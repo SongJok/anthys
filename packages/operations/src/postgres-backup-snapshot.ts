@@ -19,7 +19,7 @@ export async function openPostgresBackupSnapshot(input:PostgresBackupSnapshotOpt
  const left=Math.min(input.maxDurationMs,Date.parse(input.expiresAt)-Date.now());
  if(input.signal.aborted)fail('BACKUP_SNAPSHOT_CANCELLED');if(left<=0)fail('BACKUP_SNAPSHOT_WINDOW_CLOSED');
  const deadline=performance.now()+left,controller=new AbortController(),signal=AbortSignal.any([input.signal,controller.signal]);
- const connection={host:p.host,port:p.port,database:p.database,user:p.user,password:p.password,ssl:false,sslnegotiation:'postgres' as const,client_encoding:'UTF8',replication:'false',binary:false,options:'-c row_security=off',application_name:'open_aider_backup_snapshot',query_timeout:left,connectionTimeoutMillis:Math.min(3000,left),statement_timeout:left,lock_timeout:1000,idle_in_transaction_session_timeout:left},client=new pg.Client(connection);
+ const connection={host:p.host,port:p.port,database:p.database,user:p.user,password:p.password,ssl:false,sslnegotiation:'postgres' as const,client_encoding:'UTF8',replication:'false',binary:false,options:'-c row_security=off',application_name:'anthys_backup_snapshot',query_timeout:left,connectionTimeoutMillis:Math.min(3000,left),statement_timeout:left,lock_timeout:1000,idle_in_transaction_session_timeout:left},client=new pg.Client(connection);
  let connected=false,transaction=false,closed=false,closing:Promise<void>|undefined;
  client.on('error',()=>controller.abort());
  const checkpoint=()=>{if(signal.aborted)fail('BACKUP_SNAPSHOT_CANCELLED_OR_TIMEOUT');if(performance.now()>=deadline||Date.now()>=Date.parse(input.expiresAt))fail('BACKUP_SNAPSHOT_WINDOW_CLOSED');};
@@ -46,7 +46,7 @@ export async function openPostgresBackupSnapshot(input:PostgresBackupSnapshotOpt
   checkpoint();await client.connect();connected=true;checkpoint();
   // Acquire the session lock before assigning the repeatable-read snapshot.
   // Waiting for a migration inside that transaction could freeze its old ledger.
-  await client.query("SELECT pg_advisory_lock_shared(hashtext('open_aider_migrations'))");checkpoint();
+  await client.query("SELECT pg_advisory_lock_shared(hashtext('anthys_migrations'))");checkpoint();
   await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');transaction=true;await identityAndLedger();await stopped();
   const snapshot=(await client.query('SELECT pg_export_snapshot() snapshot')).rows[0]?.snapshot;
   if(typeof snapshot!=='string'||! /^[a-fA-F0-9]{8}-[a-fA-F0-9]{8}-[0-9]{1,10}$/.test(snapshot))fail('BACKUP_SNAPSHOT_ID_REJECTED');checkpoint();

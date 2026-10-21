@@ -12,11 +12,11 @@ import {createServer} from '../../apps/api/src/server.js';
 import {groupReminderDatabase} from '../support/group-reminder-database.js';
 import {reminderExecution} from '../support/group-reminder-execution.js';
 import {signedReminderRuntime} from '../support/group-reminder-signed-runtime.js';
-const vault=new Vault(new Map([['1',Buffer.from(secret('APP_MASTER_KEY')!,'hex')]]),'1'),base='http://127.0.0.1:52339';
+const vault=new Vault(new Map([['1',Buffer.from(secret('APP_MASTER_KEY')!,'hex')]]),'1'),base='http://127.0.0.1:64702';
 let d:Awaited<ReturnType<typeof groupReminderDatabase>>,s:Awaited<ReturnType<typeof reminderExecution>>,rpc:Awaited<ReturnType<typeof signedReminderRuntime>>,scheduler:GroupReminderScheduler,verifier:GroupReminderVerifier,api:Awaited<ReturnType<typeof createServer>>,store:RuntimeStore,q:{scheduleId:string;occurrenceId:string},ownerCookie:string,taskId:string,runId:string,deliveryId:string,body:string,sends=0;
 beforeAll(async()=>{
  d=await groupReminderDatabase();await d.install();s=await reminderExecution(d,vault,2);q=await s.queue();rpc=await signedReminderRuntime(d,s,vault,q);scheduler=new GroupReminderScheduler(d.db,vault,new GroupReminderAudience(rpc.identities,'robot-1'),'robot-1');verifier=new GroupReminderVerifier(vault,new GroupReminderAudience(rpc.identities,'robot-1'),'robot-1');
- ownerCookie=(await new Sessions(d.appDb,secret('SESSION_SECRET')!).create(s.w.f.ctx)).cookie;store=new RuntimeStore(d.db,vault);api=await createServer({config:config(),db:d.appDb,sessionSecret:secret('SESSION_SECRET')!,finalReader:new Gateway(store)});await api.app.listen({host:'127.0.0.1',port:52339});
+ ownerCookie=(await new Sessions(d.appDb,secret('SESSION_SECRET')!).create(s.w.f.ctx)).cookie;store=new RuntimeStore(d.db,vault);api=await createServer({config:config(),db:d.appDb,sessionSecret:secret('SESSION_SECRET')!,finalReader:new Gateway(store)});await api.app.listen({host:'127.0.0.1',port:64702});
 });
 afterAll(async()=>{await api?.app.close();await scheduler?.audience.close();await verifier?.close();await rpc?.close();await s?.close();await d?.close();});
 const read=async(cookie=ownerCookie)=>{const r=await fetch(base+'/api/v1/tasks/'+taskId,{headers:{cookie:'oa_session='+cookie}});return {status:r.status,cache:r.headers.get('cache-control'),body:await r.json() as {data?:{runs:{id:string;result:string|null;result_access?:string}[]}}};};

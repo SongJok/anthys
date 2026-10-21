@@ -1,6 +1,6 @@
 {
   "contract": {
-    "id": "open_aider.company.logs.read",
+    "id": "anthys.company.logs.read",
     "version": 1,
     "operations": [
       "CHECK",

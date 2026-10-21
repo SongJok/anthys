@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "meaning": "Reviewed open_aider result projections; not provider endpoint schemas, permission grants or live certification",
+  "meaning": "Reviewed anthys result projections; not provider endpoint schemas, permission grants or live certification",
   "capabilities": [
     {
       "id": "artifacts.create",

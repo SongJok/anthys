@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {GroupCasesFlow,GroupCasesFailure,caseActions,localToday,localWindowInputs,localRegistrationWindow,type GroupCase,type GroupCasesTransport} from '../../apps/web/src/group-cases-flow.js';
-assert.equal(Reflect.get(globalThis,Symbol.for('open_aider.testNetworkGuard')),true);
+assert.equal(Reflect.get(globalThis,Symbol.for('anthys.testNetworkGuard')),true);
 assert.deepEqual(Object.keys(process.env).filter(k=>/(?:DATABASE|PROVIDER|GLM|DINGTALK|DWS|MCP|TOKEN|SECRET|CREDENTIAL|^PG|^NODE_OPTIONS$)/i.test(k)),[]);
 const actor='10000000-0000-4000-8000-000000000001',other='10000000-0000-4000-8000-000000000002',id='20000000-0000-4000-8000-000000000001',id2='20000000-0000-4000-8000-000000000002',key='30000000-0000-4000-8000-000000000001';
 const range={from:'2026-10-18T00:00:00.000Z',until:'2026-10-19T00:00:00.000Z'};

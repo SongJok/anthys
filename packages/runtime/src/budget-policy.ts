@@ -20,7 +20,7 @@ export const modelBudgetPolicySchema=z.object({
 });
 export type ModelBudgetPolicy=z.infer<typeof modelBudgetPolicySchema>;
 export function assertPolicyEnvironment(p:ModelBudgetPolicy):void{
- if(p.environment==='SYNTHETIC_TEST'&&(process.env['APP_ENV']!=='test'||process.env['OA_TEST_ISOLATED']!=='true'||Reflect.get(globalThis,Symbol.for('open_aider.testNetworkGuard'))!==true))throw new BudgetError('SYNTHETIC_BUDGET_POLICY_FORBIDDEN');
+ if(p.environment==='SYNTHETIC_TEST'&&(process.env['APP_ENV']!=='test'||process.env['OA_TEST_ISOLATED']!=='true'||Reflect.get(globalThis,Symbol.for('anthys.testNetworkGuard'))!==true))throw new BudgetError('SYNTHETIC_BUDGET_POLICY_FORBIDDEN');
 }
 export function loadModelBudgetPolicy(env:NodeJS.ProcessEnv=process.env):{policy:ModelBudgetPolicy|null;error:string|null}{
  const path=env['BUDGET_POLICY_FILE']?.trim();if(!path)return {policy:null,error:'MODEL_BUDGET_POLICY_UNCONFIGURED'};

@@ -19,7 +19,7 @@ import type {ModelProvider} from '../../packages/provider-glm/src/client.js';
 import type {StreamProgress} from '../../packages/provider-glm/src/sse.js';
 import {ids,seed} from '../../scripts/seed.js';
 const db=new Database(secret('RUNTIME_DATABASE_URL')!),admin=new pg.Pool({connectionString:secret('MIGRATION_DATABASE_URL')!}),vault=new Vault(new Map([['1',Buffer.from(secret('APP_MASTER_KEY')!,'hex')]]),'1'),store=new RuntimeStore(db,vault);
-const template={templateId:'synthetic-native-template',statusKey:'status',taskUrlKey:'taskUrl',cancelTokenKey:'cancelToken'},binding={corpId:'TENANT_A',appOrigin:'http://localhost:52330',template},signal=()=>new AbortController().signal;
+const template={templateId:'synthetic-native-template',statusKey:'status',taskUrlKey:'taskUrl',cancelTokenKey:'cancelToken'},binding={corpId:'TENANT_A',appOrigin:'http://localhost:64700',template},signal=()=>new AbortController().signal;
 const privateAnswer='PRIVATE_ANSWER_SENTINEL'.repeat(99)+'TOOL_CREDENTIAL_SENTINEL';
 beforeAll(()=>seed(secret('MIGRATION_DATABASE_URL')!));afterAll(async()=>{await db.close();await admin.end();});
 async function fixture(mode:'ok'|'rate'|'unknown'='ok',retryHeader:string|((now:number)=>string)='2'){

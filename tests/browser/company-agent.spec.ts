@@ -5,12 +5,12 @@ type Fixture={ownerCookie:string;taskId:string;runId:string;ordinaryTaskId:strin
 type Proof={calls:number;state:string;remoteCancellation:string;enterpriseCost:string;workerFailed:boolean};
 const fixture=async(project:string)=>JSON.parse(await readFile('.data/test-environment/browser-company-agent.json','utf8'))[project] as Fixture;
 const panel=(page:Page)=>page.getByRole('region',{name:'企业请求等待状态',exact:true});
-async function login(page:Page,cookie:string,taskId:string){await page.context().addCookies([{name:'oa_session',value:cookie,url:'http://localhost:52339'}]);await page.goto('/tasks?task='+taskId);await expect(page.getByText('工作台已就绪',{exact:true})).toBeVisible();}
+async function login(page:Page,cookie:string,taskId:string){await page.context().addCookies([{name:'oa_session',value:cookie,url:'http://localhost:64702'}]);await page.goto('/tasks?task='+taskId);await expect(page.getByText('工作台已就绪',{exact:true})).toBeVisible();}
 async function proof(page:Page):Promise<Proof>{const response=await page.request.get('/api/v1/browser-company-agent-proof');expect(response.status()).toBe(200);const data=(await response.json()).data as Proof;expect(data.workerFailed).toBe(false);return data;}
 const layout=async(page:Page)=>expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
 
 test('real local API polling and confirmed cancellation retain UNKNOWN without a repeated enterprise call',async({page},info)=>{
- const f=await fixture(info.project.name);expect(f.isolatedDatabase).toMatch(/^open_aider_test_group_reminder_[a-f0-9]{32}$/);
+ const f=await fixture(info.project.name);expect(f.isolatedDatabase).toMatch(/^anthys_test_group_reminder_[a-f0-9]{32}$/);
  const enterprisePath='/api/v1/tasks/'+f.taskId+'/enterprise-requests',ordinaryPath='/api/v1/tasks/'+f.ordinaryTaskId+'/enterprise-requests';
  const reads:{status:number;state:string}[]=[],ordinaryReads:string[]=[],cancels:string[]=[];
  // Each body read is owned by the current step and completes before reload,

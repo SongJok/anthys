@@ -1,7 +1,7 @@
 import {test,expect,type Page} from '@playwright/test';
 import {readFile} from 'node:fs/promises';
 test.skip(!process.env['GROUP_CONTRACT_ADMIN_BUNDLE'],'A dedicated offline real-component bundle is required; a skipped run is not validation.');
-test.beforeAll(()=>expect(Reflect.get(globalThis,Symbol.for('open_aider.testNetworkGuard'))).toBe(true));
+test.beforeAll(()=>expect(Reflect.get(globalThis,Symbol.for('anthys.testNetworkGuard'))).toBe(true));
 const delegation='10000000-0000-4000-8000-000000000001',id='20000000-0000-4000-8000-000000000001',admin='30000000-0000-4000-8000-000000000001',service='40000000-0000-4000-8000-000000000001',revision='50000000-0000-4000-8000-000000000001',nextRevision='50000000-0000-4000-8000-000000000002';
 const secret='SYNTHETIC_PRIVATE_GROUP_MARKER_MUST_DISAPPEAR';
 function snapshot(){return {authority:{id:delegation,groupId:'synthetic-group',administratorId:admin,serviceIdentityId:service,reviewReference:'review-2026-1',validUntil:'2099-01-01T00:00:00+00:00',currency:'CNY',maxAmountMinor:100,authority:'REVIEWED_DELEGATION',platformPermissionsVerified:false},contract:{revisionId:revision,version:3,document:{schemaVersion:1,id,tenantId:'synthetic-tenant',groupId:'synthetic-group',version:3,serviceIdentityId:service,administratorAuthorization:{actorId:admin,evidenceRef:'review-2026-1'},responsibilityScope:['记录明确提交的事项'],sources:{mode:'MENTION_ONLY',entries:[{kind:'MENTION',resourceRef:'synthetic-source'}]},actions:{allowed:['case.record'],prohibited:['case.assign']},workHours:{timezone:'Asia/Shanghai',windows:[{daysOfWeek:[1,2,3,4,5],start:'09:00',end:'18:00'}]},mentionUserIds:[],escalationUserIds:[],validFrom:'2020-01-01T00:00:00Z',expiresAt:'2098-01-01T00:00:00Z',state:'ACTIVE',stateUpdatedAt:'2020-01-01T00:00:00Z',budget:{currency:'CNY',maxAmountMinor:50},revocation:{method:'authenticated administrator'}}},platformPermissionsVerified:false};}
@@ -14,7 +14,7 @@ async function mount(page:Page,scenario:Scenario={}){
  const bundle=await readFile(process.env['GROUP_CONTRACT_ADMIN_BUNDLE']!,'utf8');
  await page.route('**/*',async route=>{
   const req=route.request(),url=new URL(req.url()),path=url.pathname;
-  if(url.origin!=='http://127.0.0.1:52339'){unexpected.push(url.origin);return route.abort('blockedbyclient');}
+  if(url.origin!=='http://127.0.0.1:64702'){unexpected.push(url.origin);return route.abort('blockedbyclient');}
   if(path==='/group-contract-admin')return route.fulfill({contentType:'text/html',body:'<!doctype html><html lang="zh"><meta charset="utf-8"><div id="root"></div><script src="/fixture.js"></script></html>'});
   if(path==='/fixture.js')return route.fulfill({contentType:'text/javascript',body:bundle});
   if(path==='/api/v1/permissions')return route.fulfill({json:{data:own(role,scenario.resources)}});
@@ -32,7 +32,7 @@ async function mount(page:Page,scenario:Scenario={}){
   if(path===`/api/v1/permissions/resources/${service}/withdraw`)return route.fulfill({json:{data:{reauthenticationRequired:true}}});
   unexpected.push(path);return route.abort('blockedbyclient');
  });
- await page.goto('http://127.0.0.1:52339/group-contract-admin');
+ await page.goto('http://127.0.0.1:64702/group-contract-admin');
  return {calls,unexpected,revokeRole:()=>{role=false;}};
 }
 const area=(page:Page)=>page.getByRole('region',{name:'已有群合同管理',exact:true});
@@ -45,7 +45,7 @@ for(const state of ['PAUSED','REVOKED'] as const){
  test(`${state}: explicit UUID read, cancel, single fixed-key confirmation and exact CSRF/body`,async({page})=>{
   let release!:()=>void;const hold=new Promise<void>(r=>{release=r;});const {calls,unexpected}=await mount(page,{hold});await expect(area(page)).toBeVisible();expect(calls).toEqual([]);await prepare(page,state);expect(calls[0]!.path).toBe(`/api/v1/group-contracts?delegationId=${delegation}`);await expect(area(page)).toContainText('REVIEWED_DELEGATION');await expect(area(page)).toContainText('平台权限：尚未核实');await area(page).getByRole('button',{name:'取消状态变更'}).click();expect(calls.filter(c=>c.method==='POST')).toEqual([]);
   await area(page).getByRole('button',{name:state==='PAUSED'?'暂停此群合同':'撤销此群合同',exact:true}).click();await submit(page,state).evaluate(b=>{(b as HTMLButtonElement).click();(b as HTMLButtonElement).click();});await expect.poll(()=>calls.filter(c=>c.method==='POST').length).toBe(1);release();await expect(area(page).getByRole('complementary',{name:'群合同状态回执'})).toBeVisible();
-  const post=calls.find(c=>c.method==='POST')!;expect(post.path).toBe(`/api/v1/group-contracts/${id}/state`);expect(post.body).toEqual({delegationId:delegation,expectedVersion:3,state});expect(post.csrf).toBe('synthetic-csrf');expect(post.origin).toBe('http://127.0.0.1:52339');expect(post.key).toMatch(/^[a-f0-9-]{36}$/);await expect(area(page)).toContainText('在途或结果未知的动作仍需核对，不会补发');expect(unexpected).toEqual([]);await safe(page);
+  const post=calls.find(c=>c.method==='POST')!;expect(post.path).toBe(`/api/v1/group-contracts/${id}/state`);expect(post.body).toEqual({delegationId:delegation,expectedVersion:3,state});expect(post.csrf).toBe('synthetic-csrf');expect(post.origin).toBe('http://127.0.0.1:64702');expect(post.key).toMatch(/^[a-f0-9-]{36}$/);await expect(area(page)).toContainText('在途或结果未知的动作仍需核对，不会补发');expect(unexpected).toEqual([]);await safe(page);
  });
 }
 

@@ -3,7 +3,7 @@ import {createServer} from 'node:http';
 import {randomUUID} from 'node:crypto';
 import {installEscalationFetchWitness,type EscalationFetchWitness} from '../support/escalation-fetch-witness.js';
 
-const origin='http://127.0.0.1:52339',group='SYNTHETIC witness group/%',prefix='/api/v1/groups/'+encodeURIComponent(group)+'/case-escalations/';
+const origin='http://127.0.0.1:64702',group='SYNTHETIC witness group/%',prefix='/api/v1/groups/'+encodeURIComponent(group)+'/case-escalations/';
 const requests:{path:string;method:string}[]=[],timers=new Set<ReturnType<typeof setTimeout>>();
 const modes=new Map<string,'INVALID_JSON'|'OVERSIZE'|'LATE_HEADERS'|'SPLIT_DEADLINE'>();
 const server=createServer((req,res)=>{
@@ -31,7 +31,7 @@ async function assertWitnessError(witness:EscalationFetchWitness,query:Parameter
 
 test.describe('native escalation fetch witness contract, real local HTTP only',()=>{
  test.describe.configure({mode:'serial',timeout:30000,retries:0});
- test.beforeAll(async()=>{await new Promise<void>((done,reject)=>{server.once('error',reject);server.listen(52339,'127.0.0.1',()=>{server.off('error',reject);done();});});});
+ test.beforeAll(async()=>{await new Promise<void>((done,reject)=>{server.once('error',reject);server.listen(64702,'127.0.0.1',()=>{server.off('error',reject);done();});});});
  test.afterAll(async()=>{for(const timer of timers)clearTimeout(timer);timers.clear();server.closeAllConnections();await new Promise<void>((done,reject)=>server.close(error=>error?reject(error):done()));});
  for(const viewport of [{width:1280,height:900},{width:390,height:844}]){
   test(`preserves original Promise/Response and exactly one normal confirm/read/cancel at ${viewport.width}`,async({page})=>{

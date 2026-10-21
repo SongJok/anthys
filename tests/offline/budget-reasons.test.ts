@@ -9,7 +9,7 @@ import dgram from 'node:dgram';
 import {syncBuiltinESMExports} from 'node:module';
 
 // Run with an environment allowlist and the repository's explicit network guard.
-assert.equal(Reflect.get(globalThis, Symbol.for('open_aider.testNetworkGuard')), true);
+assert.equal(Reflect.get(globalThis, Symbol.for('anthys.testNetworkGuard')), true);
 assert.deepEqual(Object.keys(process.env).filter(key => /(?:DATABASE|PROVIDER|GLM|DINGTALK|DWS|MCP|TOKEN|SECRET|CREDENTIAL|^PG|^NODE_OPTIONS$)/i.test(key)), []);
 const attempts: string[] = [];
 const deny = () => { attempts.push('network'); throw new Error('BUDGET_REASONS_OFFLINE_IO_DENIED'); };

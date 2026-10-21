@@ -3,7 +3,7 @@ import {resolve} from 'node:path';
 import {spawn} from 'node:child_process';
 import {preserveTestArtifacts} from './preserve-test-artifacts.mjs';
 const prepared=JSON.parse(await readFile('.data/test-environment/environment.json','utf8'));
-for(const [name,role] of [['DATABASE_URL','oa_app'],['RUNTIME_DATABASE_URL','oa_runtime'],['QUEUE_DATABASE_URL','oa_queue'],['MIGRATION_DATABASE_URL','oa_migrator']]){const url=new URL(prepared[name]);if(url.protocol!=='postgresql:'||url.hostname!=='127.0.0.1'||url.port!=='53331'||url.pathname!=='/open_aider_test'||url.search||url.username!==role||url.password.length<32)throw Error('TEST_DATABASE_TARGET_REJECTED');}
+for(const [name,role] of [['DATABASE_URL','oa_app'],['RUNTIME_DATABASE_URL','oa_runtime'],['QUEUE_DATABASE_URL','oa_queue'],['MIGRATION_DATABASE_URL','oa_migrator']]){const url=new URL(prepared[name]);if(url.protocol!=='postgresql:'||url.hostname!=='127.0.0.1'||url.port!=='64711'||url.pathname!=='/anthys_test'||url.search||url.username!==role||url.password.length<32)throw Error('TEST_DATABASE_TARGET_REJECTED');}
 if(prepared.APP_ENV!=='test'||prepared.OA_TEST_ISOLATED!=='true')throw Error('TEST_ISOLATION_REQUIRED');
 const allowedConfig=new Set(['APP_ENV','OA_TEST_ISOLATED','APP_ORIGIN','PORT','DATABASE_URL','RUNTIME_DATABASE_URL','QUEUE_DATABASE_URL','MIGRATION_DATABASE_URL','APP_MASTER_KEY_FILE','SESSION_SECRET_FILE','BUDGET_POLICY_FILE']);
 if(Object.keys(prepared).some(k=>!allowedConfig.has(k)))throw Error('TEST_UNEXPECTED_CONFIGURATION');

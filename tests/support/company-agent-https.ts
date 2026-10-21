@@ -13,7 +13,7 @@ import type {Transport} from '@modelcontextprotocol/sdk/shared/transport.js';
 import {CallToolRequestSchema,ListToolsRequestSchema,isInitializeRequest} from '@modelcontextprotocol/sdk/types.js';
 import {agentChatInputSchemaHash} from '../../packages/company/src/agent-chat.js';
 
-const endpoint='https://127.0.0.1:52339/mcp';
+const endpoint='https://127.0.0.1:64702/mcp';
 const defaultSchema={type:'object' as const,properties:{message:{type:'string'}},required:['message'],additionalProperties:false};
 let trustInUse=false;
 export type SyntheticAgentHttpsOptions={token?:string;serverName?:string;serverVersion?:string;inputSchema?:Record<string,unknown>;text?:string;delayMs?:number};
@@ -60,7 +60,7 @@ function wait(milliseconds:number,signal:AbortSignal):Promise<void>{
 
 /** Real loopback HTTPS + actual SDK server. No fetch replacement, business credentials or external destination. */
 export async function startSyntheticAgentHttps(options:SyntheticAgentHttpsOptions={}):Promise<SyntheticAgentHttps>{
-  if(Reflect.get(globalThis,Symbol.for('open_aider.testNetworkGuard'))!==true)throw fail('NETWORK_GUARD_REQUIRED');
+  if(Reflect.get(globalThis,Symbol.for('anthys.testNetworkGuard'))!==true)throw fail('NETWORK_GUARD_REQUIRED');
   if(process.env['NODE_TLS_REJECT_UNAUTHORIZED']==='0')throw fail('TLS_VERIFICATION_DISABLED');
   if(trustInUse)throw fail('CONCURRENT_TRUST_CHANGE');
   const schema=structuredClone(options.inputSchema??defaultSchema);agentChatInputSchemaHash(schema);
@@ -86,7 +86,7 @@ export async function startSyntheticAgentHttps(options:SyntheticAgentHttpsOption
   })();
   const reject=(res:ServerResponse,status:number)=>{res.writeHead(status,{'content-type':'application/json'});res.end('{"error":"SYNTHETIC_REQUEST_REJECTED"}');};
   const handler=async(req:IncomingMessage,res:ServerResponse)=>{
-    if(closed||req.method!=='POST'||req.url!=='/mcp'||req.headers.host!=='127.0.0.1:52339'||req.headers.authorization!=='Bearer '+token||!req.headers['content-type']?.startsWith('application/json')){faults.push('REQUEST_TARGET_OR_HEADERS');reject(res,400);return;}
+    if(closed||req.method!=='POST'||req.url!=='/mcp'||req.headers.host!=='127.0.0.1:64702'||req.headers.authorization!=='Bearer '+token||!req.headers['content-type']?.startsWith('application/json')){faults.push('REQUEST_TARGET_OR_HEADERS');reject(res,400);return;}
     const raw=await body(req),message=raw as {method?:unknown};
     if(!message||typeof message!=='object'||!['initialize','notifications/initialized','tools/list','tools/call','notifications/cancelled','ping'].includes(String(message.method))){faults.push('UNEXPECTED_METHOD');reject(res,400);return;}
     methods.push(String(message.method));
@@ -117,7 +117,7 @@ export async function startSyntheticAgentHttps(options:SyntheticAgentHttpsOption
     });
     https.requestTimeout=15_000;https.headersTimeout=5000;https.timeout=15_000;https.keepAliveTimeout=500;
     https.on('connection',socket=>{sockets.add(socket);socket.once('close',()=>sockets.delete(socket));});
-    await new Promise<void>((resolve,reject)=>{https!.once('error',reject);https!.listen(52339,'127.0.0.1',()=>{https!.removeListener('error',reject);resolve();});});
+    await new Promise<void>((resolve,reject)=>{https!.once('error',reject);https!.listen(64702,'127.0.0.1',()=>{https!.removeListener('error',reject);resolve();});});
     return {endpoint,token,schema,server,get methods(){return Object.freeze([...methods]);},callCount:()=>calls,close};
   }catch(error){await close();if(error instanceof Error&&/^SYNTHETIC_HTTPS_[A-Z_]+$/.test(error.message))throw error;throw fail('START_FAILED');}
 }

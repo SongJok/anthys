@@ -52,7 +52,7 @@ const sender=new DingTalkSender({clientId:'synthetic',clientSecret:'synthetic',r
  const body=JSON.parse(init!.body as string) as {msgtype:string;text:{content:string}};assert.equal(body.msgtype,'text');
  sent.push({url:String(url),text:body.text.content});return new Response(JSON.stringify({errcode:0}),{headers:{'content-type':'application/json'}});
 }});
-const delivery=new DeliveryGateway(runtime,vault,sender,{corpId,robotCode,appOrigin:'http://localhost:52339'},Date.now,(...args)=>gateway.finalSourcesAllowed(...args));
+const delivery=new DeliveryGateway(runtime,vault,sender,{corpId,robotCode,appOrigin:'http://localhost:64702'},Date.now,(...args)=>gateway.finalSourcesAllowed(...args));
 const queue=new RunQueue(resources?.queueUrl??secret('QUEUE_DATABASE_URL')!,'synthetic-self-dm-'+randomUUID());
 await queue.start();await queue.work(async job=>{
  try{const ctx={tenantId:job.tenantId,actorId:job.actorId};await new AgentRuntime(store,model,gateway).advance(ctx,job.runId);for(const id of await delivery.pending(ctx))await delivery.process(ctx,id,new AbortController().signal);}
@@ -60,7 +60,7 @@ await queue.start();await queue.work(async job=>{
 });
 async function until(check:()=>boolean|Promise<boolean>){const stop=performance.now()+15000;while(!await check()){assert.equal(workerErrors.length,0);if(performance.now()>=stop)throw Error('SYNTHETIC_SELF_DM_BOUNDARY_TIMEOUT');await delay(25);}}
 const identity=(code:string)=>{const project=code.replace(/^synthetic-self-dm-/,'');return code.startsWith('synthetic-self-dm-')&&(project==='desktop'||project==='mobile')?{corpId,unionId:external[project]}:null;};
-const {app}=await createServer({config:config({APP_ENV:'test',APP_ORIGIN:'http://localhost:52339',PORT:'52339'}),db:appDb,sessionSecret:randomBytes(32).toString('hex'),finalReader:gateway,webRoot:resolve('dist/web'),login:{tenantId,corpId,clientId:'synthetic-self-dm',provider:{exchange:async code=>{const value=identity(code);if(!value)throw Error('SYNTHETIC_CODE_REJECTED');return value;}}}});
+const {app}=await createServer({config:config({APP_ENV:'test',APP_ORIGIN:'http://localhost:64702',PORT:'64702'}),db:appDb,sessionSecret:randomBytes(32).toString('hex'),finalReader:gateway,webRoot:resolve('dist/web'),login:{tenantId,corpId,clientId:'synthetic-self-dm',provider:{exchange:async code=>{const value=identity(code);if(!value)throw Error('SYNTHETIC_CODE_REJECTED');return value;}}}});
 // The same scenario retains its own tenant, immutable budget and real API
 // sessions in both E2E entrypoints. No shared fixture policy is replaced.
 const scenario=async(request:FastifyRequest)=>{

@@ -41,9 +41,9 @@ describe('pure bounded watch scalar predicate, not monitoring execution',()=>{
  });
  it('pins domain-separated canonical summaries and immutable primitive-only output',()=>{
   const p=predicate(),o=observed(),result=evaluateWatchPredicate(p,o);
-  expect(result).toEqual({state:'MATCH',predicateHash:digest('open_aider.watch.predicate.v1','{"schemaVersion":1,"operator":"EQ","expected":3}'),valueHash:digest('open_aider.watch.value.v1','3'),sourceHash,asOf,reason:'COMPARISON_MATCH'});
+  expect(result).toEqual({state:'MATCH',predicateHash:digest('anthys.watch.predicate.v1','{"schemaVersion":1,"operator":"EQ","expected":3}'),valueHash:digest('anthys.watch.value.v1','3'),sourceHash,asOf,reason:'COMPARISON_MATCH'});
   expect(evaluateWatchPredicate(Object.fromEntries(Object.entries(p).reverse()),Object.fromEntries(Object.entries(o).reverse()))).toEqual(result);
-  p.expected=4;o.value=4;expect(result.valueHash).toBe(digest('open_aider.watch.value.v1','3'));expect(Object.keys(result).sort()).toEqual(['asOf','predicateHash','reason','sourceHash','state','valueHash']);
+  p.expected=4;o.value=4;expect(result.valueHash).toBe(digest('anthys.watch.value.v1','3'));expect(Object.keys(result).sort()).toEqual(['asOf','predicateHash','reason','sourceHash','state','valueHash']);
   expect(Object.isFrozen(watchPredicateSchema.parse(predicate()))).toBe(true);expect(Object.isFrozen(watchObservationSchema.parse(observed()))).toBe(true);
   expect(evaluateWatchPredicate(predicate('EQ',-0),observed(-0))).toEqual(check('EQ',0,0));expect(check('EQ','3','3').valueHash).not.toBe(result.valueHash);
  });

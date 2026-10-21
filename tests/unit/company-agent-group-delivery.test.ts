@@ -43,8 +43,8 @@ it('keeps cancellation after an actual loopback POST UNKNOWN when the provider r
  })().catch(()=>{res.destroy();rejectReceived(Error('SYNTHETIC_LOOPBACK_REQUEST_FAILED'));});});
  const timeout=setTimeout(()=>{controller.abort();rejectReceived(Error('SYNTHETIC_LOOPBACK_TIMEOUT'));},5000);
  try{
-  await new Promise<void>((resolve,reject)=>{server.once('error',reject);server.listen(52339,'127.0.0.1',resolve);});
-  const sender=new DingTalkSender({clientId:'SYNTHETIC_UNUSED',clientSecret:'SYNTHETIC_UNUSED',robotCode:'SYNTHETIC',replyOnly:true,fetch:async(input,init)=>{fetches++;expect(String(input)).toBe(url);expect(init).toMatchObject({method:'POST',redirect:'error'});return fetch('http://127.0.0.1:52339/reply',init);}});
+  await new Promise<void>((resolve,reject)=>{server.once('error',reject);server.listen(64702,'127.0.0.1',resolve);});
+  const sender=new DingTalkSender({clientId:'SYNTHETIC_UNUSED',clientSecret:'SYNTHETIC_UNUSED',robotCode:'SYNTHETIC',replyOnly:true,fetch:async(input,init)=>{fetches++;expect(String(input)).toBe(url);expect(init).toMatchObject({method:'POST',redirect:'error'});return fetch('http://127.0.0.1:64702/reply',init);}});
   const pending=sender.sendReply(reply(),text,controller.signal);expect(await arrived).toEqual({method:'POST',path:'/reply',bodyHash:hash(JSON.stringify({msgtype:'text',text:{content:text}}))});controller.abort();
   expect(await pending).toEqual({state:'UNKNOWN',reason:'RESPONSE_LOST'});expect(physical).toBe(1);expect(fetches).toBe(1);
  }finally{clearTimeout(timeout);controller.abort();server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));}

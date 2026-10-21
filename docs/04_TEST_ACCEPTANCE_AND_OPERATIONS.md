@@ -1,4 +1,4 @@
-# open_aider｜04 测试、验收、部署与运维
+# anthys｜04 测试、验收、部署与运维
 
 接管验证补充（2026-10-18，非最终验收）：T033 新增完整名单和独立人数均新增外部成员的发送边界反例，首次检查通过后最终检查拒绝，物理发送零次并持久化 SUPPRESSED；此为普通群澄清，未证明初始获准的敏感企业来源群共享，完整 T033 状态不提升。T076 的代码 v2/日志观察 v1 组合测试走实际配置的 MCP SDK Streamable HTTP 客户端、合成 fetch/上游、真实隔离 PostgreSQL 和原生 SSE 替身；最终答复版本未核实，任一源撤销阻断旧结果和发送，重放不重复查询/投递，不计为真实 T082。
 
@@ -543,20 +543,20 @@ services:
   postgres:
     image: ${POSTGRES_IMAGE:?set_verified_digest}
     environment:
-      POSTGRES_DB: open_aider
+      POSTGRES_DB: anthys
       POSTGRES_USER: oa_migrator
       POSTGRES_PASSWORD_FILE: /run/secrets/pg_admin_password
     secrets: [pg_admin_password]
     volumes: [pg_data:/var/lib/postgresql/data]
     networks: [db_net]
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U oa_migrator -d open_aider"]
+      test: ["CMD-SHELL", "pg_isready -U oa_migrator -d anthys"]
       interval: 10s
       timeout: 5s
       retries: 10
     restart: unless-stopped
   api:
-    image: ${OPEN_AIDER_IMAGE:?set_verified_digest}
+    image: ${ANTHYS_IMAGE:?set_verified_digest}
     command: ["node", "apps/api/dist/main.js"]
     user: "10001:10001"
     read_only: true
@@ -591,7 +591,7 @@ secrets:
     file: ${SECRETS_DIR:?set_secrets_dir}/app_master_key
 ```
 
-`POSTGRES_IMAGE`和`OPEN_AIDER_IMAGE`必须替换为实际构建/扫描/核验的镜像引用，不能造一个sha256。migrate完成后才启动业务；应用数据库URI必须使用`oa_app`等非迁移角色。生产启动顺序由发布脚本明确控制，不能只依赖上述db健康检查就跳过迁移。
+`POSTGRES_IMAGE`和`ANTHYS_IMAGE`必须替换为实际构建/扫描/核验的镜像引用，不能造一个sha256。migrate完成后才启动业务；应用数据库URI必须使用`oa_app`等非迁移角色。生产启动顺序由发布脚本明确控制，不能只依赖上述db健康检查就跳过迁移。
 
 `internal:true`网络仅是一层隔离；真正的外网/内网目的地址控制还要通过代理、防火墙或部署平台网络策略实现。Compose普通网络不会自动拦截所有SSRF或限制域名。
 
@@ -834,7 +834,7 @@ A的原始纯scope-only一步保存体验仍未完成，安全确认候选不是
 
 USER 人设隐私删除为独立操作：H5 DELETE /api/v1/me/persona，或经当前 DM 验证的“擦除我的人设及历史”。清除本人历史设置及请求正文、原生来源/范围提案和实际关联运行副本；保留 GLOBAL/GROUP、其他用户、独立记忆及无关运行。写入空的单调版本标记，阻止旧请求重放；再次明确保存可产生新版本，旧删除请求重试不擦除新内容。
 
-迁移050–058仅在隔离合成 PostgreSQL 127.0.0.1:53331/open_aider_test 应用并保留原文。053首次执行失败的空对象和别名问题分别由054/055修复；失败事务回滚、SDK无成功ACK。恢复测试保留删除账本，真实恢复选定旧内容/任务/租约；最初使用 pg Date 的试验损失微秒，旧租约失配导致的通过不作为屏障证据。修正为 PostgreSQL JSON 保留精度后复现迟到journal写回，057增加运行获取及每次guarded写的账本否决，058加强保留依赖和恢复状态修复。失败、修复和重跑记录保留于 reports/checks/history/，以 reports/p07-memory-candidate.json 的检查点和范围为准。
+迁移050–058仅在隔离合成 PostgreSQL 127.0.0.1:64711/anthys_test 应用并保留原文。053首次执行失败的空对象和别名问题分别由054/055修复；失败事务回滚、SDK无成功ACK。恢复测试保留删除账本，真实恢复选定旧内容/任务/租约；最初使用 pg Date 的试验损失微秒，旧租约失配导致的通过不作为屏障证据。修正为 PostgreSQL JSON 保留精度后复现迟到journal写回，057增加运行获取及每次guarded写的账本否决，058加强保留依赖和恢复状态修复。失败、修复和重跑记录保留于 reports/checks/history/，以 reports/p07-memory-candidate.json 的检查点和范围为准。
 
 独立 start:maintenance 仅需要内部数据库/key及明确 WORKER_SCOPE_FILE，处理活跃主体的有界过期及保留账本下的修复，不调用模型/钉钉/DWS。当前不能认证已离职主体清理、删除账本本身回滚的整库备份恢复、独立删除日志重放、实际备份保留期及180天审计元数据清理。已外发字节不能撤回；逻辑擦除不等于 PostgreSQL/WAL 物理抹零。
 
@@ -849,7 +849,7 @@ P07本地完整后端检查点：reports/checks/p07-memory-backend-full.json 记
 
 ## 2026-10-16 P02/P03/P07 后续修正与证据检查点（阶段仍未完成）
 
-本次迁移059补齐实际来源选择回复的原生入站副本与SOURCE_REPLY outbox清理；迁移060使仅返回布尔值、严格绑定tenant/owner的删除否决在主体离职后仍有效，私人表RLS仍拒绝离职主体读取。Gateway在工具返回落库前获取共享删除屏障并检查该否决：恢复旧EXECUTING动作也不能重新写入已删除私人正文；普通租约失效/离职且未发生删除的UNKNOWN结果仍保守记录。只在127.0.0.1:53331隔离合成数据库应用迁移，没有执行开发库或企业数据清理。
+本次迁移059补齐实际来源选择回复的原生入站副本与SOURCE_REPLY outbox清理；迁移060使仅返回布尔值、严格绑定tenant/owner的删除否决在主体离职后仍有效，私人表RLS仍拒绝离职主体读取。Gateway在工具返回落库前获取共享删除屏障并检查该否决：恢复旧EXECUTING动作也不能重新写入已删除私人正文；普通租约失效/离职且未发生删除的UNKNOWN结果仍保守记录。只在127.0.0.1:64711隔离合成数据库应用迁移，没有执行开发库或企业数据清理。
 
 原生来源选择、checkpoint、工具动作、回复、outbox与投递等实际数据流接受逐行旧记录恢复测试，使用明确标记的故障注入，并保留同字面值的无关动作/企业源/其他主体。该子矩阵通过不等于完整删除图通过：普通run_user_messages与narrative review逐存储恢复、真实checkpoint时的父run.context_ref、已开始物理发送的边界、离职主体维护、独立整库备份删除日志重放及180天元数据清理仍需实现和验证。
 
@@ -868,7 +868,7 @@ P07新增4项真实隔离PostgreSQL验证：PRIVATE Preference与USER人设各�
 
 P02/P04新增可选DINGTALK_REPLY_ONLY=true配置（严格true/false，默认false）：通知器使用同一Sender模式，跳过CardCoordinator；sendProactive在令牌兑换前返回FAILED/PROACTIVE_REPLY_ONLY_MODE，直接token调用也拒绝。原生事件有效sessionWebhook仍按既有身份/受众/来源/URL/到期/禁止跳转检查回复；缺失/过期私聊地址经既有投递路径得到明确FAILED，0令牌/0HTTP请求，不自动重试。已发请求丢失响应保持UNKNOWN，重复处理不再发。该模式限制本通知器的出站路径，不是员工、入站、模型、其他业务能力或费用授权。
 
-本地37项定向检查（Sender契约21、投递11、配置5）及typecheck/lint通过；所有provider fetch为显式注入替身、数据库仅127.0.0.1:53331新合成记录，没有真实令牌/消息/模型调用。默认false的原主动投递回执契约仍通过。精确检查点和后续元数据差异见reports/reply-only-candidate.json。没有重新执行先前531全后端或50 Chrome，不将其声称为新源码全量结果。当前模式未写入真实.env、未启动应用、未配置员工/租户/预算/凭据/持久权限，也未部署。
+本地37项定向检查（Sender契约21、投递11、配置5）及typecheck/lint通过；所有provider fetch为显式注入替身、数据库仅127.0.0.1:64711新合成记录，没有真实令牌/消息/模型调用。默认false的原主动投递回执契约仍通过。精确检查点和后续元数据差异见reports/reply-only-candidate.json。没有重新执行先前531全后端或50 Chrome，不将其声称为新源码全量结果。当前模式未写入真实.env、未启动应用、未配置员工/租户/预算/凭据/持久权限，也未部署。
 
 P00–P14原目标保留。P02/P03/P07仍IN_PROGRESS，ENTERPRISE_DWS仍FAIL，原130项验收状态不变。真实测试员工/租户映射、企业已批准预算、平台授权与真实交互验收尚未具备证据；旧局部探测或本次无网测试不能代替。
 
@@ -879,7 +879,7 @@ P00–P14原目标保留。P02/P03/P07仍IN_PROGRESS，ENTERPRISE_DWS仍FAIL，�
 
 DeliveryGateway现在在迟到回执落库前获取共享owner删除屏障，绑定本次实际读取正文时的source_run_id，调用已有仅返回布尔且tenant/owner受限的060删除否决。已知删除时清除恢复的正文，SENDING保持保守UNKNOWN，不把接受回执当作已核验送达，不自动重发；不含正文的提供方ID可保留供后续核对。普通离职/租约损失且没有删除仍按原规则记录已派发结果。没有在网络调用期间持有删除锁，已发出的外部字节无法撤回。
 
-53项定向检查通过（在途及既有图17、普通澄清4、投递11、Sender契约21）并通过typecheck/lint。它们使用真实127.0.0.1:53331新合成记录、原生SDK/SSE数据流及注入fetch，不构成真实钉钉/公司MCP/模型联调。无新数据库结构变化，复用已应用且不可改写的050–060迁移；本次修正只改变迟到投递记账路径。完整回归、产物与失败记录的准确源码绑定见reports/p07-erasure-send-candidate.json，不将此前531或50页面检查点当作当前同源重跑。
+53项定向检查通过（在途及既有图17、普通澄清4、投递11、Sender契约21）并通过typecheck/lint。它们使用真实127.0.0.1:64711新合成记录、原生SDK/SSE数据流及注入fetch，不构成真实钉钉/公司MCP/模型联调。无新数据库结构变化，复用已应用且不可改写的050–060迁移；本次修正只改变迟到投递记账路径。完整回归、产物与失败记录的准确源码绑定见reports/p07-erasure-send-candidate.json，不将此前531或50页面检查点当作当前同源重跑。
 
 完整R10/P07仍未验收：独立整库删除日志重放/备份保留、离职主体维护、180天元数据清理、其他记忆类型/群合同、企业关键覆盖与原P00–P14全部剩余需求。原130项验收与ENTERPRISE_DWS门槛保持不变；无新增真实模型请求、消息、配置启用、授权或部署。
 
@@ -890,7 +890,7 @@ DeliveryGateway现在在迟到回执落库前获取共享owner删除屏障，绑
 
 后台沿原有依赖ID清除正文，不以文本匹配删除；保留后续有效人设版本、未到期条目、其他主体/租户、共享企业来源、无关任务和费用/UNKNOWN账本。到期产生内容已移除的内部随机请求键，避免用户选择旧expiry键阻止政策清理；范围仍有界且两worker串行，不因清理重新执行模型、钉钉或MCP。
 
-复现修前7个真实业务断言失败、3个活跃对照通过；修后定向回归通过，另验证原生运行实际正文恢复、表/函数权限、批次上限、后续版本保留、真实SIGKILL提交前后原子性及独立维护进程。均仅127.0.0.1:53331合成数据、注入SSE/发送器与本地测试MCP，不是企业LIVE。完整最终源码、命令、失败历史和验证范围以reports/p07-inactive-maintenance-candidate.json为准。
+复现修前7个真实业务断言失败、3个活跃对照通过；修后定向回归通过，另验证原生运行实际正文恢复、表/函数权限、批次上限、后续版本保留、真实SIGKILL提交前后原子性及独立维护进程。均仅127.0.0.1:64711合成数据、注入SSE/发送器与本地测试MCP，不是企业LIVE。完整最终源码、命令、失败历史和验证范围以reports/p07-inactive-maintenance-candidate.json为准。
 
 原050–064迁移保持原样。独立整库删除日志重放/备份保留、180天元数据处理、其他记忆种类/群合同、完整工作指导、企业关键覆盖及P00–P14剩余要求继续保留。P07与ENTERPRISE_DWS未完成；没有启用真实试验、企业清理、付费请求、消息或部署。
 
@@ -922,7 +922,7 @@ R08/R07/R29 的本地组件：真实PG角色写入反例修前4失败/1正例通
 
 新增 tests/security/role-authority-boundaries.test.ts：三种同名串权拒绝并核对实际物理写入为零；七种合法类型作用域经过真实认证审批与 Gateway 派发、数据库回读；新角色、绑定移动、重复无变化插入、跨租户、旧无类型入口和跨群反例。修后连同原 controls/permission-center/schema-readiness 合计 70 PASS。该组件不是完整 T030/T036 或企业验收。初始红例、草稿迁移修复和最终全量范围见 reports/typed-role-authority-candidate.json。
 
-隔离执行：`node scripts/run-tests.mjs vitest run tests/security/role-authority-boundaries.test.ts tests/integration/controls.test.ts tests/integration/permission-center.test.ts tests/integration/schema-readiness.test.ts --maxWorkers=2`。仅使用合成提供方与专用 PostgreSQL53331，无企业动作。原 130 条 ENTERPRISE_DWS 验收及无未解释失败门槛保持；CI38失败未全部解释，不能宣告通过。
+隔离执行：`node scripts/run-tests.mjs vitest run tests/security/role-authority-boundaries.test.ts tests/integration/controls.test.ts tests/integration/permission-center.test.ts tests/integration/schema-readiness.test.ts --maxWorkers=2`。仅使用合成提供方与专用 PostgreSQL 64711，无企业动作。原 130 条 ENTERPRISE_DWS 验收及无未解释失败门槛保持；CI38失败未全部解释，不能宣告通过。
 
 
 ### 068登记权限组件的验收边界（2026-10-16）
@@ -990,13 +990,13 @@ T117绑定controls.test.ts中的实际失响应写入路径：审批后隔离PG�
 
 新增反例先验证缺少转换入口，再验证旧UNKNOWN和全部bucket/allocation不变、旧策略快照不可改、同请求重放不重复授权、身份epoch/停用/撤销后重放拒绝、版本冲突和两操作者竞争只有一个提交。畸形文档/UUID/摘要、不同owner/trial、已blocked预算、未撤销授权、提额/换币种/换费率、非有限或超出预算的正式期限均拒绝且无部分写入。实际新事件→正式admission→新运行→新预算预留/结算使用合成模型数据；累计bucket耗尽仍不能借转换重获额度，旧用量迟到按旧快照结算，不复活CLOSED任务。
 
-固定Node24与显式网络守卫，仅隔离53331执行迁移/测试。旧迁移不改；候选schema84的真实升级未执行。脚本默认plan只读取三个0600私有文档且不读数据库，输出摘要供精确审阅；显式authorize还需expected-request-hash和review-ref。plan通过不代表数据库已同意、供应商报价已核验或已获真实运行批准。不可把新开发授权、旧试验窗口、回调值或测试通过当成正式运行授权。最终命令/次数/指纹/CI以reports/daily-budget-transition-20261018交接为准；完整需求门槛保留。
+固定Node24与显式网络守卫，仅隔离64711执行迁移/测试。旧迁移不改；候选schema84的真实升级未执行。脚本默认plan只读取三个0600私有文档且不读数据库，输出摘要供精确审阅；显式authorize还需expected-request-hash和review-ref。plan通过不代表数据库已同意、供应商报价已核验或已获真实运行批准。不可把新开发授权、旧试验窗口、回调值或测试通过当成正式运行授权。最终命令/次数/指纹/CI以reports/daily-budget-transition-20261018交接为准；完整需求门槛保留。
 
 ### 2026-10-18 群合同治理的验证要求
 
 新增 group-clarification 集成反例覆盖无独立委托、角色/目录/受众来源变化、当前会话/CSRF、密文隔离、幂等冲突和并发修订、暂停阻止已准备回复、累计群额度及 UNKNOWN 保留。停止验证必须让合法原生 SSE 请求实际保持进行中，再由合同暂停/到期中断；解析错误后的清理信号不能当作停止证明。另验证服务用户行被锁时暂停仍能提交，原试验/正式运行超时与身份限制保持原断言。
 
-局部测试使用隔离 53331 合成库；调试过程中替换尚未发布的 085 函数不等于全新安装证明，最终候选需 CI 在新测试库按 001 至 085 顺序验证。真实目标库仍停留 schema73，不重复升级或重建。原覆盖率、需求及企业验收门槛保持不变；源码、模拟、CI、真实模型、真实外发和部署结果分别记录。
+局部测试使用隔离 64711 合成库；调试过程中替换尚未发布的 085 函数不等于全新安装证明，最终候选需 CI 在新测试库按 001 至 085 顺序验证。真实目标库仍停留 schema73，不重复升级或重建。原覆盖率、需求及企业验收门槛保持不变；源码、模拟、CI、真实模型、真实外发和部署结果分别记录。
 
 权限管理界面验证需实际加载 PERMISSION_ADMIN_BUNDLE；缺少 bundle 的默认 skip 不能算验收。专用 runner 严格核对 9 个流程和 30 个真实组件浏览器测试、0 skip/failed/flaky；既有 permission-administration 集成测试另证明真实合成数据库/API 条件。route mock 只能验证界面和协议行为，不能替代后端授权、真实供应商权限或企业联调证明。
 

@@ -3,7 +3,7 @@ import {readFile,mkdir} from 'node:fs/promises';
 type Fixture={taskId:string;missingAuthTaskId:string;userId:string;actorId:string};
 async function fixtures(){return JSON.parse(await readFile('.data/test-environment/browser-dws-fixtures.json','utf8')) as Record<string,Fixture>;}
 async function login(page:Page,context:BrowserContext,code:string){
- await context.route('**/*',route=>new URL(route.request().url()).origin==='http://localhost:52339'?route.continue():route.abort('blockedbyclient'));
+ await context.route('**/*',route=>new URL(route.request().url()).origin==='http://localhost:64702'?route.continue():route.abort('blockedbyclient'));
  await page.route('https://login.dingtalk.com/oauth2/auth?*',async route=>{const url=new URL(route.request().url()),callback=new URL(url.searchParams.get('redirect_uri')!);callback.searchParams.set('authCode',code);callback.searchParams.set('state',url.searchParams.get('state')!);await route.fulfill({status:302,headers:{location:callback.toString()}});});
  await page.goto('/tasks');await page.getByRole('button',{name:'使用钉钉登录'}).click();await expect(page.getByRole('heading',{name:'创建任务'})).toBeVisible();
 }

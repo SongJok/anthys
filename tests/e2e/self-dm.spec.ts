@@ -1,7 +1,7 @@
 import {test,expect} from '@playwright/test';
 
 test('T001 trusted ordinary DM persists one task, traverses the real queue and replies once to its original conversation with a visible task ID',async({page,context},info)=>{
- await context.route('**/*',route=>new URL(route.request().url()).origin==='http://localhost:52339'?route.continue():route.abort('blockedbyclient'));
+ await context.route('**/*',route=>new URL(route.request().url()).origin==='http://localhost:64702'?route.continue():route.abort('blockedbyclient'));
  await page.route('**/api/**',async route=>{const url=new URL(route.request().url());url.pathname='/__test/self-dm-api'+url.pathname;const response=await route.fetch({url:url.toString(),headers:await route.request().allHeaders()});await route.fulfill({response});});
  const response=await page.request.post('/__test/self-dm',{data:{project:info.project.name}});expect(response.status()).toBe(200);
  const f=await response.json() as {taskId:string;runId:string;actorId:string;tenantId:string;answer:string;acks:number;logicalTasks:number;replies:number;replyText:string;modelRequests:number;maxOutputTokens:number;audit:{action:string;result:string}[]};

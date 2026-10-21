@@ -2,7 +2,7 @@ import {test,expect} from '@playwright/test';
 import {readFile} from 'node:fs/promises';
 import {Database} from '../../packages/storage/src/database.js';
 import {secret} from '../../packages/config/src/index.js';
-test.beforeEach(async({context})=>{await context.route('**/*',route=>new URL(route.request().url()).origin==='http://localhost:52339'?route.continue():route.abort('blockedbyclient'));});
+test.beforeEach(async({context})=>{await context.route('**/*',route=>new URL(route.request().url()).origin==='http://localhost:64702'?route.continue():route.abort('blockedbyclient'));});
 test('persona workbench saves real revisions, inherits clears, preserves CAS conflicts and hides revoked group data',async({page},info)=>{
  const f=(JSON.parse(await readFile('.data/test-environment/browser-persona-fixtures.json','utf8')) as Record<string,{actorId:string;groupId:string;groupGrant:string}>)[info.project.name]!;
  await page.route('https://login.dingtalk.com/oauth2/auth?*',async route=>{const url=new URL(route.request().url()),callback=new URL(url.searchParams.get('redirect_uri')!);callback.searchParams.set('authCode','synthetic-persona-browser-'+info.project.name+'-code');callback.searchParams.set('state',url.searchParams.get('state')!);await route.fulfill({status:302,headers:{location:callback.toString()}});});

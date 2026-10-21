@@ -1,6 +1,6 @@
 import {readFileSync} from 'node:fs';
 import {z} from 'zod';
-export function loadEnvFile(): void {if(process.env['OA_TEST_ISOLATED']==='true'||process.env['VITEST']==='true'||Reflect.get(globalThis,Symbol.for('open_aider.reviewedRuntimeEnvironment'))===true)return;try {process.loadEnvFile('.env');} catch(e) {if((e as NodeJS.ErrnoException).code!=='ENOENT') throw e;}}
+export function loadEnvFile(): void {if(process.env['OA_TEST_ISOLATED']==='true'||process.env['VITEST']==='true'||Reflect.get(globalThis,Symbol.for('anthys.reviewedRuntimeEnvironment'))===true)return;try {process.loadEnvFile('.env');} catch(e) {if((e as NodeJS.ErrnoException).code!=='ENOENT') throw e;}}
 const aliases:Readonly<Record<string,string>>={DINGTALK_CLIENT_ID:'DINGTALK_APP_KEY',DINGTALK_CLIENT_SECRET:'DINGTALK_APP_SECRET',GLM_API_KEY:'AIDER_AI_DEFAULT_API_KEY',GLM_BASE_URL:'AIDER_AI_DEFAULT_BASE_URL',GLM_MODEL:'AIDER_AI_DEFAULT_MODEL'};
 export function secret(name:string, env:NodeJS.ProcessEnv=process.env):string|undefined {
   for(const candidate of [name,aliases[name]].filter((s):s is string=>!!s)) {
@@ -12,7 +12,7 @@ export function secret(name:string, env:NodeJS.ProcessEnv=process.env):string|un
 const schema=z.object({
   APP_ENV:z.enum(['development','test','production']).default('development'),
   HOST:z.enum(['127.0.0.1','0.0.0.0']).default('127.0.0.1'),
-  APP_ORIGIN:z.url().default('http://localhost:52330'),PORT:z.coerce.number().int().min(1).max(65535).default(52330),
+  APP_ORIGIN:z.url().default('http://localhost:64700'),PORT:z.coerce.number().int().min(1).max(65535).default(64700),
   RELEASE_PROFILE:z.enum(['BASE','ENTERPRISE_DWS']).default('ENTERPRISE_DWS'),
   GLM_MODEL:z.literal('glm-5.3-flash').default('glm-5.3-flash'),
   GLM_BASE_URL:z.url().default('https://open.bigmodel.cn/api/paas/v4'),

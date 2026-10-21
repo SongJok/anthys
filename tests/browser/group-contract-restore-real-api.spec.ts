@@ -8,11 +8,11 @@ type Fixture={delegationId:string;contractId:string;adminCookie:string;apiCookie
 test('administrator explicitly restores a paused contract through the actual UI/API/PostgreSQL',async({page,request},info)=>{
  const f=(JSON.parse(await readFile('.data/test-environment/browser-group-cases.json','utf8'))[info.project.name] as {contractAdmin:Fixture}).contractAdmin;
  const path='/api/v1/group-contracts/'+f.contractId+'/state',readPath='/api/v1/group-contracts?delegationId='+f.delegationId;
- const headers={cookie:'oa_session='+f.apiCookie,origin:'http://localhost:52339','x-csrf-token':f.apiCsrf};
+ const headers={cookie:'oa_session='+f.apiCookie,origin:'http://localhost:64702','x-csrf-token':f.apiCsrf};
  const initial=await request.get(readPath,{headers});expect(initial.status()).toBe(200);const before=(await initial.json()).data.contract;expect(before.version).toBe(2);expect(before.document.state).toBe('PAUSED');
  const body={delegationId:f.delegationId,expectedVersion:2,state:'ACTIVE'};
  const denied=await request.post(path,{headers:{...headers,cookie:'oa_session='+f.ownerCookie,'x-csrf-token':f.ownerCsrf,'idempotency-key':randomUUID()},data:body});expect(denied.status()).toBe(403);
- await page.context().addCookies([{name:'oa_session',value:f.adminCookie,url:'http://localhost:52339'}]);await page.goto('/permissions');await expect(page.getByText('工作台已就绪',{exact:true})).toBeVisible();
+ await page.context().addCookies([{name:'oa_session',value:f.adminCookie,url:'http://localhost:64702'}]);await page.goto('/permissions');await expect(page.getByText('工作台已就绪',{exact:true})).toBeVisible();
  const area=page.getByRole('region',{name:'已有群合同管理',exact:true});await area.getByLabel('已审核委托 UUID',{exact:true}).fill(f.delegationId);await area.getByRole('button',{name:'读取群合同',exact:true}).click();await expect(area.getByText('合同登记状态：已暂停',{exact:true})).toBeVisible();
  const posts:{body:unknown;key:string|undefined}[]=[];page.on('request',r=>{if(r.method()==='POST'&&new URL(r.url()).pathname===path)posts.push({body:r.postDataJSON(),key:r.headers()['idempotency-key']});});
  await area.getByRole('button',{name:'恢复此暂停合同',exact:true}).click();const confirmation=area.getByRole('complementary',{name:'确认群合同状态变更',exact:true});await expect(confirmation).toContainText('后端会重新核对当前身份和授权');await area.getByRole('button',{name:'取消状态变更',exact:true}).click();expect(posts).toHaveLength(0);const cancelled=await request.get(readPath,{headers});expect((await cancelled.json()).data.contract.version).toBe(2);

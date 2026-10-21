@@ -15,7 +15,7 @@ function canonical(value:unknown):string {
   if(Array.isArray(value))return '['+value.map(canonical).join(',')+']';
   return '{'+Object.keys(value).sort().map(key=>JSON.stringify(key)+':'+canonical((value as Record<string,unknown>)[key])).join(',')+'}';
 }
-function resign(payload:AnalysisJobPayload):AnalysisSignedJob{return {keyId:verifying().keyId,payload,signature:sign(null,Buffer.from('open_aider.analysis.job.v1\0'+canonical(payload)),keys.privateKey).toString('base64url')};}
+function resign(payload:AnalysisJobPayload):AnalysisSignedJob{return {keyId:verifying().keyId,payload,signature:sign(null,Buffer.from('anthys.analysis.job.v1\0'+canonical(payload)),keys.privateKey).toString('base64url')};}
 
 describe('analysis broker structured signed job contract (no isolation execution)',()=>{
   it('uses real Ed25519, accepts a JSON/UTF-8 wire, and freezes independent job and subject snapshots',()=>{
@@ -117,7 +117,7 @@ describe('analysis broker structured signed job contract (no isolation execution
   });
   it('separates the analysis signature domain from other signed protocols and rejects noncanonical base64url',()=>{
     const signed=signAnalysisJob(job(),signing());
-    const wrongDomain=sign(null,Buffer.from('open_aider.dws.read.v1\0'+canonical(signed.payload)),keys.privateKey).toString('base64url');
+    const wrongDomain=sign(null,Buffer.from('anthys.dws.read.v1\0'+canonical(signed.payload)),keys.privateKey).toString('base64url');
     expect(()=>verifyAnalysisJob(JSON.stringify({...signed,signature:wrongDomain}),verifying())).toThrow('ANALYSIS_JOB_SIGNATURE_INVALID');
     const alphabet='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_',last=alphabet.indexOf(signed.signature.at(-1)!);
     const alias=signed.signature.slice(0,-1)+alphabet[last+1];

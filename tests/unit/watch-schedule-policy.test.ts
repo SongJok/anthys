@@ -16,7 +16,7 @@ describe('watch schedule policy: pure eligibility, not authorization or persiste
  it('allows the first current check and matching current change, with frozen bounded audit summaries',()=>{
   expect(check()).toMatchObject({state:'ELIGIBLE',reason:'CHECK_CURRENT',phase:'CHECK',sourceHash:null,valueHash:null,retryAt:null,localTime:'2026-10-20T12:00:00',tz:'UTC'});
   const p=policy(),s=checked(),result=notify(p,s),comparison=evaluateWatchPredicate(p.predicate,observation());
-  expect(result).toMatchObject({state:'ELIGIBLE',reason:'NOTIFY_CURRENT_CHANGE',asOf:now,sourceHash,valueHash:comparison.valueHash,predicateHash:comparison.predicateHash,policyHash:digest('open_aider.watch.schedule-policy.v1',watchSchedulePolicySchema.parse(p)),stateHash:digest('open_aider.watch.schedule-state.v1',watchScheduleStateSchema.parse(s))});
+  expect(result).toMatchObject({state:'ELIGIBLE',reason:'NOTIFY_CURRENT_CHANGE',asOf:now,sourceHash,valueHash:comparison.valueHash,predicateHash:comparison.predicateHash,policyHash:digest('anthys.watch.schedule-policy.v1',watchSchedulePolicySchema.parse(p)),stateHash:digest('anthys.watch.schedule-state.v1',watchScheduleStateSchema.parse(s))});
   expect(Object.isFrozen(result)).toBe(true);expect(Object.hasOwn(result,'value')).toBe(false);expect(Object.hasOwn(result,'authorization')).toBe(false);
  });
  it('is deterministic under input key order, does not read Date.now, mutate state, or consume any quota',()=>{

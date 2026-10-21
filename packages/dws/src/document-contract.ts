@@ -18,7 +18,7 @@ export const documentSelector=z.discriminatedUnion('kind',[
 export const documentReadSchema=z.object({nodeId:documentNode,authorizationVersion:z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),requestNonce:z.uuid(),selector:documentSelector}).strict();
 export type DocumentRead=z.infer<typeof documentReadSchema>;
 export const documentEnvelope=z.object({contractVersion:z.literal('doc.content.v1'),status:z.literal('success'),complete:z.literal(true),target:z.object({canonicalId:documentNode,product:z.literal('doc'),name:z.string().optional(),resourceType:z.string().optional(),canonicalUrl:z.string().optional(),containerId:z.string().optional()}).strict(),content:z.record(z.string(),z.unknown())}).strict();
-export const documentContractHash=hash('open_aider.dws.doc.read.v1:reviewed-payload-profile:exact-owner:single-document:unicode-ranges:current-source');
+export const documentContractHash=hash('anthys.dws.doc.read.v1:reviewed-payload-profile:exact-owner:single-document:unicode-ranges:current-source');
 // Missing/unpublished is distinct from an explicit null terminal cursor.
 const unpublished=Symbol('unpublished-payload-field');
 export function payloadValue(value:unknown,path:string|null):unknown{if(path===null)return unpublished;let current=value;for(const part of path.split('/').slice(1)){const key=part.replace(/~1/g,'/').replace(/~0/g,'~');if(!current||typeof current!=='object'||Array.isArray(current)||!Object.hasOwn(current,key))return unpublished;current=(current as Record<string,unknown>)[key];}return current;}

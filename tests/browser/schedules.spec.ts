@@ -3,7 +3,7 @@ import {readFile} from 'node:fs/promises';
 type Fixture={actorId:string;cookie:string;apiCookie:string;apiCsrf:string;unknownId:string};
 const region=(p:Page)=>p.getByRole('region',{name:'私人文本提醒',exact:true});
 async function fixture(project:string){return JSON.parse(await readFile('.data/test-environment/browser-schedules.json','utf8'))[project] as Fixture;}
-async function login(page:Page,f:Fixture){await page.context().addCookies([{name:'oa_session',value:f.cookie,url:'http://localhost:52339'}]);await page.goto('/schedules');await expect(page.getByText('工作台已就绪',{exact:true})).toBeVisible();await expect(region(page).getByRole('button',{name:'重新读取我的提醒',exact:true})).toBeEnabled();}
+async function login(page:Page,f:Fixture){await page.context().addCookies([{name:'oa_session',value:f.cookie,url:'http://localhost:64702'}]);await page.goto('/schedules');await expect(page.getByText('工作台已就绪',{exact:true})).toBeVisible();await expect(region(page).getByRole('button',{name:'重新读取我的提醒',exact:true})).toBeEnabled();}
 async function list(request:APIRequestContext,f:Fixture){const r=await request.get('/api/v1/schedules?limit=50',{headers:{cookie:'oa_session='+f.apiCookie}});expect(r.status()).toBe(200);return (await r.json()).data.items;}
 test('T047/T053 real browser/API/PG saves without extra approval, edits paused rule, resumes and cancels with current revision',async({page,request},info)=>{
  const f=await fixture(info.project.name),title='真实界面私人提醒 '+info.project.name,errors:string[]=[];page.on('pageerror',e=>errors.push(e.message));await login(page,f);const area=region(page);

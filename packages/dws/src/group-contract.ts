@@ -47,4 +47,4 @@ export function projectGroupAudience(before:unknown,members:GroupMembersObservat
  return {...members,independentSource:{reviewRef:p.reviewRef,revision:first.revision,userCount:first.userCount,botCount:first.botCount,recordHash:hash(canonical(first)),profileHash:hash(canonical(p))},platformCountsVerified:true as const};
 }
 export type GroupAudienceObservation=ReturnType<typeof projectGroupAudience>;
-export const groupAudienceContractHash=hash('open_aider.group-audience.v1:pinned-cli:independent-counts-roster:reviewed-owner-directory:approved-bots:mention-only-general-and-clarification');
+export const groupAudienceContractHash=hash('anthys.group-audience.v1:pinned-cli:independent-counts-roster:reviewed-owner-directory:approved-bots:mention-only-general-and-clarification');

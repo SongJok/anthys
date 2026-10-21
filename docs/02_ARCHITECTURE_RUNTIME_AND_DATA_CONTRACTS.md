@@ -1,4 +1,4 @@
-# open_aider｜02 技术架构、原生运行时与数据契约
+# anthys｜02 技术架构、原生运行时与数据契约
 
 实施补充（2026-10-18，群事务切片进行中）：087/088 增加 group_cases、不可变来源/变更/幂等请求记录及最小群成员投影。正文加密，tenant/group 与合同外键绑定；API 的真实会话、当前成员目录、独立委托、合同动作、合同版本、事项版本和安全停止开关均重新检查。管理员通过受限函数取得本群成员 ID/显示名，不扩大私人 DWS 目录 SELECT。合同暂停/撤销沿原群锁串行化；查询锁等待最多10秒、单条语句最多12秒，连接池耗尽返回受控503，原幂等键可在恢复后核对。中止的本地请求在提交前回滚；不声称撤回外部字节。
 
@@ -70,7 +70,7 @@ notifier  ──> delivery_outbox ──> 钉钉消息/卡片，结果回写审�
 ### 2.1 目录
 
 ```text
-open_aider/
+anthys/
   apps/{api,web,ingress,worker,scheduler,notifier,dws-runner,sandbox-broker}/
   packages/
     contracts/              # Zod schemas、公共事件、错误、provider-tool mapping
@@ -795,7 +795,7 @@ A的原始纯scope-only一步保存体验仍未完成，安全确认候选不是
 
 USER 人设隐私删除为独立操作：H5 DELETE /api/v1/me/persona，或经当前 DM 验证的“擦除我的人设及历史”。清除本人历史设置及请求正文、原生来源/范围提案和实际关联运行副本；保留 GLOBAL/GROUP、其他用户、独立记忆及无关运行。写入空的单调版本标记，阻止旧请求重放；再次明确保存可产生新版本，旧删除请求重试不擦除新内容。
 
-迁移050–058仅在隔离合成 PostgreSQL 127.0.0.1:53331/open_aider_test 应用并保留原文。053首次执行失败的空对象和别名问题分别由054/055修复；失败事务回滚、SDK无成功ACK。恢复测试保留删除账本，真实恢复选定旧内容/任务/租约；最初使用 pg Date 的试验损失微秒，旧租约失配导致的通过不作为屏障证据。修正为 PostgreSQL JSON 保留精度后复现迟到journal写回，057增加运行获取及每次guarded写的账本否决，058加强保留依赖和恢复状态修复。失败、修复和重跑记录保留于 reports/checks/history/，以 reports/p07-memory-candidate.json 的检查点和范围为准。
+迁移050–058仅在隔离合成 PostgreSQL 127.0.0.1:64711/anthys_test 应用并保留原文。053首次执行失败的空对象和别名问题分别由054/055修复；失败事务回滚、SDK无成功ACK。恢复测试保留删除账本，真实恢复选定旧内容/任务/租约；最初使用 pg Date 的试验损失微秒，旧租约失配导致的通过不作为屏障证据。修正为 PostgreSQL JSON 保留精度后复现迟到journal写回，057增加运行获取及每次guarded写的账本否决，058加强保留依赖和恢复状态修复。失败、修复和重跑记录保留于 reports/checks/history/，以 reports/p07-memory-candidate.json 的检查点和范围为准。
 
 独立 start:maintenance 仅需要内部数据库/key及明确 WORKER_SCOPE_FILE，处理活跃主体的有界过期及保留账本下的修复，不调用模型/钉钉/DWS。当前不能认证已离职主体清理、删除账本本身回滚的整库备份恢复、独立删除日志重放、实际备份保留期及180天审计元数据清理。已外发字节不能撤回；逻辑擦除不等于 PostgreSQL/WAL 物理抹零。
 
@@ -810,7 +810,7 @@ P07本地完整后端检查点：reports/checks/p07-memory-backend-full.json 记
 
 ## 2026-10-16 P02/P03/P07 后续修正与证据检查点（阶段仍未完成）
 
-本次迁移059补齐实际来源选择回复的原生入站副本与SOURCE_REPLY outbox清理；迁移060使仅返回布尔值、严格绑定tenant/owner的删除否决在主体离职后仍有效，私人表RLS仍拒绝离职主体读取。Gateway在工具返回落库前获取共享删除屏障并检查该否决：恢复旧EXECUTING动作也不能重新写入已删除私人正文；普通租约失效/离职且未发生删除的UNKNOWN结果仍保守记录。只在127.0.0.1:53331隔离合成数据库应用迁移，没有执行开发库或企业数据清理。
+本次迁移059补齐实际来源选择回复的原生入站副本与SOURCE_REPLY outbox清理；迁移060使仅返回布尔值、严格绑定tenant/owner的删除否决在主体离职后仍有效，私人表RLS仍拒绝离职主体读取。Gateway在工具返回落库前获取共享删除屏障并检查该否决：恢复旧EXECUTING动作也不能重新写入已删除私人正文；普通租约失效/离职且未发生删除的UNKNOWN结果仍保守记录。只在127.0.0.1:64711隔离合成数据库应用迁移，没有执行开发库或企业数据清理。
 
 原生来源选择、checkpoint、工具动作、回复、outbox与投递等实际数据流接受逐行旧记录恢复测试，使用明确标记的故障注入，并保留同字面值的无关动作/企业源/其他主体。该子矩阵通过不等于完整删除图通过：普通run_user_messages与narrative review逐存储恢复、真实checkpoint时的父run.context_ref、已开始物理发送的边界、离职主体维护、独立整库备份删除日志重放及180天元数据清理仍需实现和验证。
 
@@ -829,7 +829,7 @@ P07新增4项真实隔离PostgreSQL验证：PRIVATE Preference与USER人设各�
 
 P02/P04新增可选DINGTALK_REPLY_ONLY=true配置（严格true/false，默认false）：通知器使用同一Sender模式，跳过CardCoordinator；sendProactive在令牌兑换前返回FAILED/PROACTIVE_REPLY_ONLY_MODE，直接token调用也拒绝。原生事件有效sessionWebhook仍按既有身份/受众/来源/URL/到期/禁止跳转检查回复；缺失/过期私聊地址经既有投递路径得到明确FAILED，0令牌/0HTTP请求，不自动重试。已发请求丢失响应保持UNKNOWN，重复处理不再发。该模式限制本通知器的出站路径，不是员工、入站、模型、其他业务能力或费用授权。
 
-本地37项定向检查（Sender契约21、投递11、配置5）及typecheck/lint通过；所有provider fetch为显式注入替身、数据库仅127.0.0.1:53331新合成记录，没有真实令牌/消息/模型调用。默认false的原主动投递回执契约仍通过。精确检查点和后续元数据差异见reports/reply-only-candidate.json。没有重新执行先前531全后端或50 Chrome，不将其声称为新源码全量结果。当前模式未写入真实.env、未启动应用、未配置员工/租户/预算/凭据/持久权限，也未部署。
+本地37项定向检查（Sender契约21、投递11、配置5）及typecheck/lint通过；所有provider fetch为显式注入替身、数据库仅127.0.0.1:64711新合成记录，没有真实令牌/消息/模型调用。默认false的原主动投递回执契约仍通过。精确检查点和后续元数据差异见reports/reply-only-candidate.json。没有重新执行先前531全后端或50 Chrome，不将其声称为新源码全量结果。当前模式未写入真实.env、未启动应用、未配置员工/租户/预算/凭据/持久权限，也未部署。
 
 P00–P14原目标保留。P02/P03/P07仍IN_PROGRESS，ENTERPRISE_DWS仍FAIL，原130项验收状态不变。真实测试员工/租户映射、企业已批准预算、平台授权与真实交互验收尚未具备证据；旧局部探测或本次无网测试不能代替。
 
@@ -840,7 +840,7 @@ P00–P14原目标保留。P02/P03/P07仍IN_PROGRESS，ENTERPRISE_DWS仍FAIL，�
 
 DeliveryGateway现在在迟到回执落库前获取共享owner删除屏障，绑定本次实际读取正文时的source_run_id，调用已有仅返回布尔且tenant/owner受限的060删除否决。已知删除时清除恢复的正文，SENDING保持保守UNKNOWN，不把接受回执当作已核验送达，不自动重发；不含正文的提供方ID可保留供后续核对。普通离职/租约损失且没有删除仍按原规则记录已派发结果。没有在网络调用期间持有删除锁，已发出的外部字节无法撤回。
 
-53项定向检查通过（在途及既有图17、普通澄清4、投递11、Sender契约21）并通过typecheck/lint。它们使用真实127.0.0.1:53331新合成记录、原生SDK/SSE数据流及注入fetch，不构成真实钉钉/公司MCP/模型联调。无新数据库结构变化，复用已应用且不可改写的050–060迁移；本次修正只改变迟到投递记账路径。完整回归、产物与失败记录的准确源码绑定见reports/p07-erasure-send-candidate.json，不将此前531或50页面检查点当作当前同源重跑。
+53项定向检查通过（在途及既有图17、普通澄清4、投递11、Sender契约21）并通过typecheck/lint。它们使用真实127.0.0.1:64711新合成记录、原生SDK/SSE数据流及注入fetch，不构成真实钉钉/公司MCP/模型联调。无新数据库结构变化，复用已应用且不可改写的050–060迁移；本次修正只改变迟到投递记账路径。完整回归、产物与失败记录的准确源码绑定见reports/p07-erasure-send-candidate.json，不将此前531或50页面检查点当作当前同源重跑。
 
 完整R10/P07仍未验收：独立整库删除日志重放/备份保留、离职主体维护、180天元数据清理、其他记忆类型/群合同、企业关键覆盖与原P00–P14全部剩余需求。原130项验收与ENTERPRISE_DWS门槛保持不变；无新增真实模型请求、消息、配置启用、授权或部署。
 
@@ -851,7 +851,7 @@ DeliveryGateway现在在迟到回执落库前获取共享owner删除屏障，绑
 
 后台沿原有依赖ID清除正文，不以文本匹配删除；保留后续有效人设版本、未到期条目、其他主体/租户、共享企业来源、无关任务和费用/UNKNOWN账本。到期产生内容已移除的内部随机请求键，避免用户选择旧expiry键阻止政策清理；范围仍有界且两worker串行，不因清理重新执行模型、钉钉或MCP。
 
-复现修前7个真实业务断言失败、3个活跃对照通过；修后定向回归通过，另验证原生运行实际正文恢复、表/函数权限、批次上限、后续版本保留、真实SIGKILL提交前后原子性及独立维护进程。均仅127.0.0.1:53331合成数据、注入SSE/发送器与本地测试MCP，不是企业LIVE。完整最终源码、命令、失败历史和验证范围以reports/p07-inactive-maintenance-candidate.json为准。
+复现修前7个真实业务断言失败、3个活跃对照通过；修后定向回归通过，另验证原生运行实际正文恢复、表/函数权限、批次上限、后续版本保留、真实SIGKILL提交前后原子性及独立维护进程。均仅127.0.0.1:64711合成数据、注入SSE/发送器与本地测试MCP，不是企业LIVE。完整最终源码、命令、失败历史和验证范围以reports/p07-inactive-maintenance-candidate.json为准。
 
 原050–064迁移保持原样。独立整库删除日志重放/备份保留、180天元数据处理、其他记忆种类/群合同、完整工作指导、企业关键覆盖及P00–P14剩余要求继续保留。P07与ENTERPRISE_DWS未完成；没有启用真实试验、企业清理、付费请求、消息或部署。
 
@@ -879,7 +879,7 @@ SECURITY DEFINER 仅以当前tenant/actor与当前会话执行本人精确id/ver
 
 ### P04 T036 实际派发验收入口（2026-10-16）
 
-T036入口为每组新建独立合成主体、资源和真实任务租约，使用当前RLS、绑定、资源委托与真实Gateway。源提供者在本地52339独立按当前主体查询53331的资源所有权；获准读取生成持久审计，获准写入生成真实数据库记录，并独立回读。写入审批经过现有会话/CSRF/nonce API，不直接伪造APPROVED行。独立参考函数不导入生产authorize/Gateway/SQL助手。拒绝同时核对HTTP请求与持久化副作用为零。只创建合成记录，无真实企业提供者、模型、消息或DWS。
+T036入口为每组新建独立合成主体、资源和真实任务租约，使用当前RLS、绑定、资源委托与真实Gateway。源提供者在本地64702独立按当前主体查询64711的资源所有权；获准读取生成持久审计，获准写入生成真实数据库记录，并独立回读。写入审批经过现有会话/CSRF/nonce API，不直接伪造APPROVED行。独立参考函数不导入生产authorize/Gateway/SQL助手。拒绝同时核对HTTP请求与持久化副作用为零。只创建合成记录，无真实企业提供者、模型、消息或DWS。
 
 ### P04 Action 角色上下文契约（2026-10-16）
 
@@ -898,7 +898,7 @@ audit_events 保存固定动作、状态、内部资源编号和 trace 编号，
 
 迁移074在原有诊断函数中沿用撤销路径的员工级事务锁，先重新核对会话，再删除该员工的过期缓存，并保留最新127份旧快照，为当前计算预留一份；提交后每位员工最多128份。缓存仍只有元信息，`executionAuthority=false`；输出前的会话、授权到期与DWS到期复核、租户/本人隔离不变。该组件不增加权限、不认证外部资源。
 
-仅隔离测试库53331应用了074。真实项目库53330仍为73；新候选要求74，因此不得沿用此前73版本的就绪结果启动新候选。真实库升级须在后续获准的维护步骤执行，本轮没有迁移、重置或修改真实数据。诊断请求限速与闲置员工的周期清理仍待实现，不据此宣布完整P04通过。
+仅隔离测试库64711应用了074。真实项目库64710仍为73；新候选要求74，因此不得沿用此前73版本的就绪结果启动新候选。真实库升级须在后续获准的维护步骤执行，本轮没有迁移、重置或修改真实数据。诊断请求限速与闲置员工的周期清理仍待实现，不据此宣布完整P04通过。
 
 ### 2026-10-18 权限诊断持久限速组件（未在真实库启用）
 
@@ -920,7 +920,7 @@ API新增管理员资源列表及CREATE/RENEW/REVOKE/REGRANT。后台每次核�
 
 按稳定顺序锁定管理员和目标的权限事务锁，再锁session/角色/身份，兼容员工自行撤销；等待后重查会话及到期条件。写入使用版本CAS、按管理员/请求ID绑定规范化输入的不可变回执，目标员工审计链同事务追加。旧回执重放返回当时结果并另列currentVersion/currentState，不把旧撤销快照假称当前状态。REVOKE/REGRANT递增目标auth_epoch并清诊断缓存；本人撤销会让当前会话失效并清cookie，不自动复活旧任务或重置预算。
 
-077–083只应用于合成库53331。078把PostgreSQL不支持的{0,511}正则重复界限改为同字符集+单独512字符限制；后续迁移补齐完整描述和认证模式，旧登记文件未改写。真实库仍未操作，最后只读观察为73；本组件候选需要83，不能使用旧版本就绪记录启动。完整管理员角色/委托、群治理、管理UI和企业验收仍待后续工作，不提高原R状态。
+077–083只应用于合成库64711。078把PostgreSQL不支持的{0,511}正则重复界限改为同字符集+单独512字符限制；后续迁移补齐完整描述和认证模式，旧登记文件未改写。真实库仍未操作，最后只读观察为73；本组件候选需要83，不能使用旧版本就绪记录启动。完整管理员角色/委托、群治理、管理UI和企业验收仍待后续工作，不提高原R状态。
 
 082在既有租户/本人RLS上叠加限制性SELECT政策，受管理行只对声明`OA_MANAGED_GRANT_V1`的事务上下文可见；新Database.scope固定设置本地标识，提交/回滚后不保留。未声明的旧读取路径只见原legacy行，不能因忽略新列而使用新授权。标识仅是代码协议准入条件，不赋予租户、本人、管理或执行权限；完整描述/来源/审批校验仍必须通过。
 
@@ -986,13 +986,13 @@ MCP QUERY 返回绑定 nonce/tenant/actor/scope/version/sourceRevision 的严格
 
 089–091新增owner强制RLS的schedules、occurrences、幂等请求、不可变版本history与原生设置回执。计划正文/规则加密，执行身份以owner+当前auth_epoch/policy重核，目标固定本人；原生来源与加密inbox关联。API `/api/v1/schedules`、`/:id`、`/preview`及`/:id/pause|resume|cancel`；PATCH完整text/rule，变更需If-Match、CSRF和Idempotency-Key。
 
-scheduler按5秒tick、owner范围due索引及SKIP LOCKED，在同事务生成唯一(schedule,revision,UTC) occurrence+task+SCHEDULE outbox并推进规则。任务在确定性执行前保持非模型可领取状态；暂停/改版/取消撤销旧occurrence、关闭旧outbox、取消待执行任务并抑制PENDING投递。下一到期为空但最后发生点未执行时仍ACTIVE；本地执行后COMPLETED只表示规则结束。执行与物理发送前重核revision、身份、策略、内容/授权证据，UNKNOWN不重试。提醒只取最近错过一次且在一小时内，否则MISSED；不补发停机期间每个提醒。报表/监控与高风险写的独立misfire执行仍待完成。新迁移只在隔离53331库验证；真实schema升级须另批。
+scheduler按5秒tick、owner范围due索引及SKIP LOCKED，在同事务生成唯一(schedule,revision,UTC) occurrence+task+SCHEDULE outbox并推进规则。任务在确定性执行前保持非模型可领取状态；暂停/改版/取消撤销旧occurrence、关闭旧outbox、取消待执行任务并抑制PENDING投递。下一到期为空但最后发生点未执行时仍ACTIVE；本地执行后COMPLETED只表示规则结束。执行与物理发送前重核revision、身份、策略、内容/授权证据，UNKNOWN不重试。提醒只取最近错过一次且在一小时内，否则MISSED；不补发停机期间每个提醒。报表/监控与高风险写的独立misfire执行仍待完成。新迁移只在隔离64711库验证；真实schema升级须另批。
 
 ### 2026-10-19 原生群事项来源与投递证明
 
 092仅新增task control_kind GROUP_CASE、以实际owned GROUP/MENTION_ONLY task/run为依据的独立native authority/member函数及owner私有不可变group_case_responses；不绕过H5 session检查。普通RUN队列复用零模型/工具预算的确定性分支；原goal与加密inbox全文保持相同。当前合同/委托/来源身份和新鲜完整群受众在执行前后及旧结果读取、最终两次发送检查复核。CASE正文/版本与LIST当前投影变化都会拒绝旧回执。一般GROUP企业工具及证据屏障保持。
 
-同事务保存事项、请求、审计、受保护投影、run结果与delivery；取消或SQL超时后不保留半次mutation。UNKNOWN不重发，不因此再次登记或调用模型。物理发送与远端名单观察不原子，不能宣称撤回已经发出的字节。API最终读者与独立notifier同样配置群事项校验器。092只在本地53331合成库验证，真实库未升级。
+同事务保存事项、请求、审计、受保护投影、run结果与delivery；取消或SQL超时后不保留半次mutation。UNKNOWN不重发，不因此再次登记或调用模型。物理发送与远端名单观察不原子，不能宣称撤回已经发出的字节。API最终读者与独立notifier同样配置群事项校验器。092只在本地64711合成库验证，真实库未升级。
 
 
 ### 群事项模型读的受限证据路径（2026-10-19）
@@ -1001,12 +1001,12 @@ scheduler按5秒tick、owner范围due索引及SKIP LOCKED，在同事务生成�
 
 发现、读取前后、缓存/重读、history、checkpoint的facts/actions/omitted/unexecutedCalls、模型派发、最终引用、HTTP和发送复用窄认证与当前投影检查。非白名单无data错误、悬空调用、重复call ID和额外身份参数不能借上下文恢复带入模型。认证失败回执只允许固定安全envelope。局部SQL瞬态失败保持CERTIFIED_LOCAL_READ/PREPARED以便安全重读；UNKNOWN不自动重做。
 
-REPORT正文必须严格空串，事实由引用渲染；所有证据均为当前认证case读且非空时，既有两次物理发送前复核才允许群正文。一般群企业工具/证据和附件仍拒绝。模型投影刻意排除scope全目录，H5原接口保持。093仅应用隔离53331；真实库未升级。独立来源授权撤销、增强来源与其余未交付能力仍不是本切片的完成声明。
+REPORT正文必须严格空串，事实由引用渲染；所有证据均为当前认证case读且非空时，既有两次物理发送前复核才允许群正文。一般群企业工具/证据和附件仍拒绝。模型投影刻意排除scope全目录，H5原接口保持。093仅应用隔离64711；真实库未升级。独立来源授权撤销、增强来源与其余未交付能力仍不是本切片的完成声明。
 
 
 ### 群事项当前名单授权（094）
 094新增封闭H5 observer元数据与观察名单目录投影。GroupCaseRoster在实际B/C会话事务内核对合同/委托/角色/身份/绑定/授权/kill，独立有界凭据池只为已审服务A执行群名单读；读写前后观察和目录摘要变化即回滚事项/变更/回执。GroupAudience.currentMembers为原生候选与回执复核提供同一当前集合，不再调用旧整目录投影。
-ACTIVE合同put统一先取group-contract advisory，再进入保留全部原验证的v85体，旧体和整目录投影撤掉runtime直接执行权，避免反向等待。093/094已应用文件保持不可变，当前精确清单94/hash=cdcb2dc3c98c2ccada2407db219d4ac752ce3ddf9adeb39af1d68a03deb2d0e7；仅合成53331已升级，真实库未迁移。
+ACTIVE合同put统一先取group-contract advisory，再进入保留全部原验证的v85体，旧体和整目录投影撤掉runtime直接执行权，避免反向等待。093/094已应用文件保持不可变，当前精确清单94/hash=cdcb2dc3c98c2ccada2407db219d4ac752ce3ddf9adeb39af1d68a03deb2d0e7；仅合成64711已升级，真实库未迁移。
 
 群事项UI复用现有from/until UTC半开API（最多31×24小时），本地墙钟输入拒绝无效日历与DST不存在时间，重复墙钟选较早时刻并提示核对UTC；分页沿已读coverage，不因编辑条件恢复旧数据。服务端当前名单/合同验证保持独立。
 
@@ -1148,4 +1148,4 @@ STOP先在一事务提交永久veto，再用独立事务复用原task取消；�
 
 2026-10-20 有界迁移执行合同补充：planBoundedMigrationStep(raw, signal?)传播取消并对104份SQL/契约准备累计单调预算，plan允许过去/未来执行窗作检查，不读连接或授予执行。apply复用一次lifetime而非为准备/连接/事务重置预算，截止取maxDuration与validUntil剩余较小值，PG超时使用剩余额度；本次Socket由执行器独占。工作结束前停止后续SQL，清理最多另1秒确认end/close，UNCONFIRMED及末尾overrun独立于COMMIT知识，CLI不得将其当成功。CLI必须先读取有界私有profile才能得知其预算，读后复核取消；已开始的本机文件系统操作仍须settlement后检查，未承诺OS系统调用硬实时中断。本地连接关闭不证明外部业务结果或恢复授权，CLOSED/UNKNOWN及撤销摘要保护未减。
 
-2026-10-20 独立恢复测试契约：固定PG镜像、随机自有容器name/label/full ID；network=none、无host bind/端口、只读根，数据tmpfs为noexec，仅私有runtime子挂载exec，实际读mountinfo复核。通过docker exec stdin写入且重核hash，不挂载工作区/.env/.secrets。内部仍用原test-network-guard与127.0.0.1:53331，端口相同但网络命名空间与PG系统均独立；原护栏未放宽。官方Node24.21.0双架构归档与提取bin均固定SHA，缓存私有并再验证ELF/架构/字节，SHA校验不冒称发行签名验证；test:prepare只增加公共运行时准备，应用运行时不接入新容器。
+2026-10-20 独立恢复测试契约：固定PG镜像、随机自有容器name/label/full ID；network=none、无host bind/端口、只读根，数据tmpfs为noexec，仅私有runtime子挂载exec，实际读mountinfo复核。通过docker exec stdin写入且重核hash，不挂载工作区/.env/.secrets。内部仍用原test-network-guard与127.0.0.1:64711，端口相同但网络命名空间与PG系统均独立；原护栏未放宽。官方Node24.21.0双架构归档与提取bin均固定SHA，缓存私有并再验证ELF/架构/字节，SHA校验不冒称发行签名验证；test:prepare只增加公共运行时准备，应用运行时不接入新容器。

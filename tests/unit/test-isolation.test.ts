@@ -31,14 +31,14 @@ it('missing isolated environment refuses all runner entry points before starting
 it('default network guard rejects fetch, HTTP, HTTPS, TCP and TLS outside declared loopback ports',()=>{
  const code=`import net from 'node:net';import tls from 'node:tls';import http from 'node:http';import https from 'node:https';
 let blocked=0;try{await fetch('https://api.dingtalk.com/');}catch(e){if(e.message==='TEST_NETWORK_UNDECLARED_DESTINATION')blocked++;}
-for(const fn of [()=>http.get('http://example.com/'),()=>https.request('https://example.com/'),()=>net.connect(443,'example.com'),()=>tls.connect({host:'example.com',port:443}),()=>net.connect(53330,'127.0.0.1'),()=>net.connect({path:'/tmp/undeclared.sock'})]){try{fn();}catch(e){if(e.message.startsWith('TEST_NETWORK_UNDECLARED'))blocked++;}}
+for(const fn of [()=>http.get('http://example.com/'),()=>https.request('https://example.com/'),()=>net.connect(443,'example.com'),()=>tls.connect({host:'example.com',port:443}),()=>net.connect(64710,'127.0.0.1'),()=>net.connect({path:'/tmp/undeclared.sock'})]){try{fn();}catch(e){if(e.message.startsWith('TEST_NETWORK_UNDECLARED'))blocked++;}}
 if(blocked!==7)throw Error('GUARD_DID_NOT_BLOCK');console.log(blocked);`;
  const output=execFileSync(process.execPath,['--import',resolve('scripts/test-network-guard.mjs'),'--input-type=module','-e',code],{env:{PATH:process.env['PATH']},encoding:'utf8'});expect(output.trim()).toBe('7');
 });
 it('test runner rejects production, development and non-loopback database targets before launching tests',async()=>{
  const dir=await mkdtemp(join(tmpdir(),'oa-target-'));try{
   const {mkdir}=await import('node:fs/promises');await mkdir(join(dir,'.data/test-environment'),{recursive:true});
-  for(const target of ['postgresql://test@production.example:53331/open_aider_test','postgresql://test@127.0.0.1:53330/open_aider','postgresql://test@127.0.0.1:53331/production','postgresql://test@127.0.0.1:53331/open_aider_test?host=production.example']){
+  for(const target of ['postgresql://test@production.example:64711/anthys_test','postgresql://test@127.0.0.1:64710/anthys','postgresql://test@127.0.0.1:64711/production','postgresql://test@127.0.0.1:64711/anthys_test?host=production.example']){
    await writeFile(join(dir,'.data/test-environment/environment.json'),JSON.stringify({DATABASE_URL:target}));let output='';try{execFileSync(process.execPath,[resolve('scripts/run-tests.mjs'),'vitest','run'],{cwd:dir,env:{PATH:process.env['PATH']},stdio:'pipe'});}catch(e){output=String((e as {stderr:Buffer}).stderr);}expect(output).toContain('TEST_DATABASE_TARGET_REJECTED');
   }
  }finally{await rm(dir,{recursive:true,force:true});}

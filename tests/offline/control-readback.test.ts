@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {ReadBackFlow, readBackNotice} from '../../apps/web/src/read-back-flow.js';
-assert.equal(Reflect.get(globalThis, Symbol.for('open_aider.testNetworkGuard')), true);
+assert.equal(Reflect.get(globalThis, Symbol.for('anthys.testNetworkGuard')), true);
 assert.deepEqual(Object.keys(process.env).filter(k => /(?:DATABASE|PROVIDER|GLM|DINGTALK|DWS|MCP|TOKEN|SECRET|CREDENTIAL|^PG|^NODE_OPTIONS$)/i.test(k)), []);
 const action={id:'10000000-0000-4000-8000-000000000001',capability_id:'synthetic.journal',state:'UNKNOWN' as const};
 const id='20000000-0000-4000-8000-000000000001', now=1800000000000;

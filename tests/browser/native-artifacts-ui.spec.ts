@@ -31,7 +31,7 @@ test('private tool draft is visibly unverified, keeps protected downloads and re
  let forged=false,grants=0,gets=0,secretMatched=false;const targets:string[]=[];const ticket='S'.repeat(43);
  await page.route('**/*',async route=>{
   const request=route.request(),url=new URL(request.url());
-  expect(url.origin).toBe('http://localhost:52339');targets.push(url.pathname);expect(url.search).toBe('');
+  expect(url.origin).toBe('http://localhost:64702');targets.push(url.pathname);expect(url.search).toBe('');
   const now=new Date().toISOString(),common={taskId,runId,format:'txt',mime:'text/plain; charset=utf-8',byteSize:bytes.length,sha256:sha,createdAt:now};
   const items=[{...common,id,fileName:'draft.txt',source:{mode:'TOOL_DRAFT',classification:'INTERNAL',verification:forged?'VERIFIED':'UNVERIFIED',asOf:now,notice:artifactToolDraftNotice}},{...common,id:oldId,fileName:'result.txt',source:{mode:'VERIFIED_TASK_RESULT',classification:'INTERNAL',verification:'PARTIAL',asOf:now,notice:'SYNTHETIC existing partial result.'}}];
   if(url.pathname===`/api/v1/tasks/${taskId}/artifacts`){expect(request.method()).toBe('GET');await route.fulfill({json:{data:{items,asOf:now}}});return;}

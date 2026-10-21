@@ -3,8 +3,8 @@ import {Vault} from '../../packages/storage/src/crypto.js';
 import {randomBytes} from 'node:crypto';
 describe('P00 configuration and P01 secret envelope',()=>{
  it('T122 refuses unsafe production origin, mocks and weak secrets',()=>{
-  for(const env of [{APP_ORIGIN:'https://aider.example.invalid'},{APP_ORIGIN:'http://example.com'},{APP_ORIGIN:'https://example.com',MOCK_PROVIDERS:'true'},{APP_ORIGIN:'https://example.com',APP_MASTER_KEY:'test'}]) expect(()=>config({APP_ENV:'production',...env})).toThrow();
-  expect(config({}).PORT).toBe(52330);expect(()=>config({GLM_MODEL:'other'})).toThrow();
+  for(const env of [{APP_ORIGIN:'https://anthys.example.invalid'},{APP_ORIGIN:'http://example.com'},{APP_ORIGIN:'https://example.com',MOCK_PROVIDERS:'true'},{APP_ORIGIN:'https://example.com',APP_MASTER_KEY:'test'}]) expect(()=>config({APP_ENV:'production',...env})).toThrow();
+  expect(config({}).PORT).toBe(64700);expect(()=>config({GLM_MODEL:'other'})).toThrow();
  });
  it('T125 rotates encryption keys and binds ciphertext to tenant/identity',()=>{
   const a=randomBytes(32),b=randomBytes(32),v1=new Vault(new Map([['1',a]]),'1');

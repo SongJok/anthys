@@ -17,13 +17,13 @@ export async function readProjectBackupSource(raw:unknown,review:{expectedProfil
   bytes=await readOperationsPrivateFile(p.source.connectionFile,8192);checkpoint();
   if(createHash('sha256').update(bytes).digest('hex')!==p.source.connectionFileSha256)fail('BACKUP_SOURCE_CONNECTION_CHANGED');
   const text=new TextDecoder('utf-8',{fatal:true}).decode(bytes).trim();
-  if(!/^postgresql:\/\/oa_migrator:[^/?#@\s]+@127\.0\.0\.1:53330\/open_aider$/.test(text))fail('BACKUP_SOURCE_TARGET_REJECTED');
+  if(!/^postgresql:\/\/oa_migrator:[^/?#@\s]+@127\.0\.0\.1:64710\/anthys$/.test(text))fail('BACKUP_SOURCE_TARGET_REJECTED');
   const url=new URL(text),password=decodeURIComponent(url.password);
   if(url.protocol!=='postgresql:'||url.hostname!==p.source.host||Number(url.port)!==p.source.port||url.pathname!=='/'+p.source.database||url.username!==p.source.role||url.search||url.hash||!password||/[\u0000-\u001f\u007f]/.test(password))fail('BACKUP_SOURCE_TARGET_REJECTED');
   checkpoint();
   // Explicit fields prevent PGHOST/PGOPTIONS/PGSSLMODE inheritance from
   // redirecting this local operator connection. Never serialize this return.
-  return {host:p.source.host,port:p.source.port,database:p.source.database,user:p.source.role,password,ssl:false as const,sslnegotiation:'postgres' as const,client_encoding:'UTF8' as const,replication:'false' as const,binary:false as const,options:'-c row_security=off' as const,connectionTimeoutMillis:3000,query_timeout:p.maxDurationMs,application_name:'open_aider_bounded_backup'};
+  return {host:p.source.host,port:p.source.port,database:p.source.database,user:p.source.role,password,ssl:false as const,sslnegotiation:'postgres' as const,client_encoding:'UTF8' as const,replication:'false' as const,binary:false as const,options:'-c row_security=off' as const,connectionTimeoutMillis:3000,query_timeout:p.maxDurationMs,application_name:'anthys_bounded_backup'};
  }catch(error){throw error instanceof BackupSourceError?error:new BackupSourceError('BACKUP_SOURCE_PRIVATE_INPUT_REJECTED');}
  finally{bytes?.fill(0);}
 }

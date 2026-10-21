@@ -22,7 +22,7 @@ const binary=(name:'pg_dump'|'pg_restore')=>z.object({path,sha256:sha,version:z.
  * grants permission to read the production database or create a backup. */
 export const projectBackupProfileSchema=z.object({
  schemaVersion:z.literal(1),kind:z.literal('BOUNDED_PROJECT_BACKUP'),backupSetId:z.uuid().regex(/^[a-f0-9-]+$/),reviewReference:ref,
- source:z.object({host:z.literal('127.0.0.1'),port:z.literal(53330),database:z.literal('open_aider'),role:z.literal('oa_migrator'),systemIdentifierSha256:sha,migrationCount:z.number().int().min(73).max(requiredSchema.migrations.length),schemaFingerprint:sha,connectionFile:path,connectionFileSha256:sha}).strict(),
+ source:z.object({host:z.literal('127.0.0.1'),port:z.literal(64710),database:z.literal('anthys'),role:z.literal('oa_migrator'),systemIdentifierSha256:sha,migrationCount:z.number().int().min(73).max(requiredSchema.migrations.length),schemaFingerprint:sha,connectionFile:path,connectionFileSha256:sha}).strict(),
  repositoryContractFingerprint:sha,
  pgDump:binary('pg_dump'),pgRestore:binary('pg_restore'),
  postgresArchiveRoot:path,fileStoreArchiveRoot:path,

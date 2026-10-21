@@ -11,7 +11,7 @@ RUN pnpm build
 
 FROM node:24.21.0-bookworm-slim@sha256:d6aa754f16b3197301076f047b5def2f02ea1dbbc2ca920407d46d7ec7f87b20
 WORKDIR /app
-RUN groupadd --gid 10001 aider && useradd --uid 10001 --gid 10001 --no-create-home aider
+RUN groupadd --gid 10001 anthys && useradd --uid 10001 --gid 10001 --no-create-home anthys
 COPY --from=build --chown=10001:10001 /app/dist/packages ./dist/packages
 COPY --from=build --chown=10001:10001 /app/dist/apps/dws-runner ./dist/apps/dws-runner
 COPY --from=build --chown=10001:10001 /app/node_modules ./node_modules

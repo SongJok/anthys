@@ -1,8 +1,8 @@
-# open_aider｜03 外部接入、配置与 Codex 实施计划
+# anthys｜03 外部接入、配置与 Codex 实施计划
 
 实施补充（2026-10-18，接管进行中）：群事务生产入口为 /api/v1/groups/:id/cases 的 GET/POST/PATCH 与工作台页面，依赖当前会话、独立审核群合同及该合同明确列出的 case.read、case.create、case.update；case.owner_reported 为独立显式选择，缺省不启用。工作台卡片需本人明确共享，@ 来源需绑定本人的真实持久入站任务，不采信客户端提供的正文身份。代码升级和迁移不创建任何真实群委托或主动发送授权。
 
-087/088 仅在53331合成环境增量应用。真实库此前确认仍为73，不能以测试准备器或源码版本推定真实升级。旧本人试验仍永久 CLOSED；企业业务数据库直连继续二期，经既有企业MCP的数据问答按最新调整纳入一期；平台 PostgreSQL、文件/分析和其他一期要求保留。组合 MCP 测试使用实际 SDK 的配置/发现/调用与合成 HTTP/原生 SSE，不使用真实企业密钥、模型费用或外发；真实部署/版本对应关系不据此认证。
+087/088 仅在64711合成环境增量应用。真实库此前确认仍为73，不能以测试准备器或源码版本推定真实升级。旧本人试验仍永久 CLOSED；企业业务数据库直连继续二期，经既有企业MCP的数据问答按最新调整纳入一期；平台 PostgreSQL、文件/分析和其他一期要求保留。组合 MCP 测试使用实际 SDK 的配置/发现/调用与合成 HTTP/原生 SSE，不使用真实企业密钥、模型费用或外发；真实部署/版本对应关系不据此认证。
 
 版本：1.0.0　事实核实日期：2026-10-14　依赖：文档 01、02。所有接入必须形成真实适配器、测试 fixture、错误归一化与验证报告，不得用提示词代替。
 
@@ -38,7 +38,7 @@ Codex 不应为这些未知值填“看起来像真的”默认值。应完成�
 
 ### 2.1 应用形态
 
-创建企业内部应用 `open_aider`，添加机器人能力，并配置 H5 微应用作为个人中心/管理入口。默认使用 Stream 接收消息和适用事件；HTTP 回调作为可选部署方式。Stream 降低消息接入的入站网络要求，但 H5/OAuth/成果下载仍需钉钉客户端可访问的 HTTPS 地址。[S05][S19]
+创建企业内部应用 `anthys`，添加机器人能力，并配置 H5 微应用作为个人中心/管理入口。默认使用 Stream 接收消息和适用事件；HTTP 回调作为可选部署方式。Stream 降低消息接入的入站网络要求，但 H5/OAuth/成果下载仍需钉钉客户端可访问的 HTTPS 地址。[S05][S19]
 
 `clientId` 对应应用凭据的 Client ID/AppKey；`robotCode` 从机器人配置读取，作为独立字段，不假定与 clientId 相同。内部用户 ID 与钉钉各种外部 ID 通过身份服务转换。
 
@@ -51,10 +51,10 @@ Codex 不应为这些未知值填“看起来像真的”默认值。应完成�
 5. 配置 H5 首页、OAuth/免登回调、可信域名与必要 IP 范围。
 6. 发布应用版本；验证单聊、群 @、卡片回调和 H5 登录。
 7. 独立开通 DWS CLI 并完成试点身份授权。
-8. 在 open_aider 能力中心运行非破坏检查，记录各能力状态。
+8. 在 anthys 能力中心运行非破坏检查，记录各能力状态。
 9. 通过真实联调后逐步扩大应用可见范围，不首次就向全公司群发。
 
-界面菜单名称可能变化，以实际控制台为准。不能把其他应用或 OpenClaw 快捷创建流程中的“自动获得权限”当作手动创建 open_aider 已自动授权。[S08]
+界面菜单名称可能变化，以实际控制台为准。不能把其他应用或 OpenClaw 快捷创建流程中的“自动获得权限”当作手动创建 anthys 已自动授权。[S08]
 
 ## 3. 权限中心：从“勾权限”变成可验证状态
 
@@ -397,9 +397,9 @@ provider 不可用时：普通请求显示依赖不可用；持久任务延期�
 所有变量是本项目变量，不是声称上游软件原生支持同名环境变量。秘密优先 `_FILE`，读取后不能出现在健康页或异常堆栈。
 
 ```dotenv
-APP_NAME=open_aider
+APP_NAME=anthys
 APP_ENV=development
-APP_ORIGIN=https://aider.example.invalid
+APP_ORIGIN=https://anthys.example.invalid
 RELEASE_PROFILE=BASE
 DEFAULT_TIMEZONE=Asia/Shanghai
 DEFAULT_LOCALE=zh-CN
@@ -432,7 +432,7 @@ SANDBOX_ENABLED=false
 SANDBOX_BROKER_URL=http://sandbox-broker:8092
 SANDBOX_BROKER_AUTH_KEY_FILE=/run/secrets/sandbox_broker_auth_key
 FILESTORE_DRIVER=local
-FILESTORE_ROOT=/var/lib/open_aider/artifacts
+FILESTORE_ROOT=/var/lib/anthys/artifacts
 MCP_REGISTRY_FILE=/app/config/mcp-connections.json
 SEARCH_REGISTRY_FILE=/app/config/search-connections.json
 MOCK_PROVIDERS=false
@@ -518,7 +518,7 @@ pnpm run doctor
 以下内容可以连同四份文件交给 Codex：
 
 ```text
-从空仓库开发独立项目 open_aider。docs/ 中四份文档是产品、架构、接入和验收基线。
+从空仓库开发独立项目 anthys。docs/ 中四份文档是产品、架构、接入和验收基线。
 使用 TypeScript 为主、Node.js 24 LTS、PostgreSQL、Docker；唯一默认大模型是 glm-5.3-flash。
 实现原生思考与工具调用运行时，不用固定问答流程冒充自主 Agent。
 先阅读全部文档，建立 R01-R36 与测试ID、代码模块的映射，再依 P00-P14 实施。
@@ -532,7 +532,7 @@ pnpm run doctor
 不能以空实现、TODO、写死成功、仅有UI、仅mock或降低验收阈值宣布完成。
 发现文档互相矛盾时采用更严格的安全/真实性要求，并在现有四文档内记录决议。
 需要授权人登录/审批或生产凭据时停止该外部动作，但继续所有不依赖它的开发和测试。
-启动新的端口：52330 pg端口改为：53330
+启动新的端口：64700 pg端口改为：64710
 ```
 
 
@@ -543,7 +543,7 @@ P03预算运行配置（2026-10-15）：worker通过 `BUDGET_POLICY_FILE` 读取
 
 策略字段以 `packages/runtime/src/budget-policy.ts` 为可执行契约：`schemaVersion:1`、唯一策略 `id`、`model:glm-5.3-flash`、`currency:CNY|USD`、`environment:PRODUCTION`、`approved:true`、批准引用 `approvalReference`、未来 `validUntil`、IANA `dayZone`、输入/输出上限；正数 `ceiling.inputPerMillion/outputPerMillion` 是企业批准的预留上界；`pricing` 可为null，否则含费率、来源引用和有效起止时间；`limits.tenant/department/user/task` 各含十进制字符串 `tokens/money` 和整数 `concurrent`。金额不能使用JSON浮点数。上界、币种和额度必须由企业提供；只有配置文件的审批标记不代表外部验收通过。
 
-当前挂载策略首次注册后以hash固定；配置改动不自动覆盖旧策略，版本不一致停止派发。完整的管理审批、版本轮换与费用核对界面仍属于后续权限中心/管理阶段。本轮不以数据库手工清零或删除旧账解除生产预算阻塞。测试准备器的 `--fresh` 仅重建固定 `open-aider-test` 临时PG容器，不操作53330开发库。
+当前挂载策略首次注册后以hash固定；配置改动不自动覆盖旧策略，版本不一致停止派发。完整的管理审批、版本轮换与费用核对界面仍属于后续权限中心/管理阶段。本轮不以数据库手工清零或删除旧账解除生产预算阻塞。测试准备器的 `--fresh` 仅重建固定 `anthys-test` 临时PG容器，不操作64710开发库。
 
 ```text
 执行 Pxx：<阶段名称>。
@@ -604,7 +604,7 @@ P03预算运行配置（2026-10-15）：worker通过 `BUDGET_POLICY_FILE` 读取
 
 ### 10.6 P03结构化最终结果切片的复现边界（2026-10-15）
 
-在已准备的隔离测试环境中执行`node --import tsx scripts/test-environment.ts`检查迁移001–031，执行`pnpm test:coverage`、`pnpm lint`、`pnpm typecheck`、`pnpm build`和`pnpm test:e2e`。使用`scripts/record-check.mjs`记录精确命令、退出码与前后源码hash；完整命令和真实结果见`reports/checks/p03-finalization-*.json`及候选报告。测试限定53331临时PG和52339浏览器服务，不能加载企业.env或继承供应商凭据。
+在已准备的隔离测试环境中执行`node --import tsx scripts/test-environment.ts`检查迁移001–031，执行`pnpm test:coverage`、`pnpm lint`、`pnpm typecheck`、`pnpm build`和`pnpm test:e2e`。使用`scripts/record-check.mjs`记录精确命令、退出码与前后源码hash；完整命令和真实结果见`reports/checks/p03-finalization-*.json`及候选报告。测试限定64711临时PG和64702浏览器服务，不能加载企业.env或继承供应商凭据。
 
 新增031和最终结果校验不需要企业凭据。当前真实企业资料仍BLOCKED_EXTERNAL：已发现chat工具不等于已确认其只读、按用户资源鉴权、版本化代码/日志及引用契约。选择chat作为入口仅确定适配方向；本切片没有执行MCP业务工具、真实钉钉消息、付费模型或生产部署。生产预算仍需企业批准策略。
 
@@ -629,7 +629,7 @@ P05仍为IN_PROGRESS：company.logs/query、部署版本关联、更多认证/�
 
 P06组件不满足整阶段交付。下一步按原架构实现独立runner与device flow，再扩展文档ACL/只读查询、受控办公写入和读回；同时保留P03一般问答与有效澄清、P05日志等未完成项。
 
-本组件复现命令（Node/pnpm使用runtime-lock版本，测试准备器仅操作独立53331库）：
+本组件复现命令（Node/pnpm使用runtime-lock版本，测试准备器仅操作独立64711库）：
 
 ```sh
 pnpm test:prepare
@@ -638,9 +638,9 @@ pnpm typecheck
 pnpm lint
 pnpm build
 node scripts/run-tests.mjs playwright test
-node scripts/prepare-dws-release.mjs --platform linux-arm64 --output /private/tmp/open-aider-dws-release-context-arm64 --archive /opt/homebrew/lib/node_modules/dingtalk-workspace-cli/assets/dws-linux-arm64.tar.gz --checksums /opt/homebrew/lib/node_modules/dingtalk-workspace-cli/assets/checksums.txt
-docker build --platform linux/arm64 --build-context dws_release=/private/tmp/open-aider-dws-release-context-arm64 -f deploy/images/dws.Dockerfile -t open-aider:p06-dws .
-node scripts/verify-dws-image.mjs open-aider:p06-dws
+node scripts/prepare-dws-release.mjs --platform linux-arm64 --output /private/tmp/anthys-dws-release-context-arm64 --archive /opt/homebrew/lib/node_modules/dingtalk-workspace-cli/assets/dws-linux-arm64.tar.gz --checksums /opt/homebrew/lib/node_modules/dingtalk-workspace-cli/assets/checksums.txt
+docker build --platform linux/arm64 --build-context dws_release=/private/tmp/anthys-dws-release-context-arm64 -f deploy/images/dws.Dockerfile -t anthys:p06-dws .
+node scripts/verify-dws-image.mjs anthys:p06-dws
 pnpm verify:requirements
 pnpm verify:release --profile ENTERPRISE_DWS
 ```
@@ -699,7 +699,7 @@ P03仍未完整交付：此处是私聊固定版本代码候选的工具后澄�
 钉钉SDK入站支持明确范围的设置指令与有限自然表达，复用同一真实授权/政策/CAS写入器；不伪造H5会话。实际加密inbox须匹配当前租户、机器人、发送人及会话。范围不明的“切换为SRE”只询问范围、不保存；用户须重述完整请求，例如“把我的助理切换为SRE”或“把本群助理切换为PMO”。仅回复“个人/本群”的上下文续答尚未实现。回执与版本同事务持久化，零模型预算、无RUN队列；回执不包含偏好正文，发送前再次核验。自称管理员、角色定位文字及未知权限字段不能授予权限。
 
 仍未完成：scope长期记忆、显式记住/忘记、纠错/过期及派生数据清除和备份边界；个人偏好完整删除/隐私擦除；完整GroupContract与群记忆；任意自然表达的设置理解、仅范围回答续接；任务页快照版本说明；有证据的完整工作计划/业务目标核验；SRE告警、BI认证统计及PMO调度/催办的依赖能力与各自授权。无真实模型语义评测、真实钉钉外发或企业联调PASS。
-执行：`pnpm test:prepare`（独立53331，不加--fresh），`pnpm typecheck`、`pnpm lint`、`pnpm build`、`pnpm test:coverage`、`pnpm test:e2e`。定向测试见tests/integration/personas.test.ts、persona-runtime.test.ts、persona-group.test.ts、persona-native.test.ts及tests/e2e/personas.spec.ts。原生例子：`/persona personal view`、`/persona personal set {"tone":"DIRECT"}`、`/persona group set {"role":"PMO_COORDINATOR"}`；JSON null清除覆盖。个人只在单聊，本群只在对应群，global仍需当前企业管理授权。
+执行：`pnpm test:prepare`（独立64711，不加--fresh），`pnpm typecheck`、`pnpm lint`、`pnpm build`、`pnpm test:coverage`、`pnpm test:e2e`。定向测试见tests/integration/personas.test.ts、persona-runtime.test.ts、persona-group.test.ts、persona-native.test.ts及tests/e2e/personas.spec.ts。原生例子：`/persona personal view`、`/persona personal set {"tone":"DIRECT"}`、`/persona group set {"role":"PMO_COORDINATOR"}`；JSON null清除覆盖。个人只在单聊，本群只在对应群，global仍需当前企业管理授权。
 
 本机完整后端覆盖检查采用`node scripts/run-tests.mjs vitest run --coverage --maxWorkers=2`，与Chrome全套串行；保留原断言、全部超时与覆盖门槛。后端452项冻结检查点至最终UI修复的逐文件差异见reports/p07-persona-backend-to-final-delta.json；不得将检查点说成最终源码重新执行。
 
@@ -729,7 +729,7 @@ A的原始纯scope-only一步保存体验仍未完成，安全确认候选不是
 
 USER 人设隐私删除为独立操作：H5 DELETE /api/v1/me/persona，或经当前 DM 验证的“擦除我的人设及历史”。清除本人历史设置及请求正文、原生来源/范围提案和实际关联运行副本；保留 GLOBAL/GROUP、其他用户、独立记忆及无关运行。写入空的单调版本标记，阻止旧请求重放；再次明确保存可产生新版本，旧删除请求重试不擦除新内容。
 
-迁移050–058仅在隔离合成 PostgreSQL 127.0.0.1:53331/open_aider_test 应用并保留原文。053首次执行失败的空对象和别名问题分别由054/055修复；失败事务回滚、SDK无成功ACK。恢复测试保留删除账本，真实恢复选定旧内容/任务/租约；最初使用 pg Date 的试验损失微秒，旧租约失配导致的通过不作为屏障证据。修正为 PostgreSQL JSON 保留精度后复现迟到journal写回，057增加运行获取及每次guarded写的账本否决，058加强保留依赖和恢复状态修复。失败、修复和重跑记录保留于 reports/checks/history/，以 reports/p07-memory-candidate.json 的检查点和范围为准。
+迁移050–058仅在隔离合成 PostgreSQL 127.0.0.1:64711/anthys_test 应用并保留原文。053首次执行失败的空对象和别名问题分别由054/055修复；失败事务回滚、SDK无成功ACK。恢复测试保留删除账本，真实恢复选定旧内容/任务/租约；最初使用 pg Date 的试验损失微秒，旧租约失配导致的通过不作为屏障证据。修正为 PostgreSQL JSON 保留精度后复现迟到journal写回，057增加运行获取及每次guarded写的账本否决，058加强保留依赖和恢复状态修复。失败、修复和重跑记录保留于 reports/checks/history/，以 reports/p07-memory-candidate.json 的检查点和范围为准。
 
 独立 start:maintenance 仅需要内部数据库/key及明确 WORKER_SCOPE_FILE，处理活跃主体的有界过期及保留账本下的修复，不调用模型/钉钉/DWS。当前不能认证已离职主体清理、删除账本本身回滚的整库备份恢复、独立删除日志重放、实际备份保留期及180天审计元数据清理。已外发字节不能撤回；逻辑擦除不等于 PostgreSQL/WAL 物理抹零。
 
@@ -744,7 +744,7 @@ P07本地完整后端检查点：reports/checks/p07-memory-backend-full.json 记
 
 ## 2026-10-16 P02/P03/P07 后续修正与证据检查点（阶段仍未完成）
 
-本次迁移059补齐实际来源选择回复的原生入站副本与SOURCE_REPLY outbox清理；迁移060使仅返回布尔值、严格绑定tenant/owner的删除否决在主体离职后仍有效，私人表RLS仍拒绝离职主体读取。Gateway在工具返回落库前获取共享删除屏障并检查该否决：恢复旧EXECUTING动作也不能重新写入已删除私人正文；普通租约失效/离职且未发生删除的UNKNOWN结果仍保守记录。只在127.0.0.1:53331隔离合成数据库应用迁移，没有执行开发库或企业数据清理。
+本次迁移059补齐实际来源选择回复的原生入站副本与SOURCE_REPLY outbox清理；迁移060使仅返回布尔值、严格绑定tenant/owner的删除否决在主体离职后仍有效，私人表RLS仍拒绝离职主体读取。Gateway在工具返回落库前获取共享删除屏障并检查该否决：恢复旧EXECUTING动作也不能重新写入已删除私人正文；普通租约失效/离职且未发生删除的UNKNOWN结果仍保守记录。只在127.0.0.1:64711隔离合成数据库应用迁移，没有执行开发库或企业数据清理。
 
 原生来源选择、checkpoint、工具动作、回复、outbox与投递等实际数据流接受逐行旧记录恢复测试，使用明确标记的故障注入，并保留同字面值的无关动作/企业源/其他主体。该子矩阵通过不等于完整删除图通过：普通run_user_messages与narrative review逐存储恢复、真实checkpoint时的父run.context_ref、已开始物理发送的边界、离职主体维护、独立整库备份删除日志重放及180天元数据清理仍需实现和验证。
 
@@ -763,7 +763,7 @@ P07新增4项真实隔离PostgreSQL验证：PRIVATE Preference与USER人设各�
 
 P02/P04新增可选DINGTALK_REPLY_ONLY=true配置（严格true/false，默认false）：通知器使用同一Sender模式，跳过CardCoordinator；sendProactive在令牌兑换前返回FAILED/PROACTIVE_REPLY_ONLY_MODE，直接token调用也拒绝。原生事件有效sessionWebhook仍按既有身份/受众/来源/URL/到期/禁止跳转检查回复；缺失/过期私聊地址经既有投递路径得到明确FAILED，0令牌/0HTTP请求，不自动重试。已发请求丢失响应保持UNKNOWN，重复处理不再发。该模式限制本通知器的出站路径，不是员工、入站、模型、其他业务能力或费用授权。
 
-本地37项定向检查（Sender契约21、投递11、配置5）及typecheck/lint通过；所有provider fetch为显式注入替身、数据库仅127.0.0.1:53331新合成记录，没有真实令牌/消息/模型调用。默认false的原主动投递回执契约仍通过。精确检查点和后续元数据差异见reports/reply-only-candidate.json。没有重新执行先前531全后端或50 Chrome，不将其声称为新源码全量结果。当前模式未写入真实.env、未启动应用、未配置员工/租户/预算/凭据/持久权限，也未部署。
+本地37项定向检查（Sender契约21、投递11、配置5）及typecheck/lint通过；所有provider fetch为显式注入替身、数据库仅127.0.0.1:64711新合成记录，没有真实令牌/消息/模型调用。默认false的原主动投递回执契约仍通过。精确检查点和后续元数据差异见reports/reply-only-candidate.json。没有重新执行先前531全后端或50 Chrome，不将其声称为新源码全量结果。当前模式未写入真实.env、未启动应用、未配置员工/租户/预算/凭据/持久权限，也未部署。
 
 P00–P14原目标保留。P02/P03/P07仍IN_PROGRESS，ENTERPRISE_DWS仍FAIL，原130项验收状态不变。真实测试员工/租户映射、企业已批准预算、平台授权与真实交互验收尚未具备证据；旧局部探测或本次无网测试不能代替。
 
@@ -774,7 +774,7 @@ P00–P14原目标保留。P02/P03/P07仍IN_PROGRESS，ENTERPRISE_DWS仍FAIL，�
 
 DeliveryGateway现在在迟到回执落库前获取共享owner删除屏障，绑定本次实际读取正文时的source_run_id，调用已有仅返回布尔且tenant/owner受限的060删除否决。已知删除时清除恢复的正文，SENDING保持保守UNKNOWN，不把接受回执当作已核验送达，不自动重发；不含正文的提供方ID可保留供后续核对。普通离职/租约损失且没有删除仍按原规则记录已派发结果。没有在网络调用期间持有删除锁，已发出的外部字节无法撤回。
 
-53项定向检查通过（在途及既有图17、普通澄清4、投递11、Sender契约21）并通过typecheck/lint。它们使用真实127.0.0.1:53331新合成记录、原生SDK/SSE数据流及注入fetch，不构成真实钉钉/公司MCP/模型联调。无新数据库结构变化，复用已应用且不可改写的050–060迁移；本次修正只改变迟到投递记账路径。完整回归、产物与失败记录的准确源码绑定见reports/p07-erasure-send-candidate.json，不将此前531或50页面检查点当作当前同源重跑。
+53项定向检查通过（在途及既有图17、普通澄清4、投递11、Sender契约21）并通过typecheck/lint。它们使用真实127.0.0.1:64711新合成记录、原生SDK/SSE数据流及注入fetch，不构成真实钉钉/公司MCP/模型联调。无新数据库结构变化，复用已应用且不可改写的050–060迁移；本次修正只改变迟到投递记账路径。完整回归、产物与失败记录的准确源码绑定见reports/p07-erasure-send-candidate.json，不将此前531或50页面检查点当作当前同源重跑。
 
 完整R10/P07仍未验收：独立整库删除日志重放/备份保留、离职主体维护、180天元数据清理、其他记忆类型/群合同、企业关键覆盖与原P00–P14全部剩余需求。原130项验收与ENTERPRISE_DWS门槛保持不变；无新增真实模型请求、消息、配置启用、授权或部署。
 
@@ -785,7 +785,7 @@ DeliveryGateway现在在迟到回执落库前获取共享owner删除屏障，绑
 
 后台沿原有依赖ID清除正文，不以文本匹配删除；保留后续有效人设版本、未到期条目、其他主体/租户、共享企业来源、无关任务和费用/UNKNOWN账本。到期产生内容已移除的内部随机请求键，避免用户选择旧expiry键阻止政策清理；范围仍有界且两worker串行，不因清理重新执行模型、钉钉或MCP。
 
-复现修前7个真实业务断言失败、3个活跃对照通过；修后定向回归通过，另验证原生运行实际正文恢复、表/函数权限、批次上限、后续版本保留、真实SIGKILL提交前后原子性及独立维护进程。均仅127.0.0.1:53331合成数据、注入SSE/发送器与本地测试MCP，不是企业LIVE。完整最终源码、命令、失败历史和验证范围以reports/p07-inactive-maintenance-candidate.json为准。
+复现修前7个真实业务断言失败、3个活跃对照通过；修后定向回归通过，另验证原生运行实际正文恢复、表/函数权限、批次上限、后续版本保留、真实SIGKILL提交前后原子性及独立维护进程。均仅127.0.0.1:64711合成数据、注入SSE/发送器与本地测试MCP，不是企业LIVE。完整最终源码、命令、失败历史和验证范围以reports/p07-inactive-maintenance-candidate.json为准。
 
 原050–064迁移保持原样。独立整库删除日志重放/备份保留、180天元数据处理、其他记忆种类/群合同、完整工作指导、企业关键覆盖及P00–P14剩余要求继续保留。P07与ENTERPRISE_DWS未完成；没有启用真实试验、企业清理、付费请求、消息或部署。
 
@@ -804,7 +804,7 @@ DeliveryGateway现在在迟到回执落库前获取共享owner删除屏障，绑
 
 ### P04 权限中心组件进度（2026-10-16）
 
-继续按10.4执行，不缩减P00–P14。一次性单聊控制已交付局部代码/反例回归，真实试验未开启。本轮补齐P04一段闭环：审核版本清单→本人当前元信息→依赖隔离的本地诊断→确认撤销→旧会话/租约拒绝→审计。新增066只应用专用53331合成库，001–065未修改。安装器的 --check 不加载.env/连接数据库；实际安装需要明确迁移管理员且不授予业务/平台权限。执行命令见 config/permission-center-contract.md，最终源码与失败历史见 reports/p04-permissions-candidate.json。
+继续按10.4执行，不缩减P00–P14。一次性单聊控制已交付局部代码/反例回归，真实试验未开启。本轮补齐P04一段闭环：审核版本清单→本人当前元信息→依赖隔离的本地诊断→确认撤销→旧会话/租约拒绝→审计。新增066只应用专用64711合成库，001–065未修改。安装器的 --check 不加载.env/连接数据库；实际安装需要明确迁移管理员且不授予业务/平台权限。执行命令见 config/permission-center-contract.md，最终源码与失败历史见 reports/p04-permissions-candidate.json。
 
 P04仍IN_PROGRESS：完整CapabilityDescriptor及output schema、角色分配/委托全生命周期、认证上游只读探测/核对、NOT_APPLIED证明和显式批准重试、10000个实际Gateway授权组合均未完成。公司chat的主体/资源只读契约和生产DWS入口继续BLOCKED_EXTERNAL。缓存与本地CONNECTED均不得提升任何LIVE验收状态。
 
@@ -828,13 +828,13 @@ GitHub main 31ca 的 CI run38885031070 存在 38 个失败。Linux arm64 合成�
 旧文件001–067不修改，既有SELECT/角色密码/RLS不改变，无法收紧的其他角色授权
 使当前迁移事务失败而不是自动扩大撤权。范围、实际执行命令、失败历史和候选绑定
 见 config/database-readiness-contract.md 与 reports/ledger-authority-candidate.json。
-只应用专用合成53331；目标53330未升级、未开启单聊或外部能力。P00–P14目标不缩减，
+只应用专用合成64711；目标64710未升级、未开启单聊或外部能力。P00–P14目标不缩减，
 P04完整管理/核对、其余软件与ENTERPRISE_DWS门槛继续保留。
 
 
 ### 2026-10-18 本人单聊离线联调入口
 
-在锁定 Node24.21.0/pnpm10.34.7、已准备的独立合成测试库中，pnpm test:self-dm 运行桌面和手机 T001。该入口使用受防护的本地52339/53331、真实 PostgreSQL/pg-boss、固定 SDK 回调、原生 GLM SSE 替身及回复发送替身；不会建立真实 SDK 连接、调用收费模型或向钉钉外发。新场景同时登记在现有完整 E2E 服务中，没有通过排除测试取得通过。CI 显式安装固定 Playwright 所需 Chromium 并执行本入口，随后继续原完整需求门禁。
+在锁定 Node24.21.0/pnpm10.34.7、已准备的独立合成测试库中，pnpm test:self-dm 运行桌面和手机 T001。该入口使用受防护的本地64702/64711、真实 PostgreSQL/pg-boss、固定 SDK 回调、原生 GLM SSE 替身及回复发送替身；不会建立真实 SDK 连接、调用收费模型或向钉钉外发。新场景同时登记在现有完整 E2E 服务中，没有通过排除测试取得通过。CI 显式安装固定 Playwright 所需 Chromium 并执行本入口，随后继续原完整需求门禁。
 
 实际本人试验仍要求新的明确批准、准确候选绑定、新预算和独立试验输入。旧窗口和 START 不恢复，正式 profile 不替代单次试验限制；不要从回调值生成身份授权。具体数据范围、费用、期限、停止与复核方式以 reports/self-dm-closure-20261018/CHECKLIST.md 为准。企业业务数据库连接与查询仍属二期；项目自身 PostgreSQL 是一期设施。
 
@@ -872,7 +872,7 @@ P04完整管理/核对、其余软件与ENTERPRISE_DWS门槛继续保留。
 
 本切片只解决“ensurePolicy固定当前hash、069正式授权绑定原trial hash、prepareModel仍取原trial hash”导致新审阅日常预算无法准入这一数据流。配置新增budget-transition指纹合同，脚本scripts/budget-transition.ts提供plan/authorize，084以不可变旧策略快照+CAS当前投影+精确新正式授权原子提交；运行时FORMAL选择可信状态返回的新预算摘要，不改旧试验或结算算法。原有身份/权限、期限、nonce/版本、撤销、预算和输出保护保留。
 
-先仅支持同容量/同费率窗口转换，不把通用提额、计费修复、自动续期或启用服务拉入此批。相关测试在原lifecycle/model-budget/one-shot及CLI范围内增量验证，迁移仅合成53331；未操作真实schema73。与辅助read-back控制台入口分工独立，主统一审阅合并；真实预算/profile/权限/模型/钉钉/部署仍需单独具体批准。
+先仅支持同容量/同费率窗口转换，不把通用提额、计费修复、自动续期或启用服务拉入此批。相关测试在原lifecycle/model-budget/one-shot及CLI范围内增量验证，迁移仅合成64711；未操作真实schema73。与辅助read-back控制台入口分工独立，主统一审阅合并；真实预算/profile/权限/模型/钉钉/部署仍需单独具体批准。
 
 ### 2026-10-18 群合同治理的开发边界
 
@@ -884,7 +884,7 @@ P04完整管理/核对、其余软件与ENTERPRISE_DWS门槛继续保留。
 
 ### 2026-10-18 P05 日志链路与 P10 合同停止入口的接线边界
 
-新日志代理合同及摘要见 config/company-logs-contract.json，源码 log-contracts/log-client/logs/log-configuration/log-result-contract/log-citation。它是需独立认证的 open_aider scoped-proxy 合同，不是当前企业 chat 的已发现能力。默认没有日志连接；0600 显式配置、准确正式能力绑定、迁移角色审核安装的本人范围和资源 grant、上游当前 ACL/不可变查询证明均满足后才可读取。禁止用回调正文、API key 或应用角色自授数据权限。
+新日志代理合同及摘要见 config/company-logs-contract.json，源码 log-contracts/log-client/logs/log-configuration/log-result-contract/log-citation。它是需独立认证的 anthys scoped-proxy 合同，不是当前企业 chat 的已发现能力。默认没有日志连接；0600 显式配置、准确正式能力绑定、迁移角色审核安装的本人范围和资源 grant、上游当前 ACL/不可变查询证明均满足后才可读取。禁止用回调正文、API key 或应用角色自授数据权限。
 
 本批通过实际 SDK 的 InMemory 及 Streamable HTTP 替身运行查询，原生 GLM 流替身读取已审核日志、保留 queryId/窗口/采样截断、拒绝注入扩权，生成一次安全回复。三个进程共同初始化并分别关闭代码/日志连接；原 code contractHash 不变。T075/T077 建立真实软件场景对应，R19 保持 IN_PROGRESS；T076 部署版本未验证、真实 T082、trace 增强及更多认证/传输/重新审核生命周期仍未验收。
 

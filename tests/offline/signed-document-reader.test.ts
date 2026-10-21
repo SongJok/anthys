@@ -54,7 +54,7 @@ async function assertCli(f:Awaited<ReturnType<typeof fixture>>){
  assert.deepEqual(await readdir(f.cli.workspace),[]);
 }
 test('document offline guard rejects PG/TCP/HTTP/DNS/TLS/foreign sockets and arbitrary processes',()=>{
- for(const call of [()=>net.connect(53331,'127.0.0.1'),()=>http.get('http://localhost:53331'),()=>dns.lookup('example.invalid',()=>{}),()=>tls.connect(443),()=>fetch('https://example.invalid'),()=>dgram.createSocket('udp4'),()=>net.connect('/var/run/docker.sock'),()=>Reflect.apply(pg.Client.prototype.connect,null,[]),()=>childProcess.spawn('not-executed')])assert.throws(call,/OFFLINE_IO_DENIED/);
+ for(const call of [()=>net.connect(64711,'127.0.0.1'),()=>http.get('http://localhost:64711'),()=>dns.lookup('example.invalid',()=>{}),()=>tls.connect(443),()=>fetch('https://example.invalid'),()=>dgram.createSocket('udp4'),()=>net.connect('/var/run/docker.sock'),()=>Reflect.apply(pg.Client.prototype.connect,null,[]),()=>childProcess.spawn('not-executed')])assert.throws(call,/OFFLINE_IO_DENIED/);
  assert.equal(denied.length,9);denied.length=0;
 });
 test('actual runner/CLI FULL returns one reviewed document projection with redacted body and legitimate synthetic credential rotation',async()=>{

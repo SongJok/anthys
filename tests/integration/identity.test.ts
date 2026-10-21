@@ -44,7 +44,7 @@ describe('P01 real PostgreSQL identity and owner isolation',()=>{
    const s=await sessions.create(alice),headers={cookie:`oa_session=${s.cookie}`};
    expect((await app.inject({url:'/api/v1/me',headers})).json().data.roles).toEqual(['PAYMENTS_ANALYST']);
    expect((await app.inject({url:'/api/v1/auth/logout',method:'POST',headers})).statusCode).toBe(403);
-   expect((await app.inject({url:'/api/v1/auth/logout',method:'POST',headers:{...headers,origin:'http://localhost:52330','x-csrf-token':s.csrf}})).statusCode).toBe(200);
+   expect((await app.inject({url:'/api/v1/auth/logout',method:'POST',headers:{...headers,origin:'http://localhost:64700','x-csrf-token':s.csrf}})).statusCode).toBe(200);
    expect(await sessions.authenticate(s.cookie)).toBeNull();
   } finally {await app.close();}
  });

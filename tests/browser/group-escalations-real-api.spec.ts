@@ -11,18 +11,18 @@ type ActualBody={data:{kind:string;code?:string;receipt?:{caseId:string;caseVers
 // 30s per-test limit, zero retries and every authority observation.
 test.describe.serial('selected real case uses actual API and PostgreSQL for administrator escalation',()=>{
  let f:Fixture,item:{id:string;version:number};
- async function login(page:Page,cookie:string,title:string){const area=page.getByRole('region',{name:'群事务登记',exact:true});await page.context().addCookies([{name:'oa_session',value:cookie,url:'http://localhost:52339'}]);await page.goto('/groups');await expect(page.getByText('工作台已就绪',{exact:true})).toBeVisible();await area.getByLabel('管理员提供的群标识',{exact:true}).fill(f.group);await area.getByRole('button',{name:'读取今日登记事项',exact:true}).click();await expect(area.getByRole('article',{name:'群事项 '+title,exact:true})).toBeVisible();}
+ async function login(page:Page,cookie:string,title:string){const area=page.getByRole('region',{name:'群事务登记',exact:true});await page.context().addCookies([{name:'oa_session',value:cookie,url:'http://localhost:64702'}]);await page.goto('/groups');await expect(page.getByText('工作台已就绪',{exact:true})).toBeVisible();await area.getByLabel('管理员提供的群标识',{exact:true}).fill(f.group);await area.getByRole('button',{name:'读取今日登记事项',exact:true}).click();await expect(area.getByRole('article',{name:'群事项 '+title,exact:true})).toBeVisible();}
  test('owner is denied for the actual persisted open case',async({page,request},info)=>{
   f=JSON.parse(await readFile('.data/test-environment/browser-group-cases.json','utf8'))[info.project.name] as Fixture;
   const base='/api/v1/groups/'+encodeURIComponent(f.group),title='SYNTHETIC single case escalation '+info.project.name;
-  const created=await request.post(base+'/cases',{headers:{cookie:'oa_session='+f.ownerApiCookie,origin:'http://localhost:52339','x-csrf-token':f.ownerApiCsrf,'idempotency-key':randomUUID()},data:{contractVersion:1,details:{title,resourceRef:'release:'+randomUUID(),priority:'HIGH',dueAt:new Date(Date.now()-3600000).toISOString()},source:{kind:'CARD',shareWithGroup:true}}});expect(created.status()).toBe(201);item=(await created.json()).data.case;
-  const opened=await request.patch(base+'/cases/'+item.id,{headers:{cookie:'oa_session='+f.adminApiCookie,origin:'http://localhost:52339','x-csrf-token':f.adminApiCsrf,'idempotency-key':randomUUID()},data:{contractVersion:1,expectedVersion:item.version,command:{operation:'OPEN'}}});expect(opened.status()).toBe(200);
+  const created=await request.post(base+'/cases',{headers:{cookie:'oa_session='+f.ownerApiCookie,origin:'http://localhost:64702','x-csrf-token':f.ownerApiCsrf,'idempotency-key':randomUUID()},data:{contractVersion:1,details:{title,resourceRef:'release:'+randomUUID(),priority:'HIGH',dueAt:new Date(Date.now()-3600000).toISOString()},source:{kind:'CARD',shareWithGroup:true}}});expect(created.status()).toBe(201);item=(await created.json()).data.case;
+  const opened=await request.patch(base+'/cases/'+item.id,{headers:{cookie:'oa_session='+f.adminApiCookie,origin:'http://localhost:64702','x-csrf-token':f.adminApiCsrf,'idempotency-key':randomUUID()},data:{contractVersion:1,expectedVersion:item.version,command:{operation:'OPEN'}}});expect(opened.status()).toBe(200);
   const area=page.getByRole('region',{name:'群事务登记',exact:true});
   await login(page,f.ownerCookie,title);expect(await area.getByRole('button',{name:'申请此事项同群升级',exact:true}).count()).toBe(0);
  });
  test('administrator reviews, confirms, reads without repeating, then cancels once',async({page,request},info)=>{
   const title='SYNTHETIC single case escalation '+info.project.name,sent:string[]=[];
-  const witness=await installEscalationFetchWitness(page,{origin:'http://localhost:52339',group:f.group,timeoutMs:escalationUiRequestLifetimeMs,maxBodyBytes:64*1024});
+  const witness=await installEscalationFetchWitness(page,{origin:'http://localhost:64702',group:f.group,timeoutMs:escalationUiRequestLifetimeMs,maxBodyBytes:64*1024});
   try{
   page.on('request',req=>{if(req.method()==='POST'&&req.url().includes('/case-escalations/'))sent.push(req.url());});
   await login(page,f.adminCookie,title);const card=page.getByRole('region',{name:'群事务登记',exact:true}).getByRole('article',{name:'群事项 '+title,exact:true});
@@ -41,7 +41,7 @@ test.describe.serial('selected real case uses actual API and PostgreSQL for admi
   }
   // Derive the proposal reference from the actual confirmation response's request.
   const start=Date.now(),afterSequence=await witness.sequence();
-  const [response]=await Promise.all([page.waitForResponse(r=>{const url=new URL(r.url()),prefix='/api/v1/groups/'+encodeURIComponent(f.group)+'/case-escalations/';return r.request().method()==='POST'&&url.origin==='http://localhost:52339'&&url.pathname.startsWith(prefix)&&/^[0-9a-f-]{36}\/confirm$/.test(url.pathname.slice(prefix.length));},{timeout:escalationUiRequestLifetimeMs}),panel.getByRole('button',{name:'确认申请同群升级',exact:true}).click()]);
+  const [response]=await Promise.all([page.waitForResponse(r=>{const url=new URL(r.url()),prefix='/api/v1/groups/'+encodeURIComponent(f.group)+'/case-escalations/';return r.request().method()==='POST'&&url.origin==='http://localhost:64702'&&url.pathname.startsWith(prefix)&&/^[0-9a-f-]{36}\/confirm$/.test(url.pathname.slice(prefix.length));},{timeout:escalationUiRequestLifetimeMs}),panel.getByRole('button',{name:'确认申请同群升级',exact:true}).click()]);
   const confirmationPath=new URL(response.request().url()).pathname,observed=await witness.read({afterSequence,method:'POST',path:confirmationPath,timeoutMs:remaining(start)}),confirmed=observed.body as ActualBody;
   expect(observed.url).toBe(response.url());expect(observed.status).toBe(response.status());
   await info.attach('actual-escalation-confirmation',{contentType:'application/json',body:Buffer.from(JSON.stringify({elapsedMs:Date.now()-start,status:response.status(),kind:confirmed.data?.kind??null,code:confirmed.data?.code??null}))});

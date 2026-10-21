@@ -18,7 +18,7 @@ class BackupError extends Error{constructor(readonly code:string){super(code);}}
 const fail=(code:string):never=>{throw new BackupError(code);};
 const hash=(v:Buffer|string)=>createHash('sha256').update(v).digest('hex');
 export function postgresBackupEnvironment(p:PostgresBackupConnection,timeoutMs:number){
- return {LC_ALL:'C',LANG:'C',PGHOST:p.host,PGPORT:String(p.port),PGDATABASE:p.database,PGUSER:p.user,PGPASSWORD:p.password as string,PGSSLMODE:'disable',PGCONNECT_TIMEOUT:String(Math.max(1,Math.ceil(Math.min(timeoutMs,3000)/1000))),PGCLIENTENCODING:'UTF8',PGOPTIONS:'-c row_security=off -c statement_timeout='+Math.floor(timeoutMs)+' -c lock_timeout=3000',PGAPPNAME:'open_aider_bounded_backup_child',PGSERVICEFILE:'/dev/null',PGPASSFILE:'/dev/null'};
+ return {LC_ALL:'C',LANG:'C',PGHOST:p.host,PGPORT:String(p.port),PGDATABASE:p.database,PGUSER:p.user,PGPASSWORD:p.password as string,PGSSLMODE:'disable',PGCONNECT_TIMEOUT:String(Math.max(1,Math.ceil(Math.min(timeoutMs,3000)/1000))),PGCLIENTENCODING:'UTF8',PGOPTIONS:'-c row_security=off -c statement_timeout='+Math.floor(timeoutMs)+' -c lock_timeout=3000',PGAPPNAME:'anthys_bounded_backup_child',PGSERVICEFILE:'/dev/null',PGPASSFILE:'/dev/null'};
 }
 export type CreatePostgresFileBackupInput=PostgresBackupSnapshotOptions&{backupSetId:string;profileHash:string;keyId:string;key:Buffer;pgDump:BackupExecutablePin;pgRestore:BackupExecutablePin;postgresArchiveRoot:string;maxPostgresArchiveBytes:number;inventoryLimits:InventoryLimits;fileStore:Omit<FileStoreSnapshotOptions,'backupId'|'keyId'|'key'|'schemaFingerprint'|'signal'>;expectedFileStoreRootHash:string};
 /** Internal coordinator shared with owned-nonce acceptance. Production callers

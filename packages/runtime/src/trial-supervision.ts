@@ -5,8 +5,8 @@ export const trialServiceSchema=z.enum(['ingress','worker','notifier']);
 export type TrialService=z.infer<typeof trialServiceSchema>;
 export const trialFixtureSchema=z.enum(['idle','busy','grandchild','native-worker']);
 export type TrialFixture=z.infer<typeof trialFixtureSchema>;
-export const trialOwnedMarker=Symbol.for('open_aider.ownedTrialService');
-export const trialEnvironmentMarker=Symbol.for('open_aider.reviewedRuntimeEnvironment');
+export const trialOwnedMarker=Symbol.for('anthys.ownedTrialService');
+export const trialEnvironmentMarker=Symbol.for('anthys.reviewedRuntimeEnvironment');
 const markerSchema=z.object({profileHash:z.string().regex(/^[a-f0-9]{64}$/),deadlineAt:z.number().int().positive(),service:trialServiceSchema,guardianPid:z.number().int().positive(),pid:z.number().int().positive()}).strict();
 export function assertOwnedTrialService(profile:TrialProfile,service:TrialService):void{
  const parsed=markerSchema.safeParse(Reflect.get(globalThis,trialOwnedMarker));
@@ -41,7 +41,7 @@ export function trialWallNow(){const shift=isolatedTrialFixtureAllowed()?Number(
 export function trialRemainingMs(bound:TrialDeadline,wall=trialWallNow(),mono=process.hrtime.bigint()):number{
  return Math.max(0,Math.min(bound.deadlineAt-wall,Number((bound.monoDeadlineNs-mono)/1000000n)));
 }
-export function isolatedTrialFixtureAllowed(){return process.env['OA_TEST_ISOLATED']==='true'&&process.env['APP_ENV']==='test'&&Reflect.get(globalThis,Symbol.for('open_aider.testNetworkGuard'))===true;}
+export function isolatedTrialFixtureAllowed(){return process.env['OA_TEST_ISOLATED']==='true'&&process.env['APP_ENV']==='test'&&Reflect.get(globalThis,Symbol.for('anthys.testNetworkGuard'))===true;}
 export function trialProcessEnvironment(env:NodeJS.ProcessEnv):NodeJS.ProcessEnv{
  const names=['PATH','HOME','TMPDIR','LANG','LC_ALL','APP_ENV','APP_ORIGIN','PORT','HOST','RELEASE_PROFILE','DATABASE_URL','RUNTIME_DATABASE_URL','QUEUE_DATABASE_URL','APP_MASTER_KEY','SESSION_SECRET','GLM_API_KEY','GLM_BASE_URL','GLM_MODEL','DINGTALK_CLIENT_ID','DINGTALK_CLIENT_SECRET','DINGTALK_APP_KEY','DINGTALK_APP_SECRET','DINGTALK_CORP_ID','DINGTALK_ROBOT_CODE','AIDER_AI_DEFAULT_API_KEY','AIDER_AI_DEFAULT_BASE_URL','AIDER_AI_DEFAULT_MODEL','BUDGET_POLICY_FILE','WORKER_SCOPE_FILE','TENANT_BINDINGS_FILE'];
  const selected:NodeJS.ProcessEnv={};for(const name of names)for(const key of [name,name+'_FILE'])if(env[key]!==undefined)selected[key]=env[key];

@@ -4,7 +4,7 @@ import {loadEnvFile,secret} from '../packages/config/src/index.js';
 export async function migrate(url:string,rolePasswordDirectory='.secrets'):Promise<void> {
  const client=new pg.Client({connectionString:url});await client.connect();
  try {
-  await client.query("SELECT pg_advisory_lock(hashtext('open_aider_migrations'))");
+  await client.query("SELECT pg_advisory_lock(hashtext('anthys_migrations'))");
   await client.query('CREATE TABLE IF NOT EXISTS schema_migrations(name text PRIMARY KEY, hash text NOT NULL, applied_at timestamptz NOT NULL DEFAULT now())');
   const {hash}=await import('../packages/storage/src/crypto.js');
   for(const file of (await readdir('db/migrations')).filter(f=>f.endsWith('.sql')).sort()) {
@@ -21,6 +21,6 @@ export async function migrate(url:string,rolePasswordDirectory='.secrets'):Promi
    await client.query(q.rows[0].sql);
   }
   await client.query('GRANT SELECT ON schema_migrations TO oa_app,oa_runtime');
- } finally {await client.query("SELECT pg_advisory_unlock(hashtext('open_aider_migrations'))");await client.end();}
+ } finally {await client.query("SELECT pg_advisory_unlock(hashtext('anthys_migrations'))");await client.end();}
 }
 if(import.meta.url===`file://${process.argv[1]}`) {loadEnvFile();const url=secret('MIGRATION_DATABASE_URL');if(!url) throw Error('MIGRATION_DATABASE_URL_REQUIRED');await migrate(url);}

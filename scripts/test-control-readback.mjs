@@ -4,7 +4,7 @@ import {join,resolve} from 'node:path';
 import {createRequire} from 'node:module';
 import {pathToFileURL} from 'node:url';
 import {spawn} from 'node:child_process';
-if(process.argv.length!==2||Reflect.get(globalThis,Symbol.for('open_aider.testNetworkGuard'))!==true)throw Error('READ_BACK_GUARDED_RUNNER_REQUIRED');
+if(process.argv.length!==2||Reflect.get(globalThis,Symbol.for('anthys.testNetworkGuard'))!==true)throw Error('READ_BACK_GUARDED_RUNNER_REQUIRED');
 const root=process.cwd(),work=await mkdtemp(join(tmpdir(),'oa-control-readback-')),guard=pathToFileURL(resolve('scripts/test-network-guard.mjs')).href;
 const env=Object.fromEntries(['PATH','HOME','TMPDIR','LANG','LC_ALL','CI','TERM','NO_COLOR'].filter(k=>process.env[k]!==undefined).map(k=>[k,process.env[k]]));
 const require=createRequire(import.meta.url),tsxRequire=createRequire(require.resolve('tsx'));

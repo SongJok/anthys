@@ -29,7 +29,7 @@ pnpm permissions:install TENANT_UUID /absolute/path/reviewed-manifest.json
 
 ## 实际验证与限制
 
-仅在 127.0.0.1:53331 的新增合成记录上操作；测试网络守卫移除企业凭据。原角色越权写入反例在修前 4 项失败，066 后被真实 PostgreSQL 拒绝。真实数据库测试包括缓存依赖变化、到期锁等待、20 次并发撤销、分页、跨用户/租户、CSRF、旧 Gateway 租约拒绝；Chrome 桌面/手机验证本人页面和撤销流程。命令、失败历史、源码指纹、完整脱敏输出及最终结果见 `reports/p04-permissions-candidate.json` 和 `reports/checks/p04-permissions-*.json`。
+仅在 127.0.0.1:64711 的新增合成记录上操作；测试网络守卫移除企业凭据。原角色越权写入反例在修前 4 项失败，066 后被真实 PostgreSQL 拒绝。真实数据库测试包括缓存依赖变化、到期锁等待、20 次并发撤销、分页、跨用户/租户、CSRF、旧 Gateway 租约拒绝；Chrome 桌面/手机验证本人页面和撤销流程。命令、失败历史、源码指纹、完整脱敏输出及最终结果见 `reports/p04-permissions-candidate.json` 和 `reports/checks/p04-permissions-*.json`。
 
 已注册能力的完整 CapabilityDescriptor 与输出 Schema 约束已经实现；诊断缓存的本人128份上限、共享持久限速和过期分批维护也已实现。它们不代表新增提供者已获审核或平台授权。仍缺上游认证只读探测与核对、NOT_APPLIED 证明及新批准后的明确重试、完整10000组合 Gateway 授权矩阵和角色/委托全生命周期。现有 `chat` 的公司主体/资源只读契约和真实企业验收继续标 `BLOCKED_EXTERNAL`。不得用局部测试替换 T036 或任意 LIVE 验收项。
 

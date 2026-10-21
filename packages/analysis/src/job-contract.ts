@@ -119,7 +119,7 @@ function bindings(payload:AnalysisJobPayload,expected:AnalysisJobSubject,imageDi
 function timeWindow(payload:AnalysisJobPayload,now:number){
   if(!instant.safeParse(now).success||payload.expiresAt<=payload.issuedAt||payload.expiresAt-payload.issuedAt>analysisJobMaxLifetimeMs||now<payload.issuedAt||now>=payload.expiresAt)throw new AnalysisJobError('ANALYSIS_JOB_EXPIRED');
 }
-const domain='open_aider.analysis.job.v1\0';
+const domain='anthys.analysis.job.v1\0';
 /** Trusted host signs only an already-authorized job. This operation performs no authorization or dispatch. */
 export function signAnalysisJob(rawJob:unknown,options:AnalysisJobSigningOptions):AnalysisSignedJob {
   configuration(options.keyId,options.imageDigest,options.privateKey,'private');

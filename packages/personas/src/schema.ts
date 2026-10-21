@@ -13,7 +13,7 @@ export type PersonaScope=z.infer<typeof scopeSchema>;
 export const policySchema=z.object({fields:personaFields,lockedFields:z.array(personaKeys).max(10).refine(v=>new Set(v).size===v.length)}).strict().refine(v=>v.lockedFields.every(key=>v.fields[key]!==undefined)&&Object.keys(v.fields).every(key=>v.lockedFields.includes(key as keyof PersonaFields)),'POLICY_FIELDS_MUST_MATCH_LOCKS');
 export const requestKey=z.string().min(8).max(128).regex(/^[A-Za-z0-9._:-]+$/);
 export const ifMatchSchema=z.string().regex(/^"(?:0|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})"$/);
-export const defaults:PersonaFields={name:'open_aider',role:'ENTERPRISE_ASSISTANT',tone:'NEUTRAL',length:'BALANCED',outputTemplate:'AUTO',prohibitedImpersonations:['不冒充真实领导或声称获得未经核实的授权']};
+export const defaults:PersonaFields={name:'anthys',role:'ENTERPRISE_ASSISTANT',tone:'NEUTRAL',length:'BALANCED',outputTemplate:'AUTO',prohibitedImpersonations:['不冒充真实领导或声称获得未经核实的授权']};
 export const personaTemplates:Record<NonNullable<PersonaFields['role']>,{label:string;fields:PersonaFields}>={
  ENTERPRISE_ASSISTANT:{label:'企业助理',fields:{role:'ENTERPRISE_ASSISTANT',rolePosition:'提供日常工作指导',outputTemplate:'AUTO'}},
  GROUP_SECRETARY:{label:'群事务秘书',fields:{role:'GROUP_SECRETARY',rolePosition:'整理本群已授权事项与明确分工',tone:'FORMAL',outputTemplate:'CHECKLIST'}},

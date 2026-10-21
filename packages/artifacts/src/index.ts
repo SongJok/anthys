@@ -282,7 +282,7 @@ function zipInspection(bytes: Buffer, limits: ArtifactLimits): Map<string, Buffe
 }
 async function xlsx(r: ArtifactRequest, limits: ArtifactLimits, signal: AbortSignal | undefined): Promise<Buffer> {
     const book = new ExcelJS.Workbook();
-    book.creator = 'open_aider';
+    book.creator = 'anthys';
     book.created = new Date('2000-01-01T00:00:00Z');
     book.modified = new Date('2000-01-01T00:00:00Z');
     const summary = book.addWorksheet('Document');
@@ -370,7 +370,7 @@ async function docx(r: ArtifactRequest, limits: ArtifactLimits, font: ReviewedDo
     if (pages > limits.maxPages)
         fail('ARTIFACT_PAGE_LIMIT');
     const paragraphs = source.map((s, i) => new Paragraph({ spacing: { before: 0, after: 0, line: lineHeight * 20, lineRule: 'exact' }, children: [...(i > 0 && i % perPage === 0 ? [new PageBreak()] : []), new TextRun({ text: s, font: { ascii: family, hAnsi: family, eastAsia: family, cs: family }, size: 20 })] }));
-    const bytes = await Packer.toBuffer(new Document({ creator: 'open_aider', title: r.title, description: 'Structured artifact', ...(fontBytes ? { fonts: [{ name: family, data: fontBytes }] } : {}), sections: [{ properties: { page: { size: { width: 11906, height: 16838 }, margin: { top: 1440, bottom: 1440, left: 1440, right: 1440 } } }, children: paragraphs }] }));
+    const bytes = await Packer.toBuffer(new Document({ creator: 'anthys', title: r.title, description: 'Structured artifact', ...(fontBytes ? { fonts: [{ name: family, data: fontBytes }] } : {}), sections: [{ properties: { page: { size: { width: 11906, height: 16838 }, margin: { top: 1440, bottom: 1440, left: 1440, right: 1440 } } }, children: paragraphs }] }));
     if (bytes.length > limits.maxOutputBytes)
         fail('ARTIFACT_OUTPUT_LIMIT');
     const zip = zipInspection(bytes, limits), xml = zip.get('word/document.xml')?.toString();
@@ -403,7 +403,7 @@ async function pdf(r: ArtifactRequest, limits: ArtifactLimits, signal: AbortSign
     if (fontBytes)
         verifyEmbedding(fontBytes, 'pdf');
     const lineHeight = fontBytes ? reviewedLineHeight(fontBytes, 10) : 14;
-    const document = new PDFDocument({ autoFirstPage: false, compress: false, bufferPages: true, size: 'A4', margin: 48, info: { Title: r.title, Author: 'open_aider', Creator: 'open_aider', CreationDate: new Date('2000-01-01T00:00:00Z'), ModDate: new Date('2000-01-01T00:00:00Z') } });
+    const document = new PDFDocument({ autoFirstPage: false, compress: false, bufferPages: true, size: 'A4', margin: 48, info: { Title: r.title, Author: 'anthys', Creator: 'anthys', CreationDate: new Date('2000-01-01T00:00:00Z'), ModDate: new Date('2000-01-01T00:00:00Z') } });
     const chunks: Buffer[] = [];
     let total = 0;
     let outputError: Error | undefined;

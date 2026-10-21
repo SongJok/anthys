@@ -24,7 +24,7 @@ export async function prepareBrowserApprovals(store:RuntimeStore,tenantId:string
  return async(app:FastifyInstance,sessions:Sessions)=>{
   const fixtures:Record<string,typeof pending[string]&{approvalId:string}>={};
   for(const [project,item] of Object.entries(pending)){
-   const session=await sessions.create({tenantId,actorId:ownerId}),requested=await app.inject({method:'POST',url:`/api/v1/actions/${item.actionId}/approvals`,headers:{cookie:`oa_session=${session.cookie}`,origin:'http://localhost:52339','x-csrf-token':session.csrf},payload:{approverId:reviewerId}});if(requested.statusCode!==200)throw Error('BROWSER_APPROVAL_REQUEST_FAILED');fixtures[project]={...item,approvalId:requested.json().data.id as string};
+   const session=await sessions.create({tenantId,actorId:ownerId}),requested=await app.inject({method:'POST',url:`/api/v1/actions/${item.actionId}/approvals`,headers:{cookie:`oa_session=${session.cookie}`,origin:'http://localhost:64702','x-csrf-token':session.csrf},payload:{approverId:reviewerId}});if(requested.statusCode!==200)throw Error('BROWSER_APPROVAL_REQUEST_FAILED');fixtures[project]={...item,approvalId:requested.json().data.id as string};
   }
   await writeFile('.data/test-environment/browser-approval-fixtures.json',JSON.stringify(fixtures),{mode:0o600});
  };

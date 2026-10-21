@@ -21,7 +21,7 @@ it.each(['EXACT','WRONG_BINDING','WRONG_VERSION','WRONG_ID','WRONG_SERVER'] as c
   const gateway={register:(c:{id:string})=>caps.push(c.id)} as unknown as Parameters<typeof configureCompanyLogs>[0];
   if(mode==='WRONG_SERVER')await expect(configureCompanyLogs(gateway,{COMPANY_LOGS_MCP_CONFIG_FILE:path},fetcher,approved)).rejects.toMatchObject({code:'COMPANY_LOG_CONNECTION_UNAVAILABLE'});
   else {connection=await configureCompanyLogs(gateway,{COMPANY_LOGS_MCP_CONFIG_FILE:path},fetcher,approved);expect(connection.enabled).toBe(mode==='EXACT');}
-  expect(caps).toEqual(mode==='EXACT'?['company.logs.query']:[]);expect(requests.length).toBe(mode==='EXACT'||mode==='WRONG_SERVER'?2:0);expect(companyContractHash).toBe('4b3803e13459f8a3800464c462a9b1bad13312122e0950cd327f464ff8cf5c8d');
+  expect(caps).toEqual(mode==='EXACT'?['company.logs.query']:[]);expect(requests.length).toBe(mode==='EXACT'||mode==='WRONG_SERVER'?2:0);expect(companyContractHash).toBe('54dcabdb09e9e5fc945ccb246dfc3b6366a02669a2d14b1c89572e97c7041361');
  }finally{await connection?.close();await rm(dir,{recursive:true,force:true});}
 });
 it('malformed private configuration and unsafe token permissions fail with a fixed redacted error',async()=>{

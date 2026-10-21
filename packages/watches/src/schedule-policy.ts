@@ -92,7 +92,7 @@ export function evaluateWatchSchedulePolicy(rawPolicy:unknown,rawState:unknown,r
  const checkedAt=state.lastCheckStartedAt===null?null:Date.parse(state.lastCheckStartedAt),notifiedAt=state.lastNotificationAt===null?null:Date.parse(state.lastNotificationAt);
  if((checkedAt!==null&&checkedAt>now)||(notifiedAt!==null&&notifiedAt>now)||state.checksStarted>policy.maxChecks||state.notificationsReserved>policy.maxNotifications)throw Error('WATCH_SCHEDULE_STATE_INVALID');
  const format=clock(policy.tz),wall=local(format,now),comparison=input.phase==='NOTIFY'?evaluateWatchPredicate(policy.predicate,input.observation):null;
- const summary={phase:input.phase,asOf:input.now,policyHash:digest('open_aider.watch.schedule-policy.v1',policy),stateHash:digest('open_aider.watch.schedule-state.v1',state),predicateHash:digest('open_aider.watch.predicate.v1',policy.predicate),sourceHash:comparison?.sourceHash??null,valueHash:comparison?.valueHash??null,localTime:wall,tz:policy.tz};
+ const summary={phase:input.phase,asOf:input.now,policyHash:digest('anthys.watch.schedule-policy.v1',policy),stateHash:digest('anthys.watch.schedule-state.v1',state),predicateHash:digest('anthys.watch.predicate.v1',policy.predicate),sourceHash:comparison?.sourceHash??null,valueHash:comparison?.valueHash??null,localTime:wall,tz:policy.tz};
  const result=(decision:WatchScheduleDecision['state'],reason:WatchScheduleReason,retry:number|null=null):WatchScheduleDecision=>Object.freeze({state:decision,reason,...summary,retryAt:retry!==null&&retry<expiry?new Date(retry).toISOString():null});
  if(state.lifecycle==='CANCELLED')return result('STOP','CANCELLED');
  if(now>=expiry)return result('STOP','EXPIRED');

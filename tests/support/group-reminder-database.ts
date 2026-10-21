@@ -4,7 +4,7 @@ import {readFile,readdir} from 'node:fs/promises';
 import pg from 'pg';
 import {Database} from '../../packages/storage/src/database.js';
 
-const sourceName='open_aider_test',migration95='095_group_reminder_authority.sql',migration96='096_group_reminder_execution.sql',migration97='097_task_result_artifacts.sql',migration98='098_company_agent_requests.sql',migration99='099_native_case_audiences.sql',migration100='100_formal_group_admission.sql',migration101='101_group_mention_contract_observer.sql',migration102='102_native_artifact_drafts.sql',migration103='103_group_case_escalations.sql',migration104='104_finite_private_pilots.sql';
+const sourceName='anthys_test',migration95='095_group_reminder_authority.sql',migration96='096_group_reminder_execution.sql',migration97='097_task_result_artifacts.sql',migration98='098_company_agent_requests.sql',migration99='099_native_case_audiences.sql',migration100='100_formal_group_admission.sql',migration101='101_group_mention_contract_observer.sql',migration102='102_native_artifact_drafts.sql',migration103='103_group_case_escalations.sql',migration104='104_finite_private_pilots.sql';
 const roles=[['MIGRATION_DATABASE_URL','oa_migrator'],['RUNTIME_DATABASE_URL','oa_runtime'],['DATABASE_URL','oa_app']] as const;
 const image='postgres:17-bookworm@sha256:3645570cccdfa447589da9f57dd740faa29b30938e861289a5574b6ca6b03826';
 const maxBytes=64*1024*1024;
@@ -18,13 +18,13 @@ const digest=(text:string)=>createHash('sha256').update(text).digest('hex');
 type Ledger={name:string;hash:string}[];
 
 function targets(){
- if(process.env['APP_ENV']!=='test'||process.env['OA_TEST_ISOLATED']!=='true'||Reflect.get(globalThis,Symbol.for('open_aider.testNetworkGuard'))!==true)fail('TEST_ISOLATION_REQUIRED');
+ if(process.env['APP_ENV']!=='test'||process.env['OA_TEST_ISOLATED']!=='true'||Reflect.get(globalThis,Symbol.for('anthys.testNetworkGuard'))!==true)fail('TEST_ISOLATION_REQUIRED');
  const urls=new Map<string,URL>();
  for(const [key,role] of roles){
   const text=process.env[key];if(!text||text.length>8192||process.env[key+'_FILE'])fail('TEST_DATABASE_TARGET_REJECTED');
   let url:URL;try{url=new URL(text);}catch{fail('TEST_DATABASE_TARGET_REJECTED');}
   let password:string;try{password=decodeURIComponent(url.password);}catch{fail('TEST_DATABASE_TARGET_REJECTED');}
-  if(url.protocol!=='postgresql:'||url.hostname!=='127.0.0.1'||url.port!=='53331'||url.pathname!=='/'+sourceName||url.username!==role||url.search||url.hash||text.includes('?')||text.includes('#')||password.length<32||/[\u0000-\u001f\u007f]/.test(password))fail('TEST_DATABASE_TARGET_REJECTED');
+  if(url.protocol!=='postgresql:'||url.hostname!=='127.0.0.1'||url.port!=='64711'||url.pathname!=='/'+sourceName||url.username!==role||url.search||url.hash||text.includes('?')||text.includes('#')||password.length<32||/[\u0000-\u001f\u007f]/.test(password))fail('TEST_DATABASE_TARGET_REJECTED');
   urls.set(key,url);
  }
  return urls;
@@ -44,13 +44,13 @@ function localDocker(){
  if(!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(context))fail('TEST_DOCKER_ENDPOINT_REJECTED');
  let endpoint:string;try{endpoint=unixEndpoint(JSON.parse(docker(['context','inspect',context,'--format','{{json .Endpoints.docker.Host}}']).toString('utf8')));}catch(e){throw safe(e,'TEST_DOCKER_ENDPOINT_REJECTED');}
  if(supplied&&supplied!==endpoint)fail('TEST_DOCKER_ENDPOINT_REJECTED');
- const prefix=['--host',endpoint],ids=docker([...prefix,'ps','--filter','label=com.docker.compose.project=open-aider-test','--filter','label=com.docker.compose.service=postgres','--filter','publish=53331','--format','{{.ID}}']).toString('utf8').trim().split(/\s+/).filter(Boolean);
+ const prefix=['--host',endpoint],ids=docker([...prefix,'ps','--filter','label=com.docker.compose.project=anthys-test','--filter','label=com.docker.compose.service=postgres','--filter','publish=64711','--format','{{.ID}}']).toString('utf8').trim().split(/\s+/).filter(Boolean);
  if(ids.length!==1||!/^[a-f0-9]{12,64}$/.test(ids[0]!))fail('TEST_DOCKER_CONTAINER_REJECTED');
  let info:Record<string,unknown>;try{const parsed:unknown=JSON.parse(docker([...prefix,'inspect',ids[0]!,'--format','{{json .}}']).toString('utf8'));if(!parsed||typeof parsed!=='object'||Array.isArray(parsed))fail('TEST_DOCKER_CONTAINER_REJECTED');info=parsed as Record<string,unknown>;}catch{fail('TEST_DOCKER_CONTAINER_REJECTED');}
  const config=info['Config'] as {Image?:unknown;Labels?:Record<string,string>}|undefined,state=info['State'] as {Running?:unknown}|undefined;
  const ports=(info['NetworkSettings'] as {Ports?:Record<string,unknown>}|undefined)?.Ports,bindings=ports?.['5432/tcp'];
- if(config?.Image!==image||config.Labels?.['com.docker.compose.project']!=='open-aider-test'||config.Labels?.['com.docker.compose.service']!=='postgres'||state?.Running!==true
-  ||!Array.isArray(bindings)||bindings.length!==1||bindings[0]?.HostIp!=='127.0.0.1'||bindings[0]?.HostPort!=='53331')fail('TEST_DOCKER_CONTAINER_REJECTED');
+ if(config?.Image!==image||config.Labels?.['com.docker.compose.project']!=='anthys-test'||config.Labels?.['com.docker.compose.service']!=='postgres'||state?.Running!==true
+  ||!Array.isArray(bindings)||bindings.length!==1||bindings[0]?.HostIp!=='127.0.0.1'||bindings[0]?.HostPort!=='64711')fail('TEST_DOCKER_CONTAINER_REJECTED');
  return (command:string[],input?:Buffer)=>docker([...prefix,'exec',...(input?['-i']:[]),ids[0]!,...command],input);
 }
 /** Inspect top-level commands, preserving quoted function bodies and faithful object ACLs. */
@@ -108,8 +108,8 @@ async function identity(c:pg.Client|pg.PoolClient,database:string,system?:string
  * or roles, and only restore bytes issued by this fixture. */
 export async function groupReminderDatabase(){
  const original=targets(),run=localDocker(),definitions=await files();
- const name='open_aider_test_group_reminder_'+randomUUID().replaceAll('-','');
- if(!/^open_aider_test_group_reminder_[a-f0-9]{32}$/.test(name)||Buffer.byteLength(name)>63)fail('TEST_DATABASE_NAME_REJECTED');
+ const name='anthys_test_group_reminder_'+randomUUID().replaceAll('-','');
+ if(!/^anthys_test_group_reminder_[a-f0-9]{32}$/.test(name)||Buffer.byteLength(name)>63)fail('TEST_DATABASE_NAME_REJECTED');
  const url=(key:string,database:string)=>{const value=new URL(original.get(key)!);value.pathname='/'+database;return value.href;};
  const options=(database:string)=>({connectionString:url('MIGRATION_DATABASE_URL',database),connectionTimeoutMillis:3000,query_timeout:12000});
  let created=false,creationAttempted=false,closed=false,closing=false,poolsClosed=false,sourceDisposed=false,sourceDisposing=false,cleanup:Promise<void>|null=null,installing:Promise<string>|null=null,sourceClose:Promise<void>|null=null;
@@ -138,7 +138,7 @@ export async function groupReminderDatabase(){
   await source.connect();system=await identity(source,sourceName);
   const observedSystem=run(['psql','--host=/var/run/postgresql','--port=5432','--username=oa_migrator','--dbname='+sourceName,'--no-password','--no-psqlrc','--tuples-only','--no-align','--command','SELECT system_identifier::text FROM pg_control_system()']).toString('utf8').trim();
   if(observedSystem!==system)fail('TEST_DOCKER_CLUSTER_MISMATCH');
-  await source.query("SELECT pg_advisory_lock_shared(hashtext('open_aider_migrations'))");sourceLock=true;
+  await source.query("SELECT pg_advisory_lock_shared(hashtext('anthys_migrations'))");sourceLock=true;
   const applied=ledger((await source.query('SELECT name,hash FROM public.schema_migrations ORDER BY name')).rows,definitions);
   const archive=run(['pg_dump','--host=/var/run/postgresql','--port=5432','--username=oa_migrator','--dbname='+sourceName,'--no-password','--format=custom','--schema-only']);
   if(archive.length<5||archive.length>maxBytes||archive.subarray(0,5).toString()!=='PGDMP')fail('TEST_SCHEMA_ARCHIVE_REJECTED');
@@ -156,14 +156,14 @@ export async function groupReminderDatabase(){
   const install=async()=>{
    if(closed||closing||poolsClosed||cleanup||!created)fail('TEST_OWN_DATABASE_CLOSED');if(installing)return installing;
    installing=(async()=>{const current=await files(),last=current.at(-1)!;for(const item of current.slice(94))schemaOnly(item.sql);const c=await root!.connect();try{await identity(c,name,system);await c.query('BEGIN');try{
-    await c.query("SELECT pg_advisory_xact_lock(hashtext('open_aider_migrations'))");const rows=ledger((await c.query('SELECT name,hash FROM public.schema_migrations ORDER BY name')).rows,current);
+    await c.query("SELECT pg_advisory_xact_lock(hashtext('anthys_migrations'))");const rows=ledger((await c.query('SELECT name,hash FROM public.schema_migrations ORDER BY name')).rows,current);
     for(const item of current.slice(rows.length)){await c.query(item.sql);await c.query('INSERT INTO public.schema_migrations(name,hash) VALUES($1,$2)',[item.name,item.hash]);}
     await c.query('COMMIT');return last.hash;
    }catch(e){await c.query('ROLLBACK');throw e;}}catch(e){throw safe(e,'TEST_OWN_MIGRATION_FAILED');}finally{c.release();}})();try{return await installing;}finally{installing=null;}
   };
   const dumpOwn=()=>operation(async()=>{
    if(closed||poolsClosed||cleanup||!created)fail('TEST_OWN_DATABASE_CLOSED');const c=new pg.Client(options(name));
-   try{await c.connect();await identity(c,name,system);await c.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');await c.query("SELECT pg_advisory_xact_lock_shared(hashtext('open_aider_migrations'))");
+   try{await c.connect();await identity(c,name,system);await c.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');await c.query("SELECT pg_advisory_xact_lock_shared(hashtext('anthys_migrations'))");
     const snapshot=(await c.query('SELECT pg_export_snapshot() snapshot')).rows[0].snapshot as string;if(!/^[0-9A-F-]{8,80}$/.test(snapshot))fail('TEST_SNAPSHOT_REJECTED');
     const archive=run(['pg_dump','--host=/var/run/postgresql','--port=5432','--username=oa_migrator','--dbname='+name,'--no-password','--format=custom','--snapshot='+snapshot]);
     if(archive.subarray(0,5).toString()!=='PGDMP'||archive.length>maxBytes)fail('TEST_OWN_ARCHIVE_REJECTED');issuedArchives.add(createHash('sha256').update(archive).digest('hex'));await c.query('COMMIT');return archive;
@@ -173,7 +173,7 @@ export async function groupReminderDatabase(){
    if(closed||poolsClosed||cleanup||!created&&!sourceDisposed||!Buffer.isBuffer(archive)||archive.length>maxBytes)fail('TEST_OWN_ARCHIVE_REJECTED');const frozen=Buffer.from(archive);
    if(!issuedArchives.has(createHash('sha256').update(frozen).digest('hex'))){frozen.fill(0);fail('TEST_OWN_ARCHIVE_REJECTED');}
    try{
-   const restored='open_aider_test_group_reminder_'+randomUUID().replaceAll('-',''),control=new pg.Client(options('postgres'));
+   const restored='anthys_test_group_reminder_'+randomUUID().replaceAll('-',''),control=new pg.Client(options('postgres'));
    let dispatched=false;
    try{await control.connect();await identity(control,'postgres',system);dispatched=true;await control.query(`CREATE DATABASE "${restored}" TEMPLATE template0`);restoredNames.add(restored);}
    catch(error){const failure=safe(error,'TEST_RESTORE_DATABASE_CREATE_FAILED');if(dispatched){failure.ownDatabaseName=restored;failure.creationState=restoredNames.has(restored)?'CONFIRMED':'UNKNOWN';}throw failure;}
@@ -188,7 +188,7 @@ export async function groupReminderDatabase(){
   // in restoreOwn is unchanged. An uncertain CREATE is never retried/dropped.
   const createOwnEmptyRestoreTarget=()=>operation(async()=>{
    if(emptyRestoreTargetsIssued>=4)fail('TEST_EMPTY_RESTORE_LIMIT');emptyRestoreTargetsIssued++;
-   const restored='open_aider_test_group_reminder_'+randomUUID().replaceAll('-',''),control=new pg.Client(options('postgres'));let dispatched=false;
+   const restored='anthys_test_group_reminder_'+randomUUID().replaceAll('-',''),control=new pg.Client(options('postgres'));let dispatched=false;
    try{await control.connect();await identity(control,'postgres',system);dispatched=true;await control.query(`CREATE DATABASE "${restored}" TEMPLATE template0`);restoredNames.add(restored);}
    catch(error){const failure=safe(error,'TEST_EMPTY_RESTORE_CREATE_FAILED');if(dispatched){failure.ownDatabaseName=restored;failure.creationState=restoredNames.has(restored)?'CONFIRMED':'UNKNOWN';}throw failure;}
    finally{await control.end();}
@@ -212,5 +212,5 @@ export async function groupReminderDatabase(){
   if(creationAttempted){error.ownDatabaseName=name;error.creationState=confirmed?'CONFIRMED':'UNKNOWN';}
   throw error;
  }
- finally{if(sourceLock)await source.query("SELECT pg_advisory_unlock_shared(hashtext('open_aider_migrations'))").catch(()=>{});await source.end().catch(()=>{});}
+ finally{if(sourceLock)await source.query("SELECT pg_advisory_unlock_shared(hashtext('anthys_migrations'))").catch(()=>{});await source.end().catch(()=>{});}
 }

@@ -1,4 +1,4 @@
-# open_aider
+# anthys
 
 需求、架构、接入和验收以 `docs/` 的四份基线为准。项目正在逐阶段实施；这不是已通过企业验收的成品。机器状态见 `config/stages.json`，外部阻塞见 `config/external-blockers.json`。报告中的合成 provider 结果不能作为 live 通过证据。
 
@@ -15,11 +15,11 @@ pnpm db:seed:test
 pnpm lint
 pnpm typecheck
 pnpm build
-pnpm test:prepare # 专用临时测试数据库，端口 53331，不读取 .env
+pnpm test:prepare # 专用临时测试数据库，端口 64711，不读取 .env
 pnpm test
 pnpm test:e2e
 pnpm dev
-# 前端独立开发预览需要把 API 的 APP_ORIGIN 配置为 http://localhost:52331
+# 前端独立开发预览需要把 API 的 APP_ORIGIN 配置为 http://localhost:64701
 # 另一个终端：前端开发预览，代理到 API
 pnpm dev:web
 # 另一个终端：持久队列/原生模型运行时
@@ -28,7 +28,7 @@ pnpm start:worker
 pnpm start:notifier
 ```
 
-API 使用 `127.0.0.1:52330`，数据库使用 `127.0.0.1:53330`；前端开发预览使用 `52331`。`/api/v1/health/live` 与 `/api/v1/health/ready` 分开检查。没有模型密钥时 worker 将真实记录 `WAITING_AUTH`，不会返回假模型回答。没有钉钉应用配置时 `start:ingress` 拒绝启动，不使用已有员工 CLI 登录替代机器人身份。已实现浏览器 OAuth、一次性 state、企业与目录身份匹配和任务工作台；真实 OAuth 仍需企业回调域名及已核验目录，已实现安全状态卡、750ms合并和会话确认的取消流程；真实模板与权限仍须验收。可先执行 pnpm tenant:register 建立本地租户命名空间，此操作不会创建用户、授予角色或验证平台授权。构建后的工作台由 API 在 52330 同源提供。
+API 使用 `127.0.0.1:64700`，数据库使用 `127.0.0.1:64710`；前端开发预览使用 `64701`。`/api/v1/health/live` 与 `/api/v1/health/ready` 分开检查。没有模型密钥时 worker 将真实记录 `WAITING_AUTH`，不会返回假模型回答。没有钉钉应用配置时 `start:ingress` 拒绝启动，不使用已有员工 CLI 登录替代机器人身份。已实现浏览器 OAuth、一次性 state、企业与目录身份匹配和任务工作台；真实 OAuth 仍需企业回调域名及已核验目录，已实现安全状态卡、750ms合并和会话确认的取消流程；真实模板与权限仍须验收。可先执行 pnpm tenant:register 建立本地租户命名空间，此操作不会创建用户、授予角色或验证平台授权。构建后的工作台由 API 在 64700 同源提供。
 
 `oa_app`、`oa_runtime`、`oa_queue` 分离；迁移身份仅用于一次性迁移/测试种子。RLS 按租户与所有者约束私人行。pg-boss 结构属于显式迁移，队列运行时不执行升级。迁移只允许追加，不修改已经执行过的文件；回滚采取兼容旧代码或新修正迁移。
 
@@ -43,7 +43,7 @@ pnpm verify:release --profile ENTERPRISE_DWS # 缺任何必需证据都拒绝发
 
 现有 `.env` 可使用 `DINGTALK_APP_KEY/SECRET` 和 `AIDER_AI_DEFAULT_BASE_URL/API_KEY/MODEL`，项目会映射到规范名称；显式规范变量优先，secret mount 优先于明文变量。默认模型仍严格限定为 `glm-5.3-flash`。凭据存在仅表示已配置；真实验证和企业测试资产仍单独核验。
 
-自动化测试只使用 `.data/test-environment/` 下独立生成的测试配置和专用临时 PG 实例，不加载仓库 `.env`，不继承企业 provider 凭据。测试入口默认拦截未声明网络目标，只允许测试数据库 53331 和浏览器测试服务 52339 的回环连接；这是 Node 进程保护，生产沙箱的网络隔离仍属 P13。浏览器使用本机 Chrome；OAuth 导航在测试内拦截，合成 OAuth 通过不计为企业联调。
+自动化测试只使用 `.data/test-environment/` 下独立生成的测试配置和专用临时 PG 实例，不加载仓库 `.env`，不继承企业 provider 凭据。测试入口默认拦截未声明网络目标，只允许测试数据库 64711 和浏览器测试服务 64702 的回环连接；这是 Node 进程保护，生产沙箱的网络隔离仍属 P13。浏览器使用本机 Chrome；OAuth 导航在测试内拦截，合成 OAuth 通过不计为企业联调。
 
 卡片配置通过 `DINGTALK_CARD_TEMPLATE_FILE` 指向受控 JSON，必需字段为 `templateId`、`statusKey`、`taskUrlKey`、`cancelTokenKey`，后三者对应企业已审核模板的变量名。模板取消回调传入 `cardPrivateData.params.action=cancel` 和该卡的 `token`；服务器只返回当前用户私有的 `actionUrl`，实际停止须在 H5 登录并确认。审批通过独立的会话审批流程处理，不接受取消回调充当批准。缺模板或明确权限拒绝时保留文本投递；未知卡片发送不会自动重做。`FINALIZED_UNVERIFIED` 只表示平台接受最终更新，不表示已核验送达。T007 已由原生 SSE 解析器的100个分片驱动安全进度、750ms卡片合并和最终更新的本地协议链路验证；模型和钉钉 HTTP 使用明确替身，真实模板/平台送达仍待企业联调。
 

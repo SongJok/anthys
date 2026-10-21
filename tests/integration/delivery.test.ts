@@ -13,7 +13,7 @@ import {DingTalkSender} from '../../packages/dingtalk/src/sender.js';
 import {TaskStore} from '../../packages/tasks/src/store.js';
 import {ids,seed} from '../../scripts/seed.js';
 loadEnvFile();const db=new Database(secret('RUNTIME_DATABASE_URL')!),admin=new pg.Pool({connectionString:secret('MIGRATION_DATABASE_URL')!}),vault=new Vault(new Map([['1',randomBytes(32)]]),'1');
-const ctx={tenantId:ids.tenantA,actorId:ids.bob},store=new RuntimeStore(db,vault),binding={corpId:'TENANT_A',robotCode:'synthetic-robot',appOrigin:'http://localhost:52330'};
+const ctx={tenantId:ids.tenantA,actorId:ids.bob},store=new RuntimeStore(db,vault),binding={corpId:'TENANT_A',robotCode:'synthetic-robot',appOrigin:'http://localhost:64700'};
 
 class DeliveryGateway extends ProductionDeliveryGateway {constructor(...args:ConstructorParameters<typeof ProductionDeliveryGateway>){super(args[0],args[1],args[2],args[3],args[4]??Date.now,(...params)=>syntheticTextGateway(store,'synthetic private result',params[1].audience['kind']==='GROUP'?'MCP':'CORE').finalSourcesAllowed(...params));}}
 const ingress=new DingTalkIngress(db,vault,{tenantId:ctx.tenantId,...binding});

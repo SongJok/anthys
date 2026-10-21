@@ -21,7 +21,7 @@ it('exchanges a verified provider subject into a scoped HttpOnly session; client
  const {app}=await createServer({config:config({APP_ENV:'test'}),db,sessionSecret:key,login:{tenantId:ids.tenantA,corpId:'TENANT_A',provider:{exchange:async()=>{exchanges++;return {corpId:'TENANT_A',unionId:'synthetic-h5-union'};}}}});
  try{
   const start=await app.inject('/api/v1/auth/dingtalk/state'),state=start.json().data.state as string,cookie=start.cookies.find(c=>c.name==='oa_login_browser')!;
-  expect(cookie.httpOnly).toBe(true);const headers={origin:'http://localhost:52330',cookie:`oa_login_browser=${cookie.value}`};
+  expect(cookie.httpOnly).toBe(true);const headers={origin:'http://localhost:64700',cookie:`oa_login_browser=${cookie.value}`};
   const forged=await app.inject({method:'POST',url:'/api/v1/auth/dingtalk/exchange',headers,payload:{code:'synthetic-code',state,userId:ids.alice,roles:['ADMIN']}});expect(forged.statusCode).toBe(400);expect(exchanges).toBe(0);
   const result=await app.inject({method:'POST',url:'/api/v1/auth/dingtalk/exchange',headers,payload:{code:'synthetic-code',state}});expect(result.statusCode).toBe(200);expect(result.json().data.csrfToken).toBeTypeOf('string');expect(exchanges).toBe(1);
   const session=result.cookies.find(c=>c.name==='oa_session')!;expect(session.httpOnly).toBe(true);expect(session.sameSite).toBe('Lax');
@@ -34,7 +34,7 @@ it('rejects login CSRF, wrong enterprise, unmapped union and missing login confi
   const {app}=await createServer({config:config({APP_ENV:'test'}),db,sessionSecret:key,login:{tenantId:ids.tenantA,corpId:'TENANT_A',provider:{exchange:async()=>subject}}});
   try{const start=await app.inject('/api/v1/auth/dingtalk/state'),browser=start.cookies.find(c=>c.name==='oa_login_browser')!;const payload={code:'synthetic',state:start.json().data.state as string};
    expect((await app.inject({method:'POST',url:'/api/v1/auth/dingtalk/exchange',payload,headers:{origin:'https://evil.invalid'}})).statusCode).toBe(403);
-   expect((await app.inject({method:'POST',url:'/api/v1/auth/dingtalk/exchange',payload,headers:{origin:'http://localhost:52330',cookie:`oa_login_browser=${browser.value}`}})).statusCode).toBe(403);
+   expect((await app.inject({method:'POST',url:'/api/v1/auth/dingtalk/exchange',payload,headers:{origin:'http://localhost:64700',cookie:`oa_login_browser=${browser.value}`}})).statusCode).toBe(403);
   }finally{await app.close();}
  }
  const {app}=await createServer({config:config({APP_ENV:'test'}),db,sessionSecret:key});try{expect((await app.inject('/api/v1/auth/dingtalk/state')).statusCode).toBe(503);}finally{await app.close();}

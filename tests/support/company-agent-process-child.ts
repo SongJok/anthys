@@ -10,7 +10,7 @@ import {connectCompanyAgent} from '../../packages/company/src/agent-connection.j
 import {agentChatInputSchemaHash} from '../../packages/company/src/agent-chat.js';
 
 const mode=z.enum(['in-flight','stored-before-resume']).parse(process.argv[2]);
-const payloadSchema=z.object({ctx:z.object({tenantId:z.uuid(),actorId:z.uuid()}).strict(),admission:agentRequestAdmissionSchema,databaseName:z.string().regex(/^open_aider_test_group_reminder_[a-f0-9]{32}$/),keyHex:z.string().regex(/^[a-f0-9]{64}$/),grantId:z.uuid()}).strict();
+const payloadSchema=z.object({ctx:z.object({tenantId:z.uuid(),actorId:z.uuid()}).strict(),admission:agentRequestAdmissionSchema,databaseName:z.string().regex(/^anthys_test_group_reminder_[a-f0-9]{32}$/),keyHex:z.string().regex(/^[a-f0-9]{64}$/),grantId:z.uuid()}).strict();
 const endpoint='https://synthetic-process-agent.invalid/mcp',text='SYNTHETIC process response; original durable request only.';
 const schema={type:'object',properties:{message:{type:'string'},conversationId:{type:'integer'},images:{type:'array',items:{type:'object'}}}};
 const controller=new AbortController();let db:Database|undefined,job:Promise<boolean>|undefined,closing:Promise<void>|undefined,calls=0;
@@ -23,11 +23,11 @@ process.once('disconnect',()=>{void close().catch(()=>{process.exitCode=1;});});
 if(!process.send||!process.connected)throw Error('SYNTHETIC_CHILD_IPC_REQUIRED');
 process.once('message',raw=>{void (async()=>{
  const payload=payloadSchema.parse(raw);
- // isolation.js has already checked the inherited original /open_aider_test
+ // isolation.js has already checked the inherited original /anthys_test
  // environment. Derive this one connection URL, never alter process.env or
  // accept a caller-supplied URL, role, endpoint or provider credential.
  const original=secret('RUNTIME_DATABASE_URL');if(!original)throw Error('SYNTHETIC_RUNTIME_DATABASE_REQUIRED');const url=new URL(original);
- if(url.protocol!=='postgresql:'||url.hostname!=='127.0.0.1'||url.port!=='53331'||url.pathname!=='/open_aider_test'||url.username!=='oa_runtime'||url.search||url.hash)throw Error('SYNTHETIC_RUNTIME_DATABASE_REJECTED');
+ if(url.protocol!=='postgresql:'||url.hostname!=='127.0.0.1'||url.port!=='64711'||url.pathname!=='/anthys_test'||url.username!=='oa_runtime'||url.search||url.hash)throw Error('SYNTHETIC_RUNTIME_DATABASE_REJECTED');
  url.pathname='/'+payload.databaseName;db=new Database(url.href,4,3000);
  const vault=new Vault(new Map([['1',Buffer.from(payload.keyHex,'hex')]]),'1'),store=new RuntimeStore(db,vault);
  if(payload.admission.inputSchemaHash!==agentChatInputSchemaHash(schema))throw Error('SYNTHETIC_SCHEMA_MISMATCH');

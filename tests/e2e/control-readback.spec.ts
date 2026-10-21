@@ -17,7 +17,7 @@ async function mount(page:Page,scenario:Scenario={}){
  const bundle=await readFile(process.env['CONTROL_READBACK_BUNDLE']!,'utf8');
  await page.route('**/*',async route=>{
   const request=route.request(),url=new URL(request.url()),path=url.pathname;
-  if(url.origin!=='http://127.0.0.1:52339'){unexpected.push(url.origin);return route.abort('blockedbyclient');}
+  if(url.origin!=='http://127.0.0.1:64702'){unexpected.push(url.origin);return route.abort('blockedbyclient');}
   if(path==='/control-readback')return route.fulfill({contentType:'text/html',body:'<!doctype html><html lang="zh"><meta charset="utf-8"><div id="root"></div><script src="/fixture.js"></script></html>'});
   if(path==='/fixture.js')return route.fulfill({contentType:'text/javascript',body:bundle});
   if(path==='/api/v1/controls/overview')return route.fulfill({status:scenario.unauthorized?403:200,json:{data:scenario.unauthorized?{private:secret}:overview}});
@@ -27,7 +27,7 @@ async function mount(page:Page,scenario:Scenario={}){
   if(path===`/api/v1/reconciliations/${caseId}/attestation`)return route.fulfill({json:{data:{id:caseId,state:'MANUAL_APPLIED_UNVERIFIED',actionState:'APPLIED_UNVERIFIED',verification:'UNVERIFIED',retryAllowed:false}}});
   unexpected.push(path);return route.abort('blockedbyclient');
  });
- await page.goto('http://127.0.0.1:52339/control-readback');
+ await page.goto('http://127.0.0.1:64702/control-readback');
  return {calls,unexpected};
 }
 async function begin(page:Page){await page.getByRole('button',{name:'核对此动作',exact:true}).click();}
@@ -41,7 +41,7 @@ test('real component requires explicit read-back and sends one CSRF-bound reques
  await readButton(page).evaluate(button=>{(button as HTMLButtonElement).click();(button as HTMLButtonElement).click();});
  await expect(page.getByRole('form',{name:'人工核对'})).toHaveCount(0);
  await expect.poll(()=>calls.length).toBe(2);release();await expect(page.getByRole('status')).toContainText('认证日志确认已发生');
- expect(calls).toEqual([{path:`/api/v1/actions/${actionId}/reconciliation-sessions`,body:{},csrf:'synthetic-csrf',origin:'http://127.0.0.1:52339'},{path:`/api/v1/reconciliations/${caseId}/read-back`,body:{nonce:'synthetic-once',argsHash:hash},csrf:'synthetic-csrf',origin:'http://127.0.0.1:52339'}]);
+ expect(calls).toEqual([{path:`/api/v1/actions/${actionId}/reconciliation-sessions`,body:{},csrf:'synthetic-csrf',origin:'http://127.0.0.1:64702'},{path:`/api/v1/reconciliations/${caseId}/read-back`,body:{nonce:'synthetic-once',argsHash:hash},csrf:'synthetic-csrf',origin:'http://127.0.0.1:64702'}]);
  expect(unexpected).toEqual([]);await safePage(page);
 });
 

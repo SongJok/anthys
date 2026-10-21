@@ -14,5 +14,5 @@ for(const project of ['desktop','mobile']){const w=await groupReminderWorld(isol
 await writeFile('.data/test-environment/browser-group-reminders.json',JSON.stringify(fixtures),{mode:0o600});
 const service=(p:{tenantId:string})=>{const w=worlds.find(w=>w.principal.tenantId===p.tenantId);if(!w)throw new GroupReminderError('GROUP_REMINDER_NOT_FOUND',404);return w.reminders;};
 const reminders:Pick<GroupReminders,'list'|'preview'|'create'|'mutate'>={list:(p,...args)=>service(p).list(p,...args),preview:(p,...args)=>service(p).preview(p,...args),create:(p,...args)=>service(p).create(p,...args),mutate:(p,...args)=>service(p).mutate(p,...args)};
-const {app}=await createServer({config:{...config(),APP_ORIGIN:'http://localhost:52339'},db:isolated.appDb,sessionSecret:secret('SESSION_SECRET')!,groupReminders:reminders,webRoot:resolve('dist/web')});await app.listen({host:'127.0.0.1',port:52339});
+const {app}=await createServer({config:{...config(),APP_ORIGIN:'http://localhost:64702'},db:isolated.appDb,sessionSecret:secret('SESSION_SECRET')!,groupReminders:reminders,webRoot:resolve('dist/web')});await app.listen({host:'127.0.0.1',port:64702});
 let closing=false;for(const signal of ['SIGTERM','SIGINT'] as const)process.once(signal,()=>{if(closing)return;closing=true;void app.close().then(async()=>{for(const w of worlds)await w.f.close();await isolated.close();});});

@@ -7,7 +7,7 @@ import {resolve} from 'node:path';
 import {linuxNodeRuntimePins} from '../../scripts/prepare-linux-node-runtime.mjs';
 
 const image='postgres:17-bookworm@sha256:3645570cccdfa447589da9f57dd740faa29b30938e861289a5574b6ca6b03826';
-const label='org.open-aider.test-independent-restore';
+const label='org.anthys.test-independent-restore';
 const hash=(bytes:Buffer|string)=>createHash('sha256').update(bytes).digest('hex');
 function reject(code:string):never{throw Error(code);}
 type Runtime={schemaVersion:1;version:string;platform:'linux';architecture:'arm64'|'x64';binaryPath:string;binarySha256:string;sourceIntegrity:string};
@@ -15,12 +15,12 @@ type Inspection={Id:string;Name:string;Config:{Image:string;Labels:Record<string
 
 /** No host mounts, published ports or bridge. All execution happens in this
  * fixture's nonce container; the unchanged network guard still permits only
- * loopback:53331 inside its independent namespace. No caller supplies an ID. */
+ * loopback:64711 inside its independent namespace. No caller supplies an ID. */
 export async function independentPostgresCluster(directory:string){
- if(process.env['APP_ENV']!=='test'||process.env['OA_TEST_ISOLATED']!=='true'||Reflect.get(globalThis,Symbol.for('open_aider.testNetworkGuard'))!==true)reject('INDEPENDENT_TEST_ISOLATION_REQUIRED');
+ if(process.env['APP_ENV']!=='test'||process.env['OA_TEST_ISOLATED']!=='true'||Reflect.get(globalThis,Symbol.for('anthys.testNetworkGuard'))!==true)reject('INDEPENDENT_TEST_ISOLATION_REQUIRED');
  if(process.env['DOCKER_TLS_VERIFY']||process.env['DOCKER_CERT_PATH'])reject('INDEPENDENT_DOCKER_ENDPOINT_REJECTED');
  const nonce=randomUUID(),name='oa-test-independent-'+nonce,idPattern=/^[a-f0-9]{64}$/;
- const password=randomBytes(32).toString('hex'),database='open_aider_test_restore_'+randomUUID().replaceAll('-','');
+ const password=randomBytes(32).toString('hex'),database='anthys_test_restore_'+randomUUID().replaceAll('-','');
  const env={PATH:process.env['PATH']??'/usr/bin:/bin',...(process.env['HOME']?{HOME:process.env['HOME']}:{})};
  const invoke=(args:string[],input?:Buffer,timeout=30000,extra:Record<string,string>={})=>{
   try{return execFileSync('docker',args,{env:{...env,...extra},input,timeout,maxBuffer:128*1024*1024,stdio:['pipe','pipe','pipe']});}catch(error){
@@ -53,15 +53,15 @@ export async function independentPostgresCluster(directory:string){
   closed=true;return {state:'DESTROYED' as const,confirmedAbsent:true as const};
  };
  const exec=(args:string[],input?:Buffer,timeout?:number)=>{if(closed||!created)reject('INDEPENDENT_CONTAINER_CLOSED');inspect(true);return docker(['exec',...(input?['-i']:[]),'--user','postgres',id!,...args],input,timeout);};
- const sql=(query:string)=>exec(['psql','--host=/var/run/postgresql','--port=53331','--username=oa_migrator','--dbname='+database,'--no-password','--no-psqlrc','--set=ON_ERROR_STOP=1','--tuples-only','--no-align'],Buffer.from(query)).toString('utf8').trim();
+ const sql=(query:string)=>exec(['psql','--host=/var/run/postgresql','--port=64711','--username=oa_migrator','--dbname='+database,'--no-password','--no-psqlrc','--set=ON_ERROR_STOP=1','--tuples-only','--no-align'],Buffer.from(query)).toString('utf8').trim();
  try{
   // create does not start a process. A creation error is reconciled only by the
   // issued name plus exact nonce/image/network/mount checks, never a broad rm.
-  try{creationAttempted=true;const candidate=docker(['create','--pull=never','--name',name,'--label',label+'='+nonce,'--network','none','--read-only','--security-opt','no-new-privileges','--tmpfs','/oa:rw,nosuid,nodev,noexec,mode=0755','--tmpfs','/oa/runtime:rw,nosuid,nodev,exec,mode=0755','--tmpfs','/tmp:rw,nosuid,noexec,mode=1777','--tmpfs','/var/run/postgresql:rw,nosuid,noexec,mode=0775','--tmpfs','/var/lib/postgresql/data:rw,nosuid,noexec,mode=0700','--env','POSTGRES_USER=oa_migrator','--env','POSTGRES_DB=postgres','--env','POSTGRES_PASSWORD',image,'postgres','-c','listen_addresses=127.0.0.1','-p','53331'],undefined,30000,{POSTGRES_PASSWORD:password}).toString('utf8').trim();if(!idPattern.test(candidate))reject('INDEPENDENT_CONTAINER_ID_REJECTED');id=candidate;created=true;}
+  try{creationAttempted=true;const candidate=docker(['create','--pull=never','--name',name,'--label',label+'='+nonce,'--network','none','--read-only','--security-opt','no-new-privileges','--tmpfs','/oa:rw,nosuid,nodev,noexec,mode=0755','--tmpfs','/oa/runtime:rw,nosuid,nodev,exec,mode=0755','--tmpfs','/tmp:rw,nosuid,noexec,mode=1777','--tmpfs','/var/run/postgresql:rw,nosuid,noexec,mode=0775','--tmpfs','/var/lib/postgresql/data:rw,nosuid,noexec,mode=0700','--env','POSTGRES_USER=oa_migrator','--env','POSTGRES_DB=postgres','--env','POSTGRES_PASSWORD',image,'postgres','-c','listen_addresses=127.0.0.1','-p','64711'],undefined,30000,{POSTGRES_PASSWORD:password}).toString('utf8').trim();if(!idPattern.test(candidate))reject('INDEPENDENT_CONTAINER_ID_REJECTED');id=candidate;created=true;}
   catch(error){const candidates=docker(['ps','--all','--filter','name=^/'+name+'$','--filter','label='+label+'='+nonce,'--format','{{.ID}}']).toString('utf8').trim();if(candidates){const observed=inspect(false);id=observed.Id;created=true;}throw error;}
   inspect(false);docker(['start',id!]);
   // docker exec is the only transport. There is no forwarder or host listener.
-  exec(['sh','-c','for i in $(seq 1 100); do pg_isready --host=127.0.0.1 --port=53331 --username=oa_migrator --dbname=postgres >/dev/null 2>&1 && exit 0; sleep 0.1; done; exit 1'],undefined,15000);
+  exec(['sh','-c','for i in $(seq 1 100); do pg_isready --host=127.0.0.1 --port=64711 --username=oa_migrator --dbname=postgres >/dev/null 2>&1 && exit 0; sleep 0.1; done; exit 1'],undefined,15000);
   inspect(true);docker(['exec','--user','root',id!,'sh','-c','mkdir /oa/private /oa/postgres /oa/filestore /oa/restored && chown -R postgres:postgres /oa && chmod 700 /oa /oa/private /oa/postgres /oa/filestore /oa/restored /oa/runtime']);
   // Write only this owned tmpfs via exec; no Docker archive extraction into
   // the read-only root filesystem and no host bind mount are needed.
@@ -72,7 +72,7 @@ export async function independentPostgresCluster(directory:string){
   const observedNode=exec(['/oa/runtime/node','--version']).toString('utf8').trim();if(observedNode!=='v24.21.0')reject('INDEPENDENT_NODE_VERSION_REJECTED');
   const nativeHash=exec(['sha256sum','/usr/lib/postgresql/17/bin/pg_restore']).toString('utf8').split(/\s+/)[0]!,nativeVersion=exec(['/usr/lib/postgresql/17/bin/pg_restore','--version']).toString('utf8').trim();
   if(!/^[a-f0-9]{64}$/.test(nativeHash)||!/^pg_restore \(PostgreSQL\) 17\.[0-9]+/.test(nativeVersion))reject('INDEPENDENT_PG_PIN_REJECTED');
-  const psql=(query:string)=>exec(['psql','--host=/var/run/postgresql','--port=53331','--username=oa_migrator','--dbname=postgres','--no-password','--no-psqlrc','--set=ON_ERROR_STOP=1','--tuples-only','--no-align'],Buffer.from(query)).toString('utf8').trim();
+  const psql=(query:string)=>exec(['psql','--host=/var/run/postgresql','--port=64711','--username=oa_migrator','--dbname=postgres','--no-password','--no-psqlrc','--set=ON_ERROR_STOP=1','--tuples-only','--no-align'],Buffer.from(query)).toString('utf8').trim();
   psql(['oa_app','oa_runtime','oa_queue'].map(role=>'CREATE ROLE '+role+' LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE;').join('\n')+'\nCREATE DATABASE '+database+' TEMPLATE template0;');
   const identity=JSON.parse(sql("SELECT json_build_object('database',current_database(),'system',(SELECT system_identifier::text FROM pg_control_system()),'oid',(SELECT oid::text FROM pg_database WHERE datname=current_database()));")) as {database:string;system:string;oid:string};
   if(identity.database!==database||!/^\d+$/.test(identity.system)||!/^\d+$/.test(identity.oid))reject('INDEPENDENT_PG_IDENTITY_REJECTED');
@@ -91,6 +91,6 @@ export async function independentPostgresCluster(directory:string){
   };
   await stage('runtime/guard.mjs',await readFile('scripts/test-network-guard.mjs'));
   await bundled('scripts/project-restore.ts','restore.mjs');await bundled('scripts/restore-verification.ts','verification.mjs');await bundled('tests/support/independent-restore-probe.ts','probe.mjs');
-  return {database,system:identity.system,databaseOid:identity.oid,connectionString:`postgresql://oa_migrator:${password}@127.0.0.1:53331/${database}`,pgRestore:{path:'/usr/lib/postgresql/17/bin/pg_restore',sha256:nativeHash,version:nativeVersion},stage,read,runNode,sql,close,evidence:{image,nodeBinarySha256:runtime.binarySha256,nodeSourceIntegrity:runtime.sourceIntegrity,network:'none',hostMounts:0,publishedPorts:0,productionBundles:true}};
+  return {database,system:identity.system,databaseOid:identity.oid,connectionString:`postgresql://oa_migrator:${password}@127.0.0.1:64711/${database}`,pgRestore:{path:'/usr/lib/postgresql/17/bin/pg_restore',sha256:nativeHash,version:nativeVersion},stage,read,runNode,sql,close,evidence:{image,nodeBinarySha256:runtime.binarySha256,nodeSourceIntegrity:runtime.sourceIntegrity,network:'none',hostMounts:0,publishedPorts:0,productionBundles:true}};
  }catch(error){await close();throw error;}
 }

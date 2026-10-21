@@ -29,7 +29,7 @@ export async function connectCompanyAgent(pin:AgentConnectionPin,context:{signal
  // and compiles advertised output schemas before returning to our adapter;
  // refuse them through the public validator hook, before any untrusted AJV
  // compilation/regular-expression execution can block deadline timers.
- const client=new Client({name:'open_aider_company_agent',version:'0.1.0'},{capabilities:{},jsonSchemaValidator:{getValidator(){throw new AgentTransportError('AGENT_OUTPUT_SCHEMA_UNREVIEWED');}}});
+ const client=new Client({name:'anthys_company_agent',version:'0.1.0'},{capabilities:{},jsonSchemaValidator:{getValidator(){throw new AgentTransportError('AGENT_OUTPUT_SCHEMA_UNREVIEWED');}}});
  // A fresh SDK transport belongs to one local request. No old MCP session,
  // conversation, retry or GET/SSE reconnection is used to recover a lost call.
  const transport=new StreamableHTTPClientTransport(new URL(endpoint),{fetch:bound.fetch,requestInit:{headers:{authorization:'Bearer '+token}},reconnectionOptions:{maxRetries:0,initialReconnectionDelay:1,maxReconnectionDelay:1,reconnectionDelayGrowFactor:1}});

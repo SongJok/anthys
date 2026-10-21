@@ -21,7 +21,7 @@ import {artifactWorld} from '../support/artifact-world.js';
 
 // This fixture uses the real local API/PG/SDK. Only the upstream HTTP transport
 // is synthetic; it never delegates to global fetch or reads provider env keys.
-const origin='http://localhost:52339',endpoint='https://synthetic-enterprise.invalid/mcp';
+const origin='http://localhost:64702',endpoint='https://synthetic-enterprise.invalid/mcp';
 const toolSchema={type:'object',properties:{message:{type:'string'},conversationId:{type:'integer'},images:{type:'array',items:{type:'object'}}}};
 const isolated=await groupReminderDatabase(),vault=new Vault(new Map([['1',randomBytes(32)]]),'1');
 let directory:string|undefined,app:Awaited<ReturnType<typeof createServer>>['app']|undefined,closing:Promise<void>|undefined;
@@ -83,5 +83,5 @@ try{
  }
  await writeFile('.data/test-environment/browser-company-agent.json',JSON.stringify(fixtures),{mode:0o600});
  for(const signal of ['SIGTERM','SIGINT'] as const)process.once(signal,()=>{void close().catch(()=>{process.exitCode=1;});});
- await app.listen({host:'127.0.0.1',port:52339});
+ await app.listen({host:'127.0.0.1',port:64702});
 }catch(error){await close();throw error;}

@@ -9,5 +9,5 @@ for(const entry of await readdir('node_modules/.pnpm')){
  }
 }
 const lock=await readFile('pnpm-lock.yaml');
-await writeFile('reports/sbom.cdx.json',JSON.stringify({bomFormat:'CycloneDX',specVersion:'1.6',serialNumber:`urn:uuid:${randomUUID()}`,version:1,metadata:{timestamp:new Date().toISOString(),component:{type:'application',name:'open_aider',version:'0.1.0'},properties:[{name:'pnpm-lock-sha256',value:createHash('sha256').update(lock).digest('hex')}]},components:[...components.values()].sort((a,b)=>a.name.localeCompare(b.name))},null,2)+'\n');
+await writeFile('reports/sbom.cdx.json',JSON.stringify({bomFormat:'CycloneDX',specVersion:'1.6',serialNumber:`urn:uuid:${randomUUID()}`,version:1,metadata:{timestamp:new Date().toISOString(),component:{type:'application',name:'anthys',version:'0.1.0'},properties:[{name:'pnpm-lock-sha256',value:createHash('sha256').update(lock).digest('hex')}]},components:[...components.values()].sort((a,b)=>a.name.localeCompare(b.name))},null,2)+'\n');
 console.log(`SBOM recorded ${components.size} installed component versions.`);

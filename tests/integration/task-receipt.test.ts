@@ -18,7 +18,7 @@ async function fresh(){
  await admin.query("INSERT INTO users(tenant_id,id,external_user_id,display_name,status) VALUES($1,$2,'alice','ALICE','ACTIVE')",[ctx.tenantId,ctx.actorId]);
  const event:DWClientDownStream={specVersion:'1.0',type:'CALLBACK',headers:{appId:'synthetic',connectionId:'synthetic',contentType:'application/json',messageId:id,time:String(Date.now()),topic:TOPIC_ROBOT},data:JSON.stringify({msgId:id,chatbotCorpId:corpId,senderCorpId:corpId,senderStaffId:'alice',conversationId:'synthetic-dm',conversationType:'1',robotCode,msgtype:'text',text:{content:'SYNTHETIC_PRIVATE_GOAL'},createAt:Date.now(),senderId:'alice',chatbotUserId:'synthetic-bot',sessionWebhook:url,sessionWebhookExpiredTime:Date.now()+60000})};
  const store=new RuntimeStore(db,vault),ingress=new DingTalkIngress(db,vault,{tenantId:ctx.tenantId,corpId,robotCode},store),task=(await ingress.acceptTrustedCallback(event))!,runId=(await db.scope(ctx,c=>c.query('SELECT id FROM runs WHERE task_id=$1',[task.taskId]))).rows[0].id as string;
- const sent:string[]=[],gateway=new DeliveryGateway(db,vault,{sendReply:async(reply,text)=>{expect(reply.url).toBe(url);sent.push(text);return {state:'APPLIED_UNVERIFIED'};},sendProactive:async()=>{throw Error('UNEXPECTED_PROACTIVE');}},{corpId,robotCode,appOrigin:'http://localhost:52339'});
+ const sent:string[]=[],gateway=new DeliveryGateway(db,vault,{sendReply:async(reply,text)=>{expect(reply.url).toBe(url);sent.push(text);return {state:'APPLIED_UNVERIFIED'};},sendProactive:async()=>{throw Error('UNEXPECTED_PROACTIVE');}},{corpId,robotCode,appOrigin:'http://localhost:64702'});
  return {ctx,event,ingress,taskId:task.taskId,runId,store,gateway,sent};
 }
 

@@ -77,8 +77,8 @@ The local candidate reuses the exact locked binary/license/provenance from the
 previous verified P06 image in a temporary context; Dockerfile checks all hashes.
 
 ```sh
-docker build --build-context dws_release=/absolute/prepared/linux-arm64 -f deploy/images/dws-runner.Dockerfile -t open-aider:p06-signed-runner .
-docker run --rm --network none --read-only --user 10001:10001 --cap-drop ALL --security-opt no-new-privileges:true --pids-limit 64 --memory 512m --tmpfs /run/dws:rw,noexec,nosuid,nodev,size=32m,mode=0700,uid=10001,gid=10001 --entrypoint node open-aider:p06-signed-runner scripts/probe-dws-signed-offline.mjs
+docker build --build-context dws_release=/absolute/prepared/linux-arm64 -f deploy/images/dws-runner.Dockerfile -t anthys:p06-signed-runner .
+docker run --rm --network none --read-only --user 10001:10001 --cap-drop ALL --security-opt no-new-privileges:true --pids-limit 64 --memory 512m --tmpfs /run/dws:rw,noexec,nosuid,nodev,size=32m,mode=0700,uid=10001,gid=10001 --entrypoint node anthys:p06-signed-runner scripts/probe-dws-signed-offline.mjs
 ```
 
 The probe generates ephemeral keys in tmpfs, starts the actual compiled service,

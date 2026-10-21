@@ -6,7 +6,7 @@ import {syncBuiltinESMExports} from 'node:module';
 import {lstatSync,realpathSync} from 'node:fs';
 import {dirname,basename,join} from 'node:path';
 import {tmpdir} from 'node:os';
-const allowedPorts=new Set([53331,52339]);
+const allowedPorts=new Set([64711,64702]);
 export function permitted(host,port){return ['127.0.0.1','::1','localhost'].includes(host)&&allowedPorts.has(Number(port));}
 // One local synthetic RPC socket namespace only; no Docker/keychain/personal
 // sockets. The fixture directory and socket must already exist and be private.
@@ -17,4 +17,4 @@ const tlsConnect=tls.connect;tls.connect=function(...args){check(args);return tl
 for(const module of [http,https])for(const method of ['request','get']){const original=module[method];module[method]=function(...args){const target=args[0];const options=typeof target==='string'||target instanceof URL?new URL(target):target;if(module===http&&options?.socketPath&&permittedDwsSocket(options.socketPath))return original.apply(this,args);if(!options||!permitted(options.hostname??options.host??'localhost',options.port??(module===https?443:80)))throw Error('TEST_NETWORK_UNDECLARED_DESTINATION');return original.apply(this,args);};}
 const originalFetch=globalThis.fetch;globalThis.fetch=async function(input,init){const url=new URL(typeof input==='string'||input instanceof URL?input:input.url);if(!permitted(url.hostname,url.port|| (url.protocol==='https:'?443:80)))throw Error('TEST_NETWORK_UNDECLARED_DESTINATION');return originalFetch(input,init);};
 syncBuiltinESMExports();
-globalThis[Symbol.for('open_aider.testNetworkGuard')]=true;
+globalThis[Symbol.for('anthys.testNetworkGuard')]=true;

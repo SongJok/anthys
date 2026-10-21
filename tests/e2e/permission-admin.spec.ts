@@ -14,7 +14,7 @@ async function mount(page:Page,scenario:Scenario={}){
  const bundle=await readFile(process.env['PERMISSION_ADMIN_BUNDLE']!,'utf8');
  await page.route('**/*',async route=>{
   const req=route.request(),url=new URL(req.url()),path=url.pathname;
-  if(url.origin!=='http://127.0.0.1:52339'){unexpected.push(url.origin);return route.abort('blockedbyclient');}
+  if(url.origin!=='http://127.0.0.1:64702'){unexpected.push(url.origin);return route.abort('blockedbyclient');}
   if(path==='/permission-admin')return route.fulfill({contentType:'text/html',body:'<!doctype html><html lang="zh"><meta charset="utf-8"><div id="root"></div><script src="/fixture.js"></script></html>'});
   if(path==='/fixture.js')return route.fulfill({contentType:'text/javascript',body:bundle});
   if(path==='/api/v1/permissions')return route.fulfill({json:{data:own(admin)}});
@@ -31,7 +31,7 @@ async function mount(page:Page,scenario:Scenario={}){
   if(path===`/api/v1/permissions/resources/${second}/withdraw`)return route.fulfill({json:{data:{reauthenticationRequired:true}}});
   unexpected.push(path);return route.abort('blockedbyclient');
  });
- await page.goto('http://127.0.0.1:52339/permission-admin');
+ await page.goto('http://127.0.0.1:64702/permission-admin');
  return {calls,unexpected,revokeRole:()=>{admin=false;}};
 }
 const center=(page:Page)=>page.getByRole('region',{name:'管理员资源策略',exact:true});
@@ -50,7 +50,7 @@ for(const operation of ['renew','revoke'] as const){
  test(`${operation}: cancel sends nothing, explicit confirmation binds target/CAS/CSRF and double click submits once`,async({page})=>{
   let release!:()=>void;const hold=new Promise<void>(r=>{release=r;});const {calls}=await mount(page,{hold});await prepare(page,operation);await center(page).getByRole('button',{name:'取消变更'}).click();expect(calls.filter(c=>c.method==='POST')).toEqual([]);
   await prepare(page,operation);await submit(page,operation).evaluate(b=>{(b as HTMLButtonElement).click();(b as HTMLButtonElement).click();});await expect.poll(()=>calls.filter(c=>c.method==='POST').length).toBe(1);release();await expect(center(page).getByRole('complementary',{name:'策略变更回执'})).toBeVisible();
-  const post=calls.find(c=>c.method==='POST')!;expect(post.path).toBe(`/api/v1/permissions/admin/resources/${id}/${operation}`);expect(post.csrf).toBe('synthetic-csrf');expect(post.origin).toBe('http://127.0.0.1:52339');expect(post.key).toMatch(/^[a-f0-9-]{36}$/);expect(post.body).toEqual({targetUserId:target,version:3,reviewReference:'review-2026:1',...(operation==='renew'?{expiresAt:'2099-01-01T12:00:00.000Z'}:{})});await safe(page);
+  const post=calls.find(c=>c.method==='POST')!;expect(post.path).toBe(`/api/v1/permissions/admin/resources/${id}/${operation}`);expect(post.csrf).toBe('synthetic-csrf');expect(post.origin).toBe('http://127.0.0.1:64702');expect(post.key).toMatch(/^[a-f0-9-]{36}$/);expect(post.body).toEqual({targetUserId:target,version:3,reviewReference:'review-2026:1',...(operation==='renew'?{expiresAt:'2099-01-01T12:00:00.000Z'}:{})});await safe(page);
  });
 }
 

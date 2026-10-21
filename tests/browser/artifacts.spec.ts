@@ -7,7 +7,7 @@ import {secret} from '../../packages/config/src/index.js';
 type Fixture={nativeCookie:string;nativeTaskId:string;nativeRunId:string;nativeExpectedValue:string;nativeArtifactId:string;ownerCookie:string;taskId:string;runId:string;tenantId:string;actorId:string;isolatedDatabase:string;expectedValue:string};
 const fixture=async(project:string)=>JSON.parse(await readFile('.data/test-environment/browser-artifacts.json','utf8'))[project] as Fixture;
 const area=(page:Page)=>page.getByRole('region',{name:'任务成果',exact:true});
-async function login(page:Page,f:Fixture){await page.context().addCookies([{name:'oa_session',value:f.ownerCookie,url:'http://localhost:52339'}]);await page.goto('/tasks');await expect(page.getByText('工作台已就绪',{exact:true})).toBeVisible();await page.locator('button.task').first().click();await expect(area(page)).toBeVisible();}
+async function login(page:Page,f:Fixture){await page.context().addCookies([{name:'oa_session',value:f.ownerCookie,url:'http://localhost:64702'}]);await page.goto('/tasks');await expect(page.getByText('工作台已就绪',{exact:true})).toBeVisible();await page.locator('button.task').first().click();await expect(area(page)).toBeVisible();}
 type NativeArtifactReceipt={path:string;status:number;requestBody:string|null;body?:unknown;bodyError?:string};
 /** Observe the real fetch response in its owning browser realm. Chromium CDP
  * body handles are not a portable second consumer (CI mobile loses them even
@@ -54,7 +54,7 @@ test.describe.serial('actual task workbench through real API and disposable Post
  });
  test('revocation after rendering denies the next ticket and clears the old file entry',async({page},info)=>{
   const f=await fixture(info.project.name);await login(page,f);await expect(area(page).getByRole('button',{name:'受保护下载',exact:true})).toBeVisible();
-  const url=new URL(secret('MIGRATION_DATABASE_URL')!);expect(url.hostname).toBe('127.0.0.1');expect(url.port).toBe('53331');expect(f.isolatedDatabase).toMatch(/^open_aider_test_group_reminder_[a-f0-9]{32}$/);url.pathname='/'+f.isolatedDatabase;const db=new pg.Pool({connectionString:url.href,max:1,connectionTimeoutMillis:3000,query_timeout:12000});
+  const url=new URL(secret('MIGRATION_DATABASE_URL')!);expect(url.hostname).toBe('127.0.0.1');expect(url.port).toBe('64711');expect(f.isolatedDatabase).toMatch(/^anthys_test_group_reminder_[a-f0-9]{32}$/);url.pathname='/'+f.isolatedDatabase;const db=new pg.Pool({connectionString:url.href,max:1,connectionTimeoutMillis:3000,query_timeout:12000});
   try{await db.query('UPDATE resource_grants SET revoked_at=clock_timestamp() WHERE tenant_id=$1 AND actor_id=$2',[f.tenantId,f.actorId]);}finally{await db.end();}
   let downloads=0;page.on('request',r=>{if(new URL(r.url()).pathname===`/api/v1/artifacts/${artifactId}/download`)downloads++;});const rejected=page.waitForResponse(r=>new URL(r.url()).pathname===`/api/v1/artifacts/${artifactId}/download-ticket`);await area(page).getByRole('button',{name:'受保护下载',exact:true}).click();expect((await rejected).status()).toBe(409);await expect(area(page).getByRole('article')).toHaveCount(0);expect(downloads).toBe(0);expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
  });

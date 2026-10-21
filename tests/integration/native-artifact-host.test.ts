@@ -28,13 +28,13 @@ import {groupReminderDatabase} from '../support/group-reminder-database.js';
 import {artifactWorld} from '../support/artifact-world.js';
 import {groupRuntimeFixture} from '../support/group-runtime.js';
 let isolated:Awaited<ReturnType<typeof groupReminderDatabase>>,api:Awaited<ReturnType<typeof createServer>>,directory:string,files:EncryptedFileStore,service:TaskResultArtifacts,store:RuntimeStore,gateway:Gateway;
-const vault=new Vault(new Map([['1',randomBytes(32)]]),'1'),origin='http://127.0.0.1:52339',signal=()=>new AbortController().signal;
+const vault=new Vault(new Map([['1',randomBytes(32)]]),'1'),origin='http://127.0.0.1:64702',signal=()=>new AbortController().signal;
 const name=toolName('artifacts.create','1.0.0');
 beforeAll(async()=>{
  isolated=await groupReminderDatabase();await isolated.install();expect(await isolated.db.ready()).toBe(true);
  directory=await realpath(await mkdtemp(join(await realpath(tmpdir()),'oa-native-artifact-')));files=new EncryptedFileStore(join(directory,'files'),vault);store=new RuntimeStore(isolated.db,vault);gateway=new Gateway(store);
  expect(registerNativeArtifacts(gateway,vault,files,{},'DEFAULT')).toBe(true);service=new TaskResultArtifacts(isolated.db,vault,files,gateway);
- api=await createServer({config:{...config(),APP_ORIGIN:origin},db:isolated.appDb,sessionSecret:randomBytes(32).toString('hex'),finalReader:gateway,artifacts:service});await api.app.listen({host:'127.0.0.1',port:52339});
+ api=await createServer({config:{...config(),APP_ORIGIN:origin},db:isolated.appDb,sessionSecret:randomBytes(32).toString('hex'),finalReader:gateway,artifacts:service});await api.app.listen({host:'127.0.0.1',port:64702});
 },60000);
 afterAll(async()=>{await api?.app.close();await isolated?.close();if(directory)await rm(directory,{recursive:true,force:true});});
 const world=()=>artifactWorld({isolated,store,gateway,sessions:api.sessions},origin,{finalize:false});

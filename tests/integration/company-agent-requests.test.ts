@@ -19,9 +19,9 @@ import {TaskStore} from '../../packages/tasks/src/store.js';
 import {toolName} from '../../packages/gateway/src/index.js';
 import {CompanyAgentRequests} from '../../packages/company/src/agent-requests.js';
 let isolated:Awaited<ReturnType<typeof groupReminderDatabase>>,api:Awaited<ReturnType<typeof createServer>>;
-const origin='http://127.0.0.1:52339';
+const origin='http://127.0.0.1:64702';
 const vault=new Vault(new Map([['1',randomBytes(32)]]),'1'),signal=()=>new AbortController().signal;
-beforeAll(async()=>{isolated=await groupReminderDatabase();await isolated.install();expect(await isolated.db.ready()).toBe(true);const readOnly=new CompanyAgentRequests(new RuntimeStore(isolated.db,vault),vault,async()=>false);api=await createServer({config:{...config(),APP_ORIGIN:origin},db:isolated.appDb,sessionSecret:randomBytes(32).toString('hex'),companyRequests:readOnly});await api.app.listen({host:'127.0.0.1',port:52339});});
+beforeAll(async()=>{isolated=await groupReminderDatabase();await isolated.install();expect(await isolated.db.ready()).toBe(true);const readOnly=new CompanyAgentRequests(new RuntimeStore(isolated.db,vault),vault,async()=>false);api=await createServer({config:{...config(),APP_ORIGIN:origin},db:isolated.appDb,sessionSecret:randomBytes(32).toString('hex'),companyRequests:readOnly});await api.app.listen({host:'127.0.0.1',port:64702});});
 afterAll(async()=>{await api?.app.close();await isolated?.close();});
 const world=(options?:Parameters<typeof companyAgentWorld>[2])=>companyAgentWorld(isolated,vault,options);
 it('real Gateway atomically defers to an encrypted-input PostgreSQL request and releases active run time',async()=>{

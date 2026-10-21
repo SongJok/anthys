@@ -17,12 +17,12 @@ import {createServer} from '../../apps/api/src/server.js';
 import {config,secret} from '../../packages/config/src/index.js';
 import type {GroupEscalationApi} from '../../apps/api/src/group-escalations.js';
 let isolated:Awaited<ReturnType<typeof groupReminderDatabase>>,server:Awaited<ReturnType<typeof createServer>>;
-const adapters=new Map<string,GroupEscalationApi>(),origin='http://127.0.0.1:52339';
+const adapters=new Map<string,GroupEscalationApi>(),origin='http://127.0.0.1:64702';
 const vault=new Vault(new Map([['1',randomBytes(32)]]),'1'),signal=()=>new AbortController().signal;
 const fixtures:{close:()=>Promise<void>}[]=[];
 beforeAll(async()=>{isolated=await groupReminderDatabase();await isolated.install();expect(await isolated.db.ready()).toBe(true);
  const service=(c:GroupEscalationContext)=>{const adapter=adapters.get(c.principal.tenantId);if(!adapter)throw Error('SYNTHETIC_ESCALATION_UNKNOWN_TENANT');return adapter;};
- server=await createServer({config:{...config(),APP_ORIGIN:origin},db:isolated.appDb,sessionSecret:secret('SESSION_SECRET')!,groupEscalations:{prepare:(c,...a)=>service(c).prepare(c,...a),read:(c,...a)=>service(c).read(c,...a),enqueue:(c,...a)=>service(c).enqueue(c,...a),cancel:(c,...a)=>service(c).cancel(c,...a)}});await server.app.listen({host:'127.0.0.1',port:52339});
+ server=await createServer({config:{...config(),APP_ORIGIN:origin},db:isolated.appDb,sessionSecret:secret('SESSION_SECRET')!,groupEscalations:{prepare:(c,...a)=>service(c).prepare(c,...a),read:(c,...a)=>service(c).read(c,...a),enqueue:(c,...a)=>service(c).enqueue(c,...a),cancel:(c,...a)=>service(c).cancel(c,...a)}});await server.app.listen({host:'127.0.0.1',port:64702});
 },60000);
 afterAll(async()=>{await server?.app.close();for(const f of fixtures)await f.close();await isolated?.close();});
 async function world(options:{allow?:boolean}={}){

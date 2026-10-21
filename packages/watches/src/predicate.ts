@@ -48,7 +48,7 @@ export function evaluateWatchPredicate(rawPredicate:unknown,rawObservation:unkno
  const checkedPredicate=watchPredicateSchema.safeParse(rawPredicate);if(!checkedPredicate.success)throw Error('WATCH_PREDICATE_INVALID');
  const checkedObservation=watchObservationSchema.safeParse(rawObservation);if(!checkedObservation.success)throw Error('WATCH_OBSERVATION_INVALID');
  const predicate=checkedPredicate.data,observation=checkedObservation.data;
- const summary={predicateHash:digest('open_aider.watch.predicate.v1',predicate),valueHash:observation.state==='OBSERVED'?digest('open_aider.watch.value.v1',observation.value):null,sourceHash:observation.sourceHash,asOf:observation.asOf};
+ const summary={predicateHash:digest('anthys.watch.predicate.v1',predicate),valueHash:observation.state==='OBSERVED'?digest('anthys.watch.value.v1',observation.value):null,sourceHash:observation.sourceHash,asOf:observation.asOf};
  const result=(state:WatchPredicateResult['state'],reason:WatchPredicateReason):WatchPredicateResult=>Object.freeze({state,...summary,reason});
  if(observation.state!=='OBSERVED')return result('UNKNOWN',observation.state==='UNKNOWN'?'OBSERVATION_UNKNOWN':'OBSERVATION_UNAVAILABLE');
  const actual=observation.value,expected=predicate.expected;

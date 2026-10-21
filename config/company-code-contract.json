@@ -1,6 +1,6 @@
 {
   "contract": {
-    "id": "open_aider.company.code.read",
+    "id": "anthys.company.code.read",
     "version": 1,
     "operations": [
       "CHECK",
@@ -10,7 +10,7 @@
     "authorization": "UPSTREAM_RESOURCE_ENFORCED",
     "sideEffects": "NONE"
   },
-  "contractHash": "4b3803e13459f8a3800464c462a9b1bad13312122e0950cd327f464ff8cf5c8d",
+  "contractHash": "54dcabdb09e9e5fc945ccb246dfc3b6366a02669a2d14b1c89572e97c7041361",
   "sdk": "@modelcontextprotocol/sdk@1.32.1",
   "selectedUpstreamTool": "chat",
   "wireArguments": [

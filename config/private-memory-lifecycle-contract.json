@@ -60,7 +60,7 @@
     "Separate USER persona erasure and source native copy cleanup"
   ],
   "enterprisePass": false,
-  "migration050": "Applied only to isolated synthetic PostgreSQL127.0.0.1:53331; immutable after this application.",
+  "migration050": "Applied only to isolated synthetic PostgreSQL127.0.0.1:64711; immutable after this application.",
   "unimplemented": [
     "Full graph beyond the recorded and verified private dependencies, remaining group cases/other memory kinds and enterprise critical coverage.",
     "Independent deletion-log replay for whole backup restores that lose or roll back retained deletion ledgers or persona privacy state; reviewed backup retention/restore operations.",

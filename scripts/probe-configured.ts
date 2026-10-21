@@ -16,8 +16,8 @@ if(apiKey&&baseUrl){
  try{
   if(new URL(baseUrl).origin!=='https://open.bigmodel.cn') throw Error('UNAPPROVED_DESTINATION');
   const model=new GlmProvider({apiKey,baseUrl,reasoningEffort:'high',timeoutMs:30000});
-  const r=await model.complete([{role:'user',content:'Reply with exactly open_aider_connectivity_ok. This connection test contains no enterprise data.'}],[],AbortSignal.timeout(35000));
-  const report={checkedAt:new Date().toISOString(),environment:'LIVE',status:r.message.content?.trim()==='open_aider_connectivity_ok'?'PASS':'FAIL',scope:'TEXT_SSE_CONNECTIVITY_ONLY',model:'glm-5.3-flash',requestId:r.requestId,usage:r.usage,reasoningReturned:typeof r.message.reasoning_content==='string',reasoningRecorded:false,remaining:['multi-tool loop','cancellation','image','structured output','full model evaluation']};
+  const r=await model.complete([{role:'user',content:'Reply with exactly anthys_connectivity_ok. This connection test contains no enterprise data.'}],[],AbortSignal.timeout(35000));
+  const report={checkedAt:new Date().toISOString(),environment:'LIVE',status:r.message.content?.trim()==='anthys_connectivity_ok'?'PASS':'FAIL',scope:'TEXT_SSE_CONNECTIVITY_ONLY',model:'glm-5.3-flash',requestId:r.requestId,usage:r.usage,reasoningReturned:typeof r.message.reasoning_content==='string',reasoningRecorded:false,remaining:['multi-tool loop','cancellation','image','structured output','full model evaluation']};
   const path='reports/probes/glm-connectivity.json';await writeFile(path,JSON.stringify(report,null,2)+'\n');results.push({component:'GLM',status:report.status,detail:report.scope,evidenceRef:path});
  }catch{results.push({component:'GLM',status:'FAIL',detail:'CONNECTION_OR_PROTOCOL_PROBE_FAILED'});}
 }else results.push({component:'GLM',status:'BLOCKED_EXTERNAL',detail:'CONFIGURATION_MISSING'});
@@ -38,7 +38,7 @@ for(const [label,key] of [['configured-mcp-1','AIDER_AI_DD_MCP'],['configured-mc
   const url=new URL(endpoint);if(url.origin!=='https://dd-agent.tuwan.com') throw Error('UNAPPROVED_DESTINATION');
   const boundFetch:typeof fetch=(input,init={})=>{const target=new URL(typeof input==='string'||input instanceof URL?input:input.url);if(target.origin!==url.origin)throw Error('MCP_ORIGIN_CHANGED');return fetch(input,{...init,redirect:'error',signal:AbortSignal.any([...(init.signal?[init.signal]:[]),AbortSignal.timeout(15000)])});};
   const requestInit={headers:token?{authorization:`Bearer ${token}`}:{}};
-  client=new Client({name:'open_aider_contract_probe',version:'0.1.0'},{capabilities:{}});
+  client=new Client({name:'anthys_contract_probe',version:'0.1.0'},{capabilities:{}});
   const transport=url.pathname.endsWith('/sse')?new SSEClientTransport(url,{requestInit,fetch:boundFetch}):new StreamableHTTPClientTransport(url,{requestInit,fetch:boundFetch});
   // SDK 1.32.1 declares sessionId as string|undefined on the implementation but optional string on its own Transport interface. Runtime methods are the same; keep strict project settings.
   await client.connect(transport as Transport);let cursor:string|undefined,complete=false;const tools:unknown[]=[],cursors=new Set<string>();

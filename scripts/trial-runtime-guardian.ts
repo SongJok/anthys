@@ -39,7 +39,7 @@ async function start(value:unknown){
  const bindings=z.array(z.object({tenantId:z.uuid(),corpId:z.string().min(1)}).strict()).length(1).parse(await privateJson(process.env['TENANT_BINDINGS_FILE']??''));
  if(bindings[0]!.tenantId!==profile.tenantId||bindings[0]!.corpId!==profile.corpId)throw Error('TENANT_BINDING');
  const url=secret('RUNTIME_DATABASE_URL');if(!url)throw Error('DATABASE_CONFIGURATION');
- if(isolatedTrialFixtureAllowed()){const target=new URL(url);if(target.hostname!=='127.0.0.1'||target.port!=='53331'||target.pathname!=='/open_aider_test')throw Error('ISOLATED_TARGET');}
+ if(isolatedTrialFixtureAllowed()){const target=new URL(url);if(target.hostname!=='127.0.0.1'||target.port!=='64711'||target.pathname!=='/anthys_test')throw Error('ISOLATED_TARGET');}
  startupStage='SCHEMA';db=new Database(url,1,150);db.trialProfileHash=init.profileHash;if(!await db.ready())throw Error('SCHEMA_NOT_READY');
  const began=process.hrtime.bigint(),p=profile;
  startupStage='SLOT';const row=await db.scope({tenantId:p.tenantId,actorId:p.actorId},async c=>(await c.query(`SELECT s.state,s.profile_hash,s.budget_policy_hash,s.corp_id,s.external_user_id,s.robot_code,s.conversation_id,

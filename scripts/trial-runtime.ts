@@ -25,7 +25,7 @@ if(mode==='plan'){
   // Fault injection exists only with the isolated test target/network guard.
   // It changes the launcher's fallback connection after the guardian is READY;
   // the production branch never substitutes a model, service or DB endpoint.
-  if(fixture&&process.env['OA_TRIAL_TEST_PARENT_BLACKHOLE_PORT']==='52339'){delete process.env['RUNTIME_DATABASE_URL_FILE'];process.env['RUNTIME_DATABASE_URL']='postgresql://synthetic:synthetic@127.0.0.1:52339/blackhole';}
+  if(fixture&&process.env['OA_TRIAL_TEST_PARENT_BLACKHOLE_PORT']==='64702'){delete process.env['RUNTIME_DATABASE_URL_FILE'];process.env['RUNTIME_DATABASE_URL']='postgresql://synthetic:synthetic@127.0.0.1:64702/blackhole';}
   console.log(JSON.stringify({kind:'TRIAL_SERVICES_READY',profileHash,deadline:profile.deadline}));const receipt=await controller.finished;console.log(JSON.stringify({kind:'TRIAL_STOPPED',receipt}));if(!receipt.databaseClosed||!receipt.ownedGroupsClosed)process.exitCode=78;}
   catch{console.error('TRIAL_SUPERVISION_FAILED_NO_PRIVATE_VALUES_PRINTED');process.exitCode=78;}
  process.exit(process.exitCode??0);

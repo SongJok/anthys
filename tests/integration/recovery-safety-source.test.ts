@@ -46,7 +46,7 @@ it('a bounded projection failure leaves the confirmed source fenced and issues n
 },60000);
 
 it('rejects an already cancelled source operation and unsafe routing before any database fence',async()=>{
- const p:RecoverySafetySourceInput={connectionString:'postgresql://oa_migrator:synthetic@127.0.0.1:53331/open_aider_test_never_connect',expectedDatabase:'open_aider_test_never_connect',expectedDatabaseOid:'1',expectedSystemIdentifier:'1',expectedSchemaFingerprint:'a'.repeat(64),timeoutMs:1000,maxRows:100,maxBytes:4096,signal:AbortSignal.abort()};
+ const p:RecoverySafetySourceInput={connectionString:'postgresql://oa_migrator:synthetic@127.0.0.1:64711/anthys_test_never_connect',expectedDatabase:'anthys_test_never_connect',expectedDatabaseOid:'1',expectedSystemIdentifier:'1',expectedSchemaFingerprint:'a'.repeat(64),timeoutMs:1000,maxRows:100,maxBytes:4096,signal:AbortSignal.abort()};
  await expect(freezeRecoverySafetySource(p)).rejects.toMatchObject({code:'RECOVERY_SOURCE_CANCELLED',sourceFenceMayBeActive:false});
- for(const connectionString of [p.connectionString.replace('53331','53332'),p.connectionString+'?options=unsafe',p.connectionString.replace('127.0.0.1','example.invalid')])await expect(freezeRecoverySafetySource({...p,connectionString,signal:new AbortController().signal})).rejects.toMatchObject({code:'RECOVERY_SOURCE_INPUT_INVALID',sourceFenceMayBeActive:false});
+ for(const connectionString of [p.connectionString.replace('64711','64712'),p.connectionString+'?options=unsafe',p.connectionString.replace('127.0.0.1','example.invalid')])await expect(freezeRecoverySafetySource({...p,connectionString,signal:new AbortController().signal})).rejects.toMatchObject({code:'RECOVERY_SOURCE_INPUT_INVALID',sourceFenceMayBeActive:false});
 });

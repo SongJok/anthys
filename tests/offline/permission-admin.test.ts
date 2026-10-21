@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {PermissionAdminFlow,PermissionAdminFailure,canManage} from '../../apps/web/src/permission-admin-flow.js';
-assert.equal(Reflect.get(globalThis,Symbol.for('open_aider.testNetworkGuard')),true);
+assert.equal(Reflect.get(globalThis,Symbol.for('anthys.testNetworkGuard')),true);
 assert.deepEqual(Object.keys(process.env).filter(k=>/(?:DATABASE|PROVIDER|GLM|DINGTALK|DWS|MCP|TOKEN|SECRET|CREDENTIAL|^PG|^NODE_OPTIONS$)/i.test(k)),[]);
 const id='10000000-0000-4000-8000-000000000001',target='20000000-0000-4000-8000-000000000001',key='30000000-0000-4000-8000-000000000001',manifest='40000000-0000-4000-8000-000000000001';
 const now=1800000000000,expiry=new Date(now+86400000).toISOString();

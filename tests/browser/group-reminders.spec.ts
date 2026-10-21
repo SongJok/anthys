@@ -5,10 +5,10 @@ const region=(page:Page)=>page.getByRole('region',{name:'群催办管理',exact:
 // Parent-owned real isolated API/PG fixture. No route mocks or conditional skip.
 async function fixture(project:string){return JSON.parse(await readFile('.data/test-environment/browser-group-reminders.json','utf8'))[project] as Fixture;}
 let saved:{id:string};
-async function login(page:Page,f:Fixture){await page.context().addCookies([{name:'oa_session',value:f.adminCookie,url:'http://localhost:52339'}]);await page.goto('/groups');await expect(page.getByText('工作台已就绪',{exact:true})).toBeVisible();await region(page).getByLabel('管理员提供的群标识',{exact:true}).fill(f.group);}
+async function login(page:Page,f:Fixture){await page.context().addCookies([{name:'oa_session',value:f.adminCookie,url:'http://localhost:64702'}]);await page.goto('/groups');await expect(page.getByText('工作台已就绪',{exact:true})).toBeVisible();await region(page).getByLabel('管理员提供的群标识',{exact:true}).fill(f.group);}
 test.describe.serial('T111 real persisted reminder across bounded browser phases',()=>{
 test('reviewed administrator previews and explicitly registers a real group reminder',async({page},info)=>{
- const f=await fixture(info.project.name);expect(f.actorId).toBeTruthy();await page.context().addCookies([{name:'oa_session',value:f.adminCookie,url:'http://localhost:52339'}]);await page.goto('/groups');await expect(page.getByText('工作台已就绪',{exact:true})).toBeVisible();
+ const f=await fixture(info.project.name);expect(f.actorId).toBeTruthy();await page.context().addCookies([{name:'oa_session',value:f.adminCookie,url:'http://localhost:64702'}]);await page.goto('/groups');await expect(page.getByText('工作台已就绪',{exact:true})).toBeVisible();
  const area=region(page);await area.getByLabel('管理员提供的群标识',{exact:true}).fill(f.group);
  const read=()=>area.getByRole('button',{name:'读取当前审核授权与计划',exact:true}).click();await read();
  const selector=area.getByLabel('当前已审核授权',{exact:true});await expect(selector).toHaveValue('');

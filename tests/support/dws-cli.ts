@@ -15,7 +15,7 @@ import ${JSON.stringify(pathToFileURL(resolve('scripts/test-network-guard.mjs'))
 import {readFile,writeFile,appendFile,stat} from 'node:fs/promises';
 import {spawn} from 'node:child_process';
 const args=process.argv.slice(2),control=JSON.parse(await readFile(${JSON.stringify(control)},'utf8')),root=process.env.HOME,registry=JSON.parse(await readFile(process.env.DWS_CONFIG_DIR+'/profiles.json','utf8')),profile=registry.profiles[0],key=process.env.DWS_KEYCHAIN_DIR+'/dws-cli/auth-token.enc',token=JSON.parse(await readFile(key,'utf8'));
-if(Reflect.get(globalThis,Symbol.for('open_aider.testNetworkGuard'))!==true)throw Error('CHILD_NETWORK_GUARD_MISSING');
+if(Reflect.get(globalThis,Symbol.for('anthys.testNetworkGuard'))!==true)throw Error('CHILD_NETWORK_GUARD_MISSING');
 if(Object.keys(process.env).some(k=>/^(AIDER_AI_|GLM_|DINGTALK_|DATABASE_|APP_MASTER_KEY|NODE_OPTIONS)/.test(k)))throw Error('UNEXPECTED_INHERITED_SECRET_ENV');
 const event=async(extra={})=>appendFile(${JSON.stringify(telemetry)},JSON.stringify({args,root,pid:process.pid,parent:process.ppid,corp:profile.corpId,user:profile.userId,rootMode:(await stat(root)).mode&511,fileMode:(await stat(key)).mode&511,tokenMatches:token.token===${JSON.stringify(dwsCredentialCanary)}+'_'+profile.userId,...extra})+'\\n');
 await event({phase:'START'});const finish=data=>process.stdout.write(JSON.stringify(data));

@@ -24,7 +24,7 @@ export async function historicalMigrationDatabase(prefix:73|94=94){
   await source.connect();connected=true;
   await source.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
   const sourceIdentity=(await source.query("SELECT current_database() name,current_user actor,(SELECT system_identifier::text FROM pg_control_system()) system")).rows[0];
-  if(sourceIdentity.name!=='open_aider_test'||sourceIdentity.actor!=='oa_migrator')throw Error('HISTORICAL_FIXTURE_SOURCE_REJECTED');
+  if(sourceIdentity.name!=='anthys_test'||sourceIdentity.actor!=='oa_migrator')throw Error('HISTORICAL_FIXTURE_SOURCE_REJECTED');
   const sourceBefore=digest(JSON.stringify((await source.query('SELECT name,hash FROM public.schema_migrations ORDER BY name')).rows));
   const clusterBefore=await clusterState(source);await source.query('COMMIT');
   // Always reproduce CI: first bring this own clone to the CURRENT source.
@@ -32,7 +32,7 @@ export async function historicalMigrationDatabase(prefix:73|94=94){
   const current=(await own.root.query('SELECT name,hash FROM public.schema_migrations ORDER BY name')).rows;
   if(JSON.stringify(current)!==JSON.stringify(requiredSchema.migrations))throw Error('HISTORICAL_FIXTURE_CURRENT_SCHEMA_REQUIRED');
   const url=new URL(own.connectionString);
-  if(url.hostname!=='127.0.0.1'||url.port!=='53331'||url.pathname!=='/'+own.name||url.username!=='oa_migrator'||!/^open_aider_test_group_reminder_[a-f0-9]{32}$/.test(own.name))throw Error('HISTORICAL_FIXTURE_OWN_NONCE_REQUIRED');
+  if(url.hostname!=='127.0.0.1'||url.port!=='64711'||url.pathname!=='/'+own.name||url.username!=='oa_migrator'||!/^anthys_test_group_reminder_[a-f0-9]{32}$/.test(own.name))throw Error('HISTORICAL_FIXTURE_OWN_NONCE_REQUIRED');
   const definitions=[];
   for(const [index,migration] of requiredSchema.migrations.slice(0,prefix).entries()){
    let sql=await readFile('db/migrations/'+migration.name,'utf8');
@@ -46,7 +46,7 @@ export async function historicalMigrationDatabase(prefix:73|94=94){
   const client=await own.root.connect();
   try{
    await client.query('BEGIN');
-   await client.query("SELECT pg_advisory_xact_lock(hashtext('open_aider_migrations'))");
+   await client.query("SELECT pg_advisory_xact_lock(hashtext('anthys_migrations'))");
    const identity=(await client.query("SELECT current_database() name,current_user actor,(SELECT system_identifier::text FROM pg_control_system()) system")).rows[0];
    if(identity.name!==own.name||identity.actor!=='oa_migrator'||identity.system!==sourceIdentity.system||await clusterState(client)!==clusterBefore)throw Error('HISTORICAL_FIXTURE_IDENTITY_CHANGED');
    if((await client.query('SELECT EXISTS(SELECT 1 FROM public.tenants) present')).rows[0].present===true)throw Error('HISTORICAL_FIXTURE_EMPTY_CLONE_REQUIRED');

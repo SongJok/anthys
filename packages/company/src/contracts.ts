@@ -2,9 +2,9 @@ import {z} from 'zod';
 import {canonical} from '../../gateway/src/index.js';
 import {hash} from '../../storage/src/crypto.js';
 
-// This is an open_aider scoped-proxy contract, NOT an assertion that an
+// This is an anthys scoped-proxy contract, NOT an assertion that an
 // arbitrary upstream chat agent understands or enforces these instructions.
-export const COMPANY_CHAT_CONTRACT={id:'open_aider.company.code.read',version:1,operations:['CHECK','SEARCH','READ'],authorization:'UPSTREAM_RESOURCE_ENFORCED',sideEffects:'NONE'} as const;
+export const COMPANY_CHAT_CONTRACT={id:'anthys.company.code.read',version:1,operations:['CHECK','SEARCH','READ'],authorization:'UPSTREAM_RESOURCE_ENFORCED',sideEffects:'NONE'} as const;
 export const companyContractHash=hash(canonical(COMPANY_CHAT_CONTRACT));
 export const repoSchema=z.string().min(1).max(256).regex(/^[A-Za-z0-9][A-Za-z0-9._/-]*$/).refine(s=>!s.split('/').some(p=>p==='..'||!p),'INVALID_REPO');
 export const commitSchema=z.string().regex(/^[a-f0-9]{40}$/);

@@ -1,4 +1,4 @@
-name: open-aider
+name: anthys
 on: [push, pull_request]
 permissions:
   contents: read

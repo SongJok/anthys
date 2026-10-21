@@ -1,16 +1,16 @@
-name: open-aider-test
+name: anthys-test
 services:
   postgres:
     image: postgres:17-bookworm@sha256:3645570cccdfa447589da9f57dd740faa29b30938e861289a5574b6ca6b03826
     environment:
       POSTGRES_USER: oa_migrator
-      POSTGRES_DB: open_aider_test
+      POSTGRES_DB: anthys_test
       POSTGRES_PASSWORD_FILE: /run/secrets/pg_admin_password
     secrets: [pg_admin_password]
-    ports: ["127.0.0.1:53331:5432"]
+    ports: ["127.0.0.1:64711:5432"]
     tmpfs: [/var/lib/postgresql/data]
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U oa_migrator -d open_aider_test"]
+      test: ["CMD-SHELL", "pg_isready -U oa_migrator -d anthys_test"]
       interval: 2s
       timeout: 3s
       retries: 20

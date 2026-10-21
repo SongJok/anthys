@@ -3,7 +3,7 @@ import {readFile,mkdir} from 'node:fs/promises';
 type Fixture={actorId:string;grantId:string;roleBinding:string;capabilityId:string};
 async function fixtures(){return JSON.parse(await readFile('.data/test-environment/browser-permission-fixtures.json','utf8')) as Record<string,Fixture>;}
 async function login(page:Page,context:BrowserContext,project:string){
- await context.route('**/*',route=>new URL(route.request().url()).origin==='http://localhost:52339'?route.continue():route.abort('blockedbyclient'));
+ await context.route('**/*',route=>new URL(route.request().url()).origin==='http://localhost:64702'?route.continue():route.abort('blockedbyclient'));
  await page.route('https://login.dingtalk.com/oauth2/auth?*',async route=>{const url=new URL(route.request().url()),callback=new URL(url.searchParams.get('redirect_uri')!);callback.searchParams.set('authCode','synthetic-permission-'+project+'-code');callback.searchParams.set('state',url.searchParams.get('state')!);await route.fulfill({status:302,headers:{location:callback.toString()}});});
  await page.goto('/tasks');await page.getByRole('button',{name:'使用钉钉登录'}).click();await expect(page.getByRole('heading',{name:'创建任务'})).toBeVisible();await page.goto('/permissions');await expect(page.getByRole('region',{name:'权限中心'}).getByRole('heading',{name:'我的权限'})).toBeVisible();
 }
@@ -13,7 +13,7 @@ test('owner metadata, honest UNKNOWN diagnosis and resource withdrawal invalidat
  await login(page,context,info.project.name);const center=page.getByRole('region',{name:'权限中心'});await expect(center.getByText('合成资源使用条件 · 当前有效',{exact:true})).toBeVisible();expect(await page.content()).not.toContain('synthetic-private-resource-'+(info.project.name==='desktop'?'mobile':'desktop'));expect(await page.content()).not.toContain('SYNTHETIC_PERMISSION_BROWSER_CREDENTIAL');
  const overview=await page.request.get('/api/v1/permissions');expect(overview.headers()['cache-control']).toBe('private, no-store');expect((await overview.json()).data.grants.items.map((g:{id:string})=>g.id)).toEqual([f.grantId]);
  const csrf=(await(await page.request.get('/api/v1/auth/csrf')).json()).data.csrfToken as string;
- const denied=await page.request.post('/api/v1/permissions/resources/'+other.grantId+'/diagnostic',{headers:{origin:'http://localhost:52339','x-csrf-token':csrf},data:{capabilityVersion:'1.0.0'}});expect(denied.status()).toBe(404);
+ const denied=await page.request.post('/api/v1/permissions/resources/'+other.grantId+'/diagnostic',{headers:{origin:'http://localhost:64702','x-csrf-token':csrf},data:{capabilityVersion:'1.0.0'}});expect(denied.status()).toBe(404);
  expect((await page.request.post('/api/v1/permissions/resources/'+f.grantId+'/withdraw',{data:{version:1}})).status()).toBe(403);
  await page.reload();await center.getByRole('button',{name:'重新检查',exact:true}).click();const result=page.getByRole('complementary',{name:'权限检查结果'});await expect(result.getByText('平台状态：尚未核实')).toBeVisible();await expect(result.getByText('所需权限：Synthetic.Read')).toBeVisible();await expect(result.getByText('此检查不会开通权限或执行业务操作。')).toBeVisible();
  await expect.poll(()=>page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);await mkdir('reports/ui',{recursive:true});await result.scrollIntoViewIfNeeded();await page.screenshot({path:'reports/ui/p04-permissions-diagnostic-'+info.project.name+'.png'});

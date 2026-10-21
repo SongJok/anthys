@@ -25,13 +25,13 @@ async function selectWindow(page:Page,window:{from:string;until:string}){
 test('registration windows use real API/PG, show UTC coverage, clear drafts and ignore a late real response',async({page,request},info)=>{
  const f=await fixture(info.project.name),title='窗口查询 '+randomUUID();
  const response=await request.post('/api/v1/groups/'+encodeURIComponent(f.group)+'/cases',{
-  headers:{cookie:'oa_session='+f.ownerApiCookie,origin:'http://localhost:52339','x-csrf-token':f.ownerApiCsrf,'idempotency-key':randomUUID()},
+  headers:{cookie:'oa_session='+f.ownerApiCookie,origin:'http://localhost:64702','x-csrf-token':f.ownerApiCsrf,'idempotency-key':randomUUID()},
   data:{contractVersion:1,details:{title,resourceRef:'window:'+randomUUID(),priority:'NORMAL',dueAt:null},source:{kind:'CARD',shareWithGroup:true}},
  });
  expect(response.status()).toBe(201);
  const created=(await response.json()).data.case as {id:string;sources:{created_at:string}[]};
  expect(created.sources[0]?.created_at).toBeTruthy();
- await page.context().addCookies([{name:'oa_session',value:f.ownerCookie,url:'http://localhost:52339'}]);
+ await page.context().addCookies([{name:'oa_session',value:f.ownerCookie,url:'http://localhost:64702'}]);
  await page.goto('/groups');await expect(page.getByText('工作台已就绪',{exact:true})).toBeVisible();
  await area(page).getByLabel('管理员提供的群标识',{exact:true}).fill(f.group);
  const current=await endpoints(page,created.sources[0]!.created_at),past=await endpoints(page,created.sources[0]!.created_at,-2);

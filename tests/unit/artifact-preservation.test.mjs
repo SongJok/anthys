@@ -37,7 +37,7 @@ test('the real runner refuses to launch its child when report preservation fails
       await mkdir(join(root, directory), {recursive: true});
     const prepared = {APP_ENV: 'test', OA_TEST_ISOLATED: 'true'};
     for (const [name, role] of [['DATABASE_URL', 'oa_app'], ['RUNTIME_DATABASE_URL', 'oa_runtime'], ['QUEUE_DATABASE_URL', 'oa_queue'], ['MIGRATION_DATABASE_URL', 'oa_migrator']])
-      prepared[name] = `postgresql://${role}:${'x'.repeat(32)}@127.0.0.1:53331/open_aider_test`;
+      prepared[name] = `postgresql://${role}:${'x'.repeat(32)}@127.0.0.1:64711/anthys_test`;
     for (const [name, file] of [['APP_MASTER_KEY_FILE', 'app_master_key'], ['SESSION_SECRET_FILE', 'session_secret'], ['BUDGET_POLICY_FILE', 'budget-policy.json']])
       prepared[name] = join(root, '.data/test-environment', file);
     await writeFile(join(root, '.data/test-environment/environment.json'), JSON.stringify(prepared));

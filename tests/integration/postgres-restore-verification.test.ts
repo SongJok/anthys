@@ -76,7 +76,7 @@ it.each(['cancel','timeout'] as const)('an actual blocked read ends on %s and re
  await lock.query('BEGIN');await lock.query(`LOCK TABLE ${quote(row.schema)}.${quote(row.name)} IN ACCESS EXCLUSIVE MODE`);
  try{
   const pending=capture(source.connectionString,source.name,{signal:controller.signal,limits:{...limits,timeoutMs:kind==='timeout'?1000:10000}});void pending.catch(()=>{});
-  if(kind==='cancel'){let waiting=false;for(let i=0;i<200;i++){waiting=!!(await source.root.query("SELECT 1 FROM pg_stat_activity WHERE datname=$1 AND application_name='open-aider-restore-verification' AND wait_event_type='Lock'",[source.name])).rowCount;if(waiting)break;await new Promise(resolvePromise=>setTimeout(resolvePromise,20));}expect(waiting).toBe(true);controller.abort();}
+  if(kind==='cancel'){let waiting=false;for(let i=0;i<200;i++){waiting=!!(await source.root.query("SELECT 1 FROM pg_stat_activity WHERE datname=$1 AND application_name='anthys-restore-verification' AND wait_event_type='Lock'",[source.name])).rowCount;if(waiting)break;await new Promise(resolvePromise=>setTimeout(resolvePromise,20));}expect(waiting).toBe(true);controller.abort();}
   await expect(pending).rejects.toMatchObject({code:kind==='timeout'?'TIMEOUT':'CANCELLED'});
  }finally{await lock.query('ROLLBACK');lock.release();}
 },15000);

@@ -28,7 +28,7 @@ export async function configureCompanyCode(gateway:Gateway,env:NodeJS.ProcessEnv
   // Rediscovery precedes each call, so disabling optional GET is deliberate.
   if((init.method??'GET')==='GET')return new Response(null,{status:405});
   return boundedResponse(await fetcher(input,{...init,redirect:'error',signal:AbortSignal.any([...(init.signal?[init.signal]:[]),AbortSignal.timeout(config.timeoutMs)])}));};
- const client=new Client({name:'open_aider_company_code',version:'0.1.0'},{capabilities:{}}),transport=new StreamableHTTPClientTransport(new URL(config.endpoint),{requestInit:{headers:{authorization:'Bearer '+token}},fetch:boundFetch});
+ const client=new Client({name:'anthys_company_code',version:'0.1.0'},{capabilities:{}}),transport=new StreamableHTTPClientTransport(new URL(config.endpoint),{requestInit:{headers:{authorization:'Bearer '+token}},fetch:boundFetch});
  try{await client.connect(transport as Transport,{timeout:config.timeoutMs,maxTotalTimeout:config.timeoutMs,signal:AbortSignal.timeout(config.timeoutMs)});if(client.getServerVersion()?.name!==config.server.name||client.getServerVersion()?.version!==config.server.version||!client.getServerCapabilities()?.tools)throw new CompanySourceError('COMPANY_SERVER_CHANGED');registerCompanyCodeCapabilities(gateway,new CompanyChat(client,config.connectorId,connectionBinding,config.timeoutMs,config.maxConcurrent));return {enabled:true,close:()=>client.close()};}
  catch{await client.close().catch(()=>{});throw new CompanySourceError('COMPANY_CONNECTION_UNAVAILABLE');}
 }

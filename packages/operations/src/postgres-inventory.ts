@@ -57,7 +57,7 @@ export async function capturePostgresInventory(input:CapturePostgresInventoryInp
   try{const url=new URL(input.connectionString!);if(url.protocol!=='postgresql:'||url.username!=='oa_migrator'||decodeURIComponent(url.pathname.slice(1))!==input.expectedDatabase||url.hash||url.search||input.connectionString!.includes('?')||input.connectionString!.includes('#')||!url.hostname||!url.password||input.connectionString!.length>8192)throw Error();}catch{throw new InventoryError('INVALID_INPUT');}
   config={connectionString:input.connectionString};
  }
- const c=new pg.Client({...config,connectionTimeoutMillis:3000,query_timeout:limits.data.timeoutMs,application_name:'open-aider-restore-verification'}),controller=new AbortController(),timer=setTimeout(()=>controller.abort(),limits.data.timeoutMs),signal=AbortSignal.any([input.signal,controller.signal]);timer.unref();
+ const c=new pg.Client({...config,connectionTimeoutMillis:3000,query_timeout:limits.data.timeoutMs,application_name:'anthys-restore-verification'}),controller=new AbortController(),timer=setTimeout(()=>controller.abort(),limits.data.timeoutMs),signal=AbortSignal.any([input.signal,controller.signal]);timer.unref();
  let connected=false;const stop=()=>{void c.end().catch(()=>{});};c.on('error',()=>{});signal.addEventListener('abort',stop,{once:true});
  try{
   signal.throwIfAborted();await c.connect();connected=true;await c.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');

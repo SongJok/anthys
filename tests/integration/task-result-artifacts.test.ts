@@ -16,12 +16,12 @@ import {TaskResultArtifacts} from '../../packages/artifacts/src/service.js';
 import {createServer} from '../../apps/api/src/server.js';
 import {config,secret} from '../../packages/config/src/index.js';
 let isolated:Awaited<ReturnType<typeof groupReminderDatabase>>,api:Awaited<ReturnType<typeof createServer>>,directory:string,files:EncryptedFileStore,service:TaskResultArtifacts,store:RuntimeStore,gateway:Gateway;
-const vault=new Vault(new Map([['1',randomBytes(32)]]),'1'),origin='http://127.0.0.1:52339',signingKey=randomBytes(32).toString('hex');
+const vault=new Vault(new Map([['1',randomBytes(32)]]),'1'),origin='http://127.0.0.1:64702',signingKey=randomBytes(32).toString('hex');
 const signal=()=>new AbortController().signal;
 beforeAll(async()=>{
  isolated=await groupReminderDatabase();await isolated.install();expect(await isolated.db.ready()).toBe(true);
  directory=await realpath(await mkdtemp(join(tmpdir(),'oa-task-artifact-')));files=new EncryptedFileStore(join(directory,'files'),vault);store=new RuntimeStore(isolated.db,vault);gateway=new Gateway(store);service=new TaskResultArtifacts(isolated.db,vault,files,gateway);
- api=await createServer({config:{...config(),APP_ORIGIN:origin},db:isolated.appDb,sessionSecret:signingKey,finalReader:gateway,artifacts:service});await api.app.listen({host:'127.0.0.1',port:52339});
+ api=await createServer({config:{...config(),APP_ORIGIN:origin},db:isolated.appDb,sessionSecret:signingKey,finalReader:gateway,artifacts:service});await api.app.listen({host:'127.0.0.1',port:64702});
 });
 afterAll(async()=>{await api?.app.close();await isolated?.close();if(directory)await rm(directory,{recursive:true,force:true});});
 const world=()=>artifactWorld({isolated,store,gateway,sessions:api.sessions},origin);

@@ -7,7 +7,7 @@ import {join,resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 const sourceSha='dd27f2b3c59e73ed14aa3324901242bf69a032a6347805f274e6260322d42979',version='17.11';
 export async function preparePostgresClient(){
- const root=join(await realpath('/tmp'),'open-aider-pg17-native'),env={PATH:'/usr/bin:/bin:/usr/local/bin',LC_ALL:'C',LANG:'C'};
+ const root=join(await realpath('/tmp'),'anthys-pg17-native'),env={PATH:'/usr/bin:/bin:/usr/local/bin',LC_ALL:'C',LANG:'C'};
  const inspect=async()=>{
   const pins={};for(const name of ['pg_dump','pg_restore']){const path=join(root,'bin',name),s=await lstat(path);if(!s.isFile()||s.isSymbolicLink()||await realpath(path)!==path||s.uid!==process.getuid?.()||(s.mode&0o022)||(s.mode&0o111)===0||s.size>256*1024*1024)throw Error('PG17_TEST_CLIENT_UNSAFE');const bytes=await readFile(path),observed=execFileSync(path,['--version'],{env,cwd:'/',timeout:10000,maxBuffer:4096,encoding:'utf8',stdio:['ignore','pipe','pipe']}).trim();if(observed!==name+' (PostgreSQL) '+version)throw Error('PG17_TEST_CLIENT_VERSION_MISMATCH');pins[name]={path,sha256:createHash('sha256').update(bytes).digest('hex'),version:observed};}return pins;
  };

@@ -3,7 +3,7 @@ import {test} from 'node:test';
 import {GroupRemindersFlow,GroupRemindersFailure,reminderScheduleActions,reminderDraft,reminderDraftRule,draftFromReminder} from '../../apps/web/src/group-reminders-flow.js';
 import {groupReminderRule,type GroupReminderSchedule} from '../../packages/groups/src/reminder-model.js';
 import {preview} from '../../packages/schedules/src/rules.js';
-assert.equal(Reflect.get(globalThis,Symbol.for('open_aider.testNetworkGuard')),true);
+assert.equal(Reflect.get(globalThis,Symbol.for('anthys.testNetworkGuard')),true);
 assert.deepEqual(Object.keys(process.env).filter(k=>/(?:DATABASE|PROVIDER|GLM|DINGTALK|DWS|MCP|TOKEN|SECRET|CREDENTIAL|^PG|^NODE_OPTIONS$)/i.test(k)),[]);
 const id=(n:number)=>`00000000-0000-4000-8000-${String(n).padStart(12,'0')}`,actor=id(1),now='2026-10-19T00:00:00.000Z';
 const rule=groupReminderRule.parse({schemaVersion:1,kind:'ONCE',tz:'UTC',start:{kind:'UTC',at:'2026-10-20T00:00:00Z'},misfire:{kind:'REMINDER_LATEST'}});

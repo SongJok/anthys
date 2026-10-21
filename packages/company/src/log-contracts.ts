@@ -1,9 +1,9 @@
 import {z} from 'zod';
 import {canonical} from '../../gateway/src/index.js';
 import {hash} from '../../storage/src/crypto.js';
-// An independently reviewed open_aider proxy contract. Discovery of a generic
+// An independently reviewed anthys proxy contract. Discovery of a generic
 // upstream chat tool never proves that it supports this contract or log access.
-export const COMPANY_LOGS_CONTRACT={id:'open_aider.company.logs.read',version:1,operations:['CHECK','QUERY'],authorization:'UPSTREAM_RESOURCE_ENFORCED',sideEffects:'NONE',snapshots:'IMMUTABLE_QUERY_RECEIPT'} as const;
+export const COMPANY_LOGS_CONTRACT={id:'anthys.company.logs.read',version:1,operations:['CHECK','QUERY'],authorization:'UPSTREAM_RESOURCE_ENFORCED',sideEffects:'NONE',snapshots:'IMMUTABLE_QUERY_RECEIPT'} as const;
 export const companyLogsContractHash=hash(canonical(COMPANY_LOGS_CONTRACT));
 const instant=z.iso.datetime({offset:true}).refine(v=>Number.isFinite(Date.parse(v)),'FINITE_INSTANT_REQUIRED').transform(v=>new Date(v).toISOString());
 export const logEnvironmentSchema=z.enum(['TEST','STAGING','PRODUCTION']);

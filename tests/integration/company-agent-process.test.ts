@@ -35,7 +35,7 @@ async function fresh(){const w=await companyAgentWorld(isolated,vault);w.admissi
 async function launch(w:Awaited<ReturnType<typeof fresh>>,mode:'in-flight'|'stored-before-resume'){
  const process=startChild(mode);try{expect(await process.wait('READY')).toEqual({phase:'READY',calls:0});
   // IPC only: never argv/env/logs. Original inherited DB env remains the guarded
-  // 53331/open_aider_test target; child derives its own nonce DB connection.
+  // 64711/anthys_test target; child derives its own nonce DB connection.
   await new Promise<void>((resolve,reject)=>process.child.send({ctx:w.ctx,admission:w.admission,databaseName:isolated.name,keyHex:key.toString('hex'),grantId:w.grantId},error=>error?reject(Error('SYNTHETIC_CHILD_IPC_SEND_FAILED')):resolve()));return process;
  }catch(error){await process.stop();throw error;}
 }

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {ScheduleFlow,ScheduleFailure,reminderRuleSchema,reminderActions,type ReminderSchedule,type ScheduleTransport} from '../../apps/web/src/schedule-flow.js';
 import {preview} from '../../packages/schedules/src/rules.js';
-assert.equal(Reflect.get(globalThis,Symbol.for('open_aider.testNetworkGuard')),true);
+assert.equal(Reflect.get(globalThis,Symbol.for('anthys.testNetworkGuard')),true);
 assert.deepEqual(Object.keys(process.env).filter(k=>/(?:DATABASE|PROVIDER|GLM|DINGTALK|DWS|MCP|TOKEN|SECRET|CREDENTIAL|^PG|^NODE_OPTIONS$)/i.test(k)),[]);
 const actor='10000000-0000-4000-8000-000000000001',other='10000000-0000-4000-8000-000000000002',id='20000000-0000-4000-8000-000000000001',id2='20000000-0000-4000-8000-000000000002',key='30000000-0000-4000-8000-000000000001',asOf='2026-10-18T00:00:00.000Z',now=()=>Date.parse(asOf);
 const rule=reminderRuleSchema.parse({schemaVersion:1,kind:'ONCE',tz:'Asia/Shanghai',start:{kind:'LOCAL',at:'2026-10-19T09:00:00'},misfire:{kind:'REMINDER_LATEST'}});
