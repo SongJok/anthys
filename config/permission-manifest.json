@@ -1,0 +1,102 @@
+[
+  {
+    "schemaVersion": "1.0",
+    "capabilityId": "dt.robot.send",
+    "provider": "DINGTALK_API",
+    "authMode": "APP",
+    "requiredScopes": [
+      "qyapi_robot_sendmsg"
+    ],
+    "resourcePreconditions": [
+      "published_internal_app",
+      "visible_test_user_or_group"
+    ],
+    "officialDocRef": "S08",
+    "liveVerification": "NOT_RUN"
+  },
+  {
+    "schemaVersion": "1.0",
+    "capabilityId": "dt.card.instance.write",
+    "provider": "DINGTALK_API",
+    "authMode": "APP",
+    "requiredScopes": [
+      "Card.Instance.Write"
+    ],
+    "resourcePreconditions": [
+      "authorized_card_template",
+      "authenticated_callback"
+    ],
+    "officialDocRef": "S06",
+    "liveVerification": "NOT_RUN"
+  },
+  {
+    "schemaVersion": "1.0",
+    "capabilityId": "dt.card.stream.update",
+    "provider": "DINGTALK_API",
+    "authMode": "APP",
+    "requiredScopes": [
+      "Card.Streaming.Write"
+    ],
+    "resourcePreconditions": [
+      "authorized_card_instance"
+    ],
+    "officialDocRef": "S06",
+    "liveVerification": "NOT_RUN"
+  },
+  {
+    "schemaVersion": "1.0",
+    "capabilityId": "dws.core",
+    "provider": "DWS",
+    "authMode": "USER_DELEGATED",
+    "requiredScopes": [],
+    "resourcePreconditions": [
+      "precise_verified_profile",
+      "enterprise_cli_eligibility",
+      "per_resource_authorization"
+    ],
+    "officialDocRef": "S09",
+    "liveVerification": "NOT_RUN",
+    "scopeDiscovery": "FROM_PINNED_CLI_AND_LIVE_ERRORS_ONLY"
+  },
+  {
+    "schemaVersion": "1.0",
+    "capabilityId": "dws.contact.me",
+    "provider": "DWS",
+    "authMode": "USER_DELEGATED",
+    "requiredScopes": [],
+    "resourcePreconditions": [
+      "precise_verified_owner_profile",
+      "private_user_audience",
+      "CONFIDENTIAL_resource_grant",
+      "approved_model_egress",
+      "current_authorization_version",
+      "certified_standalone_runner"
+    ],
+    "officialDocRef": "S09",
+    "pinnedSchema": "config/dws/contact-me.schema.json",
+    "liveVerification": "NOT_RUN",
+    "scopeDiscovery": "FROM_PINNED_CLI_AND_LIVE_ERRORS_ONLY"
+  },
+  {
+    "schemaVersion": "1.0",
+    "capabilityId": "dws.doc.read",
+    "provider": "DWS",
+    "authMode": "USER_DELEGATED",
+    "requiredScopes": [],
+    "resourcePreconditions": [
+      "exact_owner_profile",
+      "reviewed_stable_adoc_node",
+      "reviewed_tenant_payload_mapping",
+      "current_upstream_body_read_under_owner_identity",
+      "private_user_audience",
+      "classified_resource_grant_and_model_egress",
+      "current_source_proof",
+      "certified_standalone_runner"
+    ],
+    "officialDocRef": "S09",
+    "pinnedSchema": "config/dws/doc-fetch.schema.json",
+    "publishedResultSchema": false,
+    "liveVerification": "NOT_RUN",
+    "scopeDiscovery": "FROM_PINNED_CLI_AND_LIVE_ERRORS_ONLY"
+  }
+]

@@ -1,0 +1,4 @@
+import {z} from 'zod';
+import {dataResultContract} from '../../contracts/src/result-contract.js';
+import {logSourceReceiptSchema,logCanonicalQuerySchema,logCanonicalInstantSchema,logReceiptRowSchema,logSamplingSchema} from './log-contracts.js';
+export const companyLogsResultContract=dataResultContract(z.object({source:logSourceReceiptSchema,query:logCanonicalQuerySchema,queryId:z.uuid(),asOf:logCanonicalInstantSchema,timezone:z.string().min(1).max(100),rows:z.array(logReceiptRowSchema).max(100),totalCount:z.number().int().nonnegative().max(1000000000).nullable(),sampling:logSamplingSchema,truncated:z.boolean(),partial:z.boolean(),deploymentVersionVerification:z.literal('UNVERIFIED'),untrustedContent:z.literal(true)}).strict().refine(v=>v.queryId===v.source.queryId&&v.query.service===v.source.service&&v.query.environment===v.source.environment&&v.rows.length<=v.query.limit&&(v.totalCount===null||v.totalCount>=v.rows.length)));

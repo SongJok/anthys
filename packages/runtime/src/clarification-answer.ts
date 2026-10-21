@@ -1,0 +1,15 @@
+import {randomUUID} from 'node:crypto';
+import type pg from 'pg';
+import type {DbContext} from '../../storage/src/database.js';
+import {Vault,hash} from '../../storage/src/crypto.js';
+import {LeaseLost} from './store.js';
+// Persistence only. Callers must validate the current admitted question and
+// either the private reply authority or the actual group verification lease.
+export async function commitClarificationAnswer(c:pg.PoolClient,ctx:DbContext,vault:Vault,run:Record<string,unknown>,taskId:string,reviewId:string,text:string,key:string,source?:{eventId:string;conversationId:string},groupAudience?:{id:string;hash:string},personaSnapshot?:{id:string;hash:string}){
+ const seq=Number((await c.query('SELECT coalesce(max(seq),0)+1 seq FROM provider_journals WHERE run_id=$1',[run.id])).rows[0].seq),value=vault.seal(JSON.stringify({role:'user',content:text}),`${ctx.tenantId}:${ctx.actorId}:${run.id}:${seq}`);
+ await c.query("INSERT INTO provider_journals(tenant_id,id,owner_id,run_id,seq,ciphertext_ref,key_version,expires_at,session_no) VALUES($1,$2,$3,$4,$5,$6,$7,now()+interval '24 hours',$8)",[ctx.tenantId,randomUUID(),ctx.actorId,run.id,seq,JSON.stringify(value),value.version,run.provider_session_no]);
+ const messageId=randomUUID(),saved=vault.seal(JSON.stringify({reviewId,seq,content:text,...(groupAudience?{groupAudience}:{}),...(personaSnapshot?{personaSnapshot}:{})}),`${ctx.tenantId}:${ctx.actorId}:reply:${messageId}`);await c.query("INSERT INTO run_user_messages(tenant_id,id,owner_id,run_id,review_id,request_key,input_hash,message_ref,message_seq,generation,expires_at,content_state,source_event_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'SEALED',$12)",[ctx.tenantId,messageId,ctx.actorId,run.id,reviewId,key,hash(JSON.stringify({reviewId,text})),JSON.stringify(saved),seq,Number(run.retry_generation)+1,run.expires_at,source?.eventId??null]);
+ if(source)await c.query('UPDATE tasks SET reply_event_id=$2 WHERE id=$1',[taskId,source.eventId]);await c.query('UPDATE run_narrative_reviews SET answered_at=clock_timestamp(),updated_at=now(),version=version+1 WHERE id=$1',[reviewId]);
+ const generation=Number((await c.query("UPDATE runs SET status='QUEUED',result=NULL,last_error=NULL,clarification_review_id=NULL,group_reply_id=NULL,lease_owner=NULL,lease_until=NULL,retry_generation=retry_generation+1,version=version+1 WHERE id=$1 RETURNING retry_generation",[run.id])).rows[0].retry_generation);
+ await c.query("UPDATE deliveries SET state='SUPPRESSED',last_error='CLARIFICATION_ANSWERED' WHERE source_run_id=$1 AND state='PENDING'",[run.id]);await c.query("INSERT INTO outbox(tenant_id,id,owner_id,kind,aggregate_id,payload_ref,dedup_key) VALUES($1,$2,$3,'RUN',$4,$5,$6)",[ctx.tenantId,randomUUID(),ctx.actorId,run.id,JSON.stringify({tenantId:ctx.tenantId,actorId:ctx.actorId,runId:run.id,generation}),`reply:${run.id}:${reviewId}`]);if(!(await c.query('SELECT id FROM tasks WHERE id=$1 AND expires_at>clock_timestamp() AND cancel_requested_at IS NULL',[taskId])).rowCount)throw new LeaseLost();return {taskId,runId:run.id as string,generation};
+}

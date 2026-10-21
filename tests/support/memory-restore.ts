@@ -1,0 +1,11 @@
+import './isolation.js';
+import type pg from 'pg';
+const tables=['memory_items','memory_revisions','memory_search_index','memory_requests'] as const;
+type Rows=Record<typeof tables[number],Record<string,unknown>[]>;
+export async function captureMemory(root:pg.Pool,id:string){const rows={} as Rows;for(const table of tables)rows[table]=(await root.query(`SELECT * FROM ${table} WHERE ${table==='memory_items'?'id':'memory_id'}=$1`,[id])).rows;return rows;}
+export async function restoreMemoryFragment(root:pg.Pool,rows:Rows){
+ // This is deliberate trusted-restorer fault injection on this one synthetic
+ // UUID. Replication mode is transaction-local; no global trigger is disabled.
+ const client=await root.connect();try{await client.query('BEGIN');await client.query("SET LOCAL session_replication_role='replica'");for(const table of ['memory_revisions','memory_search_index'] as const){for(const row of rows[table]){const columns=Object.keys(row);await client.query(`INSERT INTO ${table}(${columns.join(',')}) VALUES(${columns.map((_,i)=>'$'+(i+1)).join(',')})`,Object.values(row));}}for(const table of ['memory_items','memory_requests'] as const)for(const row of rows[table]){const columns=Object.keys(row).filter(k=>!['tenant_id','id'].includes(k));await client.query(`UPDATE ${table} SET ${columns.map((k,i)=>k+'=$'+(i+3)).join(',')} WHERE tenant_id=$1 AND id=$2`,[row.tenant_id,row.id,...columns.map(k=>row[k])]);}await client.query('COMMIT');}catch(e){await client.query('ROLLBACK');throw e;}finally{client.release();}
+}
+export async function cleanRestoredFragment(root:pg.Pool,id:string,tombstone:Record<string,unknown>){const client=await root.connect();try{await client.query('BEGIN');await client.query("SET LOCAL session_replication_role='replica'");for(const table of ['memory_search_index','memory_revisions'])await client.query(`DELETE FROM ${table} WHERE memory_id=$1`,[id]);await client.query("UPDATE memory_requests SET input_ref=NULL,state='CONTENT_REMOVED' WHERE memory_id=$1",[id]);await client.query('UPDATE memory_items SET state=$2,current_revision_id=$3,deleted_at=$4,version=$5 WHERE id=$1',[id,tombstone.state,tombstone.current_revision_id,tombstone.deleted_at,tombstone.version]);await client.query('COMMIT');}catch(e){await client.query('ROLLBACK');throw e;}finally{client.release();}}

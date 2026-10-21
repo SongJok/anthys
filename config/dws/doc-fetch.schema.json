@@ -1,0 +1,110 @@
+{
+  "agent_summary": "读取完整或局部文档内容，并按 detail 控制保真度",
+  "availability": "available",
+  "avoid_when": [
+    "需要文件树移动、复制或普通钉盘文件操作时改用 drive；非文字文档按对象类型路由到 sheet、aitable、slides 或 wiki"
+  ],
+  "canonical_path": "doc.shortcut_fetch",
+  "cli_path": "doc +fetch",
+  "confirmation": "not_required",
+  "description": "当用户要按 node/URL 直接读取在线文字文档，或只知道唯一标题并希望一次完成解析和读取时使用；支持 outline/range/section/keyword/tags 局部内容用于精确编辑和评论；互联网公开文档（含密码保护）用 --password 提供访问密码，读历史版本用 --version 指定版本号（0 表示初始版本）。\n\n参数约束：\n  - --node 与 --query 必须且只能提供一个\n  - --scope keyword 时 --keyword 不能为空",
+  "effect": "read",
+  "examples": [
+    "dws doc +fetch --node <DOC_ID>",
+    "dws doc +fetch --query \"项目周报\" --scope keyword --keyword \"结论\""
+  ],
+  "idempotency": "idempotent",
+  "interface_mode": "composite",
+  "interface_reason": "Reviewed Doc Shortcut composite: the executable CLI owns validation, multi-step orchestration, local I/O, output projection, and confirmation; no single MCP interface represents the complete command contract.",
+  "parameters": {
+    "context-after": {
+      "description": "关键词命中后的上下文字符数",
+      "required": false,
+      "type": "integer"
+    },
+    "context-before": {
+      "description": "关键词命中前的上下文字符数",
+      "required": false,
+      "type": "integer"
+    },
+    "detail": {
+      "default": "simple",
+      "description": "输出细节（可选值: simple, with-ids, full）",
+      "enum": [
+        "simple",
+        "with-ids",
+        "full"
+      ],
+      "required": false,
+      "type": "string"
+    },
+    "end-block-id": {
+      "description": "range 结束块 ID",
+      "required": false,
+      "type": "string"
+    },
+    "keyword": {
+      "description": "keyword 范围搜索词，不能为空，支持 foo|bar",
+      "required": false,
+      "type": "string"
+    },
+    "max-depth": {
+      "description": "outline/section 最大深度",
+      "required": false,
+      "type": "integer"
+    },
+    "node": {
+      "description": "文档 ID 或 URL；--node 与 --query 必须且只能提供一个",
+      "required": false,
+      "type": "string"
+    },
+    "password": {
+      "description": "互联网公开文档开启密码保护时的访问密码；普通文档无需传入",
+      "required": false,
+      "type": "string"
+    },
+    "query": {
+      "description": "文档标题或关键词；跨页唯一解析后读取；--node 与 --query 必须且只能提供一个",
+      "required": false,
+      "type": "string"
+    },
+    "revision": {
+      "description": "不支持；revision 是文档编辑版本号（JSONML 读取响应返回、供 +update --expected-revision 条件写使用），不是历史版本号",
+      "required": false,
+      "type": "integer"
+    },
+    "scope": {
+      "default": "full",
+      "description": "读取范围；keyword 时 --keyword 不能为空（可选值: full, outline, range, section, keyword, tags）",
+      "enum": [
+        "full",
+        "outline",
+        "range",
+        "section",
+        "keyword",
+        "tags"
+      ],
+      "required": false,
+      "type": "string"
+    },
+    "start-block-id": {
+      "description": "range/section 起始块 ID",
+      "required": false,
+      "type": "string"
+    },
+    "tags": {
+      "description": "tags 范围的 JSONML tag",
+      "required": false,
+      "type": "array"
+    },
+    "version": {
+      "description": "读取指定历史版本(版本号从 doc +version-list 获取, 0 表示初始版本, 需要文档编辑权限)；缺省读最新版",
+      "required": false,
+      "type": "integer"
+    }
+  },
+  "risk": "low",
+  "use_when": [
+    "当用户要按 node/URL 直接读取在线文字文档，或只知道唯一标题并希望一次完成解析和读取时使用；支持 outline/range/section/keyword/tags 局部内容用于精确编辑和评论；互联网公开文档（含密码保护）用 --password 提供访问密码，读历史版本用 --version 指定版本号（0 表示初始版本）。"
+  ]
+}

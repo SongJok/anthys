@@ -1,0 +1,786 @@
+{
+  "R01": {
+    "tests": [
+      "T001",
+      "T002",
+      "T006",
+      "T009",
+      "T010"
+    ],
+    "modules": [
+      "packages/dingtalk/src/ingress.ts",
+      "packages/dingtalk/src/sender.ts",
+      "packages/dingtalk/src/clarification.ts",
+      "packages/dingtalk/src/clarification-receipt.ts",
+      "packages/dingtalk/src/task-receipt.ts",
+      "packages/gateway/src/delivery.ts"
+    ],
+    "status": "IN_PROGRESS",
+    "intendedModules": [
+      "packages/dingtalk/src/ingress.ts",
+      "packages/dingtalk/src/sender.ts"
+    ]
+  },
+  "R02": {
+    "tests": [
+      "T003",
+      "T004",
+      "T005"
+    ],
+    "modules": [
+      "packages/dingtalk/src/ingress.ts",
+      "db/migrations/002_tasks.sql"
+    ],
+    "status": "IN_PROGRESS",
+    "intendedModules": [
+      "packages/dingtalk/src/ingress.ts",
+      "db/migrations/002_tasks.sql"
+    ]
+  },
+  "R03": {
+    "tests": [
+      "T001",
+      "T007",
+      "T008",
+      "T116",
+      "T119"
+    ],
+    "modules": [
+      "apps/web/src/main.tsx",
+      "apps/api/src/server.ts"
+    ],
+    "status": "IN_PROGRESS",
+    "intendedModules": [
+      "apps/web/src/main.tsx"
+    ]
+  },
+  "R04": {
+    "tests": [
+      "T011",
+      "T012",
+      "T013",
+      "T014",
+      "T015",
+      "T017",
+      "T019",
+      "T020",
+      "T060"
+    ],
+    "modules": [
+      "packages/provider-glm/src/sse.ts",
+      "packages/provider-glm/src/client.ts",
+      "packages/runtime/src/store.ts",
+      "packages/runtime/src/checkpoint.ts",
+      "packages/gateway/src/checkpoint.ts",
+      "packages/runtime/src/budget.ts",
+      "packages/runtime/src/budget-policy.ts",
+      "packages/runtime/src/model-budget.ts",
+      "packages/runtime/src/budget-recovery.ts",
+      "packages/runtime/src/narrative-review.ts"
+    ],
+    "status": "IN_PROGRESS",
+    "intendedModules": [
+      "packages/provider-glm/src/sse.ts",
+      "packages/provider-glm/src/client.ts",
+      "packages/runtime/src/store.ts"
+    ]
+  },
+  "R05": {
+    "tests": [
+      "T012",
+      "T016",
+      "T018",
+      "T021",
+      "T022"
+    ],
+    "modules": [
+      "packages/runtime/src/loop.ts",
+      "packages/runtime/src/checkpoint.ts",
+      "packages/gateway/src/checkpoint.ts",
+      "packages/gateway/src/finalizer.ts",
+      "packages/runtime/src/narrative-review.ts"
+    ],
+    "status": "IN_PROGRESS",
+    "intendedModules": [
+      "packages/runtime/src/loop.ts"
+    ]
+  },
+  "R06": {
+    "tests": [
+      "T015",
+      "T022",
+      "T053",
+      "T059",
+      "T112"
+    ],
+    "modules": [
+      "packages/tasks/src/store.ts",
+      "packages/runtime/src/store.ts",
+      "packages/runtime/src/checkpoint.ts",
+      "packages/gateway/src/checkpoint.ts",
+      "packages/runtime/src/narrative-review.ts"
+    ],
+    "status": "IN_PROGRESS",
+    "intendedModules": [
+      "packages/tasks/src/store.ts",
+      "packages/runtime/src/store.ts"
+    ]
+  },
+  "R07": {
+    "tests": [
+      "T023",
+      "T024",
+      "T025",
+      "T030",
+      "T034",
+      "T054",
+      "T062"
+    ],
+    "modules": [
+      "packages/identity/src/directory.ts",
+      "packages/identity/src/sessions.ts",
+      "db/migrations/001_identity.sql"
+    ],
+    "status": "IN_PROGRESS",
+    "intendedModules": [
+      "packages/identity/src/directory.ts",
+      "packages/identity/src/sessions.ts",
+      "db/migrations/001_identity.sql"
+    ]
+  },
+  "R08": {
+    "tests": [
+      "T026",
+      "T027",
+      "T028",
+      "T063",
+      "T077"
+    ],
+    "modules": [
+      "packages/gateway/src/index.ts",
+      "packages/gateway/src/permission-administration.ts",
+      "packages/gateway/src/permissions.ts",
+      "apps/api/src/permissions.ts",
+      "db/migrations/077_managed_resource_grants.sql",
+      "db/migrations/080_managed_grant_descriptor_snapshot.sql",
+      "db/migrations/081_managed_grant_auth_mode_review.sql",
+      "packages/storage/src/database.ts",
+      "db/migrations/082_managed_grant_reader_admission.sql"
+    ],
+    "status": "IN_PROGRESS",
+    "intendedModules": [
+      "packages/gateway/src/index.ts"
+    ]
+  },
+  "R09": {
+    "tests": [
+      "T037",
+      "T038"
+    ],
+    "modules": [
+      "packages/personas/src/schema.ts",
+      "packages/personas/src/service.ts",
+      "packages/personas/src/runtime.ts",
+      "packages/personas/src/commands.ts",
+      "packages/personas/src/inbox.ts",
+      "apps/api/src/personas.ts",
+      "apps/web/src/personas.tsx",
+      "packages/dingtalk/src/personas.ts"
+    ],
+    "status": "IN_PROGRESS",
+    "intendedModules": [
+      "packages/personas"
+    ]
+  },
+  "R10": {
+    "tests": [
+      "T017",
+      "T039",
+      "T040",
+      "T041",
+      "T042",
+      "T043",
+      "T046"
+    ],
+    "modules": [
+      "packages/runtime/src/checkpoint.ts",
+      "packages/gateway/src/checkpoint.ts",
+      "packages/memory/src/schema.ts",
+      "packages/memory/src/service.ts",
+      "packages/memory/src/runtime.ts",
+      "packages/memory/src/commands.ts",
+      "packages/memory/src/inbox.ts",
+      "packages/dingtalk/src/memories.ts",
+      "apps/api/src/memories.ts",
+      "apps/web/src/memories.tsx",
+      "apps/maintenance/src/main.ts",
+      "packages/gateway/src/delivery.ts"
+    ],
+    "status": "IN_PROGRESS",
+    "intendedModules": [
+      "packages/memory"
+    ]
+  },
+  "R11": {
+    "tests": [
+      "T047",
+      "T048",
+      "T049",
+      "T050",
+      "T051",
+      "T052",
+      "T053",
+      "T054",
+      "T060"
+    ],
+    "modules": [
+      "packages/schedules/src/rules.ts",
+      "packages/schedules/src/model.ts",
+      "packages/schedules/src/commands.ts",
+      "packages/schedules/src/service.ts",
+      "packages/schedules/src/runner.ts",
+      "packages/schedules/src/delivery.ts",
+      "packages/schedules/src/receipts.ts",
+      "apps/scheduler/src/main.ts",
+      "apps/api/src/schedules.ts",
+      "apps/web/src/schedules.tsx",
+      "db/migrations/089_private_schedules.sql",
+      "db/migrations/090_schedule_execution_and_history.sql",
+      "db/migrations/091_native_schedule_receipts.sql"
+    ],
+    "status": "IN_PROGRESS",
+    "intendedModules": [
+      "packages/scheduler"
+    ],
+    "remaining": "Private deterministic reminder implementation requires exact-candidate final validation; scheduled reports/monitoring, enterprise business-calendar provider, delegated/group notification contracts and live enterprise acceptance remain incomplete."
+  },
+  "R12": {
+    "tests": [
+      "T055",
+      "T056",
+      "T057",
+      "T058"
+    ],
+    "modules": [],
+    "status": "NOT_STARTED",
+    "intendedModules": [
+      "packages/watches"
+    ]
+  },
+  "R13": {
+    "tests": [
+      "T006",
+      "T033",
+      "T057",
+      "T107",
+      "T111",
+      "T112"
+    ],
+    "modules": [
+      "packages/groups/src/contracts.ts",
+      "packages/groups/src/governance.ts",
+      "packages/groups/src/audience.ts",
+      "apps/api/src/group-contracts.ts",
+      "apps/web/src/group-contract-admin.tsx",
+      "db/migrations/085_group_contract_governance.sql"
+    ],
+    "status": "IN_PROGRESS",
+    "intendedModules": [
+      "packages/groups"
+    ],
+    "remaining": "Reviewed MENTION_ONLY contract persistence and pause/revoke UI/API are exercised offline. Platform owner certification, complete creation/activation administration, enhanced sources and proactive/group business workflows are not complete; T107/T112 remain partial components."
+  },
+  "R14": {
+    "tests": [
+      "T108",
+      "T109",
+      "T110",
+      "T111"
+    ],
+    "modules": [
+      "packages/groups/src/case-model.ts",
+      "packages/groups/src/cases.ts",
+      "apps/api/src/group-cases.ts",
+      "db/migrations/087_group_cases.sql",
+      "db/migrations/088_group_case_member_projection.sql",
+      "apps/web/src/group-cases.tsx",
+      "apps/web/src/group-cases-flow.ts",
+      "packages/groups/src/commands.ts",
+      "packages/groups/src/receipts.ts",
+      "db/migrations/092_native_group_cases.sql",
+      "tests/integration/native-group-cases.test.ts",
+      "packages/groups/src/read-capability.ts",
+      "packages/groups/src/case-contracts.ts",
+      "db/migrations/093_group_case_model_read.sql",
+      "tests/integration/group-case-model-read.test.ts",
+      "tests/unit/group-case-read-surface.test.ts",
+      "packages/groups/src/case-roster.ts",
+      "packages/dws/src/case-roster-protocol.ts",
+      "packages/dws/src/signed-service.ts",
+      "db/migrations/094_group_case_roster_authority.sql",
+      "tests/integration/group-case-roster-authority.test.ts",
+      "tests/integration/group-case-roster-signed.test.ts",
+      "packages/groups/src/escalations.ts",
+      "packages/groups/src/escalation-contracts.ts",
+      "packages/groups/src/escalation-adapter.ts",
+      "packages/groups/src/escalation-proof.ts",
+      "packages/groups/src/escalation-delivery.ts",
+      "packages/groups/src/escalation-runner.ts",
+      "packages/groups/src/escalation-cycle.ts",
+      "packages/config/src/group-escalation-runtime.ts",
+      "scripts/group-escalation-runtime.ts",
+      "apps/api/src/group-escalations.ts",
+      "apps/web/src/group-escalations.tsx",
+      "apps/web/src/group-escalations-flow.ts",
+      "db/migrations/103_group_case_escalations.sql"
+    ],
+    "status": "IN_PROGRESS",
+    "intendedModules": [
+      "packages/groups"
+    ],
+    "remaining": "Current roster/assignment and fixed source citations, explicit administrator single-case escalation with durable shared quotas and finite signed delivery are locally implemented. Complete natural-language/date semantics, multi-member native delegation, enhanced-source revocation, automatic escalation policy, full gates and necessary enterprise acceptance remain required."
+  },
+  "R15": {
+    "tests": [
+      "T002",
+      "T069",
+      "T070",
+      "T108"
+    ],
+    "modules": [
+      "packages/dingtalk/src/ingress.ts",
+      "packages/groups/src/case-model.ts",
+      "packages/groups/src/cases.ts",
+      "apps/web/src/group-cases.tsx",
+      "packages/groups/src/commands.ts",
+      "packages/groups/src/receipts.ts",
+      "db/migrations/092_native_group_cases.sql",
+      "tests/integration/native-group-cases.test.ts",
+      "packages/groups/src/read-capability.ts",
+      "packages/groups/src/case-contracts.ts",
+      "db/migrations/093_group_case_model_read.sql",
+      "tests/integration/group-case-model-read.test.ts",
+      "tests/unit/group-case-read-surface.test.ts",
+      "packages/groups/src/case-roster.ts",
+      "packages/dws/src/case-roster-protocol.ts",
+      "packages/dws/src/signed-service.ts",
+      "db/migrations/094_group_case_roster_authority.sql",
+      "tests/integration/group-case-roster-authority.test.ts",
+      "tests/integration/group-case-roster-signed.test.ts"
+    ],
+    "status": "IN_PROGRESS",
+    "intendedModules": [
+      "packages/dingtalk/src/ingress.ts"
+    ]
+  },
+  "R16": {
+    "tests": [
+      "T020",
+      "T044",
+      "T045",
+      "T095"
+    ],
+    "modules": [
+      "packages/runtime/src/loop.ts"
+    ],
+    "status": "IN_PROGRESS",
+    "intendedModules": [
+      "packages/runtime/src/loop.ts"
+    ]
+  },
+  "R17": {
+    "tests": [
+      "T103",
+      "T104",
+      "T105",
+      "T106"
+    ],
+    "modules": [],
+    "status": "NOT_STARTED",
+    "intendedModules": [
+      "packages/search"
+    ]
+  },
+  "R18": {
+    "tests": [
+      "T073",
+      "T074",
+      "T076",
+      "T078",
+      "T082"
+    ],
+    "modules": [
+      "packages/company/src/contracts.ts",
+      "packages/company/src/chat.ts",
+      "packages/company/src/code.ts",
+      "packages/company/src/configuration.ts",
+      "db/migrations/032_company_code_scopes.sql"
+    ],
+    "status": "IN_PROGRESS",
+    "intendedModules": [
+      "packages/mcp"
+    ],
+    "remaining": "Logs/deployment correlation, general narrative reasoning, full permission/version review lifecycle and live company acceptance remain incomplete."
+  },
+  "R19": {
+    "tests": [
+      "T073",
+      "T075",
+      "T076",
+      "T077",
+      "T078",
+      "T082"
+    ],
+    "modules": [
+      "packages/company/src/log-contracts.ts",
+      "packages/company/src/log-client.ts",
+      "packages/company/src/logs.ts",
+      "packages/company/src/log-configuration.ts",
+      "packages/company/src/log-result-contract.ts",
+      "packages/company/src/log-citation.ts",
+      "db/migrations/086_company_log_scopes.sql"
+    ],
+    "status": "IN_PROGRESS",
+    "intendedModules": [
+      "packages/mcp"
+    ],
+    "remaining": "Reviewed log query software is exercised with isolated MCP SDK/HTTP, PostgreSQL and native-model substitutes. Real upstream certification/T082, deployment/code version alignment, trace enrichment and other authentication/transport/review lifecycles remain unverified or incomplete."
+  },
+  "R20": {
+    "tests": [
+      "T083",
+      "T084",
+      "T085",
+      "T086",
+      "T087",
+      "T088",
+      "T089",
+      "T090",
+      "T091",
+      "T092",
+      "T093",
+      "T094",
+      "T095",
+      "T096"
+    ],
+    "modules": [],
+    "status": "NOT_STARTED",
+    "intendedModules": [
+      "packages/data"
+    ]
+  },
+  "R21": {
+    "tests": [
+      "T097",
+      "T098",
+      "T099"
+    ],
+    "modules": [],
+    "status": "NOT_STARTED",
+    "intendedModules": [
+      "packages/sandbox"
+    ]
+  },
+  "R22": {
+    "tests": [
+      "T032",
+      "T094",
+      "T099",
+      "T100",
+      "T101",
+      "T102",
+      "T106"
+    ],
+    "modules": [
+      "packages/artifacts/src/index.ts",
+      "packages/artifacts/src/service.ts",
+      "packages/artifacts/src/native-capability.ts",
+      "packages/artifacts/src/native-host.ts",
+      "packages/artifacts/src/runtime.ts",
+      "apps/web/src/artifacts.tsx",
+      "db/migrations/102_native_artifact_drafts.sql"
+    ],
+    "status": "IN_PROGRESS",
+    "intendedModules": [
+      "packages/artifacts"
+    ]
+  },
+  "R23": {
+    "tests": [
+      "T028",
+      "T061",
+      "T062",
+      "T063",
+      "T064",
+      "T065",
+      "T066",
+      "T067",
+      "T068",
+      "T069",
+      "T070",
+      "T072"
+    ],
+    "modules": [
+      "packages/dws",
+      "db/migrations/033_dws_identity_isolation.sql",
+      "apps/web/src/dws-connection.tsx"
+    ],
+    "status": "IN_PROGRESS",
+    "intendedModules": [
+      "packages/dws"
+    ]
+  },
+  "R24": {
+    "tests": [
+      "T071",
+      "T113"
+    ],
+    "modules": [],
+    "status": "NOT_STARTED",
+    "intendedModules": [
+      "packages/office"
+    ]
+  },
+  "R25": {
+    "tests": [
+      "T071",
+      "T114"
+    ],
+    "modules": [
+      "packages/dws/src/document-capability.ts",
+      "packages/dws/src/document-contract.ts",
+      "db/migrations/034_dws_document_scopes.sql"
+    ],
+    "status": "IN_PROGRESS",
+    "intendedModules": [
+      "packages/office"
+    ]
+  },
+  "R26": {
+    "tests": [
+      "T115"
+    ],
+    "modules": [],
+    "status": "NOT_STARTED",
+    "intendedModules": [
+      "packages/office"
+    ]
+  },
+  "R27": {
+    "tests": [
+      "T035",
+      "T079",
+      "T080"
+    ],
+    "modules": [
+      "packages/gateway/src/index.ts"
+    ],
+    "status": "IN_PROGRESS",
+    "intendedModules": [
+      "packages/gateway/src/index.ts"
+    ]
+  },
+  "R28": {
+    "tests": [
+      "T008",
+      "T021",
+      "T029",
+      "T030",
+      "T031",
+      "T038",
+      "T045",
+      "T065",
+      "T093",
+      "T115"
+    ],
+    "modules": [
+      "packages/gateway/src/index.ts",
+      "db/migrations/004_gateway.sql"
+    ],
+    "status": "IN_PROGRESS",
+    "intendedModules": [
+      "packages/gateway/src/index.ts",
+      "db/migrations/004_gateway.sql"
+    ]
+  },
+  "R29": {
+    "tests": [
+      "T010",
+      "T014",
+      "T023",
+      "T025",
+      "T032",
+      "T033",
+      "T034",
+      "T035",
+      "T036",
+      "T040",
+      "T043",
+      "T046",
+      "T068",
+      "T078",
+      "T079",
+      "T081",
+      "T085",
+      "T102",
+      "T103",
+      "T105",
+      "T125"
+    ],
+    "modules": [
+      "packages/policy/src/index.ts",
+      "db/migrations/001_identity.sql",
+      "packages/runtime/src/checkpoint.ts",
+      "packages/gateway/src/checkpoint.ts",
+      "packages/memory/src/service.ts",
+      "packages/personas/src/service.ts",
+      "db/migrations/057_erasure_ledger_runtime_veto.sql",
+      "db/migrations/060_owner_erasure_veto_after_departure.sql",
+      "packages/gateway/src/delivery.ts"
+    ],
+    "status": "IN_PROGRESS",
+    "intendedModules": [
+      "packages/policy/src/index.ts",
+      "db/migrations/001_identity.sql"
+    ]
+  },
+  "R30": {
+    "tests": [
+      "T007",
+      "T018",
+      "T019",
+      "T056",
+      "T092",
+      "T111",
+      "T120",
+      "T121"
+    ],
+    "modules": [
+      "packages/runtime/src/loop.ts",
+      "db/migrations/004_gateway.sql",
+      "packages/runtime/src/budget.ts",
+      "packages/runtime/src/budget-policy.ts",
+      "packages/runtime/src/model-budget.ts",
+      "packages/runtime/src/budget-recovery.ts"
+    ],
+    "status": "IN_PROGRESS",
+    "intendedModules": [
+      "packages/runtime/src/loop.ts",
+      "db/migrations/004_gateway.sql"
+    ]
+  },
+  "R31": {
+    "tests": [
+      "T003",
+      "T004",
+      "T005",
+      "T009",
+      "T016",
+      "T031",
+      "T048",
+      "T052",
+      "T058",
+      "T059",
+      "T067",
+      "T117",
+      "T118",
+      "T119"
+    ],
+    "modules": [
+      "packages/tasks/src/queue.ts",
+      "packages/gateway/src/index.ts",
+      "packages/runtime/src/checkpoint.ts",
+      "packages/gateway/src/checkpoint.ts",
+      "packages/dingtalk/src/clarification.ts",
+      "packages/dingtalk/src/clarification-receipt.ts",
+      "packages/runtime/src/retry.ts",
+      "packages/dingtalk/src/task-receipt.ts"
+    ],
+    "status": "IN_PROGRESS",
+    "intendedModules": [
+      "packages/tasks/src/queue.ts",
+      "packages/gateway/src/index.ts"
+    ]
+  },
+  "R32": {
+    "tests": [
+      "T116",
+      "T130"
+    ],
+    "modules": [
+      "apps/web/src/main.tsx"
+    ],
+    "status": "IN_PROGRESS",
+    "intendedModules": [
+      "apps/web/src/main.tsx"
+    ]
+  },
+  "R33": {
+    "tests": [
+      "T072",
+      "T097",
+      "T122",
+      "T123"
+    ],
+    "modules": [
+      "packages/config/src/index.ts",
+      "deploy/images/app.Dockerfile"
+    ],
+    "status": "IN_PROGRESS",
+    "intendedModules": [
+      "packages/config/src/index.ts",
+      "deploy/images/app.Dockerfile"
+    ]
+  },
+  "R34": {
+    "tests": [
+      "T121",
+      "T124",
+      "T125",
+      "T126",
+      "T130"
+    ],
+    "modules": [
+      "packages/observability/src/index.ts",
+      "packages/storage/src/audit.ts",
+      "packages/operations/src/bounded-migration.ts",
+      "scripts/bounded-migration-step.ts"
+    ],
+    "status": "IN_PROGRESS",
+    "intendedModules": [
+      "packages/observability/src/index.ts"
+    ]
+  },
+  "R35": {
+    "tests": [
+      "T096",
+      "T127",
+      "T128",
+      "T129"
+    ],
+    "modules": [
+      "tests",
+      "scripts/verify-release.ts"
+    ],
+    "status": "IN_PROGRESS",
+    "intendedModules": [
+      "tests",
+      "scripts/verify-release.ts"
+    ]
+  },
+  "R36": {
+    "tests": [
+      "T128",
+      "T129"
+    ],
+    "modules": [
+      "config/stages.json",
+      "scripts/verify-requirements.ts"
+    ],
+    "status": "IN_PROGRESS",
+    "intendedModules": [
+      "config/stages.json",
+      "scripts/verify-requirements.ts"
+    ]
+  }
+}

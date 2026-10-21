@@ -1,0 +1,16 @@
+import {resolve} from 'node:path';
+import {pathToFileURL} from 'node:url';
+import {readGroupEscalationRuntimeProfile} from '../packages/config/src/group-escalation-runtime.js';
+export async function groupEscalationRuntimeCommand(args:readonly string[],signal:AbortSignal){
+ const [mode='plan',...rest]=args,flags=new Map<string,string>();if(!['plan','run-once'].includes(mode)||rest.length%2)throw Error('GROUP_ESCALATION_RUNTIME_USAGE');
+ for(let i=0;i<rest.length;i+=2){const key=rest[i]!,value=rest[i+1]!;if(!['--profile','--expected-profile-hash','--review-ref'].includes(key)||flags.has(key)||!value)throw Error('GROUP_ESCALATION_RUNTIME_USAGE');flags.set(key,value);}
+ if(!flags.has('--profile'))throw Error('GROUP_ESCALATION_RUNTIME_USAGE');signal.throwIfAborted();const frozen=await readGroupEscalationRuntimeProfile(flags.get('--profile')!);
+ if(mode==='plan'){if(flags.size!==1)throw Error('GROUP_ESCALATION_RUNTIME_USAGE');return {mode:'PLAN_ONLY_NOT_AUTHORIZED',profileHash:frozen.hash,expiresAt:frozen.document.expiresAt,maxNotifications:1,modelCalls:0,databaseAccess:false,servicesStarted:false,messagesSent:0};}
+ if(flags.size!==3||flags.get('--expected-profile-hash')!==frozen.hash||flags.get('--review-ref')!==frozen.document.reviewReference)throw Error('GROUP_ESCALATION_RUNTIME_EXACT_REVIEW_REQUIRED');
+ // All real configuration loading is below the explicit exact-review gate.
+ const {loadEnvFile,config,secret}=await import('../packages/config/src/index.js');loadEnvFile();if(process.env['ONE_SHOT_TRIAL_PROFILE_FILE']||process.env['FORMAL_RUNTIME_PROFILE_FILE'])throw Error('GROUP_ESCALATION_RUNTIME_LIFECYCLE_BLOCKED');
+ const required=(key:string)=>{const value=secret(key);if(!value)throw Error('GROUP_ESCALATION_RUNTIME_CONFIGURATION_REQUIRED');return value;},[{Database},{Vault},{configureDws},{DingTalkSender},{runReviewedGroupEscalationCycle}]=await Promise.all([import('../packages/storage/src/database.js'),import('../packages/storage/src/crypto.js'),import('../packages/dws/src/configuration.js'),import('../packages/dingtalk/src/sender.js'),import('../packages/groups/src/escalation-cycle.js')]);
+ const db=new Database(required('RUNTIME_DATABASE_URL'),4,3000);
+ try{const vault=new Vault(new Map([['1',Buffer.from(required('APP_MASTER_KEY'),'hex')]]),'1'),identities=await configureDws(db,vault),binding={corpId:required('DINGTALK_CORP_ID'),robotCode:required('DINGTALK_ROBOT_CODE'),appOrigin:config().APP_ORIGIN},sender=new DingTalkSender({clientId:required('DINGTALK_CLIENT_ID'),clientSecret:required('DINGTALK_CLIENT_SECRET'),robotCode:binding.robotCode,replyOnly:config().DINGTALK_REPLY_ONLY==='true'});return await runReviewedGroupEscalationCycle({db,vault,identities,binding,sender},frozen.document,signal);}finally{await db.close();}
+}
+if(import.meta.url===pathToFileURL(resolve(process.argv[1]??'')).href){const controller=new AbortController(),stop=()=>controller.abort();process.once('SIGINT',stop);process.once('SIGTERM',stop);try{console.log(JSON.stringify(await groupEscalationRuntimeCommand(process.argv.slice(2),controller.signal)));}catch{console.error('GROUP_ESCALATION_RUNTIME_FAILED_OR_UNKNOWN_NO_RETRY');process.exitCode=1;}finally{process.removeListener('SIGINT',stop);process.removeListener('SIGTERM',stop);}}

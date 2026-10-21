@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "status": "IN_PROGRESS",
+  "proposalTtlSeconds": 600,
+  "purpose": "Retain an authenticated original persona patch; require its explicit proposal UUID when committing a scope choice. A bare scope never establishes original reply intent.",
+  "bindings": [
+    "tenant",
+    "actor",
+    "original inbox event",
+    "original conversation and channel",
+    "encrypted original patch",
+    "authorized candidate scopes and base ETags",
+    "auth epoch and exact scope grant version",
+    "fixed expiry"
+  ],
+  "selection": "Bare scope: exactly one pending proposal may produce metadata-only CONFIRM_REQUIRED, never write. Explicit 确认人设 <full UUID> <个人|本群|企业>: select only that pending proposal in the same actor/conversation. No timestamp, arrival order, lone-row or truncated-ID association. Personal is DM-only; group is the original group only.",
+  "commit": "Fresh inbox/identity/scope/policy validation and original ETag CAS through the existing writer; decision, persona revision and receipt commit atomically. Replay cannot apply twice or extend expiry.",
+  "cancellation": "Explicit 取消人设设置 closes only the requester's pending proposals in that exact conversation, with no business action or model dispatch.",
+  "checks": [
+    "proposal-bound explicit confirmation success; bare scope asks and never saves",
+    "current native request uses saved version",
+    "cross actor/group/channel/tenant denial",
+    "expired/cancelled/ambiguous denial",
+    "H5 version conflict",
+    "grant revoke and regrant",
+    "tampered proof/source denial",
+    "SDK duplicate callbacks",
+    "concurrent decisions",
+    "SIGKILL before/after commit",
+    "different-msgId delayed bare reply cannot approve next proposal",
+    "fresh old UUID and forged/cross owner/tenant/conversation IDs cannot select replacement",
+    "confirmation prompt expiry/cancel/application hides old receipts"
+  ],
+  "next": "After this candidate, implement personal Preference memory with deletion barrier and actual dependent-store purge together. Keep the original full R10 types and P00–P14 scope; no storage-only completion or real external acceptance inferred.",
+  "unimplemented": [
+    "Pure bare-scope reply directly saving the original proposal without an additional explicit confirmation; requires a verified association mechanism.",
+    "Full R10 memory lifecycle, privacy erasure, group contracts and remaining P00–P14 scope."
+  ]
+}

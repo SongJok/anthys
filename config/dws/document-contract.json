@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "cliVersion": "v1.0.61",
+  "sourceCommit": "50eb73a0906c5911c5c25f9c7106b6ead4f14f62",
+  "officialRepository": "https://github.com/DingTalk-Real-AI/dingtalk-workspace-cli",
+  "pinnedImplementationFiles": {
+    "internal/shortcut/doc/content_shortcuts.go": "fed1859be732a34376c5ac3c564fea13eb794bab7a96b842e49dba488c8ad8d5",
+    "internal/shortcut/docresolver/resolver.go": "cb0750ece437613de3d0a5886a01293b48c1676c0c497aaec750f973f8f30bb8",
+    "internal/shortcut/doc/common.go": "9238f08f0a25baaee4204d4d418d9adf8d7d2e9dbbfcbebae4a4e9d626643f84"
+  },
+  "publishedResultSchema": false,
+  "officialEnvelope": "doc.content.v1: status success, invocation complete, echoed selected target and opaque content payload",
+  "directNodeCanonicalization": "Pinned resolver echoes direct node input without URL normalization; this adapter accepts stable reviewed IDs only.",
+  "reviewedPayloadMappingRequired": [
+    "nodePointer",
+    "revisionPointer",
+    "textPointer",
+    "typePointer/typeValue=adoc",
+    "completePointer/hasMorePointer/cursorPointer (null means unknown)",
+    "independent reviewRef and authorization_review_ref"
+  ],
+  "completenessUnit": "ONE_DOCUMENT_VERSION",
+  "missingCoverageMarkers": "UNKNOWN; never infer from invocation complete",
+  "localSelection": "Unicode code-point ranges or keyword over masked text; upstream full-body transfer remains bounded by runner output limit",
+  "sensitiveSpans": "Recognize before clipping; expose only masked fragment hashes. Original full-body digest is encrypted in an owner/resource/projection-bound proof, never returned in clear. Pattern masking is not full DLP certification.",
+  "groupBodies": "DENIED until per-visible-member current resource proof exists; GROUP grant alone insufficient",
+  "productionActivation": "DWS_RUNNER_SERVICE_REQUIRED remains; separate runner and device flow pending",
+  "liveVerification": "NOT_RUN"
+}

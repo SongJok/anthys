@@ -1,0 +1,46 @@
+{
+  "checkpointVersion": 1,
+  "triggers": [
+    "CONTEXT_LIMIT",
+    "JOURNAL_EXPIRED",
+    "AUTHORIZATION_CHANGED"
+  ],
+  "maximumMessageBytes": 48000,
+  "maximumSessionsPerRun": 32,
+  "providerSemantics": "new stateless native request without original reasoning; no fake preserved transcript",
+  "checkpointFields": [
+    "originalGoal",
+    "taskState",
+    "allActionReceipts",
+    "currentlyAuthorizedVerifiedFacts",
+    "omittedReasons",
+    "unexecutedIntentHashes",
+    "blockedState"
+  ],
+  "encryption": [
+    "normalized action inputs",
+    "context checkpoint",
+    "provider journal",
+    "protected tool results"
+  ],
+  "egressChecks": [
+    "current checkpoint prefix",
+    "current registry/schema/risk/binding",
+    "exact action provenance/current result",
+    "current per-actor resource and audience grants",
+    "provider-specific source version revalidation"
+  ],
+  "sourceScopes": "attachment dependencies and final deliveries bind tenant/run/task/owner/session; old deliveries retain original session",
+  "unknownWrites": "preserve UNKNOWN and pause with zero model requests until reconciliation",
+  "approvals": "Current-role HTTP request/decision/resume with signed one-time nonce is implemented; certified external reconciliation remains incomplete",
+  "expiredCiphertext": "never decrypt; purge only after safe checkpoint/new-session commit",
+  "unreadableNonExpiredCiphertext": "pause, preserve action ledger, no model or repeated write",
+  "factsOverBudget": "omit full observations explicitly; keep action receipts; no silent truncation",
+  "liveVerified": false,
+  "pending": [
+    "general final-answer/evidence/action consistency",
+    "P13 cleanup/backup/production readiness and full-schema health verification",
+    "P03 whole runtime branch certification and real provider cost reconciliation",
+    "P04 certified connector reconciliation, diagnostic/permission manifests and delegation management"
+  ]
+}

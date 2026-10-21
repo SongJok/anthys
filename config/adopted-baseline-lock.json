@@ -1,0 +1,31 @@
+{
+  "original": {
+    "01_PRODUCT_REQUIREMENTS_AND_CAPABILITY_SCOPE.md": "16f38cbfa76e6e7b9ff219c43d5e2038a1d2f01e0239e0065013a7923637ede1",
+    "02_ARCHITECTURE_RUNTIME_AND_DATA_CONTRACTS.md": "7b1df57623418263598d97d23f19c16e7e5e9a9518b0161abd7a332ad8cb9700",
+    "03_DINGTALK_DWS_MCP_INTEGRATION_AND_CODEX_PLAN.md": "dad3cbde8c444623c28b6b253cbb53d90dc9006a5408eedb4543ed57444be2b6",
+    "04_TEST_ACCEPTANCE_AND_OPERATIONS.md": "daac6561fd37b066667d59554f7072fa05f34ec7dc3130a4e5be13e3995429d5"
+  },
+  "adopted": {
+    "01_PRODUCT_REQUIREMENTS_AND_CAPABILITY_SCOPE.md": "11b1db02d4fdb40f019dd38ccfc8a8cac9f45406ad56d4ad5985c7401297e3a4",
+    "02_ARCHITECTURE_RUNTIME_AND_DATA_CONTRACTS.md": "25e5fe91c49e4adf1e5062a84e3ee30c1be8e60b87f847383405775a38267ff2",
+    "03_DINGTALK_DWS_MCP_INTEGRATION_AND_CODEX_PLAN.md": "611d46c767e0e6cc58c5687491297fd08d4053238037f061d08176661c17c707",
+    "04_TEST_ACCEPTANCE_AND_OPERATIONS.md": "b9abc338077cb4b3ce21a39ca17b1385115207be315fc45947071765397a218e"
+  },
+  "decisions": [
+    "Use pnpm run doctor to avoid pnpm built-in doctor collision; recorded in document 03 section 9.2.",
+    "2026-10-15: Document P03 cumulative activity, atomic token/money reservations, conservative UNKNOWN exposure and offline policy configuration; preserve all original acceptance thresholds and enterprise gates.",
+    "2026-10-15: Record typed finalization proof, durable repair and current-source rechecks; keep general narrative/clarification/goal-verification gaps and all original enterprise gates explicit.",
+    "2026-10-15: Record P05 fixed-commit code component with custom certified chat proxy contract, current user/source rechecks and live blockers; preserve complete P03/P05/P14 scope and thresholds.",
+    "2026-10-15: P06 exact-profile component, generation revocation, pinned output contracts and offline evidence; independent production runner/device flow/office coverage remain pending and all enterprise gates unchanged.",
+    "2026-10-15: Document stable-node read scopes and separately reviewed opaque payload mapping, encrypted raw-source proof, masked Unicode fragments and current body rechecks; preserve production runner/device-flow/group-sharing gaps and all enterprise thresholds.",
+    "2026-10-15: Record final document UI/expiry evidence boundaries and unimplemented R09/P07 persona planning. Preserve original priorities, all130 acceptance statuses and enterprise thresholds; forwarded persona details are not direct human authorization for external actions.",
+    "2026-10-15: Preserve forwarded explicit SRE alert-template and PMO daily standup/risk-warning examples as unimplemented R09/P07 acceptance targets. Separate capability, schedule, group contract and sending authorization remain required; no code or baseline status changed.",
+    "2026-10-15: Record ordinary narrative model admission and durable H5/native explicit-question clarification, review accounting and control refusals. Probabilistic admission is not factual proof, live evaluation or whole P03 completion; original enterprise gates preserved.",
+    "2026-10-15: Record private post-tool server-projected source choices, original-budget asynchronous verification, exact selected READ, durable recovery and current-source HTTP/send proof. Preserve group/narrative/semantic/evaluation gaps and all original enterprise gates.",
+    "2026-10-15: Record ordinary MENTION_ONLY group clarification, independently reviewed complete audience/directory proof, explicit H5 public acknowledgement, original-budget asynchronous verification and durable recovery. Keep all GROUP enterprise-resource sharing disabled; preserve complete P03/P07/P14 scope, original baseline statuses and enterprise gates.",
+    "2026-10-15: P07 persona versions, H5 and authenticated Stream settings share policy/authority/CAS persistence; frozen runtime sources, coherent layers, revocation and immutable control receipts. Record bounded natural-language grammar and all memory/privacy/work-plan/enterprise gaps; preserve original priorities, all baseline test statuses and enterprise gates.",
+    "2026-10-15: Preserve first group browser timeout and precise cumulative/time-window distinction. Deterministically reproduce and repair slow-response poll starvation without changing permissions, deadlines or assertions; bind backend452 checkpoint to web/docs-only final delta. Record new persona critical coverage below enterprise90 separately from configured PASS.",
+    "2026-10-15: Implement durable scope-only persona clarification before the private Preference lifecycle/deletion barrier. Preserve complete R10/P00–P14 scope, privacy derivative/backup bounds, prior timeout uncertainty and all enterprise gates; held memory drafts are unapplied and untested.",
+    "2026-10-15: Reproduce distinct delayed bare-scope misassociation and require full proposal UUID for commit. Bare scope is metadata-only confirmation; original pure-scope direct-save experience remains incomplete. Preserve applied047/048, full R10/P00–P14 and enterprise gates."
+  ]
+}

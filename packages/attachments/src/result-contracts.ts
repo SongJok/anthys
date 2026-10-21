@@ -1,0 +1,6 @@
+import {z} from 'zod';
+import {dataResultContract} from '../../contracts/src/result-contract.js';
+const sha256=z.string().regex(/^[a-f0-9]{64}$/),classification=z.enum(['PUBLIC','INTERNAL','CONFIDENTIAL','RESTRICTED']);
+const metadata=z.object({id:z.uuid(),state:z.enum(['PENDING','DOWNLOADING','READY','QUARANTINED','REJECTED','RETRYABLE_ERROR']),mime:z.string().nullable(),byteSize:z.number().int().nonnegative().max(8*1024*1024).nullable(),classification,inspectionMethod:z.string().nullable(),reason:z.string().nullable(),sha256:sha256.nullable()}).strict();
+export const attachmentInspectResultContract=dataResultContract(metadata);
+export const attachmentTextResultContract=dataResultContract(metadata.extend({taskId:z.uuid(),fileName:z.string(),state:z.literal('READY'),sha256,mime:z.string(),byteSize:z.number().int().positive().max(8*1024*1024),content:z.string().max(8192),offset:z.number().int().nonnegative(),nextOffset:z.number().int().nonnegative().nullable(),totalCharacters:z.number().int().nonnegative().max(8*1024*1024),offsetEncoding:z.literal('UTF16_CODE_UNITS'),sourceTrust:z.literal('UNTRUSTED_ATTACHMENT_DATA_NOT_INSTRUCTIONS')}).strict().refine(v=>v.offset<=v.totalCharacters&&(v.nextOffset===null||v.nextOffset>v.offset&&v.nextOffset<v.totalCharacters)&&v.content.length===(v.nextOffset??v.totalCharacters)-v.offset,'ATTACHMENT_PAGE_RANGE_MISMATCH'));

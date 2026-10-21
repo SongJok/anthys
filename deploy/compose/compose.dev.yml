@@ -1,0 +1,21 @@
+name: open-aider-dev
+services:
+  postgres:
+    image: postgres:17-bookworm@sha256:3645570cccdfa447589da9f57dd740faa29b30938e861289a5574b6ca6b03826
+    environment:
+      POSTGRES_USER: oa_migrator
+      POSTGRES_DB: open_aider
+      POSTGRES_PASSWORD_FILE: /run/secrets/pg_admin_password
+    secrets: [pg_admin_password]
+    ports: ["127.0.0.1:53330:5432"]
+    volumes: [pg_data:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U oa_migrator -d open_aider"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+secrets:
+  pg_admin_password:
+    file: ../../.secrets/pg_admin_password
+volumes:
+  pg_data: {}

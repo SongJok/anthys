@@ -1,0 +1,73 @@
+{
+  "contract": {
+    "id": "open_aider.company.logs.read",
+    "version": 1,
+    "operations": [
+      "CHECK",
+      "QUERY"
+    ],
+    "authorization": "UPSTREAM_RESOURCE_ENFORCED",
+    "sideEffects": "NONE",
+    "snapshots": "IMMUTABLE_QUERY_RECEIPT"
+  },
+  "contractHash": "91f49aac132ba2da4ec7181f10775bc59d262759787f470e539115bf49ce5122",
+  "sdk": "@modelcontextprotocol/sdk@1.32.1",
+  "selectedUpstreamTool": "chat",
+  "wireArguments": [
+    "message"
+  ],
+  "status": "LOCAL_COMPONENT_ONLY",
+  "liveStatus": "BLOCKED_EXTERNAL",
+  "enablement": "Explicit separate private COMPANY_LOGS_MCP_CONFIG_FILE, independently reviewed proxy/server/schema/actor/resource/redaction/egress contract and operator-installed owner scope plus resource grant. Generic chat discovery and code credentials do not enable log access.",
+  "requestBinding": [
+    "contractHash",
+    "operation",
+    "nonce",
+    "tenantId",
+    "actorId",
+    "scopeId",
+    "scopeVersion",
+    "sourceRevision",
+    "args"
+  ],
+  "check": {
+    "args": {
+      "query": "Exact normalized service/environment/window/filters/limit",
+      "snapshot": "null before QUERY; queryId+snapshotHash for a retained immutable receipt"
+    },
+    "authority": "Independent provider current actor/resource authorization plus retained query identity, never request metadata alone"
+  },
+  "query": {
+    "args": [
+      "query"
+    ],
+    "snapshot": [
+      "queryId",
+      "query",
+      "asOf",
+      "snapshotExpiresAt",
+      "timezone",
+      "rows",
+      "totalCount",
+      "sampling",
+      "truncated",
+      "partial"
+    ],
+    "snapshotHash": "SHA256(canonical(snapshot)); canonical sorts object keys and preserves array order. Per-call binding/nonce are excluded. Provider must retain the immutable query receipt until expiry."
+  },
+  "limits": {
+    "maxRows": 100,
+    "maxWindowMs": 86400000,
+    "maxSnapshotTtlMs": 600000,
+    "maxMessageCharacters": 2048,
+    "maxRpcResponseBytes": 96000,
+    "maxProjectedMessageCharacters": 4096,
+    "maxHttpResponseBytes": 128000
+  },
+  "projections": "Declared row fields only; local redaction is defense in depth, not a complete anonymization or egress authorization proof.",
+  "remaining": [
+    "Live upstream actor/resource/redaction/immutable-query certification and T082",
+    "Deployment/source-code version alignment remains UNVERIFIED",
+    "Trace enrichment and additional authentication/transport/re-review lifecycles"
+  ]
+}

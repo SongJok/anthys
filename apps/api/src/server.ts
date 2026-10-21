@@ -1,0 +1,134 @@
+import {groupEscalationRoutes,type GroupEscalationApi} from './group-escalations.js';
+import {groupReminderRoutes} from './group-reminders.js';
+import type {GroupReminders} from '../../../packages/groups/src/reminders.js';
+import {GroupReminderError} from '../../../packages/groups/src/reminder-model.js';
+import {scheduleRoutes} from './schedules.js';
+import type {Schedules} from '../../../packages/schedules/src/service.js';
+import {ScheduleError} from '../../../packages/schedules/src/model.js';
+import {groupContractRoutes} from './group-contracts.js';
+import {groupCaseRoutes} from './group-cases.js';
+import type {GroupCases} from '../../../packages/groups/src/cases.js';
+import {GroupCaseError} from '../../../packages/groups/src/case-model.js';
+import {GroupContracts,GroupContractError} from '../../../packages/groups/src/contracts.js';
+import {permissionRoutes} from './permissions.js';
+import {PermissionAdministration} from '../../../packages/gateway/src/permission-administration.js';
+import {PermissionCenter,PermissionError} from '../../../packages/gateway/src/permissions.js';
+import {memoryRoutes} from './memories.js';
+import {MemoryError,type PrivatePreferences} from '../../../packages/memory/src/service.js';
+import type {DwsIdentities} from '../../../packages/dws/src/identity.js';
+import type {Personas} from '../../../packages/personas/src/service.js';
+import {PersonaError} from '../../../packages/personas/src/service.js';
+import {personaRoutes} from './personas.js';
+import Fastify from 'fastify';
+import cookie from '@fastify/cookie';
+import helmet from '@fastify/helmet';
+import staticFiles from '@fastify/static';
+import {readFile} from 'node:fs/promises';
+import {join} from 'node:path';
+import {authorizationUrl} from '../../../packages/config/src/tenant-binding.js';
+import type {Database} from '../../../packages/storage/src/database.js';
+import {Sessions,type Principal} from '../../../packages/identity/src/sessions.js';
+import type {Config} from '../../../packages/config/src/index.js';
+import {randomUUID,randomBytes} from 'node:crypto';
+import {LoginStates,type LoginIdentityProvider} from '../../../packages/identity/src/login.js';
+import {ZodError,z} from 'zod';
+import {TaskStore} from '../../../packages/tasks/src/store.js';
+import {CardActions} from '../../../packages/dingtalk/src/card-actions.js';
+import type {AttachmentService} from '../../../packages/attachments/src/service.js';
+import {ControlPlane,ControlError} from '../../../packages/gateway/src/control-plane.js';
+import {AttachmentFailure} from '../../../packages/attachments/src/errors.js';
+import type {Gateway} from '../../../packages/gateway/src/index.js';
+import type {TaskResultArtifacts} from '../../../packages/artifacts/src/service.js';
+import {artifactRoutes} from './artifacts.js';
+import {companyAgentRoutes} from './company-agent.js';
+import type {CompanyAgentRequests} from '../../../packages/company/src/agent-requests.js';
+declare module 'fastify' {interface FastifyRequest {principal:Principal|null}}
+export async function createServer(deps:{config:Config;db:Database;sessionSecret:string;formalSubject?:{tenantId:string;actorId:string};login?:{tenantId:string;corpId:string;provider:LoginIdentityProvider;clientId?:string};webRoot?:string;attachments?:AttachmentService;artifacts?:TaskResultArtifacts;companyRequests?:Pick<CompanyAgentRequests,'list'>;controls?:ControlPlane;finalReader?:Gateway;dws?:DwsIdentities;personas?:Personas;memories?:PrivatePreferences;groupContracts?:GroupContracts;groupCases?:Pick<GroupCases,'list'|'create'|'update'>;schedules?:Schedules;groupReminders?:Pick<GroupReminders,'list'|'preview'|'create'|'mutate'>;groupEscalations?:GroupEscalationApi}) {
+ const app=Fastify({logger:false,bodyLimit:1048576,genReqId:()=>randomUUID()});
+ const sessions=new Sessions(deps.db,deps.sessionSecret);
+ const tasks=new TaskStore(deps.db);
+ const cardActions=new CardActions(deps.db);
+ const login=deps.login?new LoginStates(deps.db,deps.login.tenantId,deps.login.corpId):null;
+ await app.register(cookie);await app.register(helmet,{referrerPolicy:{policy:'no-referrer'},contentSecurityPolicy:{directives:{defaultSrc:["'self'"],scriptSrc:["'self'"],styleSrc:["'self'"],imgSrc:["'self'",'data:'],connectSrc:["'self'"]}}});
+ app.decorateRequest('principal',null);
+ app.addHook('preHandler',async(req,reply)=>{
+  if(!req.url.startsWith('/api/'))return;
+  if(req.url.startsWith('/api/v1/health/')) return;
+  if(req.url.split('?')[0]==='/api/v1/auth/dingtalk/state'||req.url==='/api/v1/auth/dingtalk/exchange')return;
+  const write=!['GET','HEAD','OPTIONS'].includes(req.method);
+  const csrf=req.headers['x-csrf-token'];
+  if(write && (req.headers.origin!==deps.config.APP_ORIGIN||typeof csrf!=='string')) return reply.code(403).send({error:{code:'CSRF_REQUIRED',message:'请求认证失效',correlationId:req.id}});
+  req.principal=await sessions.authenticate(req.cookies['oa_session'],write?csrf as string:undefined);
+  if(!req.principal) return reply.code(401).send({error:{code:'UNAUTHENTICATED',message:'请先登录',correlationId:req.id}});
+  if(deps.formalSubject){const p=req.principal;if(p.tenantId!==deps.formalSubject.tenantId||p.actorId!==deps.formalSubject.actorId||!await deps.db.scope(p,async c=>{const state=(await c.query("SELECT public.oa_formal_state('API') state")).rows[0].state;return state?.allowed===true;}))return reply.code(403).send({error:{code:'FORMAL_SUBJECT_DENIED',correlationId:req.id}});}
+ });
+ app.setErrorHandler((err,req,reply)=>{reply.code(err instanceof ZodError?400:err instanceof ControlError||err instanceof PersonaError||err instanceof MemoryError||err instanceof PermissionError||err instanceof GroupContractError||err instanceof GroupCaseError||err instanceof ScheduleError||err instanceof GroupReminderError?err.status:500).send({error:{code:err instanceof ZodError?'INVALID_INPUT':err instanceof ControlError||err instanceof PersonaError||err instanceof MemoryError||err instanceof PermissionError||err instanceof GroupContractError||err instanceof GroupCaseError||err instanceof ScheduleError||err instanceof GroupReminderError?err.code:'INTERNAL_ERROR',message:err instanceof ZodError?'输入无效':'请求处理失败',correlationId:req.id}});});
+ app.get('/api/v1/health/live',async()=>({data:{status:'ALIVE'}}));
+ app.get('/api/v1/health/ready',async(_req,reply)=>{try {if(!await deps.db.ready()) throw Error('SCHEMA');return {data:{status:'READY'}};} catch {return reply.code(503).send({data:{status:'NOT_READY',dependency:'database/schema'}});}});
+ app.get('/api/v1/auth/dingtalk/state',async(req,reply)=>{
+  if(!login)return reply.code(503).send({error:{code:'BLOCKED_EXTERNAL',message:'企业登录尚未配置',correlationId:req.id}});
+  if(req.headers.origin&&req.headers.origin!==deps.config.APP_ORIGIN)return reply.code(403).send({error:{code:'ORIGIN_DENIED',correlationId:req.id}});
+  const browser=randomBytes(32).toString('base64url'),state=await login.create(browser,'/');
+  reply.setCookie('oa_login_browser',browser,{path:'/api/v1/auth/dingtalk',httpOnly:true,secure:deps.config.APP_ENV==='production',sameSite:'lax',maxAge:300});
+  reply.header('cache-control','no-store');return {data:{state,expiresInSeconds:300,...(deps.login?.clientId?{authorizationUrl:authorizationUrl(deps.login.clientId,deps.config.APP_ORIGIN,state)}:{})}};
+ });
+ app.post('/api/v1/auth/dingtalk/exchange',async(req,reply)=>{
+  if(!login||!deps.login)return reply.code(503).send({error:{code:'BLOCKED_EXTERNAL',correlationId:req.id}});
+  if(req.headers.origin!==deps.config.APP_ORIGIN)return reply.code(403).send({error:{code:'ORIGIN_DENIED',correlationId:req.id}});
+  const body=z.object({code:z.string().min(1).max(2048),state:z.string().min(1).max(128)}).strict().parse(req.body);
+  const redirect=await login.consume(body.state,req.cookies['oa_login_browser']??'');
+  if(!redirect)return reply.code(403).send({error:{code:'LOGIN_STATE_INVALID',correlationId:req.id}});
+  const subject=await deps.login.provider.exchange(body.code,AbortSignal.timeout(15000));
+  if(subject.corpId!==deps.login.corpId)return reply.code(403).send({error:{code:'IDENTITY_MISMATCH',correlationId:req.id}});
+  const principal=await login.resolveUnion(subject.unionId);if(!principal)return reply.code(403).send({error:{code:'IDENTITY_NOT_REGISTERED',correlationId:req.id}});
+  const session=await sessions.create(principal);
+  reply.setCookie('oa_session',session.cookie,{path:'/',httpOnly:true,secure:deps.config.APP_ENV==='production',sameSite:'lax',maxAge:28800});reply.clearCookie('oa_login_browser',{path:'/api/v1/auth/dingtalk'});
+  reply.header('cache-control','no-store');return {data:{csrfToken:session.csrf,redirectPath:redirect}};
+ });
+ app.get('/api/v1/auth/csrf',async(req,reply)=>{if(req.headers.origin&&req.headers.origin!==deps.config.APP_ORIGIN)return reply.code(403).send({error:{code:'ORIGIN_DENIED',correlationId:req.id}});reply.header('cache-control','no-store');return {data:{csrfToken:await sessions.rotateCsrf(req.principal!)}};});
+ app.get('/api/v1/tasks',async req=>{const q=z.object({cursor:z.uuid().optional(),limit:z.coerce.number().int().min(1).max(200).default(50)}).strict().parse(req.query);return {data:await tasks.list(req.principal!,q.cursor,q.limit)};});
+ app.get('/api/v1/me',async req=>({data:{id:req.principal!.actorId,tenantId:req.principal!.tenantId,roles:req.principal!.roles}}));
+ personaRoutes(app,deps.personas);
+ memoryRoutes(app,deps.memories);
+ groupContractRoutes(app,deps.groupContracts);
+ groupCaseRoutes(app,deps.groupCases);groupEscalationRoutes(app,deps.groupEscalations);groupReminderRoutes(app,deps.groupReminders);scheduleRoutes(app,deps.schedules);
+ const capabilityMetadata=(id:string,version:string)=>deps.finalReader?.describeCapability(id,version)??null;
+ const permissionCenter=new PermissionCenter(deps.db,capabilityMetadata);permissionRoutes(app,permissionCenter,new PermissionAdministration(deps.db,capabilityMetadata));
+ app.get<{Params:{token:string}}>('/api/v1/cards/actions/:token',async(req,reply)=>{reply.header('cache-control','no-store');const action=await cardActions.preview(req.principal!,req.params.token);return action?{data:action}:reply.code(404).send({error:{code:'NOT_FOUND',correlationId:req.id}});});
+ app.post<{Params:{token:string}}>('/api/v1/cards/actions/:token/execute',async(req,reply)=>{reply.header('cache-control','no-store');const result=await cardActions.execute(req.principal!,req.params.token);return result?{data:result}:reply.code(404).send({error:{code:'NOT_FOUND',correlationId:req.id}});});
+ const controls=()=>{if(!deps.controls)throw new ControlError('CONTROLS_UNCONFIGURED',503);return deps.controls;};
+ app.get('/api/v1/controls/overview',async(req,reply)=>{reply.header('cache-control','no-store');const query=z.object({cursor:z.uuid().optional()}).strict().parse(req.query);return {data:await controls().overview(req.principal!,query.cursor)};});
+ app.get<{Params:{id:string}}>('/api/v1/tasks/:id/actions',async(req,reply)=>{reply.header('cache-control','no-store');return {data:await controls().taskActions(req.principal!,z.uuid().parse(req.params.id))};});
+ app.get<{Params:{id:string}}>('/api/v1/actions/:id/eligible-approvers',async(req,reply)=>{reply.header('cache-control','no-store');return {data:await controls().eligible(req.principal!,z.uuid().parse(req.params.id))};});
+ app.get('/api/v1/approvals',async(req,reply)=>{reply.header('cache-control','no-store');return {data:await controls().inbox(req.principal!)};});
+ app.post<{Params:{id:string}}>('/api/v1/actions/:id/reconciliation-sessions',async(req,reply)=>{reply.header('cache-control','no-store');z.object({}).strict().parse(req.body??{});return {data:await controls().beginReconciliation(req.principal!,z.uuid().parse(req.params.id))};});
+ app.post<{Params:{id:string}}>('/api/v1/reconciliations/:id/attestation',async(req,reply)=>{reply.header('cache-control','no-store');const body=z.object({nonce:z.string().min(1).max(2048),argsHash:z.string().length(64),claim:z.enum(['APPLIED','NOT_APPLIED','INCONCLUSIVE']),evidence:z.string().min(1).max(8192)}).strict().parse(req.body);return {data:await controls().attestReconciliation(req.principal!,z.uuid().parse(req.params.id),body)};});
+ app.post<{Params:{id:string}}>('/api/v1/reconciliations/:id/read-back',async(req,reply)=>{reply.header('cache-control','no-store');const body=z.object({nonce:z.string().min(1).max(2048),argsHash:z.string().regex(/^[a-f0-9]{64}$/)}).strict().parse(req.body);return {data:await controls().verifyReconciliation(req.principal!,z.uuid().parse(req.params.id),body)};});
+ app.post('/api/v1/controls/kill-switches',async(req,reply)=>{reply.header('cache-control','no-store');const body=z.object({scopeKind:z.enum(['TENANT','CONNECTOR','GROUP','USER','TASK']),scopeId:z.string().min(1).max(256),mode:z.enum(['ALL','WRITES']),enabled:z.boolean(),reason:z.string().min(1).max(2048),expiresAt:z.iso.datetime().optional()}).strict().parse(req.body);return {data:await controls().setKill(req.principal!,body)};});
+ app.post<{Params:{id:string}}>('/api/v1/actions/:id/approvals',async(req,reply)=>{reply.header('cache-control','no-store');const body=z.object({approverId:z.uuid()}).strict().parse(req.body);return {data:await controls().request(req.principal!,z.uuid().parse(req.params.id),body.approverId)};});
+ app.get<{Params:{id:string}}>('/api/v1/approvals/:id',async(req,reply)=>{reply.header('cache-control','no-store');return {data:await controls().preview(req.principal!,z.uuid().parse(req.params.id))};});
+ app.post<{Params:{id:string}}>('/api/v1/approvals/:id/decision',async(req,reply)=>{reply.header('cache-control','no-store');const body=z.object({nonce:z.string().min(1).max(2048),argsHash:z.string().length(64),version:z.number().int().positive(),decision:z.enum(['APPROVE','REJECT'])}).strict().parse(req.body);return {data:await controls().decide(req.principal!,z.uuid().parse(req.params.id),body)};});
+ app.post('/api/v1/auth/logout',async(req,reply)=>{await sessions.revoke(req.principal!);reply.clearCookie('oa_session',{path:'/'});return {data:{status:'REVOKED'}};});
+ app.post('/api/v1/tasks',async(req,reply)=>{
+  if((await deps.db.scope(req.principal!,c=>c.query('SELECT public.oa_finite_private_pilot_active() active'))).rows[0].active)return reply.code(403).send({error:{code:'FINITE_PILOT_INPUT_NOT_APPROVED',correlationId:req.id}});
+  const body=z.object({goal:z.string().min(1).max(10000)}).strict().parse(req.body),key=z.string().min(8).max(128).parse(req.headers['idempotency-key']);
+  try {return reply.code(202).send({data:await tasks.create(req.principal!,body.goal,key)});} catch(e) {if((e as Error).message==='IDEMPOTENCY_CONFLICT') return reply.code(409).send({error:{code:'IDEMPOTENCY_CONFLICT',correlationId:req.id}});throw e;}
+ });
+ app.post<{Params:{id:string}}>('/api/v1/tasks/:id/messages',async(req,reply)=>{
+  reply.header('cache-control','private, no-store');const id=z.uuid().parse(req.params.id),body=z.object({reviewId:z.uuid(),text:z.string().min(1).max(10000),shareWithGroup:z.boolean().optional()}).strict().parse(req.body),key=z.string().min(8).max(128).parse(req.headers['idempotency-key']);
+  if((await deps.db.scope(req.principal!,c=>c.query('SELECT public.oa_finite_private_pilot_active(NULL,$1) active',[id]))).rows[0].active)return reply.code(403).send({error:{code:'FINITE_PILOT_INPUT_NOT_APPROVED',correlationId:req.id}});
+  if(!deps.finalReader)return reply.code(503).send({error:{code:'RUNTIME_UNCONFIGURED',correlationId:req.id}});
+  try{const result=await deps.finalReader.store.reply(req.principal!,id,body.reviewId,body.text,key,body.shareWithGroup===true);return result?reply.code(202).send({data:result}):reply.code(404).send({error:{code:'NOT_FOUND',correlationId:req.id}});}catch(error){if(error instanceof Error&&error.message==='GROUP_REPLY_VISIBILITY_ACK_REQUIRED')return reply.code(409).send({error:{code:error.message,correlationId:req.id}});if(error instanceof Error&&error.message==='SOURCE_CHOICE_INVALID_SELECTION')return reply.code(400).send({error:{code:error.message,correlationId:req.id}});if(error instanceof Error&&error.message==='GROUP_REPLY_IN_PROGRESS')return reply.code(409).send({error:{code:error.message,correlationId:req.id}});if(error instanceof Error&&error.message==='SOURCE_CHOICE_REPLY_IN_PROGRESS')return reply.code(409).send({error:{code:error.message,correlationId:req.id}});if(error instanceof Error&&error.message==='IDEMPOTENCY_CONFLICT')return reply.code(409).send({error:{code:'IDEMPOTENCY_CONFLICT',correlationId:req.id}});throw error;}
+ });
+ app.get('/api/v1/dws/connection',async(req,reply)=>{reply.header('cache-control','private, no-store');return {data:deps.dws?await deps.dws.connection(req.principal!):{state:'BLOCKED_EXTERNAL',authorizationVersion:null,delegationExpiresAt:null,platformValidity:'NOT_RECHECKED',authorizationEntryAvailable:false}};});
+ app.post('/api/v1/dws/disconnect',async(req,reply)=>{z.object({}).strict().parse(req.body??{});reply.header('cache-control','private, no-store');if(!deps.dws)return reply.code(503).send({error:{code:'BLOCKED_EXTERNAL',message:'个人办公连接尚未配置',correlationId:req.id}});return {data:await deps.dws.disconnect(req.principal!)};});
+ app.get<{Params:{id:string}}>('/api/v1/tasks/:id',async(req,reply)=>{reply.header('cache-control','private, no-store');const task=await tasks.get(req.principal!,z.uuid().parse(req.params.id));if(!task)return reply.code(404).send({error:{code:'NOT_FOUND',correlationId:req.id}});for(const run of task.runs)if(typeof run.result==='string'&&(!deps.finalReader||!await deps.finalReader.finalResultAllowed(req.principal!,run.id as string,run.result))){run.result=null;run.result_access='CURRENT_SOURCE_UNVERIFIED';}for(const run of task.runs)if(typeof run.result==='string'&&typeof run.source_choice_id==='string'&&deps.finalReader){run.source_choice_options=await deps.finalReader.store.sourceChoiceOptions(req.principal!,run.id as string,run.source_choice_id);if(!await deps.finalReader.finalResultAllowed(req.principal!,run.id as string,run.result)){run.result=null;run.source_choice_options=[];run.result_access='CURRENT_SOURCE_UNVERIFIED';}}for(const run of task.runs)run.persona_context=deps.finalReader?await deps.finalReader.store.personaExplanation(req.principal!,run.id as string):{state:'UNAVAILABLE'};if(deps.companyRequests){const requests=await deps.companyRequests.list(req.principal!,task.id as string);for(const run of task.runs)run.enterprise_request=requests?.items.some(item=>item.runId===run.id)===true;}return {data:task};});
+ app.get<{Params:{id:string}}>('/api/v1/tasks/:id/attachments',async(req,reply)=>{const id=z.uuid().parse(req.params.id);if(!await tasks.get(req.principal!,id))return reply.code(404).send({error:{code:'NOT_FOUND',correlationId:req.id}});const ids=await deps.db.scope(req.principal!,c=>c.query('SELECT id FROM attachments WHERE task_id=$1 ORDER BY source_index,id',[id]));if(!ids.rowCount)return {data:[]};if(!deps.attachments)return reply.code(503).send({error:{code:'ATTACHMENTS_UNCONFIGURED',correlationId:req.id}});return {data:(await Promise.all(ids.rows.map(row=>deps.attachments!.metadata(req.principal!,row.id as string)))).filter(Boolean)};});
+ app.get<{Params:{id:string}}>('/api/v1/attachments/:id/download',async(req,reply)=>{const id=z.uuid().parse(req.params.id).toLowerCase();if(!deps.attachments)return reply.code(503).send({error:{code:'ATTACHMENTS_UNCONFIGURED',correlationId:req.id}});try{const file=await deps.attachments.read(req.principal!,id);reply.header('cache-control','private, no-store');reply.header('content-disposition',"attachment; filename*=UTF-8''"+encodeURIComponent(file.metadata.fileName).replace(/['()*]/g,c=>'%'+c.charCodeAt(0).toString(16).toUpperCase()));return reply.type('application/octet-stream').send(file.bytes);}catch(e){return reply.code(e instanceof AttachmentFailure&&e.code==='ATTACHMENT_ACCESS_DENIED'?404:503).send({error:{code:'ATTACHMENT_UNAVAILABLE',correlationId:req.id}});}});
+ artifactRoutes(app,deps.artifacts);
+ companyAgentRoutes(app,deps.companyRequests);
+ app.post<{Params:{id:string}}>('/api/v1/tasks/:id/cancel',async(req,reply)=>{const task=await tasks.cancel(req.principal!,z.uuid().parse(req.params.id));return task?{data:task}:reply.code(404).send({error:{code:'NOT_FOUND',correlationId:req.id}});});
+ if(deps.webRoot){await app.register(staticFiles,{root:join(deps.webRoot,'assets'),prefix:'/assets/',decorateReply:false});for(const path of ['/','/tasks','/personal','/auth/callback','/card-action','/controls','/permissions','/groups','/schedules'])app.get(path,async(req,reply)=>{reply.header('cache-control','no-store');if(path==='/permissions'){const principal=await sessions.authenticate(req.cookies['oa_session']);if(!principal)return reply.code(401).send({error:{code:'UNAUTHENTICATED'}});await permissionCenter.overview(principal);}if(path==='/controls'){const principal=await sessions.authenticate(req.cookies['oa_session']);if(!principal)return reply.code(401).send({error:{code:'UNAUTHENTICATED'}});await controls().overview(principal);}return reply.type('text/html').send(await readFile(join(deps.webRoot!,'index.html'),'utf8'));});}
+ app.setNotFoundHandler((req,reply)=>reply.code(404).send({error:{code:'NOT_FOUND',message:'未找到',correlationId:req.id}}));
+ return {app,sessions};
+}

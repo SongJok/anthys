@@ -1,0 +1,89 @@
+{
+  "version": "v1.0.61",
+  "sourceCommit": "50eb73a0906c5911c5c25f9c7106b6ead4f14f62",
+  "officialRepository": "https://github.com/DingTalk-Real-AI/dingtalk-workspace-cli",
+  "releaseChecksumsUrl": "https://github.com/DingTalk-Real-AI/dingtalk-workspace-cli/releases/download/v1.0.61/checksums.txt",
+  "releaseChecksumsSha256": "db855ff9f6b77756df346432a4be09666df37eefc99d81d9c45ae569713fe648",
+  "platforms": {
+    "darwin-arm64": {
+      "archiveSha256": "9a122f6322983c45e44db7274788dbb5c62d1762268e45d18e0e72ed40d39978",
+      "binarySha256": "b41b5d3250fc809dbb80e1471b9a3768e0df3af088e296b457bd381f5e1df3de"
+    },
+    "linux-arm64": {
+      "archiveSha256": "6ae66f61e36f368e017136471015b277b363dfc342edd602b5166c10d91acd5b",
+      "binarySha256": "23c5e06b3175cf3910bf4c9af960545e0f995c621e1ff0aaadf58478fb84d90c"
+    },
+    "linux-amd64": {
+      "archiveSha256": "a507356bc19edc4b868398bd99c803c81480c2e094b9efbb6ad74e2905089a4d",
+      "binarySha256": "929ad4d0790bf7efe2d65b4926364c591216b81323a60cab0b464f30970f98a8"
+    }
+  },
+  "commands": {
+    "contact.me": {
+      "argv": [
+        "contact",
+        "+me"
+      ],
+      "schemaHash": "73f06237dc449c32d2f698d180f3649a334b5e606ed34fcfb4c8ea2ef015e484",
+      "schemaFile": "config/dws/contact-me.schema.json",
+      "effect": "read",
+      "risk": "low",
+      "confirmation": "not_required",
+      "outputContract": "Unified outcome/data envelope at pinned source internal/output/envelope.go and smart/contact_strict.go; data schema published by the actual leaf."
+    },
+    "doc.fetch": {
+      "argv": [
+        "doc",
+        "+fetch"
+      ],
+      "schemaHash": "b5242dc7d6de7d35918099dd653a2c0022e8442d5cb390c608653d64932720f4",
+      "schemaFile": "config/dws/doc-fetch.schema.json",
+      "effect": "read",
+      "risk": "low",
+      "confirmation": "not_required",
+      "publishedResultSchema": false,
+      "outputContract": "CLI-owned doc.content.v1 envelope audited at pinned source; opaque payload requires independently reviewed tenant mapping. Outer complete is invocation-only."
+    },
+    "chat.members": {
+      "argv": [
+        "chat",
+        "+chat-members-list"
+      ],
+      "schemaHash": "80b65e614f59dfd853b45fb512ff1ec428a7353d7be04e5935f2aa5d9327f762",
+      "schemaFile": "config/dws/chat-members-list.schema.json",
+      "effect": "read",
+      "confirmation": "not_required",
+      "publishedResultSchema": false,
+      "sourceCommit": "50eb73a0906c5911c5c25f9c7106b6ead4f14f62",
+      "offlineSchemaEvidence": "reports/checks/p03-group-members-schema.json",
+      "outputContract": "im.group-members.v1 with independent reviewed group info profile; metadata alone grants no group, directory or resource authority"
+    },
+    "chat.info": {
+      "argv": [
+        "chat",
+        "+conversation-info"
+      ],
+      "schemaHash": "a925833db4338cf6fc242602477413a25d2f9e113e463c2345123e5e3fb0c292",
+      "schemaFile": "config/dws/chat-conversation-info.schema.json",
+      "effect": "read",
+      "confirmation": "not_required",
+      "publishedResultSchema": false,
+      "sourceCommit": "50eb73a0906c5911c5c25f9c7106b6ead4f14f62",
+      "offlineSchemaEvidence": "reports/checks/p03-group-conversation-schema.json",
+      "outputContract": "Opaque group payload requires independent tenant-reviewed exact ID/type/count/revision profile; no output ACL or directory certification inferred"
+    }
+  },
+  "credentialPaths": {
+    "config": "DWS_CONFIG_DIR",
+    "keychainRoot": "DWS_KEYCHAIN_DIR/dws-cli",
+    "defaultFileKeychain": "HOME/.local/share/dws-cli",
+    "macFileBackend": "DWS_DISABLE_KEYCHAIN=1",
+    "directoriesMode": "0700",
+    "filesMode": "0600"
+  },
+  "license": "Apache-2.0",
+  "checkedAt": "2026-10-15",
+  "liveStatus": "NOT_RUN",
+  "localEvidence": "reports/dws-offline",
+  "reason": "Offline CLI metadata only. No personal profile, device authorization or enterprise business read."
+}

@@ -1,0 +1,19 @@
+import {randomUUID} from 'node:crypto';
+import {mkdtemp,realpath,rm,writeFile,chmod,symlink} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {groupReminderRuntimeFingerprint,readGroupReminderRuntimeProfile} from '../../packages/config/src/group-reminder-runtime.js';
+import {groupReminderRuntimeCommand} from '../../scripts/group-reminder-runtime.js';
+const profile=()=>({schemaVersion:1,approved:true,purpose:'GROUP_REMINDER_RUN_ONCE',reviewReference:'SYNTHETIC_FINITE_REVIEW',sourceReviewHash:'a'.repeat(64),validFrom:'2026-10-19T00:00:00Z',expiresAt:'2026-10-19T00:30:00Z',maxNotifications:1,targets:[{tenantId:randomUUID(),actorId:randomUUID(),groupId:'cidSynthetic==',scheduleId:randomUUID(),authorizationId:randomUUID(),authorizationHash:'b'.repeat(64)}],modelCalls:0,allowMentionAll:false,allowDirectMessages:false,allowEscalation:false});
+it('pins canonical profile bytes and refuses expanded authority, recipients or an unbounded window',()=>{
+ const p=profile(),f=groupReminderRuntimeFingerprint(p);expect(f.hash).toMatch(/^[a-f0-9]{64}$/);expect(groupReminderRuntimeFingerprint(JSON.parse(f.serialized)).hash).toBe(f.hash);
+ for(const changed of [{...p,approved:false},{...p,modelCalls:1},{...p,maxNotifications:7},{...p,allowMentionAll:true},{...p,allowDirectMessages:true},{...p,allowEscalation:true},{...p,purpose:'DEFAULT_STARTUP'},{...p,expiresAt:'2026-10-19T01:00:01Z'},{...p,expiresAt:p.validFrom},{...p,targets:[...p.targets,p.targets[0]]},{...p,targets:[...p.targets,{...p.targets[0],actorId:randomUUID(),scheduleId:randomUUID()}]},{...p,targets:[...p.targets,{...p.targets[0],groupId:'other-group',scheduleId:randomUUID()}]},{...p,credential:'forged'}])expect(()=>groupReminderRuntimeFingerprint(changed)).toThrow();
+});
+it('plan reads only a bounded private operator file, starts no services and exact execution review is mandatory',async()=>{
+ const root=await realpath(await mkdtemp(join(await realpath(tmpdir()),'oa-reminder-plan-'))),path=join(root,'profile.json');await chmod(root,0o700);const p=profile();await writeFile(path,JSON.stringify(p),{mode:0o600});try{
+  const frozen=await readGroupReminderRuntimeProfile(path);expect(await groupReminderRuntimeCommand(['plan','--profile',path])).toEqual({mode:'PLAN_ONLY',profileHash:frozen.hash,expiresAt:new Date(p.expiresAt).toISOString(),maxNotifications:1,modelCalls:0,databaseAccess:false,servicesStarted:false,messagesSent:0});
+  await expect(groupReminderRuntimeCommand(['run-once','--profile',path])).rejects.toThrow('EXACT_REVIEW_REQUIRED');await expect(groupReminderRuntimeCommand(['run-once','--profile',path,'--expected-profile-hash','0'.repeat(64),'--review-ref',p.reviewReference])).rejects.toThrow('EXACT_REVIEW_REQUIRED');await expect(groupReminderRuntimeCommand(['plan','--profile',path,'--review-ref',p.reviewReference])).rejects.toThrow('PLAN_PROFILE_ONLY');
+  await expect(groupReminderRuntimeCommand(['daemon','--profile',path])).rejects.toThrow('USAGE');await expect(groupReminderRuntimeCommand(['plan','--profile',path,'--profile',path])).rejects.toThrow('ARGUMENT_INVALID');await expect(groupReminderRuntimeCommand(['plan'])).rejects.toThrow('PROFILE_REQUIRED');
+  const link=join(root,'alias.json');await symlink(path,link);await expect(readGroupReminderRuntimeProfile(link)).rejects.toThrow('PRIVATE_PROFILE_REQUIRED');await chmod(path,0o644);await expect(readGroupReminderRuntimeProfile(path)).rejects.toThrow('PRIVATE_PROFILE_REQUIRED');await chmod(path,0o600);await chmod(root,0o755);await expect(readGroupReminderRuntimeProfile(path)).rejects.toThrow('PRIVATE_PROFILE_REQUIRED');await chmod(root,0o700);await writeFile(path,' '.repeat(32769));await expect(readGroupReminderRuntimeProfile(path)).rejects.toThrow('PRIVATE_PROFILE_REQUIRED');
+ }finally{await rm(root,{recursive:true,force:true});}
+});

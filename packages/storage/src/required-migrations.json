@@ -1,0 +1,424 @@
+{
+  "schemaVersion": 1,
+  "compatibility": "EXACT_SET",
+  "lastMigration": "104_finite_private_pilots.sql",
+  "contractHash": "3bf5aa1d01b1ccf60ba529a4e8e22d0835c8ae891742c5690abae0295663b2ca",
+  "migrations": [
+    {
+      "name": "001_identity.sql",
+      "hash": "d92bd1efcdd9d835ce7ababcebbe6eba61055db4ad74df4816d257814025084b"
+    },
+    {
+      "name": "002_tasks.sql",
+      "hash": "b0a4ec091b9641cc44896b0f67e1cdf3cb847a89f4d86d3beb01ddc2f29ad02a"
+    },
+    {
+      "name": "003_runtime.sql",
+      "hash": "6d2a7cbca86ef20ed441b005327d55e0fddefd2fd8255e55b7e4b5bd34206a3e"
+    },
+    {
+      "name": "004_gateway.sql",
+      "hash": "04b3372a533b752a9a46a4f605c3ad2c71a1e2571e4abbc0eb78939fe473f0b2"
+    },
+    {
+      "name": "005_queue.sql",
+      "hash": "a987621a4eaaeb06698efded384948c212649f7f2d9351d4f95a9d6f349b91e4"
+    },
+    {
+      "name": "006_login_states.sql",
+      "hash": "a025038c0636f43d4cc3da62da693207c181417ff04b5ddb2e36a0dbaf8a0452"
+    },
+    {
+      "name": "007_delivery_and_conversations.sql",
+      "hash": "8364b62e4b839544bbe0cbc8812983ccbb641cced2039ccd3b2023d1d8fad0cd"
+    },
+    {
+      "name": "008_cards.sql",
+      "hash": "bd2269fa86c22cff7f44c81ddd44f4906034702aeb29a73dcfdff9b91094d2a3"
+    },
+    {
+      "name": "009_card_callback_replay.sql",
+      "hash": "9593d1362865656e6bda4cfadc5982ec53bc4134a862986fe50338ef5f3d0348"
+    },
+    {
+      "name": "010_durable_run_retry.sql",
+      "hash": "421866626f00364cd1849e89fead0b032383db4311c67ae6ce65dda1a52fbc6e"
+    },
+    {
+      "name": "011_card_finalization_truth.sql",
+      "hash": "71aa26e4af491f4443ef943b481133ae75c55f734ad6831137f7ceca2d7faf3b"
+    },
+    {
+      "name": "012_attachments.sql",
+      "hash": "f9450ce7c4b296fe846c9eab5da2a0774a1e886e26f0ab4313464e33662febd5"
+    },
+    {
+      "name": "013_attachment_dependencies.sql",
+      "hash": "7d1434a9e1d7d80b9c8ae1646df23dde07b35b3d6d70e5ae856a71606bbc5bc1"
+    },
+    {
+      "name": "014_attachment_owner_integrity.sql",
+      "hash": "8cbaf3ccb51d3a4cfc0190969145a9cb6f5b0acca43e9a5a9b51026461b8a5b0"
+    },
+    {
+      "name": "015_attachment_read_fence.sql",
+      "hash": "02381cb21fafaef5b8d5683e608ccf63613bf5f7935c10aa7d898065148d5a33"
+    },
+    {
+      "name": "016_certified_read_recovery.sql",
+      "hash": "444314614aae33834167bb2425733cd7aa38b23beb61411125e8cce080805c37"
+    },
+    {
+      "name": "017_result_classification.sql",
+      "hash": "2bfc400e625d268d084ccb8e76b81b4bd802811d138a0d07098aae44ab71ebf0"
+    },
+    {
+      "name": "018_tool_attempt_fence.sql",
+      "hash": "5571d9ca4b23746c498fa5f8c2f5e3ba415fdb7e3357f180c62358210469dcf5"
+    },
+    {
+      "name": "019_task_control_receipts.sql",
+      "hash": "6dcf6c8c48862d0b540823dcb07ab7447e3654b14a89b98c7c266de4baf1625b"
+    },
+    {
+      "name": "020_model_stream_progress.sql",
+      "hash": "65103dd9a4596b2805738d06fda99c705c022120f6578249ae994d4616c852aa"
+    },
+    {
+      "name": "021_safe_context_sessions.sql",
+      "hash": "8f19c838532069c3b8a12ac5982323fecbe35e12b4cba0f6aabc9ce02b3fdc65"
+    },
+    {
+      "name": "022_context_source_integrity.sql",
+      "hash": "074576899440079c252e83c55d25c7d0ab2ea33c4da0487d276b797318aa8852"
+    },
+    {
+      "name": "023_control_workflows.sql",
+      "hash": "1ff2b414b95a853300fc75a78a66cf6dea61222b04e631efbbe396d2e33461b5"
+    },
+    {
+      "name": "024_reconciliation_sessions.sql",
+      "hash": "1ae33bee28076564ae769bf005d878de07da4835140b95842bf3dc77abca92f8"
+    },
+    {
+      "name": "025_connector_control_authority.sql",
+      "hash": "9783143018242b1b4e5072bf284952f0e678971902c107b08233c09a010b6f5c"
+    },
+    {
+      "name": "026_control_console.sql",
+      "hash": "5ecd268117b6c02421c6479f45b8b3acc225f37237d1fa3c6ee7a425f178b00d"
+    },
+    {
+      "name": "027_runtime_active_budget.sql",
+      "hash": "9881c93d1455c12fa9d8a4ffc40908d03b2cd1cbcba4247668ad51509b98f649"
+    },
+    {
+      "name": "028_runtime_budget_schema.sql",
+      "hash": "5eb47e7d90f15d12748ed53be70a9e638d543e8036a09c4e4f9f2ade33e0d6be"
+    },
+    {
+      "name": "029_model_quota_reservations.sql",
+      "hash": "4077b51dfe3cd84b235536264266029da08c010ac9e30ff268dc3781afc77104"
+    },
+    {
+      "name": "030_model_budget_recovery.sql",
+      "hash": "dbe5e5b1e79cc5273e14ec1d4f820277fb128790e9887f9453da71fff0a643ea"
+    },
+    {
+      "name": "031_finalization_proofs.sql",
+      "hash": "14f8cd67fe1c7bf355bbd46e5940a637a6af5ecb3569440c9ef83a61f811811a"
+    },
+    {
+      "name": "032_company_code_scopes.sql",
+      "hash": "81384a56d6e1eb093e706a1cc1f7c7d5c5ae0895de134c03c45e80da62b3c1b0"
+    },
+    {
+      "name": "033_dws_identity_isolation.sql",
+      "hash": "b123270468257196e84b2d1224bd2d08530d8ec4e5c22a631517de9bd649e7e4"
+    },
+    {
+      "name": "034_dws_document_scopes.sql",
+      "hash": "9bbe49acb6e75920ac9abc884a527ce831ec5aafbc1e067cc8b493c43baa66a0"
+    },
+    {
+      "name": "035_narrative_reviews.sql",
+      "hash": "d57d7378ef48f8edc2bf8ce7af2b9899852a13664618b95ea92e703b33da2d73"
+    },
+    {
+      "name": "036_clarification_context.sql",
+      "hash": "451c8f383b1451297edaa1e16386d8287e0d602e2ce3668360826276b23533a5"
+    },
+    {
+      "name": "037_dingtalk_clarification_replies.sql",
+      "hash": "1e804d09f0b02664b3844db7173f75f36d21cb74634d72efb869a4d03de25951"
+    },
+    {
+      "name": "038_clarification_control_responses.sql",
+      "hash": "b57110f59aac922a88d899598ea50f65a54aeee1c66a6fd329399650db7fdade"
+    },
+    {
+      "name": "039_source_choices.sql",
+      "hash": "2e368bc86f49db926a524a410eee49c715369e46017025fbfc09aa1978da343f"
+    },
+    {
+      "name": "040_control_response_origin.sql",
+      "hash": "43c6464ad16a7cba68e10aef8b85d1ec8707efcb588e6036bcbbbc290737d4a1"
+    },
+    {
+      "name": "041_group_audiences.sql",
+      "hash": "dee37599a82af52eac735152a223041402ab2dbe71cc6e4a3a318f5e9f42267b"
+    },
+    {
+      "name": "042_group_reply_verification.sql",
+      "hash": "2d1060df7740141b2bd614e4924b525329e4ab5531f7d02748d1e2f5721c74ab"
+    },
+    {
+      "name": "043_group_authority_versions.sql",
+      "hash": "fcc9f28e800946ce1dd67ffbb9c6fa687b1c82eaf2e2016840812bf1b258e706"
+    },
+    {
+      "name": "044_persona_versions.sql",
+      "hash": "72417dcadd7544d043ec31d2d5da492d036f772ce9946936bc52f6f0b0366596"
+    },
+    {
+      "name": "045_run_persona_snapshots.sql",
+      "hash": "0e3198a427cdd4cd83912e493eafd8f7fa3516d23a7f71314272432a47a6b4e4"
+    },
+    {
+      "name": "046_persona_control_receipts.sql",
+      "hash": "5172d1ca34f41924cb5b73f8b7efaba642836432b30d864d5557eacf208d530f"
+    },
+    {
+      "name": "047_persona_scope_dialogue.sql",
+      "hash": "ac0a924daa975c0aebef8578e61b46a2cd5181b32e02636813024b2ef43a3224"
+    },
+    {
+      "name": "048_persona_scope_commit_fence.sql",
+      "hash": "6d761d142d38353f1dbfe5beb9a9952a8e367fa9d8a22a5507c0313cac56f69d"
+    },
+    {
+      "name": "049_persona_explicit_confirmation.sql",
+      "hash": "4a3490e1e4968353dbb85bdf4fad5fa22316e19b13a98501b15dfa54f165ef35"
+    },
+    {
+      "name": "050_private_preference_lifecycle.sql",
+      "hash": "87ceaf167ca5a2473b6f8cd0cc1771c4f309afaef06bb19e02bfe069629cc6ce"
+    },
+    {
+      "name": "051_native_memory_receipts.sql",
+      "hash": "963c682716992e7427e5631d6c5a0e5a848b5a2dbce5215a4fb54e7bcbe5adee"
+    },
+    {
+      "name": "052_memory_restore_tombstones.sql",
+      "hash": "ab447c5c0711461f9101ae739ad7d9cb91ea416ad0a705cdf31625c7300c06c8"
+    },
+    {
+      "name": "053_user_persona_privacy_erasure.sql",
+      "hash": "7046a59ce6fc2af787780897cd5af2460ede77eb0fc8e53b29dbd20e3288a318"
+    },
+    {
+      "name": "054_persona_erasure_content_helper.sql",
+      "hash": "0ff5bd150eccee56da4b6c5eee5ed6416161fd9dc8271473ca3e37243669822d"
+    },
+    {
+      "name": "055_persona_erasure_request_alias.sql",
+      "hash": "f49313f9279baa7e6e9442dbe405f38c1bba6c6d862522bb37ab38d105e1e7f5"
+    },
+    {
+      "name": "056_persona_known_erasure_repair.sql",
+      "hash": "4b876821d0c302df74ab8f73beb01a0077d952e2e7271ab5920dd42125af87d6"
+    },
+    {
+      "name": "057_erasure_ledger_runtime_veto.sql",
+      "hash": "6cb01443128d8641fdad5d9d0452339b1da5bbd5cb77684305d52133fd64ce72"
+    },
+    {
+      "name": "058_retained_erasure_dependency_repair.sql",
+      "hash": "5fb564625e525f67dc8298b5a7f868ca288756e44e4078adf83005fac3d88053"
+    },
+    {
+      "name": "059_source_choice_private_copy_erasure.sql",
+      "hash": "03893712bc0d42dd10f1457e09ad7a1066904d7a1825c011eaa2697ecc24d2da"
+    },
+    {
+      "name": "060_owner_erasure_veto_after_departure.sql",
+      "hash": "626362f1ef9718e130937bcc0d4e179a97af3d9670c632236de40764eb4d0848"
+    },
+    {
+      "name": "061_one_shot_trial_state.sql",
+      "hash": "fcb30faacf1c35be4d867e80a777c80166e047f3a0abf90a26468249a5b89527"
+    },
+    {
+      "name": "062_one_shot_trial_guards.sql",
+      "hash": "c90eaf4ed2ae97e0fc5c8d6bcf1f18e2a120798d2d681590365f8b86dadb9841"
+    },
+    {
+      "name": "063_one_shot_trial_namespace.sql",
+      "hash": "b67bb8e19127f0ba3ae11ca02f88e0a3e2c2ceb2684cfa3dd881d35669da2452"
+    },
+    {
+      "name": "064_one_shot_trial_owner_and_generation.sql",
+      "hash": "66667e5d920c59e5e8d4abd41b33740edb591f7fa38ddccfdb5d4086c462fe6d"
+    },
+    {
+      "name": "065_inactive_private_erasure_maintenance.sql",
+      "hash": "3f9432e1bb2c90b5a6529ffea2160da88b9732b9ea982581b2a103aa2b394209"
+    },
+    {
+      "name": "066_permission_manifests_and_self_service.sql",
+      "hash": "5ac17e1e1f7a57d879efe38ec55f9a14bdc431c67a3a4a5e4bafde815b35f0ff"
+    },
+    {
+      "name": "067_typed_action_role_authority.sql",
+      "hash": "08b07a7549f4d10877527dc1ea2353fcb9f1733101abf86edc8f255fb2d23147"
+    },
+    {
+      "name": "068_schema_ledger_authority.sql",
+      "hash": "1b3f126f4df3182acc3fa13721aae7bf033a1c56562f98cda738dd71de8a4db9"
+    },
+    {
+      "name": "069_trial_formal_lifecycle.sql",
+      "hash": "bf16c7a49c09bf78e4e4e396e0b85781028efcff9f60a2b1ae58d5683943abe4"
+    },
+    {
+      "name": "070_trial_fresh_admission.sql",
+      "hash": "0dfc0528e592ddd76393f5b74ff3105dac9f4bb522e057335e35726568e84fd1"
+    },
+    {
+      "name": "071_trial_admission_binding_authority.sql",
+      "hash": "2deb9c2d76b39aaa718630717f610d2cf74ff631c571e35fc9290fe8f2453777"
+    },
+    {
+      "name": "072_trial_admission_transaction_witness.sql",
+      "hash": "c0c0912bb0f7695b0ae8f2a943c149af485cc387be1b8fc417a2ed354710a0b9"
+    },
+    {
+      "name": "073_trial_execution_claim.sql",
+      "hash": "3e82f138950f9bc1adc387931040157755efc8fa94de292aad4692d6adec900b"
+    },
+    {
+      "name": "074_permission_diagnostic_cache_bounds.sql",
+      "hash": "3ba8af7287d81c186ef7e4e223655b52ec2fd88d68b875603589aaaf7b07f657"
+    },
+    {
+      "name": "075_permission_diagnostic_rate_limit.sql",
+      "hash": "b04bb81c3deff36d28de1baf9675da09ccabe27891e8961ada7c60b7c1133226"
+    },
+    {
+      "name": "076_permission_diagnostic_maintenance.sql",
+      "hash": "af8be798cfad7d96c9ea6016747ff4890e98b983aa093d40998bfa8a270b037f"
+    },
+    {
+      "name": "077_managed_resource_grants.sql",
+      "hash": "87ceb91e7cb2709e304395efe02efb41fbb38d8c869505229f8214b56d3bcaa1"
+    },
+    {
+      "name": "078_managed_grant_resource_length.sql",
+      "hash": "3284eb200110de130b1252a131e49a5e3ec91811c33d1ef9da47ffdf83505a55"
+    },
+    {
+      "name": "079_managed_grant_provider_identity.sql",
+      "hash": "0517bff40fdaf1e1cd430b9cc14cb24a25e8ccc27a03d12656e9a59bd9a42d60"
+    },
+    {
+      "name": "080_managed_grant_descriptor_snapshot.sql",
+      "hash": "81d2be3c18c7d424f9f084ca1be0b0b184e0326b8952ef21c077ca691c50b242"
+    },
+    {
+      "name": "081_managed_grant_auth_mode_review.sql",
+      "hash": "51523fca4ab05b7b7d9bc84e2403b98502ce5141e3ad2857abae786d784d3001"
+    },
+    {
+      "name": "082_managed_grant_reader_admission.sql",
+      "hash": "2b79aecd2b5bf22b3049c85000fab8cbc852a9f8fb58a5a6ce48b60d6c5bd83d"
+    },
+    {
+      "name": "083_managed_grant_lifecycle_admission.sql",
+      "hash": "e9f95b3951545b2b10a9fd311fd6eb7daee844fd6b0586bc0efc3a6557079ac0"
+    },
+    {
+      "name": "084_daily_budget_transition.sql",
+      "hash": "7d9b592f6fa627aa0b2d32f3a8a079c46d0a0ad6bfb4d005f95a17fde033318c"
+    },
+    {
+      "name": "085_group_contract_governance.sql",
+      "hash": "239b21788d0a7f4c55e9c80c3b72fb0e0dfac30503ad212b35803772833e6cf7"
+    },
+    {
+      "name": "086_company_log_scopes.sql",
+      "hash": "c15afe02eeef59ca8f60e3c464b3c0d2179f85927f50c183f85959df27418a18"
+    },
+    {
+      "name": "087_group_cases.sql",
+      "hash": "3c369561d2872a820576ce0105db9c6f0333d82b4a7b8cffdfb340ac2311d8e8"
+    },
+    {
+      "name": "088_group_case_member_projection.sql",
+      "hash": "77040d1742b120a3c75aac513391ba9f22f346751274583f7fa75726a35a10b8"
+    },
+    {
+      "name": "089_private_schedules.sql",
+      "hash": "b3d8fd38bd588ad5a45c482f2c9d26d94cf2d36e5e7e9c82a7d25644e5520dd6"
+    },
+    {
+      "name": "090_schedule_execution_and_history.sql",
+      "hash": "5a96455c6202fd7bbde62da32345ca8cd5160824f2ad35a93dc1f483ac152f0d"
+    },
+    {
+      "name": "091_native_schedule_receipts.sql",
+      "hash": "e77aca0751c0ccac8ea3e437dfd5d28e63e9ac8b5e62e8081b4cd9f102519c5d"
+    },
+    {
+      "name": "092_native_group_cases.sql",
+      "hash": "f2d08609a5157fdb2afc73f5ba1853932d33ab7e671f31a57d2b9baa981a9bc7"
+    },
+    {
+      "name": "093_group_case_model_read.sql",
+      "hash": "73bb6a3fb99468c8e1a26d07f7b1a6732f17342aad975278851ff65cb3d033ce"
+    },
+    {
+      "name": "094_group_case_roster_authority.sql",
+      "hash": "e893e16b3c4a24d03cc075072abe9419a9180465f45e75fff29c1cbc7b90de7f"
+    },
+    {
+      "name": "095_group_reminder_authority.sql",
+      "hash": "44d4cf6c7ec66a31fc6b760da4bc1e7d3de0e114ec8edc214501c9e75b57b679"
+    },
+    {
+      "name": "096_group_reminder_execution.sql",
+      "hash": "708219750bd743bef38280448f9bb61a1ef4b52badd7ea157d7c38563dadf87f"
+    },
+    {
+      "name": "097_task_result_artifacts.sql",
+      "hash": "4825ecc074decbe324a729198c49553acd2308c2752142df46d6c4e6ca7ede33"
+    },
+    {
+      "name": "098_company_agent_requests.sql",
+      "hash": "886484643a0759657ab9890dde1da164d3ceb0ae0c05dc200a666a10476f5407"
+    },
+    {
+      "name": "099_native_case_audiences.sql",
+      "hash": "aec09fa26dac3edb1c729bad7e2aa15e191eaaa4e5a01887f557fd3996eb5434"
+    },
+    {
+      "name": "100_formal_group_admission.sql",
+      "hash": "132101dad1775759612cc4a64c9f5d3a63374080022c54ea90147704a20cfb92"
+    },
+    {
+      "name": "101_group_mention_contract_observer.sql",
+      "hash": "4b776fc231b273e6cf1bd360ec500971dadea604f9f8e3f2d53b4a23bde7be3b"
+    },
+    {
+      "name": "102_native_artifact_drafts.sql",
+      "hash": "5772dd87151df76db9cebadfd27075ec90c4973292ed03ab997246ee5d9b4083"
+    },
+    {
+      "name": "103_group_case_escalations.sql",
+      "hash": "492385df4bef1046df93d4849a7cde43d87f18620a2917c9d4aad98c0011bcee"
+    },
+    {
+      "name": "104_finite_private_pilots.sql",
+      "hash": "dca7e52fc67da1ac895ea8f85f9aad7ad6c1a87d2cf364c77b065f8d6508108b"
+    }
+  ]
+}

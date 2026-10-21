@@ -1,0 +1,1996 @@
+[
+  {
+    "id": "T001",
+    "priority": "P0",
+    "requirements": [
+      "R01",
+      "R03"
+    ],
+    "layer": "E2E",
+    "precondition": "ALICE单聊发送普通问题",
+    "oracle": "正确识别身份和会话；有任务ID；只回复原单聊",
+    "implementation": "tests/e2e/self-dm.spec.ts",
+    "status": "NOT_RUN",
+    "coverageNote": "Complete local T001 oracle: trusted SDK callback and durable ACK, real isolated PostgreSQL/pg-boss, native GLM SSE fixture with budget limits, original-DM sender fixture with visible task ID, one logical task/reply under replay, and authenticated desktop/mobile workbench. Live model and DingTalk acceptance remain NOT_RUN; R01/R03 are not declared complete.",
+    "supplementaryImplementations": [
+      "tests/integration/narrative-review.test.ts",
+      "tests/e2e/narrative.spec.ts",
+      "tests/integration/task-receipt.test.ts",
+      "tests/integration/one-shot-trial.test.ts"
+    ]
+  },
+  {
+    "id": "T002",
+    "priority": "P0",
+    "requirements": [
+      "R01",
+      "R15"
+    ],
+    "layer": "E2E",
+    "precondition": "G_RELEASE中@机器人，另发送未@消息",
+    "oracle": "标准通道仅处理收到的合法事件；不声称读取未送达消息",
+    "implementation": null,
+    "status": "NOT_RUN"
+  },
+  {
+    "id": "T003",
+    "priority": "P0",
+    "requirements": [
+      "R02",
+      "R31"
+    ],
+    "layer": "INTEGRATION",
+    "precondition": "同一可信eventId并发投递20次",
+    "oracle": "inbox只有1个逻辑事件、1个任务；不得重复外部写",
+    "implementation": "tests/integration/ingress.test.ts",
+    "status": "NOT_RUN",
+    "coverageNote": "Partial local oracle coverage with real dedicated PostgreSQL/encrypted files and synthetic provider transports; full baseline and live acceptance remain NOT_RUN. Narrative/clarification local component evidence only; synthetic review verdicts do not certify model semantic quality or complete enterprise baseline.",
+    "supplementaryImplementations": [
+      "tests/integration/ingress.test.ts",
+      "tests/integration/attachments.test.ts",
+      "tests/unit/attachments.test.ts",
+      "tests/integration/narrative-review.test.ts"
+    ]
+  },
+  {
+    "id": "T004",
+    "priority": "P0",
+    "requirements": [
+      "R02",
+      "R31"
+    ],
+    "layer": "CHAOS",
+    "precondition": "inbox提交前中断PG连接",
+    "oracle": "不ACK假成功；恢复重投后恰有1个逻辑任务",
+    "implementation": "tests/integration/ingress.test.ts",
+    "status": "NOT_RUN",
+    "coverageNote": "Real isolated PostgreSQL backend is terminated after inbox/task/run/outbox writes and before COMMIT; no ACK, full rollback, and 20 concurrent redeliveries create one logical task. Synthetic SDK transport only; live acceptance remains NOT_RUN.",
+    "supplementaryImplementations": [
+      "tests/integration/ingress.test.ts"
+    ]
+  },
+  {
+    "id": "T005",
+    "priority": "P0",
+    "requirements": [
+      "R02",
+      "R31"
+    ],
+    "layer": "CHAOS",
+    "precondition": "inbox/outbox提交后、发布队列前kill",
+    "oracle": "重启后outbox补投；不丢任务",
+    "implementation": "tests/integration/queue.test.ts",
+    "status": "NOT_RUN",
+    "coverageNote": "Real independent ingress process receives SIGKILL after durable SDK ACK and before publication; persisted outbox recovers to exactly one real pg-boss job, with idempotent republish. No live DingTalk connection.",
+    "supplementaryImplementations": [
+      "tests/integration/queue.test.ts",
+      "tests/integration/retry.test.ts"
+    ]
+  },
+  {
+    "id": "T006",
+    "priority": "P0",
+    "requirements": [
+      "R01",
+      "R13"
+    ],
+    "layer": "SECURITY",
+    "precondition": "收到机器人自身发送消息与机器人互相回复",
+    "oracle": "自身消息不产生新任务；跨机器人循环被抑制",
+    "implementation": "tests/integration/ingress.test.ts",
+    "status": "NOT_RUN",
+    "coverageNote": "Partial baseline oracle coverage; local assertions exist. Full baseline status remains NOT_RUN until all required layers and assertions are verified.",
+    "supplementaryImplementations": [
+      "tests/integration/ingress.test.ts"
+    ]
+  },
+  {
+    "id": "T007",
+    "priority": "P1",
+    "requirements": [
+      "R03",
+      "R30"
+    ],
+    "layer": "CONTRACT",
+    "precondition": "快速流式输出100个chunk",
+    "oracle": "合并更新状态卡；遵守限流；最终卡片结束",
+    "implementation": "tests/integration/card-stream.test.ts",
+    "status": "NOT_RUN",
+    "supplementaryImplementations": [
+      "tests/integration/card-stream.test.ts",
+      "tests/contract/glm.test.ts",
+      "tests/integration/cards.test.ts"
+    ],
+    "coverageNote": "Local native protocol100-fragment→safe persistent progress→750ms official card adapter substitute→single accepted final update oracle implemented. This is local contract evidence; baseline enterprise acceptance remains NOT_RUN."
+  },
+  {
+    "id": "T008",
+    "priority": "P0",
+    "requirements": [
+      "R03",
+      "R28"
+    ],
+    "layer": "SECURITY",
+    "precondition": "BOB点击转发来的CAROL审批卡",
+    "oracle": "BOB不能批准CAROL的动作；副作用为0",
+    "implementation": null,
+    "status": "NOT_RUN",
+    "supplementaryImplementations": [
+      "tests/integration/cards.test.ts"
+    ],
+    "coverageNote": "Partial local oracle coverage with isolated real PG/pg-boss and explicit provider substitutes; full baseline status remains NOT_RUN. T008 covers cancellation-card forwarding, approval-card integration is still P04."
+  },
+  {
+    "id": "T009",
+    "priority": "P1",
+    "requirements": [
+      "R01",
+      "R31"
+    ],
+    "layer": "CONTRACT",
+    "precondition": "临时回复地址过期，定时通知到期",
+    "oracle": "不用过期地址盲发；使用已授权主动通道或明确投递失败",
+    "implementation": "tests/contract/dingtalk.test.ts",
+    "status": "NOT_RUN",
+    "coverageNote": "Local synthetic-provider assertions cover part of this oracle. Full baseline and live acceptance remain NOT_RUN.",
+    "supplementaryImplementations": [
+      "tests/contract/dingtalk.test.ts",
+      "tests/integration/delivery.test.ts"
+    ]
+  },
+  {
+    "id": "T010",
+    "priority": "P0",
+    "requirements": [
+      "R01",
+      "R29"
+    ],
+    "layer": "SECURITY",
+    "precondition": "伪造HTTP签名/篡改企业ID/过期重放",
+    "oracle": "拒绝入站或去重；不采信正文身份",
+    "implementation": "tests/integration/ingress.test.ts",
+    "status": "NOT_RUN",
+    "coverageNote": "Partial baseline oracle coverage; local assertions exist. Full baseline status remains NOT_RUN until all required layers and assertions are verified.",
+    "supplementaryImplementations": [
+      "tests/integration/ingress.test.ts"
+    ]
+  },
+  {
+    "id": "T011",
+    "priority": "P0",
+    "requirements": [
+      "R04"
+    ],
+    "layer": "CONTRACT",
+    "precondition": "UTF-8、SSE事件和JSON跨网络chunk分割",
+    "oracle": "完整重组文本；没有乱码、漏事件或提前工具执行",
+    "implementation": "tests/contract/glm.test.ts",
+    "status": "NOT_RUN",
+    "coverageNote": "Partial baseline oracle coverage; local assertions exist. Full baseline status remains NOT_RUN until all required layers and assertions are verified.",
+    "supplementaryImplementations": [
+      "tests/contract/glm.test.ts"
+    ]
+  },
+  {
+    "id": "T012",
+    "priority": "P0",
+    "requirements": [
+      "R04",
+      "R05"
+    ],
+    "layer": "CONTRACT",
+    "precondition": "assistant产生2个tool_calls并返回混合成功/失败",
+    "oracle": "按ID保存并回传全部结果；原顺序与协议闭合",
+    "implementation": "tests/integration/runtime.test.ts",
+    "status": "NOT_RUN",
+    "coverageNote": "Partial baseline oracle coverage; local assertions exist. Full baseline status remains NOT_RUN until all required layers and assertions are verified.",
+    "supplementaryImplementations": [
+      "tests/integration/runtime.test.ts"
+    ]
+  },
+  {
+    "id": "T013",
+    "priority": "P0",
+    "requirements": [
+      "R04"
+    ],
+    "layer": "CONTRACT",
+    "precondition": "preserved reasoning经过重启恢复",
+    "oracle": "解密后的协议内容/顺序一致；不是前端摘要替换",
+    "implementation": "tests/integration/runtime.test.ts",
+    "status": "NOT_RUN",
+    "coverageNote": "Partial baseline oracle coverage; local assertions exist. Full baseline status remains NOT_RUN until all required layers and assertions are verified.",
+    "supplementaryImplementations": [
+      "tests/integration/runtime.test.ts"
+    ]
+  },
+  {
+    "id": "T014",
+    "priority": "P0",
+    "requirements": [
+      "R04",
+      "R29"
+    ],
+    "layer": "SECURITY",
+    "precondition": "开启trace、导出日志、查看群卡片",
+    "oracle": "均无原始reasoning_content/密钥；只展示安全动作摘要",
+    "implementation": "tests/contract/glm.test.ts",
+    "status": "NOT_RUN",
+    "coverageNote": "Partial local contract/security evidence includes independent process checkpoint recovery, current source authorization, ledger preservation and safe workbench summary; no full baseline or live acceptance is inferred.",
+    "supplementaryImplementations": [
+      "tests/contract/glm.test.ts",
+      "tests/integration/checkpoint.test.ts"
+    ]
+  },
+  {
+    "id": "T015",
+    "priority": "P0",
+    "requirements": [
+      "R04",
+      "R06"
+    ],
+    "layer": "CONTRACT",
+    "precondition": "输出工具参数半个JSON后断流",
+    "oracle": "没有工具副作用；不完整turn不进入可执行状态",
+    "implementation": "tests/contract/glm.test.ts",
+    "status": "NOT_RUN",
+    "coverageNote": "Partial baseline oracle coverage; local assertions exist. Full baseline status remains NOT_RUN until all required layers and assertions are verified.",
+    "supplementaryImplementations": [
+      "tests/contract/glm.test.ts"
+    ]
+  },
+  {
+    "id": "T016",
+    "priority": "P0",
+    "requirements": [
+      "R05",
+      "R31"
+    ],
+    "layer": "CHAOS",
+    "precondition": "工具已成功，模型后续流断开并重试",
+    "oracle": "复用工具账本与结果；不重做写动作",
+    "implementation": "tests/integration/runtime.test.ts",
+    "status": "NOT_RUN",
+    "coverageNote": "Additional isolated real-PG and independent-process recovery assertions exist. Full baseline acceptance remains NOT_RUN.",
+    "supplementaryImplementations": [
+      "tests/integration/runtime.test.ts",
+      "tests/integration/retry.test.ts"
+    ]
+  },
+  {
+    "id": "T017",
+    "priority": "P0",
+    "requirements": [
+      "R04",
+      "R10"
+    ],
+    "layer": "INTEGRATION",
+    "precondition": "上下文超限或推理密文TTL到期",
+    "oracle": "新provider session恢复安全事实，不编造/改写原始推理",
+    "implementation": "tests/integration/runtime.test.ts",
+    "status": "NOT_RUN",
+    "coverageNote": "Partial local contract/security evidence includes independent process checkpoint recovery, current source authorization, ledger preservation and safe workbench summary; no full baseline or live acceptance is inferred. Narrative/clarification local component evidence only; synthetic review verdicts do not certify model semantic quality or complete enterprise baseline.",
+    "supplementaryImplementations": [
+      "tests/integration/runtime.test.ts",
+      "tests/integration/checkpoint.test.ts",
+      "tests/integration/narrative-review.test.ts"
+    ]
+  },
+  {
+    "id": "T018",
+    "priority": "P0",
+    "requirements": [
+      "R05",
+      "R30"
+    ],
+    "layer": "UNIT",
+    "precondition": "模型重复3次相同无结果调用",
+    "oracle": "触发无进展保护；返回真实限制，不无限循环",
+    "implementation": "tests/integration/runtime.test.ts",
+    "status": "NOT_RUN",
+    "coverageNote": "Partial baseline oracle coverage; local assertions exist. Full baseline status remains NOT_RUN until all required layers and assertions are verified.",
+    "supplementaryImplementations": [
+      "tests/integration/runtime.test.ts"
+    ]
+  },
+  {
+    "id": "T019",
+    "priority": "P0",
+    "requirements": [
+      "R04",
+      "R30"
+    ],
+    "layer": "CONTRACT",
+    "precondition": "GLM返回401、429与余额不足",
+    "oracle": "正确分类/退避/预算状态；不偷偷切换模型",
+    "implementation": "tests/contract/glm.test.ts",
+    "status": "NOT_RUN",
+    "coverageNote": "Partial baseline oracle coverage; local assertions exist. Full baseline status remains NOT_RUN until all required layers and assertions are verified.",
+    "supplementaryImplementations": [
+      "tests/contract/glm.test.ts"
+    ]
+  },
+  {
+    "id": "T020",
+    "priority": "P1",
+    "requirements": [
+      "R04",
+      "R16"
+    ],
+    "layer": "LIVE",
+    "precondition": "授权测试图片与文本交给指定模型",
+    "oracle": "仅按实测输入模态启用；不宣称支持未经验证的音频输出",
+    "implementation": null,
+    "status": "NOT_RUN"
+  },
+  {
+    "id": "T021",
+    "priority": "P0",
+    "requirements": [
+      "R05",
+      "R28"
+    ],
+    "layer": "E2E",
+    "precondition": "用户要求收件人存在实质歧义的群发送",
+    "oracle": "先澄清唯一受众；不能猜测后发送",
+    "implementation": null,
+    "status": "NOT_RUN"
+  },
+  {
+    "id": "T022",
+    "priority": "P0",
+    "requirements": [
+      "R05",
+      "R06"
+    ],
+    "layer": "INTEGRATION",
+    "precondition": "用户停止时run正在等待下一工具",
+    "oracle": "取消标记持久化；不启动新工具；说明在途外部动作状态",
+    "implementation": "tests/integration/runtime.test.ts",
+    "status": "NOT_RUN",
+    "coverageNote": "Partial baseline oracle coverage; local assertions exist. Full baseline status remains NOT_RUN until all required layers and assertions are verified. Narrative/clarification local component evidence only; synthetic review verdicts do not certify model semantic quality or complete enterprise baseline.",
+    "supplementaryImplementations": [
+      "tests/integration/runtime.test.ts",
+      "tests/integration/stop.test.ts",
+      "tests/integration/narrative-review.test.ts"
+    ]
+  },
+  {
+    "id": "T023",
+    "priority": "P0",
+    "requirements": [
+      "R07",
+      "R29"
+    ],
+    "layer": "SECURITY",
+    "precondition": "TENANT_B使用TENANT_A的task/artifact/用户ID",
+    "oracle": "API与DB均拒绝；不泄露资源存在性和正文",
+    "implementation": "tests/integration/composite-keys.test.ts",
+    "status": "NOT_RUN",
+    "coverageNote": "Partial local contract/security evidence includes independent process checkpoint recovery, current source authorization, ledger preservation and safe workbench summary; no full baseline or live acceptance is inferred.",
+    "supplementaryImplementations": [
+      "tests/integration/composite-keys.test.ts",
+      "tests/integration/identity.test.ts",
+      "tests/integration/attachments.test.ts",
+      "tests/unit/attachments.test.ts",
+      "tests/integration/checkpoint.test.ts"
+    ]
+  },
+  {
+    "id": "T024",
+    "priority": "P0",
+    "requirements": [
+      "R07"
+    ],
+    "layer": "E2E",
+    "precondition": "跨企业和同企业同名联系人选择",
+    "oracle": "解析稳定ID；实质同名必须选择，不按第一条猜",
+    "implementation": "tests/integration/directory.test.ts",
+    "status": "NOT_RUN",
+    "coverageNote": "Partial baseline oracle coverage; local assertions exist. Full baseline status remains NOT_RUN until all required layers and assertions are verified.",
+    "supplementaryImplementations": [
+      "tests/integration/directory.test.ts"
+    ]
+  },
+  {
+    "id": "T025",
+    "priority": "P0",
+    "requirements": [
+      "R07",
+      "R29"
+    ],
+    "layer": "INTEGRATION",
+    "precondition": "连接池同连接先处理ALICE再处理BOB",
+    "oracle": "事务局部上下文不残留；BOB读不到ALICE私有行",
+    "implementation": "tests/integration/identity.test.ts",
+    "status": "NOT_RUN",
+    "coverageNote": "Partial baseline oracle coverage; local assertions exist. Full baseline status remains NOT_RUN until all required layers and assertions are verified.",
+    "supplementaryImplementations": [
+      "tests/integration/identity.test.ts"
+    ]
+  },
+  {
+    "id": "T026",
+    "priority": "P0",
+    "requirements": [
+      "R08"
+    ],
+    "layer": "CONTRACT",
+    "precondition": "上游返回包含requiredScopes的权限错误",
+    "oracle": "准确显示缺失scope与来源；不伪造其他scope",
+    "implementation": null,
+    "status": "NOT_RUN"
+  },
+  {
+    "id": "T027",
+    "priority": "P0",
+    "requirements": [
+      "R08"
+    ],
+    "layer": "CONTRACT",
+    "precondition": "上游403其实是资源ACL或应用未发布",
+    "oracle": "分别归类；未知原因标UNKNOWN而非全部要求开权限",
+    "implementation": null,
+    "status": "NOT_RUN"
+  },
+  {
+    "id": "T028",
+    "priority": "P0",
+    "requirements": [
+      "R08",
+      "R23"
+    ],
+    "layer": "E2E",
+    "precondition": "应用消息权限齐全但用户未授权DWS",
+    "oracle": "机器人正常问答；DWS操作进入WAITING_AUTH",
+    "implementation": null,
+    "status": "NOT_RUN"
+  },
+  {
+    "id": "T029",
+    "priority": "P0",
+    "requirements": [
+      "R28"
+    ],
+    "layer": "SECURITY",
+    "precondition": "批准后替换参数、工具版本或受众",
+    "oracle": "哈希不匹配使审批失效；拒绝执行",
+    "implementation": "tests/integration/gateway.test.ts",
+    "status": "NOT_RUN",
+    "coverageNote": "Partial baseline oracle coverage; local assertions exist. Full baseline status remains NOT_RUN until all required layers and assertions are verified.",
+    "supplementaryImplementations": [
+      "tests/integration/gateway.test.ts",
+      "tests/security/policy.test.ts"
+    ]
+  },
+  {
+    "id": "T030",
+    "priority": "P0",
+    "requirements": [
+      "R28",
+      "R07"
+    ],
+    "layer": "SECURITY",
+    "precondition": "批准后审批人离职或委托被撤销",
+    "oracle": "执行前再鉴权拒绝；旧批准不保留超权",
+    "implementation": "tests/integration/gateway.test.ts",
+    "status": "NOT_RUN",
+    "supplementaryImplementations": [
+      "tests/integration/gateway.test.ts"
+    ]
+  },
+  {
+    "id": "T031",
+    "priority": "P0",
+    "requirements": [
+      "R28",
+      "R31"
+    ],
+    "layer": "INTEGRATION",
+    "precondition": "并发消费同一审批20次",
+    "oracle": "只允许1个逻辑Action进入执行",
+    "implementation": "tests/integration/gateway.test.ts",
+    "status": "NOT_RUN",
+    "supplementaryImplementations": [
+      "tests/integration/gateway.test.ts"
+    ]
+  },
+  {
+    "id": "T032",
+    "priority": "P0",
+    "requirements": [
+      "R29",
+      "R22"
+    ],
+    "layer": "SECURITY",
+    "precondition": "ALICE查到私人DOC_PRIVATE后要求发G_RELEASE",
+    "oracle": "群输出被拒绝或转个人详情入口；群中无敏感内容",
+    "implementation": "tests/integration/delivery.test.ts",
+    "status": "NOT_RUN",
+    "supplementaryImplementations": [
+      "tests/integration/delivery.test.ts"
+    ],
+    "coverageNote": "Local synthetic-provider assertions cover part of this oracle. Full baseline and live acceptance remain NOT_RUN."
+  },
+  {
+    "id": "T033",
+    "priority": "P0",
+    "requirements": [
+      "R29",
+      "R13"
+    ],
+    "layer": "SECURITY",
+    "precondition": "读取后发送前群加入外部成员",
+    "oracle": "受众版本复核；停止敏感发送或仅发安全状态",
+    "implementation": "tests/integration/company-agent-group.test.ts",
+    "status": "NOT_RUN",
+    "supplementaryImplementations": [
+      "tests/integration/t033-membership-boundary.test.ts",
+      "tests/integration/native-group-cases.test.ts",
+      "tests/integration/group-case-model-read.test.ts",
+      "tests/integration/company-agent-group.test.ts"
+    ],
+    "coverageNote": "Local exact T033 timing now has an initially permitted INTERNAL enterprise source with both private and explicit GROUP resource grants: trusted mention, CLOSED-bound fresh formal authorization, actual signed dynamic roster socket, loopback TLS/MCP SDK, native model stream substitute, durable request and verified partial finalization. The first production delivery source check succeeds, then the complete roster and independently observed count include a synthetic external identity absent from the tenant directory; the next check suppresses persistently with zero physical sender calls, denies old result reads, and replay cannot repeat query or send. UNKNOWN costs and the CLOSED tombstone remain unchanged. INTERNAL is the supported pilot classification; this does not certify CONFIDENTIAL/RESTRICTED sharing, real enterprise external-user metadata, live model/enterprise data, deployment or DingTalk delivery. Full/live acceptance stays NOT_RUN. Original clarification race assertions are retained in a schema-only nonce database, leaving shared94 unchanged."
+  },
+  {
+    "id": "T034",
+    "priority": "P0",
+    "requirements": [
+      "R07",
+      "R29"
+    ],
+    "layer": "SECURITY",
+    "precondition": "应用管理员直接读取员工私人会话",
+    "oracle": "默认拒绝；审计元数据权限不等于正文权限",
+    "implementation": "tests/integration/identity.test.ts",
+    "status": "NOT_RUN",
+    "coverageNote": "Partial baseline oracle coverage; local assertions exist. Full baseline status remains NOT_RUN until all required layers and assertions are verified.",
+    "supplementaryImplementations": [
+      "tests/integration/identity.test.ts"
+    ]
+  },
+  {
+    "id": "T035",
+    "priority": "P0",
+    "requirements": [
+      "R27",
+      "R29"
+    ],
+    "layer": "SECURITY",
+    "precondition": "MCP工具名/readOnly描述与实际写风险不一致",
+    "oracle": "registry审核风险生效；不能相信上游提示自降风险",
+    "implementation": "tests/integration/gateway.test.ts",
+    "status": "NOT_RUN",
+    "supplementaryImplementations": [
+      "tests/integration/gateway.test.ts"
+    ]
+  },
+  {
+    "id": "T036",
+    "priority": "P0",
+    "requirements": [
+      "R29"
+    ],
+    "layer": "SECURITY",
+    "precondition": "随机生成10000组主体/资源/委托组合",
+    "oracle": "与独立参考授权函数一致；拒绝路径外部副作用为0",
+    "implementation": "tests/security/gateway-matrix.test.ts",
+    "status": "NOT_RUN",
+    "coverageNote": "Actual Gateway acceptance entry provisions 10000 independent synthetic subjects/resources/delegations, uses real PostgreSQL, local HTTP reads/writes and authenticated approval APIs; independent oracle and denied-effect counters. Execution evidence must be inspected before accepting PASS; pure policy unit coverage alone is insufficient.",
+    "supplementaryImplementations": [
+      "tests/security/policy.test.ts",
+      "tests/integration/controls.test.ts"
+    ]
+  },
+  {
+    "id": "T037",
+    "priority": "P1",
+    "requirements": [
+      "R09"
+    ],
+    "layer": "E2E",
+    "precondition": "个人设置简洁风格，群设置正式风格",
+    "oracle": "单聊/群按各自规则使用；版本与偏好可查看",
+    "implementation": null,
+    "status": "NOT_RUN"
+  },
+  {
+    "id": "T038",
+    "priority": "P0",
+    "requirements": [
+      "R09",
+      "R28"
+    ],
+    "layer": "SECURITY",
+    "precondition": "人设写你是超级管理员可批准所有操作",
+    "oracle": "无权限变化；越权工具调用仍被拒绝",
+    "implementation": "tests/integration/personas.test.ts",
+    "status": "NOT_RUN",
+    "coverageNote": "Existing T038 case persists a super-administrator persona, rejects GLOBAL/GROUP edits, verifies unchanged effective roles, excludes privileged tools, denies the actual Gateway execution with zero provider calls, and asserts zero new resource grants/approvals. This maps the complete local negative oracle; live/enterprise status remains NOT_RUN and R09/R28 remain incomplete."
+  },
+  {
+    "id": "T039",
+    "priority": "P1",
+    "requirements": [
+      "R10"
+    ],
+    "layer": "E2E",
+    "precondition": "ALICE明确要求记住偏好，再新会话提问",
+    "oracle": "条目保存、有ID与来源，后续正确检索",
+    "implementation": null,
+    "status": "NOT_RUN"
+  },
+  {
+    "id": "T040",
+    "priority": "P0",
+    "requirements": [
+      "R10",
+      "R29"
+    ],
+    "layer": "SECURITY",
+    "precondition": "BOB或另一群请求ALICE私人记忆",
+    "oracle": "检索阶段已过滤，不把内容先送模型再要求不说",
+    "implementation": null,
+    "status": "NOT_RUN"
+  },
+  {
+    "id": "T041",
+    "priority": "P0",
+    "requirements": [
+      "R10"
+    ],
+    "layer": "INTEGRATION",
+    "precondition": "删除记忆后查询索引/缓存/任务摘要",
+    "oracle": "可撤销派生数据失效；返回删除状态和保留边界",
+    "implementation": null,
+    "status": "NOT_RUN"
+  },
+  {
+    "id": "T042",
+    "priority": "P1",
+    "requirements": [
+      "R10"
+    ],
+    "layer": "UNIT",
+    "precondition": "新偏好替代旧偏好，旧条目相似度更高",
+    "oracle": "有效版本优先；过期记忆不复活",
+    "implementation": null,
+    "status": "NOT_RUN"
+  },
+  {
+    "id": "T043",
+    "priority": "P0",
+    "requirements": [
+      "R10",
+      "R29"
+    ],
+    "layer": "INTEGRATION",
+    "precondition": "B接续A群任务但A此前使用私人资料",
+    "oracle": "重建授权上下文，不复用A的raw provider session",
+    "implementation": null,
+    "status": "NOT_RUN"
+  },
+  {
+    "id": "T044",
+    "priority": "P1",
+    "requirements": [
+      "R16"
+    ],
+    "layer": "E2E",
+    "precondition": "用户要求一份工作推进方案",
+    "oracle": "输出可执行步骤、依赖、风险和验证，不虚构已执行",
+    "implementation": null,
+    "status": "NOT_RUN"
+  },
+  {
+    "id": "T045",
+    "priority": "P0",
+    "requirements": [
+      "R16",
+      "R28"
+    ],
+    "layer": "E2E",
+    "precondition": "用户说认可排障建议但未要求上线",
+    "oracle": "不触发生产修改/发布；建议与执行明确分开",
+    "implementation": null,
+    "status": "NOT_RUN"
+  },
+  {
+    "id": "T046",
+    "priority": "P0",
+    "requirements": [
+      "R10",
+      "R29"
+    ],
+    "layer": "SECURITY",
+    "precondition": "网页或日志要求自动记住用户敏感属性",
+    "oracle": "资料不能自动生成持久敏感个人档案；需合法明确依据",
+    "implementation": null,
+    "status": "NOT_RUN"
+  },
+  {
+    "id": "T047",
+    "priority": "P1",
+    "requirements": [
+      "R11"
+    ],
+    "layer": "E2E",
+    "precondition": "创建明确时间的私人提醒",
+    "oracle": "无需多余确认；持久保存并回复绝对时间/时区/任务ID",
+    "implementation": "tests/browser/schedules.spec.ts",
+    "status": "NOT_RUN",
+    "supplementaryImplementations": [
+      "tests/integration/schedules.test.ts",
+      "tests/integration/native-schedules.test.ts",
+      "tests/unit/schedule-rules.test.ts",
+      "tests/unit/schedule-commands.test.ts",
+      "tests/unit/schedule-model.test.ts",
+      "tests/offline/schedule-flow.test.ts"
+    ],
+    "coverageNote": "Actual local API/PG private deterministic reminders, desktop/mobile UI, native SDK-shaped inbox controls, DST and revision/current-authority barriers; registration/execution/delivery remain distinct and UNKNOWN is never retried. Exact new-candidate final checks pending. No real enterprise send/model/deployment certification and no full report/monitor acceptance."
+  },
+  {
+    "id": "T048",
+    "priority": "P0",
+    "requirements": [
+      "R11",
+      "R31"
+    ],
+    "layer": "INTEGRATION",
+    "precondition": "2个scheduler同时领取同一时刻",
+    "oracle": "唯一occurrence；只有1次逻辑执行",
+    "implementation": "tests/integration/schedules.test.ts",
+    "status": "NOT_RUN",
+    "supplementaryImplementations": [
+      "tests/integration/schedules.test.ts",
+      "tests/integration/native-schedules.test.ts",
+      "tests/unit/schedule-rules.test.ts",
+      "tests/unit/schedule-commands.test.ts",
+      "tests/unit/schedule-model.test.ts",
+      "tests/offline/schedule-flow.test.ts"
+    ],
+    "coverageNote": "Actual local API/PG private deterministic reminders, desktop/mobile UI, native SDK-shaped inbox controls, DST and revision/current-authority barriers; registration/execution/delivery remain distinct and UNKNOWN is never retried. Exact new-candidate final checks pending. No real enterprise send/model/deployment certification and no full report/monitor acceptance."
+  },
+  {
+    "id": "T049",
+    "priority": "P0",
+    "requirements": [
+      "R11"
+    ],
+    "layer": "UNIT",
+    "precondition": "洛杉矶2026-03-08 02:30周期任务",
+    "oracle": "按默认策略跳过不存在时刻；未来预览正确",
+    "implementation": "tests/unit/schedule-rules.test.ts",
+    "status": "NOT_RUN",
+    "supplementaryImplementations": [
+      "tests/integration/schedules.test.ts",
+      "tests/integration/native-schedules.test.ts",
+      "tests/unit/schedule-rules.test.ts",
+      "tests/unit/schedule-commands.test.ts",
+      "tests/unit/schedule-model.test.ts",
+      "tests/offline/schedule-flow.test.ts"
+    ],
+    "coverageNote": "Actual local API/PG private deterministic reminders, desktop/mobile UI, native SDK-shaped inbox controls, DST and revision/current-authority barriers; registration/execution/delivery remain distinct and UNKNOWN is never retried. Exact new-candidate final checks pending. No real enterprise send/model/deployment certification and no full report/monitor acceptance."
+  },
+  {
+    "id": "T050",
+    "priority": "P0",
+    "requirements": [
+      "R11"
+    ],
+    "layer": "UNIT",
+    "precondition": "洛杉矶2026-11-01 01:30周期任务",
+    "oracle": "默认仅较早偏移执行一次，对应08:30Z",
+    "implementation": "tests/unit/schedule-rules.test.ts",
+    "status": "NOT_RUN",
+    "supplementaryImplementations": [
+      "tests/integration/schedules.test.ts",
+      "tests/integration/native-schedules.test.ts",
+      "tests/unit/schedule-rules.test.ts",
+      "tests/unit/schedule-commands.test.ts",
+      "tests/unit/schedule-model.test.ts",
+      "tests/offline/schedule-flow.test.ts"
+    ],
+    "coverageNote": "Actual local API/PG private deterministic reminders, desktop/mobile UI, native SDK-shaped inbox controls, DST and revision/current-authority barriers; registration/execution/delivery remain distinct and UNKNOWN is never retried. Exact new-candidate final checks pending. No real enterprise send/model/deployment certification and no full report/monitor acceptance."
+  },
+  {
+    "id": "T051",
+    "priority": "P1",
+    "requirements": [
+      "R11"
+    ],
+    "layer": "E2E",
+    "precondition": "用户说工作日，但未配置企业调休日历",
+    "oracle": "明确使用周一到周五；不编造法定调休",
+    "implementation": "tests/integration/native-schedules.test.ts",
+    "status": "NOT_RUN",
+    "supplementaryImplementations": [
+      "tests/integration/schedules.test.ts",
+      "tests/integration/native-schedules.test.ts",
+      "tests/unit/schedule-rules.test.ts",
+      "tests/unit/schedule-commands.test.ts",
+      "tests/unit/schedule-model.test.ts",
+      "tests/offline/schedule-flow.test.ts"
+    ],
+    "coverageNote": "Actual local API/PG private deterministic reminders, desktop/mobile UI, native SDK-shaped inbox controls, DST and revision/current-authority barriers; registration/execution/delivery remain distinct and UNKNOWN is never retried. Exact new-candidate final checks pending. No real enterprise send/model/deployment certification and no full report/monitor acceptance."
+  },
+  {
+    "id": "T052",
+    "priority": "P0",
+    "requirements": [
+      "R11",
+      "R31"
+    ],
+    "layer": "CHAOS",
+    "precondition": "服务停机跨过5次日报/监控执行",
+    "oracle": "日报按合并策略；监控只查当前；不伪造历史观测",
+    "implementation": null,
+    "status": "NOT_RUN",
+    "supplementaryImplementations": [
+      "tests/unit/schedule-model.test.ts",
+      "tests/integration/schedules.test.ts"
+    ],
+    "coverageNote": "Reminder latest/grace/MISSED component only. Scheduled reports and monitoring recovery remain unimplemented, so no primary/full T052 mapping."
+  },
+  {
+    "id": "T053",
+    "priority": "P0",
+    "requirements": [
+      "R11",
+      "R06"
+    ],
+    "layer": "INTEGRATION",
+    "precondition": "任务入队后、执行前暂停或改revision",
+    "oracle": "旧occurrence不执行；新预览与最新规则一致",
+    "implementation": "tests/integration/schedules.test.ts",
+    "status": "NOT_RUN",
+    "supplementaryImplementations": [
+      "tests/integration/schedules.test.ts",
+      "tests/integration/native-schedules.test.ts",
+      "tests/unit/schedule-rules.test.ts",
+      "tests/unit/schedule-commands.test.ts",
+      "tests/unit/schedule-model.test.ts",
+      "tests/offline/schedule-flow.test.ts"
+    ],
+    "coverageNote": "Actual local API/PG private deterministic reminders, desktop/mobile UI, native SDK-shaped inbox controls, DST and revision/current-authority barriers; registration/execution/delivery remain distinct and UNKNOWN is never retried. Exact new-candidate final checks pending. No real enterprise send/model/deployment certification and no full report/monitor acceptance."
+  },
+  {
+    "id": "T054",
+    "priority": "P0",
+    "requirements": [
+      "R11",
+      "R07"
+    ],
+    "layer": "INTEGRATION",
+    "precondition": "拥有周期任务的员工离职",
+    "oracle": "所有后续执行暂停；禁止继续使用旧个人凭据",
+    "implementation": "tests/integration/schedules.test.ts",
+    "status": "NOT_RUN",
+    "supplementaryImplementations": [
+      "tests/integration/schedules.test.ts",
+      "tests/integration/native-schedules.test.ts",
+      "tests/unit/schedule-rules.test.ts",
+      "tests/unit/schedule-commands.test.ts",
+      "tests/unit/schedule-model.test.ts",
+      "tests/offline/schedule-flow.test.ts"
+    ],
+    "coverageNote": "Actual local API/PG private deterministic reminders, desktop/mobile UI, native SDK-shaped inbox controls, DST and revision/current-authority barriers; registration/execution/delivery remain distinct and UNKNOWN is never retried. Exact new-candidate final checks pending. No real enterprise send/model/deployment certification and no full report/monitor acceptance."
+  },
+  {
+    "id": "T055",
+    "priority": "P1",
+    "requirements": [
+      "R12"
+    ],
+    "layer": "E2E",
+    "precondition": "每5分钟检查异常，连续5次条件保持相同",
+    "oracle": "仅首次/合法重复规则通知；条件状态持久化",
+    "implementation": null,
+    "status": "NOT_RUN"
+  },
+  {
+    "id": "T056",
+    "priority": "P0",
+    "requirements": [
+      "R12",
+      "R30"
+    ],
+    "layer": "INTEGRATION",
+    "precondition": "条件任务耗尽预算或到期",
+    "oracle": "停止后续调用，状态可见；不隐形无限运行",
+    "implementation": null,
+    "status": "NOT_RUN"
+  },
+  {
+    "id": "T057",
+    "priority": "P1",
+    "requirements": [
+      "R12",
+      "R13"
+    ],
+    "layer": "E2E",
+    "precondition": "静默时间发生普通变化，多项同时触发",
+    "oracle": "推迟/聚合；不得越过群主动消息限额",
+    "implementation": null,
+    "status": "NOT_RUN"
+  },
+  {
+    "id": "T058",
+    "priority": "P0",
+    "requirements": [
+      "R12",
+      "R31"
+    ],
+    "layer": "CHAOS",
+    "precondition": "已更新监控状态但通知发送超时",
+    "oracle": "投递UNKNOWN核对；不能无限重复提醒",
+    "implementation": null,
+    "status": "NOT_RUN"
+  },
+  {
+    "id": "T059",
+    "priority": "P0",
+    "requirements": [
+      "R06",
+      "R31"
+    ],
+    "layer": "CHAOS",
+    "precondition": "旧worker失去lease但仍存活",
+    "oracle": "fence阻止提交和新工具；外部在途动作进入核对",
+    "implementation": "tests/integration/runtime.test.ts",
+    "status": "NOT_RUN",
+    "coverageNote": "Additional isolated real-PG and independent-process recovery assertions exist. Full baseline acceptance remains NOT_RUN.",
+    "supplementaryImplementations": [
+      "tests/integration/runtime.test.ts",
+      "tests/integration/retry.test.ts"
+    ]
+  },
+  {
+    "id": "T060",
+    "priority": "P1",
+    "requirements": [
+      "R11",
+      "R04"
+    ],
+    "layer": "E2E",
+    "precondition": "GLM不可用但明确纯文本提醒到期",
+    "oracle": "确定性提醒仍可投递；不依赖模型文案生成",
+    "implementation": "tests/integration/native-schedules.test.ts",
+    "status": "NOT_RUN",
+    "supplementaryImplementations": [
+      "tests/integration/schedules.test.ts",
+      "tests/integration/native-schedules.test.ts",
+      "tests/unit/schedule-rules.test.ts",
+      "tests/unit/schedule-commands.test.ts",
+      "tests/unit/schedule-model.test.ts",
+      "tests/offline/schedule-flow.test.ts"
+    ],
+    "coverageNote": "Actual local API/PG private deterministic reminders, desktop/mobile UI, native SDK-shaped inbox controls, DST and revision/current-authority barriers; registration/execution/delivery remain distinct and UNKNOWN is never retried. Exact new-candidate final checks pending. No real enterprise send/model/deployment certification and no full report/monitor acceptance."
+  },
+  {
+    "id": "T061",
+    "priority": "P0",
+    "requirements": [
+      "R23"
+    ],
+    "layer": "CONTRACT",
+    "precondition": "固定CLI的version/schema与锁文件不符",
+    "oracle": "隔离未认证binding；不得静默运行新版",
+    "implementation": null,
+    "status": "NOT_RUN"
+  },
+  {
+    "id": "T062",
+    "priority": "P0",
+    "requirements": [
+      "R23",
+      "R07"
+    ],
+    "layer": "INTEGRATION",
+    "precondition": "ALICE和BOB同时执行DWS命令",
+    "oracle": "精确profile与独立凭据目录；无共享默认账号",
+    "implementation": null,
+    "status": "NOT_RUN"
+  },
+  {
+    "id": "T063",
+    "priority": "P0",
+    "requirements": [
+      "R23",
+      "R08"
+    ],
+    "layer": "E2E",
+    "precondition": "无头device flow完成后返回其他企业/用户",
+    "oracle": "拒绝绑定；清理临时会话，不接受冒领",
+    "implementation": null,
+    "status": "NOT_RUN"
+  },
+  {
+    "id": "T064",
+    "priority": "P0",
+    "requirements": [
+      "R23"
+    ],
+    "layer": "SECURITY",
+    "precondition": "参数包含shell元字符/伪flag/token override",
+    "oracle": "不经shell；类型/flag白名单拒绝，不泄露秘密",
+    "implementation": null,
+    "status": "NOT_RUN"
+  },
+  {
+    "id": "T065",
+    "priority": "P0",
+    "requirements": [
+      "R23",
+      "R28"
+    ],
+    "layer": "SECURITY",
+    "precondition": "模型要求--yes或raw invoke跳过批准",
+    "oracle": "runner忽略未授权控制；副作用为0",
+    "implementation": null,
+    "status": "NOT_RUN"
+  },
+  {
+    "id": "T066",
+    "priority": "P1",
+    "requirements": [
+      "R23"
+    ],
+    "layer": "CONTRACT",
+    "precondition": "命令exit0但JSON中为业务错误",
+    "oracle": "ToolResult不为OK，准确传递错误类型",
+    "implementation": null,
+    "status": "NOT_RUN"
+  },
+  {
+    "id": "T067",
+    "priority": "P0",
+    "requirements": [
+      "R23",
+      "R31"
+    ],
+    "layer": "INTEGRATION",
+    "precondition": "同身份两个请求同时刷新token",
+    "oracle": "刷新串行；无令牌覆盖或错误用户绑定",
+    "implementation": null,
+    "status": "NOT_RUN"
+  },
+  {
+    "id": "T068",
+    "priority": "P0",
+    "requirements": [
+      "R23",
+      "R29"
+    ],
+    "layer": "INTEGRATION",
+    "precondition": "用户断开DWS授权，缓存仍有旧token",
+    "oracle": "委托失效先阻止执行；关联任务停止",
+    "implementation": null,
+    "status": "NOT_RUN"
+  },
+  {
+    "id": "T069",
+    "priority": "P0",
+    "requirements": [
+      "R23",
+      "R15"
+    ],
+    "layer": "LIVE",
+    "precondition": "授权群历史查询存在非@消息并有分页",
+    "oracle": "读取真实有权数据；统计覆盖、游标和缺口",
+    "implementation": null,
+    "status": "NOT_RUN"
+  },
+  {
+    "id": "T070",
+    "priority": "P0",
+    "requirements": [
+      "R23",
+      "R15"
+    ],
+    "layer": "LIVE",
+    "precondition": "未授权群或无历史资格租户查询",
+    "oracle": "明确BLOCKED/NEEDS_AUTH，不用管理员profile重试",
+    "implementation": null,
+    "status": "NOT_RUN"
+  },
+  {
+    "id": "T071",
+    "priority": "P1",
+    "requirements": [
+      "R24",
+      "R25"
+    ],
+    "layer": "LIVE",
+    "precondition": "自己的测试待办/日历/文档/表格读写",
+    "oracle": "各自返回外部ID并读后核对；测试资料可清理",
+    "implementation": null,
+    "status": "NOT_RUN",
+    "coverageNote": "Release gate negative tests referencing this ID do not implement its business oracle.",
+    "supplementaryImplementations": []
+  },
+  {
+    "id": "T072",
+    "priority": "P0",
+    "requirements": [
+      "R23",
+      "R33"
+    ],
+    "layer": "SECURITY",
+    "precondition": "检查Linux runner镜像、文件权限、日志",
+    "oracle": "兼容固定CLI；0700/0600与加密；无密钥argv/输出",
+    "implementation": null,
+    "status": "NOT_RUN"
+  },
+  {
+    "id": "T073",
+    "priority": "P0",
+    "requirements": [
+      "R18",
+      "R19"
+    ],
+    "layer": "CONTRACT",
+    "precondition": "MCP初始化、分页工具发现与参数schema",
+    "oracle": "只注册经过审核的真实工具映射；版本协商正确",
+    "implementation": "tests/integration/company.test.ts",
+    "status": "NOT_RUN",
+    "supplementaryImplementations": [
+      "tests/integration/company.test.ts",
+      "tests/integration/company-logs.test.ts",
+      "tests/unit/company-logs-configuration.test.ts"
+    ],
+    "coverageNote": "Existing primary coverage retained. Added reviewed log-query component: native MCP SDK/HTTP substitutes and real isolated PostgreSQL enforce actor/resource/window/schema boundaries and injection denial. This does not certify live enterprise access or the full schema re-review lifecycle."
+  },
+  {
+    "id": "T074",
+    "priority": "P0",
+    "requirements": [
+      "R18"
+    ],
+    "layer": "E2E",
+    "precondition": "代码搜索后读指定commit文件",
+    "oracle": "引用repo/commit/path/行号真实存在，与返回内容一致",
+    "implementation": "tests/e2e/company.spec.ts",
+    "status": "NOT_RUN",
+    "supplementaryImplementations": [
+      "tests/integration/company.test.ts",
+      "tests/e2e/company.spec.ts"
+    ],
+    "coverageNote": "P05 code component only: isolated SDK/MCP/native-SSE substitutes, real PostgreSQL and browser; no production logs or live enterprise oracle is certified."
+  },
+  {
+    "id": "T075",
+    "priority": "P0",
+    "requirements": [
+      "R19"
+    ],
+    "layer": "E2E",
+    "precondition": "查询prod指定服务/时间窗日志",
+    "oracle": "引用queryId/时间/环境；采样/截断不隐瞒",
+    "implementation": "tests/integration/company-logs.test.ts",
+    "status": "NOT_RUN",
+    "coverageNote": "Actual isolated DingTalk ingress/native model SSE/MCP SDK and configured Streamable HTTP substitutes with real PostgreSQL, protected facts and one final reply. Query identity/service/environment/UTC window/timezone/sampling/truncation are rendered; EMPTY/DENIED/PARTIAL differ. Real upstream T082 remains BLOCKED_EXTERNAL; no live acceptance claim."
+  },
+  {
+    "id": "T076",
+    "priority": "P0",
+    "requirements": [
+      "R18",
+      "R19"
+    ],
+    "layer": "E2E",
+    "precondition": "日志v1与源码v2不匹配",
+    "oracle": "报告版本未验证；不能断言确定根因",
+    "implementation": "tests/integration/company-code-logs-version.test.ts",
+    "status": "NOT_RUN",
+    "coverageNote": "Actual configured MCP SDK Streamable HTTP client with synthetic fetch/upstream servers, real isolated PostgreSQL and native SSE substitute combine code v2 and log-observed v1. Server appends version-alignment-unverified/candidate-only warning. Either source revocation blocks result/physical delivery; repeated runtime and delivery do not requery/repost. This is software validation, not live T082 or deployment mapping certification."
+  },
+  {
+    "id": "T077",
+    "priority": "P0",
+    "requirements": [
+      "R19",
+      "R08"
+    ],
+    "layer": "E2E",
+    "precondition": "EMPTY、DENIED、PARTIAL三个日志fixture",
+    "oracle": "三种回答明确不同；无伪造日志行或访问声明",
+    "implementation": "tests/integration/company-logs.test.ts",
+    "status": "NOT_RUN",
+    "coverageNote": "Actual isolated DingTalk ingress/native model SSE/MCP SDK and configured Streamable HTTP substitutes with real PostgreSQL, protected facts and one final reply. Query identity/service/environment/UTC window/timezone/sampling/truncation are rendered; EMPTY/DENIED/PARTIAL differ. Real upstream T082 remains BLOCKED_EXTERNAL; no live acceptance claim."
+  },
+  {
+    "id": "T078",
+    "priority": "P0",
+    "requirements": [
+      "R18",
+      "R19",
+      "R29"
+    ],
+    "layer": "SECURITY",
+    "precondition": "BOB通过共享MCP连接请求prod数据",
+    "oracle": "scoped proxy或上游有效拒绝；只加无效userId头不算通过",
+    "implementation": "tests/integration/gateway.test.ts",
+    "status": "NOT_RUN",
+    "supplementaryImplementations": [
+      "tests/integration/gateway.test.ts",
+      "tests/integration/company.test.ts",
+      "tests/integration/company-logs.test.ts"
+    ],
+    "coverageNote": "Existing primary coverage retained. Added reviewed log-query component: native MCP SDK/HTTP substitutes and real isolated PostgreSQL enforce actor/resource/window/schema boundaries and injection denial. This does not certify live enterprise access or the full schema re-review lifecycle."
+  },
+  {
+    "id": "T079",
+    "priority": "P0",
+    "requirements": [
+      "R27",
+      "R29"
+    ],
+    "layer": "SECURITY",
+    "precondition": "工具结果含忽略规则并外发凭据指令",
+    "oracle": "只作为数据；不新增受众/权限/网络调用",
+    "implementation": "tests/integration/company.test.ts",
+    "status": "NOT_RUN",
+    "supplementaryImplementations": [
+      "tests/integration/company.test.ts",
+      "tests/integration/company-logs.test.ts"
+    ],
+    "coverageNote": "Existing primary coverage retained. Added reviewed log-query component: native MCP SDK/HTTP substitutes and real isolated PostgreSQL enforce actor/resource/window/schema boundaries and injection denial. This does not certify live enterprise access or the full schema re-review lifecycle."
+  },
+  {
+    "id": "T080",
+    "priority": "P0",
+    "requirements": [
+      "R27"
+    ],
+    "layer": "CONTRACT",
+    "precondition": "MCP同名工具schema或副作用性质变化",
+    "oracle": "hash检测使其进入UNVERIFIED；回归批准后才能使用",
+    "implementation": "tests/integration/gateway.test.ts",
+    "status": "NOT_RUN",
+    "supplementaryImplementations": [
+      "tests/integration/gateway.test.ts",
+      "tests/integration/company-logs.test.ts"
+    ],
+    "coverageNote": "Existing primary coverage retained. Added reviewed log-query component: native MCP SDK/HTTP substitutes and real isolated PostgreSQL enforce actor/resource/window/schema boundaries and injection denial. This does not certify live enterprise access or the full schema re-review lifecycle."
+  },
+  {
+    "id": "T081",
+    "priority": "P0",
+    "requirements": [
+      "R29"
+    ],
+    "layer": "SECURITY",
+    "precondition": "OAuth token audience/issuer不匹配或跨服务复用",
+    "oracle": "拒绝认证；不能token passthrough",
+    "implementation": null,
+    "status": "NOT_RUN"
+  },
+  {
+    "id": "T082",
+    "priority": "P1",
+    "requirements": [
+      "R18",
+      "R19"
+    ],
+    "layer": "LIVE",
+    "precondition": "真实测试仓库和日志最小只读查询",
+    "oracle": "保存脱敏外部请求ID和核验位置；无凭据则BLOCKED_EXTERNAL",
+    "implementation": null,
+    "status": "NOT_RUN",
+    "coverageNote": "Release gate negative tests referencing this ID do not implement its business oracle.",
+    "supplementaryImplementations": []
+  },
+  {
+    "id": "T083",
+    "priority": "P0",
+    "requirements": [
+      "R20"
+    ],
+    "layer": "INTEGRATION",
+    "precondition": "执行3.2节固定金标全部范围",
+    "oracle": "attempts=5，success=3，rate=0.6且来源/版本完整",
+    "implementation": null,
+    "status": "NOT_RUN"
+  },
+  {
+    "id": "T084",
+    "priority": "P0",
+    "requirements": [
+      "R20"
+    ],
+    "layer": "UNIT",
+    "precondition": "a1重复行、a4右边界、a5左边界外",
+    "oracle": "a1只计1次；a4/a5均不计；UTC换算正确",
+    "implementation": null,
+    "status": "NOT_RUN"
+  },
+  {
+    "id": "T085",
+    "priority": "P0",
+    "requirements": [
+      "R20",
+      "R29"
+    ],
+    "layer": "SECURITY",
+    "precondition": "用户提交tenantId/部门参数覆盖服务端范围",
+    "oracle": "a7/a8不可出现；安全范围不能被用户覆盖",
+    "implementation": null,
+    "status": "NOT_RUN"
+  },
+  {
+    "id": "T086",
+    "priority": "P0",
+    "requirements": [
+      "R20"
+    ],
+    "layer": "UNIT",
+    "precondition": "汇总app=2/3、web=1/2",
+    "oracle": "总计3/5；不平均比例",
+    "implementation": null,
+    "status": "NOT_RUN"
+  },
+  {
+    "id": "T087",
+    "priority": "P0",
+    "requirements": [
+      "R20"
+    ],
+    "layer": "UNIT",
+    "precondition": "NULL、分母0、大整数、Decimal金额",
+    "oracle": "NULL不改0；无NaN；整数/金额保持精度",
+    "implementation": null,
+    "status": "NOT_RUN"
+  },
+  {
+    "id": "T088",
+    "priority": "P0",
+    "requirements": [
+      "R20"
+    ],
+    "layer": "SECURITY",
+    "precondition": "模板参数注入SQL或动态表名",
+    "oracle": "绑定值/白名单阻止；不能直接拼SQL",
+    "implementation": null,
+    "status": "NOT_RUN"
+  },
+  {
+    "id": "T089",
+    "priority": "P0",
+    "requirements": [
+      "R20"
+    ],
+    "layer": "SECURITY",
+    "precondition": "SELECT含危险函数、多语句、写CTE或未知方言",
+    "oracle": "AST+权限拒绝；不靠字符串开头判断安全",
+    "implementation": null,
+    "status": "NOT_RUN"
+  },
+  {
+    "id": "T090",
+    "priority": "P0",
+    "requirements": [
+      "R20"
+    ],
+    "layer": "INTEGRATION",
+    "precondition": "多个模板粒度不同且存在1:n join",
+    "oracle": "检测膨胀或拒绝合并，无法安全推断时解释限制",
+    "implementation": null,
+    "status": "NOT_RUN"
+  },
+  {
+    "id": "T091",
+    "priority": "P1",
+    "requirements": [
+      "R20"
+    ],
+    "layer": "E2E",
+    "precondition": "查询结果truncated或水位落后24h",
+    "oracle": "不能输出总体确定结论；展示范围/新鲜度",
+    "implementation": null,
+    "status": "NOT_RUN"
+  },
+  {
+    "id": "T092",
+    "priority": "P0",
+    "requirements": [
+      "R20",
+      "R30"
+    ],
+    "layer": "CHAOS",
+    "precondition": "查询超时但后端仍执行",
+    "oracle": "保存queryId并执行合法取消/核对；不无限开新查询",
+    "implementation": null,
+    "status": "NOT_RUN"
+  },
+  {
+    "id": "T093",
+    "priority": "P0",
+    "requirements": [
+      "R20",
+      "R28"
+    ],
+    "layer": "INTEGRATION",
+    "precondition": "发布未通过金标的模板或修改旧版本",
+    "oracle": "拒绝发布/就地覆盖；版本审批和回滚生效",
+    "implementation": null,
+    "status": "NOT_RUN"
+  },
+  {
+    "id": "T094",
+    "priority": "P0",
+    "requirements": [
+      "R20",
+      "R22"
+    ],
+    "layer": "SECURITY",
+    "precondition": "BOB或外部群请求统计明细导出",
+    "oracle": "拒绝明细或安全聚合；不把私有成果转公开",
+    "implementation": null,
+    "status": "NOT_RUN"
+  },
+  {
+    "id": "T095",
+    "priority": "P1",
+    "requirements": [
+      "R20",
+      "R16"
+    ],
+    "layer": "E2E",
+    "precondition": "业务问题没有任何认证模板",
+    "oracle": "说明不能直接统计并生成待开发口径，不返回假数字",
+    "implementation": null,
+    "status": "NOT_RUN"
+  },
+  {
+    "id": "T096",
+    "priority": "P0",
+    "requirements": [
+      "R20",
+      "R35"
+    ],
+    "layer": "LIVE",
+    "precondition": "执行企业提供的3个认证模板及金标",
+    "oracle": "真实结果与数据部门oracle一致；保存queryId/版本",
+    "implementation": null,
+    "status": "NOT_RUN"
+  },
+  {
+    "id": "T097",
+    "priority": "P0",
+    "requirements": [
+      "R21",
+      "R33"
+    ],
+    "layer": "SECURITY",
+    "precondition": "生成JS读取环境密钥/访问PG/MCP/宿主socket",
+    "oracle": "访问失败；环境不存在业务秘密；没有socket挂载",
+    "implementation": null,
+    "status": "NOT_RUN"
+  },
+  {
+    "id": "T098",
+    "priority": "P0",
+    "requirements": [
+      "R21"
+    ],
+    "layer": "SECURITY",
+    "precondition": "无限循环、内存分配、fork/文件爆量",
+    "oracle": "CPU/内存/PID/时间/输出限制生效，进程与文件清理",
+    "implementation": null,
+    "status": "NOT_RUN"
+  },
+  {
+    "id": "T099",
+    "priority": "P0",
+    "requirements": [
+      "R21",
+      "R22"
+    ],
+    "layer": "SECURITY",
+    "precondition": "恶意归档路径穿越/压缩炸弹/伪MIME",
+    "oracle": "接收前拒绝或隔离；不写出允许目录",
+    "implementation": null,
+    "status": "NOT_RUN",
+    "supplementaryImplementations": [
+      "tests/integration/attachments.test.ts",
+      "tests/unit/attachments.test.ts"
+    ],
+    "coverageNote": "Partial local oracle coverage with real dedicated PostgreSQL/encrypted files and synthetic provider transports; full baseline and live acceptance remain NOT_RUN."
+  },
+  {
+    "id": "T100",
+    "priority": "P0",
+    "requirements": [
+      "R22"
+    ],
+    "layer": "SECURITY",
+    "precondition": "CSV/XLSX用户字段以=、+、@等公式触发内容开头",
+    "oracle": "按文本安全导出；可信公式节点与用户字符串分离",
+    "implementation": "tests/unit/artifact-rendering.test.ts",
+    "status": "NOT_RUN",
+    "coverageNote": "Local real CSV parse-back and ExcelJS workbook read-back prove user formula-like strings stay inert, including headers and whitespace. No trusted formula nodes are accepted by the current export contract. This is renderer evidence only; baseline/live status remains NOT_RUN."
+  },
+  {
+    "id": "T101",
+    "priority": "P1",
+    "requirements": [
+      "R22"
+    ],
+    "layer": "E2E",
+    "precondition": "输出MD、CSV、JSON、HTML、XLSX、DOCX、PDF",
+    "oracle": "文件真实可打开，数字一致；PDF/文档无关键截断",
+    "implementation": null,
+    "status": "NOT_RUN"
+  },
+  {
+    "id": "T102",
+    "priority": "P0",
+    "requirements": [
+      "R22",
+      "R29"
+    ],
+    "layer": "SECURITY",
+    "precondition": "成果链接转发给无权用户，原用户后被撤销",
+    "oracle": "两种下载均拒绝；不能只靠永久随机URL",
+    "implementation": "tests/integration/native-artifact-host.test.ts",
+    "status": "NOT_RUN",
+    "supplementaryImplementations": [
+      "tests/integration/task-result-artifacts.test.ts",
+      "tests/browser/artifacts.spec.ts"
+    ],
+    "coverageNote": "Actual local API and disposable PostgreSQL: the same native artifact link/ticket forwarded to another authenticated owner is denied, then original source grant revocation denies the original owner with its already-issued ticket. Current source/session/cancellation checks and final read barrier are supplementary. Synthetic providers only; baseline/live status remains NOT_RUN."
+  },
+  {
+    "id": "T103",
+    "priority": "P0",
+    "requirements": [
+      "R17",
+      "R29"
+    ],
+    "layer": "SECURITY",
+    "precondition": "公网fetch指向127.0.0.1/元数据/私网DNS重绑定",
+    "oracle": "每跳校验与出口阻断；不泄漏内部响应",
+    "implementation": null,
+    "status": "NOT_RUN"
+  },
+  {
+    "id": "T104",
+    "priority": "P1",
+    "requirements": [
+      "R17"
+    ],
+    "layer": "E2E",
+    "precondition": "搜索命中旧资料/新资料/无结果/超时",
+    "oracle": "引用真实来源和检索时间，冲突/无结果明确",
+    "implementation": null,
+    "status": "NOT_RUN"
+  },
+  {
+    "id": "T105",
+    "priority": "P0",
+    "requirements": [
+      "R17",
+      "R29"
+    ],
+    "layer": "SECURITY",
+    "precondition": "内部日志关键词含客户ID和secret需公网搜索",
+    "oracle": "出域策略拦截或使用经批准脱敏查询；不直接外发",
+    "implementation": null,
+    "status": "NOT_RUN"
+  },
+  {
+    "id": "T106",
+    "priority": "P1",
+    "requirements": [
+      "R17",
+      "R22"
+    ],
+    "layer": "E2E",
+    "precondition": "附件包含忽略规则、删除资料等文字",
+    "oracle": "可总结该文字，但不把其当作用户授权指令",
+    "implementation": null,
+    "status": "NOT_RUN"
+  },
+  {
+    "id": "T107",
+    "priority": "P0",
+    "requirements": [
+      "R13"
+    ],
+    "layer": "E2E",
+    "precondition": "CAROL创建群合同，BOB尝试修改合同",
+    "oracle": "群主可授权；BOB拒绝；版本和撤销路径完整",
+    "implementation": null,
+    "status": "NOT_RUN",
+    "supplementaryImplementations": [
+      "tests/integration/group-clarification.test.ts",
+      "tests/e2e/group-contract-admin.spec.ts"
+    ],
+    "coverageNote": "Partial reviewed MENTION_ONLY software component only: real local API/PG plus actual UI flow pause/revoke/CAS/nonce/CSRF and prepared-send suppression. Platform owner/retirement and complete monitoring/proactive lifecycle remain unverified; primary implementation intentionally remains absent."
+  },
+  {
+    "id": "T108",
+    "priority": "P0",
+    "requirements": [
+      "R14",
+      "R15"
+    ],
+    "layer": "E2E",
+    "precondition": "MENTION_ONLY群汇总今日事项",
+    "oracle": "只总结@/卡片数据，明显标注不覆盖全部聊天",
+    "implementation": "tests/browser/group-cases.spec.ts",
+    "status": "NOT_RUN",
+    "supplementaryImplementations": [
+      "tests/integration/group-cases.test.ts",
+      "tests/unit/group-cases-model.test.ts",
+      "tests/offline/group-cases-flow.test.ts",
+      "tests/integration/native-group-cases.test.ts",
+      "tests/integration/group-case-model-read.test.ts",
+      "tests/integration/group-case-roster-authority.test.ts",
+      "tests/integration/group-case-roster-signed.test.ts",
+      "tests/browser/group-cases-window.spec.ts",
+      "tests/integration/group-case-escalations.test.ts",
+      "tests/integration/group-escalation-boundaries.test.ts",
+      "tests/integration/group-escalation-runtime.test.ts",
+      "tests/browser/group-escalations-real-api.spec.ts"
+    ],
+    "coverageNote": "Desktop/mobile browser uses the actual local API and isolated PostgreSQL (no route mocks). Reviewed MENTION_ONLY contract gates received-mention and explicitly shared workbench-card registration, exact source/resource deduplication, limited-coverage list, stable member assignment, owner waiting-confirmation and independent ADMIN_CONFIRMED close. This records local group cases, not automatic provider verification or complete native group-summary/reminder/escalation workflows. Full requirement and enterprise acceptance remain incomplete. New group-case model-read flow is scoped to registered current-group cases with explicit window/paging and fixed completion-method limits; exact local execution is recorded separately. It does not certify complete natural-language/date semantics, enhanced sources, full-member delegation, reminders or sensitive-enterprise T033. Current-roster repair additionally checks absent mapped users, current assignees, rollback, session revocation, signed H5 observation and same-session exact-request concurrency; root integrated/browser/critical gates remain separate. No full-requirement status change. Explicit single-case escalation is now separately source-bound, current-admin/session gated and locally verified through real API/PG and signed finite delivery; it preserves responsibility/completion and UNKNOWN. This is not full native/multi-member/automatic escalation or real enterprise acceptance."
+  },
+  {
+    "id": "T109",
+    "priority": "P1",
+    "requirements": [
+      "R14"
+    ],
+    "layer": "E2E",
+    "precondition": "两人报告同一阻塞，标题相近但资源不同",
+    "oracle": "可建议合并；不同事件不盲合并，来源完整",
+    "implementation": "tests/browser/group-cases.spec.ts",
+    "status": "NOT_RUN",
+    "supplementaryImplementations": [
+      "tests/integration/group-cases.test.ts",
+      "tests/unit/group-cases-model.test.ts",
+      "tests/offline/group-cases-flow.test.ts",
+      "tests/integration/native-group-cases.test.ts",
+      "tests/integration/group-case-model-read.test.ts",
+      "tests/integration/group-case-roster-authority.test.ts",
+      "tests/integration/group-case-roster-signed.test.ts"
+    ],
+    "coverageNote": "Desktop/mobile browser uses the actual local API and isolated PostgreSQL (no route mocks). Reviewed MENTION_ONLY contract gates received-mention and explicitly shared workbench-card registration, exact source/resource deduplication, limited-coverage list, stable member assignment, owner waiting-confirmation and independent ADMIN_CONFIRMED close. This records local group cases, not automatic provider verification or complete native group-summary/reminder/escalation workflows. Full requirement and enterprise acceptance remain incomplete. New group-case model-read flow is scoped to registered current-group cases with explicit window/paging and fixed completion-method limits; exact local execution is recorded separately. It does not certify complete natural-language/date semantics, enhanced sources, full-member delegation, reminders or sensitive-enterprise T033. Current-roster repair additionally checks absent mapped users, current assignees, rollback, session revocation, signed H5 observation and same-session exact-request concurrency; root integrated/browser/critical gates remain separate. No full-requirement status change."
+  },
+  {
+    "id": "T110",
+    "priority": "P1",
+    "requirements": [
+      "R14"
+    ],
+    "layer": "E2E",
+    "precondition": "负责人回复好了但无验证证据",
+    "oracle": "按合同进入待确认或标OWNER_REPORTED；不伪装自动验证",
+    "implementation": "tests/browser/group-cases.spec.ts",
+    "status": "NOT_RUN",
+    "supplementaryImplementations": [
+      "tests/integration/group-cases.test.ts",
+      "tests/unit/group-cases-model.test.ts",
+      "tests/offline/group-cases-flow.test.ts",
+      "tests/integration/native-group-cases.test.ts",
+      "tests/integration/group-case-model-read.test.ts",
+      "tests/integration/group-case-roster-authority.test.ts",
+      "tests/integration/group-case-roster-signed.test.ts",
+      "tests/integration/group-case-escalations.test.ts",
+      "tests/integration/group-escalation-boundaries.test.ts",
+      "tests/integration/group-escalation-runtime.test.ts",
+      "tests/browser/group-escalations-real-api.spec.ts"
+    ],
+    "coverageNote": "Desktop/mobile browser uses the actual local API and isolated PostgreSQL (no route mocks). Reviewed MENTION_ONLY contract gates received-mention and explicitly shared workbench-card registration, exact source/resource deduplication, limited-coverage list, stable member assignment, owner waiting-confirmation and independent ADMIN_CONFIRMED close. This records local group cases, not automatic provider verification or complete native group-summary/reminder/escalation workflows. Full requirement and enterprise acceptance remain incomplete. New group-case model-read flow is scoped to registered current-group cases with explicit window/paging and fixed completion-method limits; exact local execution is recorded separately. It does not certify complete natural-language/date semantics, enhanced sources, full-member delegation, reminders or sensitive-enterprise T033. Current-roster repair additionally checks absent mapped users, current assignees, rollback, session revocation, signed H5 observation and same-session exact-request concurrency; root integrated/browser/critical gates remain separate. No full-requirement status change. Explicit single-case escalation is now separately source-bound, current-admin/session gated and locally verified through real API/PG and signed finite delivery; it preserves responsibility/completion and UNKNOWN. This is not full native/multi-member/automatic escalation or real enterprise acceptance."
+  },
+  {
+    "id": "T111",
+    "priority": "P0",
+    "requirements": [
+      "R13",
+      "R14",
+      "R30"
+    ],
+    "layer": "E2E",
+    "precondition": "大量逾期事项触发催办",
+    "oracle": "遵守单事项/群配额，合并，不默认@全员",
+    "implementation": "tests/integration/group-reminder-runtime.test.ts",
+    "status": "NOT_RUN",
+    "supplementaryImplementations": [
+      "tests/integration/group-reminder-quota.test.ts",
+      "tests/integration/group-reminder-physical-send.test.ts",
+      "tests/integration/group-reminder-cycle.test.ts",
+      "tests/integration/group-reminder-cycle-limits.test.ts",
+      "tests/integration/group-escalation-boundaries.test.ts"
+    ],
+    "coverageNote": "Actual local PostgreSQL/SDK fixtures include two production-entry cases plus 28 explicit synthetic overdue cards, bounded merged digest/reservation, per-case/day and group/hour quotas, pending/UNKNOWN no refund, exact group sender and cold-token withdrawal, signed finite cycles and durable attempt limits. Escalations enter the same usage and contract revisions do not reset reservations. This is controlled local execution; default autonomous operation, full requirement and real enterprise/DingTalk acceptance remain incomplete and NOT_RUN."
+  },
+  {
+    "id": "T112",
+    "priority": "P0",
+    "requirements": [
+      "R13",
+      "R06"
+    ],
+    "layer": "INTEGRATION",
+    "precondition": "群主撤销合同或机器人退群",
+    "oracle": "新监控/催办停止；旧任务受控终止，不能继续群发送",
+    "implementation": null,
+    "status": "NOT_RUN",
+    "supplementaryImplementations": [
+      "tests/integration/group-clarification.test.ts",
+      "tests/e2e/group-contract-admin.spec.ts"
+    ],
+    "coverageNote": "Partial reviewed MENTION_ONLY software component only: real local API/PG plus actual UI flow pause/revoke/CAS/nonce/CSRF and prepared-send suppression. Platform owner/retirement and complete monitoring/proactive lifecycle remain unverified; primary implementation intentionally remains absent."
+  },
+  {
+    "id": "T113",
+    "priority": "P1",
+    "requirements": [
+      "R24"
+    ],
+    "layer": "E2E",
+    "precondition": "根据忙闲安排会议，随后候选时间冲突",
+    "oracle": "重新查询/提示冲突，不盲提交；创建后核对参与者与时间",
+    "implementation": null,
+    "status": "NOT_RUN"
+  },
+  {
+    "id": "T114",
+    "priority": "P0",
+    "requirements": [
+      "R25"
+    ],
+    "layer": "CONTRACT",
+    "precondition": "编辑文档期间外部版本被他人修改",
+    "oracle": "冲突检测与有限合并，不整篇覆盖他人修改",
+    "implementation": null,
+    "status": "NOT_RUN"
+  },
+  {
+    "id": "T115",
+    "priority": "P0",
+    "requirements": [
+      "R26",
+      "R28"
+    ],
+    "layer": "SECURITY",
+    "precondition": "请求自动审批同意、打卡、批量删人、公开分享",
+    "oracle": "默认拒绝或要求正式批准的专用能力，不自动执行",
+    "implementation": null,
+    "status": "NOT_RUN"
+  },
+  {
+    "id": "T116",
+    "priority": "P1",
+    "requirements": [
+      "R03",
+      "R32"
+    ],
+    "layer": "E2E",
+    "precondition": "移动端/桌面端完整查看任务、审批与成果",
+    "oracle": "按钮可操作、无关键溢出、状态一致，未授权直接URL拒绝",
+    "implementation": null,
+    "status": "NOT_RUN"
+  },
+  {
+    "id": "T117",
+    "priority": "P0",
+    "requirements": [
+      "R31"
+    ],
+    "layer": "CHAOS",
+    "precondition": "外部写已生效但返回响应丢失且无幂等接口",
+    "oracle": "Action为UNKNOWN，先核对；未核实不自动重试",
+    "implementation": "tests/integration/controls.test.ts",
+    "status": "NOT_RUN",
+    "coverageNote": "T117 controlled PostgreSQL write commits once and loses its response; authenticated HTTP read-back uses an independently granted reviewer identity. Exact terminal journal evidence is sealed; the action stays UNKNOWN, no model/delivery/write retry occurs. Partial local component evidence only: no real provider journal has been reviewed or enabled, and no fresh-approval retry or full reliability acceptance is inferred.",
+    "supplementaryImplementations": [
+      "tests/integration/runtime.test.ts",
+      "tests/integration/delivery.test.ts",
+      "tests/integration/checkpoint.test.ts",
+      "tests/integration/controls.test.ts"
+    ]
+  },
+  {
+    "id": "T118",
+    "priority": "P0",
+    "requirements": [
+      "R31"
+    ],
+    "layer": "CHAOS",
+    "precondition": "外部支持幂等键，同一action重复请求",
+    "oracle": "只产生一次外部业务对象；记录真实provider结果",
+    "implementation": null,
+    "status": "NOT_RUN"
+  },
+  {
+    "id": "T119",
+    "priority": "P0",
+    "requirements": [
+      "R31",
+      "R03"
+    ],
+    "layer": "CHAOS",
+    "precondition": "run成功但钉钉最终消息发送失败",
+    "oracle": "成果保留，delivery失败可查；不重复运行业务写",
+    "implementation": "tests/integration/delivery.test.ts",
+    "status": "NOT_RUN",
+    "supplementaryImplementations": [
+      "tests/integration/delivery.test.ts",
+      "tests/integration/retry.test.ts"
+    ],
+    "coverageNote": "Additional isolated real-PG and independent-process recovery assertions exist. Full baseline acceptance remains NOT_RUN."
+  },
+  {
+    "id": "T120",
+    "priority": "P0",
+    "requirements": [
+      "R30"
+    ],
+    "layer": "LOAD",
+    "precondition": "某用户占满队列/模型预算，同时他人提问",
+    "oracle": "租户/用户公平限流生效；控制面取消不被饥饿",
+    "implementation": null,
+    "status": "NOT_RUN"
+  },
+  {
+    "id": "T121",
+    "priority": "P1",
+    "requirements": [
+      "R30",
+      "R34"
+    ],
+    "layer": "LOAD",
+    "precondition": "按第9节基准持续负载并记录分位数",
+    "oracle": "实际测量ACK/队列/调度/内存，不能把mock延迟当模型SLA",
+    "implementation": null,
+    "status": "NOT_RUN"
+  },
+  {
+    "id": "T122",
+    "priority": "P0",
+    "requirements": [
+      "R33"
+    ],
+    "layer": "SECURITY",
+    "precondition": "生产模式使用默认secret、MOCK或.invalid域名",
+    "oracle": "启动/发布校验拒绝，日志不打印秘密",
+    "implementation": "tests/unit/config.test.ts",
+    "status": "NOT_RUN",
+    "coverageNote": "Partial baseline oracle coverage; local assertions exist. Full baseline status remains NOT_RUN until all required layers and assertions are verified.",
+    "supplementaryImplementations": [
+      "tests/unit/config.test.ts"
+    ]
+  },
+  {
+    "id": "T123",
+    "priority": "P0",
+    "requirements": [
+      "R33"
+    ],
+    "layer": "SECURITY",
+    "precondition": "检查镜像、进程用户、capabilities、Docker socket",
+    "oracle": "非root、固定digest、无业务socket、权限最小化",
+    "implementation": null,
+    "status": "NOT_RUN"
+  },
+  {
+    "id": "T124",
+    "priority": "P0",
+    "requirements": [
+      "R34"
+    ],
+    "layer": "CHAOS",
+    "precondition": "销毁测试数据库和文件卷后按备份恢复",
+    "oracle": "恢复任务/ACL/成果；核验RPO/RTO与校验哈希",
+    "implementation": null,
+    "status": "NOT_RUN"
+  },
+  {
+    "id": "T125",
+    "priority": "P0",
+    "requirements": [
+      "R34",
+      "R29"
+    ],
+    "layer": "INTEGRATION",
+    "precondition": "主密钥轮换及历史加密数据读取",
+    "oracle": "新写用新key，旧数据受控读取；无明文导出",
+    "implementation": "tests/unit/config.test.ts",
+    "status": "NOT_RUN",
+    "coverageNote": "Partial baseline oracle coverage; local assertions exist. Full baseline status remains NOT_RUN until all required layers and assertions are verified.",
+    "supplementaryImplementations": [
+      "tests/unit/config.test.ts"
+    ]
+  },
+  {
+    "id": "T126",
+    "priority": "P0",
+    "requirements": [
+      "R34"
+    ],
+    "layer": "E2E",
+    "precondition": "连接器故障、UNKNOWN写入、备份失败、队列积压",
+    "oracle": "对应告警可触发、可定位；恢复可关闭告警",
+    "implementation": null,
+    "status": "NOT_RUN"
+  },
+  {
+    "id": "T127",
+    "priority": "P0",
+    "requirements": [
+      "R35"
+    ],
+    "layer": "INTEGRATION",
+    "precondition": "live必需项为NOT_RUN/BLOCKED或测试被全部SKIP",
+    "oracle": "verify:release非零；不能显示全部通过",
+    "implementation": "tests/unit/release.test.ts",
+    "status": "NOT_RUN",
+    "coverageNote": "Partial baseline oracle coverage; local assertions exist. Full baseline status remains NOT_RUN until all required layers and assertions are verified.",
+    "supplementaryImplementations": [
+      "tests/unit/release.test.ts"
+    ]
+  },
+  {
+    "id": "T128",
+    "priority": "P0",
+    "requirements": [
+      "R36",
+      "R35"
+    ],
+    "layer": "INTEGRATION",
+    "precondition": "R编号缺测试/代码映射，关键模块存在TODO占位",
+    "oracle": "verify:requirements失败；报告指出缺失项",
+    "implementation": null,
+    "status": "NOT_RUN"
+  },
+  {
+    "id": "T129",
+    "priority": "P0",
+    "requirements": [
+      "R35",
+      "R36"
+    ],
+    "layer": "E2E",
+    "precondition": "空环境按交付脚本安装、迁移、构建、启动",
+    "oracle": "可重复执行，步骤无隐含开发机依赖；报告真实结果",
+    "implementation": null,
+    "status": "NOT_RUN"
+  },
+  {
+    "id": "T130",
+    "priority": "P1",
+    "requirements": [
+      "R32",
+      "R34"
+    ],
+    "layer": "E2E",
+    "precondition": "管理员查权限/预算/审计，普通用户查个人中心",
+    "oracle": "各页面真实数据，字段脱敏，后端逐项授权",
+    "implementation": null,
+    "status": "NOT_RUN"
+  }
+]

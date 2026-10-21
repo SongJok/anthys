@@ -1,0 +1,507 @@
+Official @alicloud/dingtalk 2.2.48 card_1_0/client.ts; full source SHA256: 009a401e2451c555190cf6c9d3e90644f8c4bd67419729a4ef09b5a633388e34
+
+Original source lines 460–590
+  constructor(map?: { [key: string]: any }) {
+    super(map);
+  }
+}
+
+export class CreateAndDeliverRequest extends $tea.Model {
+  callbackRouteKey?: string;
+  /**
+   * @example
+   * STREAM
+   */
+  callbackType?: string;
+  cardAtUserIds?: string[];
+  /**
+   * @remarks
+   * This parameter is required.
+   */
+  cardData?: CreateAndDeliverRequestCardData;
+  /**
+   * @remarks
+   * This parameter is required.
+   */
+  cardTemplateId?: string;
+  coFeedOpenDeliverModel?: CreateAndDeliverRequestCoFeedOpenDeliverModel;
+  coFeedOpenSpaceModel?: CreateAndDeliverRequestCoFeedOpenSpaceModel;
+  docOpenDeliverModel?: CreateAndDeliverRequestDocOpenDeliverModel;
+  imGroupOpenDeliverModel?: CreateAndDeliverRequestImGroupOpenDeliverModel;
+  imGroupOpenSpaceModel?: CreateAndDeliverRequestImGroupOpenSpaceModel;
+  imRobotOpenDeliverModel?: CreateAndDeliverRequestImRobotOpenDeliverModel;
+  imRobotOpenSpaceModel?: CreateAndDeliverRequestImRobotOpenSpaceModel;
+  imSingleOpenDeliverModel?: CreateAndDeliverRequestImSingleOpenDeliverModel;
+  imSingleOpenSpaceModel?: CreateAndDeliverRequestImSingleOpenSpaceModel;
+  openDynamicDataConfig?: CreateAndDeliverRequestOpenDynamicDataConfig;
+  /**
+   * @remarks
+   * This parameter is required.
+   *
+   * @example
+   * dtv1.card//im_group.cidp4Gh*******VCQ==;im_robot.manager****67;im_robot.staff****89;co_feed.manager****67;one_box.cidp4Gh*******VCQ==;
+   */
+  openSpaceId?: string;
+  /**
+   * @remarks
+   * This parameter is required.
+   */
+  outTrackId?: string;
+  privateData?: { [key: string]: PrivateDataValue };
+  topOpenDeliverModel?: CreateAndDeliverRequestTopOpenDeliverModel;
+  topOpenSpaceModel?: CreateAndDeliverRequestTopOpenSpaceModel;
+  userId?: string;
+  userIdType?: number;
+  static names(): { [key: string]: string } {
+    return {
+      callbackRouteKey: 'callbackRouteKey',
+      callbackType: 'callbackType',
+      cardAtUserIds: 'cardAtUserIds',
+      cardData: 'cardData',
+      cardTemplateId: 'cardTemplateId',
+      coFeedOpenDeliverModel: 'coFeedOpenDeliverModel',
+      coFeedOpenSpaceModel: 'coFeedOpenSpaceModel',
+      docOpenDeliverModel: 'docOpenDeliverModel',
+      imGroupOpenDeliverModel: 'imGroupOpenDeliverModel',
+      imGroupOpenSpaceModel: 'imGroupOpenSpaceModel',
+      imRobotOpenDeliverModel: 'imRobotOpenDeliverModel',
+      imRobotOpenSpaceModel: 'imRobotOpenSpaceModel',
+      imSingleOpenDeliverModel: 'imSingleOpenDeliverModel',
+      imSingleOpenSpaceModel: 'imSingleOpenSpaceModel',
+      openDynamicDataConfig: 'openDynamicDataConfig',
+      openSpaceId: 'openSpaceId',
+      outTrackId: 'outTrackId',
+      privateData: 'privateData',
+      topOpenDeliverModel: 'topOpenDeliverModel',
+      topOpenSpaceModel: 'topOpenSpaceModel',
+      userId: 'userId',
+      userIdType: 'userIdType',
+    };
+  }
+
+  static types(): { [key: string]: any } {
+    return {
+      callbackRouteKey: 'string',
+      callbackType: 'string',
+      cardAtUserIds: { 'type': 'array', 'itemType': 'string' },
+      cardData: CreateAndDeliverRequestCardData,
+      cardTemplateId: 'string',
+      coFeedOpenDeliverModel: CreateAndDeliverRequestCoFeedOpenDeliverModel,
+      coFeedOpenSpaceModel: CreateAndDeliverRequestCoFeedOpenSpaceModel,
+      docOpenDeliverModel: CreateAndDeliverRequestDocOpenDeliverModel,
+      imGroupOpenDeliverModel: CreateAndDeliverRequestImGroupOpenDeliverModel,
+      imGroupOpenSpaceModel: CreateAndDeliverRequestImGroupOpenSpaceModel,
+      imRobotOpenDeliverModel: CreateAndDeliverRequestImRobotOpenDeliverModel,
+      imRobotOpenSpaceModel: CreateAndDeliverRequestImRobotOpenSpaceModel,
+      imSingleOpenDeliverModel: CreateAndDeliverRequestImSingleOpenDeliverModel,
+      imSingleOpenSpaceModel: CreateAndDeliverRequestImSingleOpenSpaceModel,
+      openDynamicDataConfig: CreateAndDeliverRequestOpenDynamicDataConfig,
+      openSpaceId: 'string',
+      outTrackId: 'string',
+      privateData: { 'type': 'map', 'keyType': 'string', 'valueType': PrivateDataValue },
+      topOpenDeliverModel: CreateAndDeliverRequestTopOpenDeliverModel,
+      topOpenSpaceModel: CreateAndDeliverRequestTopOpenSpaceModel,
+      userId: 'string',
+      userIdType: 'number',
+    };
+  }
+
+  constructor(map?: { [key: string]: any }) {
+    super(map);
+  }
+}
+
+export class CreateAndDeliverResponseBody extends $tea.Model {
+  result?: CreateAndDeliverResponseBodyResult;
+  success?: boolean;
+  static names(): { [key: string]: string } {
+    return {
+      result: 'result',
+      success: 'success',
+    };
+  }
+
+  static types(): { [key: string]: any } {
+    return {
+      result: CreateAndDeliverResponseBodyResult,
+      success: 'boolean',
+    };
+  }
+
+  constructor(map?: { [key: string]: any }) {
+    super(map);
+  }
+}
+
+Original source lines 2189–2263
+export class StreamingUpdateRequest extends $tea.Model {
+  /**
+   * @remarks
+   * This parameter is required.
+   */
+  content?: string;
+  /**
+   * @remarks
+   * This parameter is required.
+   */
+  guid?: string;
+  isError?: boolean;
+  isFinalize?: boolean;
+  isFull?: boolean;
+  /**
+   * @remarks
+   * This parameter is required.
+   */
+  key?: string;
+  /**
+   * @remarks
+   * This parameter is required.
+   */
+  outTrackId?: string;
+  static names(): { [key: string]: string } {
+    return {
+      content: 'content',
+      guid: 'guid',
+      isError: 'isError',
+      isFinalize: 'isFinalize',
+      isFull: 'isFull',
+      key: 'key',
+      outTrackId: 'outTrackId',
+    };
+  }
+
+  static types(): { [key: string]: any } {
+    return {
+      content: 'string',
+      guid: 'string',
+      isError: 'boolean',
+      isFinalize: 'boolean',
+      isFull: 'boolean',
+      key: 'string',
+      outTrackId: 'string',
+    };
+  }
+
+  constructor(map?: { [key: string]: any }) {
+    super(map);
+  }
+}
+
+export class StreamingUpdateResponseBody extends $tea.Model {
+  result?: boolean;
+  success?: boolean;
+  static names(): { [key: string]: string } {
+    return {
+      result: 'result',
+      success: 'success',
+    };
+  }
+
+  static types(): { [key: string]: any } {
+    return {
+      result: 'boolean',
+      success: 'boolean',
+    };
+  }
+
+  constructor(map?: { [key: string]: any }) {
+    super(map);
+  }
+}
+
+
+Original source lines 3203–3231
+export class CreateAndDeliverRequestImRobotOpenDeliverModel extends $tea.Model {
+  extension?: { [key: string]: string };
+  /**
+   * @example
+   * dingg3xmqdkpaojuakm8
+   */
+  robotCode?: string;
+  spaceType?: string;
+  static names(): { [key: string]: string } {
+    return {
+      extension: 'extension',
+      robotCode: 'robotCode',
+      spaceType: 'spaceType',
+    };
+  }
+
+  static types(): { [key: string]: any } {
+    return {
+      extension: { 'type': 'map', 'keyType': 'string', 'valueType': 'string' },
+      robotCode: 'string',
+      spaceType: 'string',
+    };
+  }
+
+  constructor(map?: { [key: string]: any }) {
+    super(map);
+  }
+}
+
+
+Original source lines 3557–3629
+export class CreateAndDeliverResponseBodyResultDeliverResults extends $tea.Model {
+  /**
+   * @example
+   * 4v+AzUEDuC0dKuO*********J0w8=
+   */
+  carrierId?: string;
+  /**
+   * @example
+   * system error
+   */
+  errorMsg?: string;
+  /**
+   * @example
+   * cid1234abcd
+   */
+  spaceId?: string;
+  /**
+   * @example
+   * IM_GROUP
+   */
+  spaceType?: string;
+  success?: boolean;
+  static names(): { [key: string]: string } {
+    return {
+      carrierId: 'carrierId',
+      errorMsg: 'errorMsg',
+      spaceId: 'spaceId',
+      spaceType: 'spaceType',
+      success: 'success',
+    };
+  }
+
+  static types(): { [key: string]: any } {
+    return {
+      carrierId: 'string',
+      errorMsg: 'string',
+      spaceId: 'string',
+      spaceType: 'string',
+      success: 'boolean',
+    };
+  }
+
+  constructor(map?: { [key: string]: any }) {
+    super(map);
+  }
+}
+
+export class CreateAndDeliverResponseBodyResult extends $tea.Model {
+  deliverResults?: CreateAndDeliverResponseBodyResultDeliverResults[];
+  /**
+   * @example
+   * out_track_id_xxx
+   */
+  outTrackId?: string;
+  static names(): { [key: string]: string } {
+    return {
+      deliverResults: 'deliverResults',
+      outTrackId: 'outTrackId',
+    };
+  }
+
+  static types(): { [key: string]: any } {
+    return {
+      deliverResults: { 'type': 'array', 'itemType': CreateAndDeliverResponseBodyResultDeliverResults },
+      outTrackId: 'string',
+    };
+  }
+
+  constructor(map?: { [key: string]: any }) {
+    super(map);
+  }
+}
+
+
+Original source lines 6170–6282
+
+    if (!Util.isUnset(request.cardTemplateId)) {
+      body["cardTemplateId"] = request.cardTemplateId;
+    }
+
+    if (!Util.isUnset(request.coFeedOpenDeliverModel)) {
+      body["coFeedOpenDeliverModel"] = request.coFeedOpenDeliverModel;
+    }
+
+    if (!Util.isUnset(request.coFeedOpenSpaceModel)) {
+      body["coFeedOpenSpaceModel"] = request.coFeedOpenSpaceModel;
+    }
+
+    if (!Util.isUnset(request.docOpenDeliverModel)) {
+      body["docOpenDeliverModel"] = request.docOpenDeliverModel;
+    }
+
+    if (!Util.isUnset(request.imGroupOpenDeliverModel)) {
+      body["imGroupOpenDeliverModel"] = request.imGroupOpenDeliverModel;
+    }
+
+    if (!Util.isUnset(request.imGroupOpenSpaceModel)) {
+      body["imGroupOpenSpaceModel"] = request.imGroupOpenSpaceModel;
+    }
+
+    if (!Util.isUnset(request.imRobotOpenDeliverModel)) {
+      body["imRobotOpenDeliverModel"] = request.imRobotOpenDeliverModel;
+    }
+
+    if (!Util.isUnset(request.imRobotOpenSpaceModel)) {
+      body["imRobotOpenSpaceModel"] = request.imRobotOpenSpaceModel;
+    }
+
+    if (!Util.isUnset(request.imSingleOpenDeliverModel)) {
+      body["imSingleOpenDeliverModel"] = request.imSingleOpenDeliverModel;
+    }
+
+    if (!Util.isUnset(request.imSingleOpenSpaceModel)) {
+      body["imSingleOpenSpaceModel"] = request.imSingleOpenSpaceModel;
+    }
+
+    if (!Util.isUnset(request.openDynamicDataConfig)) {
+      body["openDynamicDataConfig"] = request.openDynamicDataConfig;
+    }
+
+    if (!Util.isUnset(request.openSpaceId)) {
+      body["openSpaceId"] = request.openSpaceId;
+    }
+
+    if (!Util.isUnset(request.outTrackId)) {
+      body["outTrackId"] = request.outTrackId;
+    }
+
+    if (!Util.isUnset(request.privateData)) {
+      body["privateData"] = request.privateData;
+    }
+
+    if (!Util.isUnset(request.topOpenDeliverModel)) {
+      body["topOpenDeliverModel"] = request.topOpenDeliverModel;
+    }
+
+    if (!Util.isUnset(request.topOpenSpaceModel)) {
+      body["topOpenSpaceModel"] = request.topOpenSpaceModel;
+    }
+
+    if (!Util.isUnset(request.userId)) {
+      body["userId"] = request.userId;
+    }
+
+    if (!Util.isUnset(request.userIdType)) {
+      body["userIdType"] = request.userIdType;
+    }
+
+    let realHeaders : {[key: string ]: string} = { };
+    if (!Util.isUnset(headers.commonHeaders)) {
+      realHeaders = headers.commonHeaders;
+    }
+
+    if (!Util.isUnset(headers.xAcsDingtalkAccessToken)) {
+      realHeaders["x-acs-dingtalk-access-token"] = Util.toJSONString(headers.xAcsDingtalkAccessToken);
+    }
+
+    let req = new $OpenApi.OpenApiRequest({
+      headers: realHeaders,
+      body: OpenApiUtil.parseToMap(body),
+    });
+    let params = new $OpenApi.Params({
+      action: "CreateAndDeliver",
+      version: "card_1.0",
+      protocol: "HTTP",
+      pathname: `/v1.0/card/instances/createAndDeliver`,
+      method: "POST",
+      authType: "AK",
+      style: "ROA",
+      reqBodyType: "none",
+      bodyType: "json",
+    });
+    return $tea.cast<CreateAndDeliverResponse>(await this.execute(params, req, runtime), new CreateAndDeliverResponse({}));
+  }
+
+  /**
+   * 创建并投放卡片
+   *
+   * @param request - CreateAndDeliverRequest
+   * @returns CreateAndDeliverResponse
+   */
+  async createAndDeliver(request: CreateAndDeliverRequest): Promise<CreateAndDeliverResponse> {
+    let runtime = new $Util.RuntimeOptions({ });
+    let headers = new CreateAndDeliverHeaders({ });
+    return await this.createAndDeliverWithOptions(request, headers, runtime);
+  }
+
+  /**
+
+Original source lines 7300–7372
+   * @param headers - StreamingUpdateHeaders
+   * @param runtime - runtime options for this request RuntimeOptions
+   * @returns StreamingUpdateResponse
+   */
+  async streamingUpdateWithOptions(request: StreamingUpdateRequest, headers: StreamingUpdateHeaders, runtime: $Util.RuntimeOptions): Promise<StreamingUpdateResponse> {
+    Util.validateModel(request);
+    let body : {[key: string ]: any} = { };
+    if (!Util.isUnset(request.content)) {
+      body["content"] = request.content;
+    }
+
+    if (!Util.isUnset(request.guid)) {
+      body["guid"] = request.guid;
+    }
+
+    if (!Util.isUnset(request.isError)) {
+      body["isError"] = request.isError;
+    }
+
+    if (!Util.isUnset(request.isFinalize)) {
+      body["isFinalize"] = request.isFinalize;
+    }
+
+    if (!Util.isUnset(request.isFull)) {
+      body["isFull"] = request.isFull;
+    }
+
+    if (!Util.isUnset(request.key)) {
+      body["key"] = request.key;
+    }
+
+    if (!Util.isUnset(request.outTrackId)) {
+      body["outTrackId"] = request.outTrackId;
+    }
+
+    let realHeaders : {[key: string ]: string} = { };
+    if (!Util.isUnset(headers.commonHeaders)) {
+      realHeaders = headers.commonHeaders;
+    }
+
+    if (!Util.isUnset(headers.xAcsDingtalkAccessToken)) {
+      realHeaders["x-acs-dingtalk-access-token"] = Util.toJSONString(headers.xAcsDingtalkAccessToken);
+    }
+
+    let req = new $OpenApi.OpenApiRequest({
+      headers: realHeaders,
+      body: OpenApiUtil.parseToMap(body),
+    });
+    let params = new $OpenApi.Params({
+      action: "StreamingUpdate",
+      version: "card_1.0",
+      protocol: "HTTP",
+      pathname: `/v1.0/card/streaming`,
+      method: "PUT",
+      authType: "AK",
+      style: "ROA",
+      reqBodyType: "none",
+      bodyType: "json",
+    });
+    return $tea.cast<StreamingUpdateResponse>(await this.execute(params, req, runtime), new StreamingUpdateResponse({}));
+  }
+
+  /**
+   * AI互动卡片流式更新
+   *
+   * @param request - StreamingUpdateRequest
+   * @returns StreamingUpdateResponse
+   */
+  async streamingUpdate(request: StreamingUpdateRequest): Promise<StreamingUpdateResponse> {
+    let runtime = new $Util.RuntimeOptions({ });
+    let headers = new StreamingUpdateHeaders({ });
+    return await this.streamingUpdateWithOptions(request, headers, runtime);
+  }

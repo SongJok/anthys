@@ -1,0 +1,19 @@
+{
+  "transport": "trusted DingTalk Stream robot TEXT callbacks only",
+  "commands": [
+    "停止",
+    "停止任务",
+    "/stop",
+    "停止 <UUID>",
+    "停止任务 <UUID>",
+    "/stop <UUID>"
+  ],
+  "targetScope": "current verified conversation + current owner + current tenant",
+  "ambiguity": "never choose among multiple candidates; show up to20 IDs privately with explicit truncation",
+  "atomicity": "inbox + cancellation + deterministic final receipt + encrypted pending delivery in one transaction",
+  "modelCalls": 0,
+  "modelQueueItems": 0,
+  "unknownExternalActions": "preserve reconciliation; do not claim rollback",
+  "groupOutput": "safe request acknowledgement only; private candidates remain in owner workbench",
+  "liveVerified": false
+}

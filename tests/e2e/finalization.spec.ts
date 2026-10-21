@@ -1,0 +1,11 @@
+import {test,expect} from '@playwright/test';
+import {readFile,mkdir} from 'node:fs/promises';
+test('owner sees rejected conclusions and unavailable cached results without false success or draft disclosure',async({page,context},info)=>{
+ await context.route('**/*',route=>new URL(route.request().url()).origin==='http://localhost:52339'?route.continue():route.abort('blockedbyclient'));
+ await page.route('https://login.dingtalk.com/oauth2/auth?*',async route=>{const url=new URL(route.request().url()),callback=new URL(url.searchParams.get('redirect_uri')!);callback.searchParams.set('authCode','synthetic-browser-code');callback.searchParams.set('state',url.searchParams.get('state')!);await route.fulfill({status:302,headers:{location:callback.toString()}});});
+ const fixtures=JSON.parse(await readFile('.data/test-environment/browser-finalization-fixtures.json','utf8')) as Record<string,{rejectedTaskId:string;expiredTaskId:string}>,fixture=fixtures[info.project.name]!;
+ await page.goto('/tasks');await page.getByRole('button',{name:'使用钉钉登录'}).click();await expect(page.getByRole('heading',{name:'创建任务'})).toBeVisible();
+ await page.goto('/tasks?task='+fixture.rejectedTaskId);await expect(page.getByText('未完成原因：回答中的说明尚未得到证据核验，任务未完成。')).toBeVisible();expect(await page.content()).not.toContain('BROWSER_REJECTED_DRAFT_MUST_NOT_LEAK');expect((await page.request.get('/api/v1/tasks/'+fixture.rejectedTaskId)).status()).toBe(200);
+ await mkdir('reports/ui',{recursive:true});await page.screenshot({path:'reports/ui/p03-finalization-rejected-'+info.project.name+'.png',fullPage:true});
+ await page.goto('/tasks?task='+fixture.expiredTaskId);await expect(page.getByText('结果的当前来源权限尚未核实，正文暂不可见。')).toBeVisible();const response=await page.request.get('/api/v1/tasks/'+fixture.expiredTaskId),body=await response.json();expect(response.headers()['cache-control']).toBe('private, no-store');expect(body.data.runs[0]).toMatchObject({result:null,result_access:'CURRENT_SOURCE_UNVERIFIED'});await expect.poll(()=>page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);await page.screenshot({path:'reports/ui/p03-finalization-unavailable-'+info.project.name+'.png',fullPage:true});
+});

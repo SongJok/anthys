@@ -1,0 +1,22 @@
+import {finalFromMessages} from './final-answer.js';
+import './isolation.js';
+import {randomUUID} from 'node:crypto';
+import {z} from 'zod';
+import {secret} from '../../packages/config/src/index.js';
+import {Database} from '../../packages/storage/src/database.js';
+import {Vault} from '../../packages/storage/src/crypto.js';
+import {EncryptedFileStore} from '../../packages/storage/src/files.js';
+import {RuntimeStore} from '../../packages/runtime/src/store.js';
+import {AgentRuntime} from '../../packages/runtime/src/loop.js';
+import {Gateway,toolName} from '../../packages/gateway/src/index.js';
+import {RunQueue,runJobSchema} from '../../packages/tasks/src/queue.js';
+import {AttachmentService} from '../../packages/attachments/src/service.js';
+import {registerAttachmentCapabilities} from '../../packages/attachments/src/capabilities.js';
+import {GlmProvider} from '../../packages/provider-glm/src/client.js';
+import type {ProviderMessage} from '../../packages/provider-glm/src/sse.js';
+const mode=process.argv[2]!,ctx=z.object({tenantId:z.uuid(),actorId:z.uuid()}).parse(JSON.parse(process.argv[3]!)),queueName=process.argv[4]!,root=process.argv[5]!,id=z.uuid().parse(process.argv[6]),db=new Database(secret('RUNTIME_DATABASE_URL')!),queue=new RunQueue(secret('QUEUE_DATABASE_URL')!,queueName),vault=new Vault(new Map([['1',Buffer.from(secret('APP_MASTER_KEY')!,'hex')]]),'1');await queue.start();
+try{const jobs=await queue.boss.fetch(queueName,{batchSize:1});if(!jobs.length)throw Error('ATTACHMENT_JOB_MISSING');const queued=jobs[0]!,job=runJobSchema.parse(queued.data),store=new RuntimeStore(db,vault),gateway=new Gateway(store);
+ registerAttachmentCapabilities(gateway,new AttachmentService(db,vault,new EncryptedFileStore(root,vault),{download:async(_code,_signal,before)=>{await before();await db.scope(ctx,c=>c.query("INSERT INTO outbox(tenant_id,id,owner_id,kind,aggregate_id,payload_ref,dedup_key,published_at) VALUES($1,$2,$3,'SYNTHETIC_ATTACHMENT_READ',$4,'{}',$5,now())",[ctx.tenantId,randomUUID(),ctx.actorId,job.runId,randomUUID()]));if(mode==='hold'){console.log('ATTACHMENT_READ_IN_FLIGHT');await new Promise(()=>{});}return {bytes:Buffer.from('synthetic attachment recovered after process restart'),mime:'text/plain'};}},{corpId:'TENANT_A',robotCode:'synthetic-robot'}));
+ const model=new GlmProvider({apiKey:'synthetic',baseUrl:'https://open.bigmodel.cn/api/paas/v4',reasoningEffort:'high',fetch:async(_url,init)=>{const messages=(JSON.parse(init!.body as string) as {messages:ProviderMessage[]}).messages,toolResults=messages.filter(m=>m.role==='tool'),hasBody=toolResults.some(m=>JSON.parse(m.content!).data?.sourceTrust==='UNTRUSTED_ATTACHMENT_DATA_NOT_INSTRUCTIONS'),name=toolName(toolResults.length?'attachments.read_text':'attachments.inspect','1.0.0'),delta=hasBody?{content:finalFromMessages(messages)}:{tool_calls:[{index:0,id:'attachment-call-'+randomUUID(),type:'function',function:{name,arguments:JSON.stringify({attachmentId:id})}}],reasoning_content:'opaque fixture reasoning'};return new Response('data: '+JSON.stringify({choices:[{index:0,delta,finish_reason:hasBody?'stop':'tool_calls'}]})+'\n\ndata: [DONE]\n\n',{headers:{'content-type':'text/event-stream'}});}});
+ await new AgentRuntime(store,model,gateway).advance(ctx,job.runId,undefined,undefined,job.generation);await queue.boss.complete(queueName,queued.id);console.log(JSON.stringify({processed:true,generation:job.generation}));
+}finally{await queue.stop();await db.close();}

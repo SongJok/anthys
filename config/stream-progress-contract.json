@@ -1,0 +1,23 @@
+{
+  "observerFields": [
+    "sequence",
+    "contentFragments",
+    "toolFragments"
+  ],
+  "forbiddenFields": [
+    "content",
+    "reasoning_content",
+    "tool_call_id",
+    "tool_name",
+    "tool_arguments",
+    "credentials"
+  ],
+  "runtimePersistence": "model_stream_progress current attempt and run fence; monotonic sequence; no reopening terminal phase",
+  "aggregationMilliseconds": 750,
+  "cardOutput": "fixed policy status strings/counts, never unverified model body",
+  "providerProtocol": "native GLM SSE parser, incomplete turns are not journaled or executed",
+  "retry": "fresh progress attempt after durable retry; unknown card response is not resent",
+  "finalization": "one accepted isFinalize update; FINALIZED_UNVERIFIED remains unverified delivery",
+  "liveVerified": false,
+  "rateLimit": "Respect full delta-seconds or HTTP-date Retry-After; no60-second cap; suppress when deadline exceeds task expiry"
+}

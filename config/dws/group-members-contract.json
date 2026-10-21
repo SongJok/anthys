@@ -1,0 +1,33 @@
+{
+  "cliVersion": "v1.0.61",
+  "sourceCommit": "50eb73a0906c5911c5c25f9c7106b6ead4f14f62",
+  "schemaHash": "80b65e614f59dfd853b45fb512ff1ec428a7353d7be04e5935f2aa5d9327f762",
+  "schemaFile": "config/dws/chat-members-list.schema.json",
+  "cliPath": "chat +chat-members-list",
+  "argv": [
+    "chat",
+    "+chat-members-list",
+    "--conversation-id",
+    "<exact stable ID>",
+    "--member-types",
+    "user,bot",
+    "--page-limit",
+    "50"
+  ],
+  "effect": "read",
+  "confirmation": "not_required",
+  "publishedResultSchema": false,
+  "sourceFile": "internal/shortcut/smart/group_members.go",
+  "sourceFileSha256": "f6bdba46989468c6d9a1747e920ca5f44f36f4bbb7fe263450dbb4e5de50c7b6",
+  "cliOwnedContract": "im.group-members.v1",
+  "limitations": [
+    "CLI drops corp identity; current directory mapping and per-resource audience proof remain required",
+    "Unknown/empty IDs, partial buckets and count inconsistencies fail closed",
+    "Next cursor may retain previous page at hasMore=false; require source_complete",
+    "Roles are opaque platform data, not permission grants or owner/admin certification"
+  ],
+  "live": false,
+  "independentInfoSchemaHash": "a925833db4338cf6fc242602477413a25d2f9e113e463c2345123e5e3fb0c292",
+  "independentInfoSchemaFile": "config/dws/chat-conversation-info.schema.json",
+  "independentInfoRequirement": "Reviewed tenant mapping: exact group ID/type, independent all-human/bot counts including external participants, and revision changing on every roster change; read before and after membership."
+}

@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "mode": "PRODUCTION_OFFLINE",
+  "socketPath": "/run/dws/socket/runner.sock",
+  "tenantId": "00000000-0000-4000-8000-000000000001",
+  "corpId": "synthetic-corp",
+  "policyHash": "0000000000000000000000000000000000000000000000000000000000000000",
+  "callerKeyId": "offline-caller",
+  "callerPublicKeyFile": "/run/dws/config/caller-public.pem",
+  "runnerKeyId": "offline-runner",
+  "runnerPrivateKeyFile": "/run/dws/config/runner-private.pem",
+  "maxRequestMs": 3000,
+  "maxConcurrent": 2,
+  "maxReplayEntries": 4096,
+  "binaryFile": "/usr/local/bin/dws",
+  "binaryHash": "23c5e06b3175cf3910bf4c9af960545e0f995c621e1ff0aaadf58478fb84d90c",
+  "schemaHash": "73f06237dc449c32d2f698d180f3649a334b5e606ed34fcfb4c8ea2ef015e484",
+  "root": "/run/dws/workspaces",
+  "maxOutputBytes": 128000
+}

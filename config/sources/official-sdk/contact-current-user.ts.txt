@@ -1,0 +1,186 @@
+Official @alicloud/dingtalk 2.2.48 contact_1_0 excerpt. Original file SHA256: c281ebef644d03c74f9ec2544240d008d7bb5c027e3c4d878880d8d7b79d4905
+Lines 4260-4380 and 16450-16510 (1-based).
+
+      statusCode: 'statusCode',
+      body: 'body',
+    };
+  }
+
+  static types(): { [key: string]: any } {
+    return {
+      headers: { 'type': 'map', 'keyType': 'string', 'valueType': 'string' },
+      statusCode: 'number',
+      body: GetUnionIdByMigrationUnionIdResponseBody,
+    };
+  }
+
+  constructor(map?: { [key: string]: any }) {
+    super(map);
+  }
+}
+
+export class GetUserHeaders extends $tea.Model {
+  commonHeaders?: { [key: string]: string };
+  xAcsDingtalkAccessToken?: string;
+  static names(): { [key: string]: string } {
+    return {
+      commonHeaders: 'commonHeaders',
+      xAcsDingtalkAccessToken: 'x-acs-dingtalk-access-token',
+    };
+  }
+
+  static types(): { [key: string]: any } {
+    return {
+      commonHeaders: { 'type': 'map', 'keyType': 'string', 'valueType': 'string' },
+      xAcsDingtalkAccessToken: 'string',
+    };
+  }
+
+  constructor(map?: { [key: string]: any }) {
+    super(map);
+  }
+}
+
+export class GetUserResponseBody extends $tea.Model {
+  avatarUrl?: string;
+  email?: string;
+  loginEmail?: string;
+  mobile?: string;
+  nick?: string;
+  openId?: string;
+  stateCode?: string;
+  unionId?: string;
+  visitor?: boolean;
+  static names(): { [key: string]: string } {
+    return {
+      avatarUrl: 'avatarUrl',
+      email: 'email',
+      loginEmail: 'loginEmail',
+      mobile: 'mobile',
+      nick: 'nick',
+      openId: 'openId',
+      stateCode: 'stateCode',
+      unionId: 'unionId',
+      visitor: 'visitor',
+    };
+  }
+
+  static types(): { [key: string]: any } {
+    return {
+      avatarUrl: 'string',
+      email: 'string',
+      loginEmail: 'string',
+      mobile: 'string',
+      nick: 'string',
+      openId: 'string',
+      stateCode: 'string',
+      unionId: 'string',
+      visitor: 'boolean',
+    };
+  }
+
+  constructor(map?: { [key: string]: any }) {
+    super(map);
+  }
+}
+
+export class GetUserResponse extends $tea.Model {
+  headers?: { [key: string]: string };
+  statusCode?: number;
+  body?: GetUserResponseBody;
+  static names(): { [key: string]: string } {
+    return {
+      headers: 'headers',
+      statusCode: 'statusCode',
+      body: 'body',
+    };
+  }
+
+  static types(): { [key: string]: any } {
+    return {
+      headers: { 'type': 'map', 'keyType': 'string', 'valueType': 'string' },
+      statusCode: 'number',
+      body: GetUserResponseBody,
+    };
+  }
+
+  constructor(map?: { [key: string]: any }) {
+    super(map);
+  }
+}
+
+export class GetUserByDingTalkIdHeaders extends $tea.Model {
+  commonHeaders?: { [key: string]: string };
+  xAcsDingtalkAccessToken?: string;
+  static names(): { [key: string]: string } {
+    return {
+      commonHeaders: 'commonHeaders',
+      xAcsDingtalkAccessToken: 'x-acs-dingtalk-access-token',
+    };
+  }
+
+  static types(): { [key: string]: any } {
+    return {
+      commonHeaders: { 'type': 'map', 'keyType': 'string', 'valueType': 'string' },
+
+   * @param request - GetUnionIdByMigrationUnionIdRequest
+   * @returns GetUnionIdByMigrationUnionIdResponse
+   */
+  async getUnionIdByMigrationUnionId(request: GetUnionIdByMigrationUnionIdRequest): Promise<GetUnionIdByMigrationUnionIdResponse> {
+    let runtime = new $Util.RuntimeOptions({ });
+    let headers = new GetUnionIdByMigrationUnionIdHeaders({ });
+    return await this.getUnionIdByMigrationUnionIdWithOptions(request, headers, runtime);
+  }
+
+  /**
+   * 获取用户个人信息
+   * 
+   * @param headers - GetUserHeaders
+   * @param runtime - runtime options for this request RuntimeOptions
+   * @returns GetUserResponse
+   */
+  async getUserWithOptions(unionId: string, headers: GetUserHeaders, runtime: $Util.RuntimeOptions): Promise<GetUserResponse> {
+    let realHeaders : {[key: string ]: string} = { };
+    if (!Util.isUnset(headers.commonHeaders)) {
+      realHeaders = headers.commonHeaders;
+    }
+
+    if (!Util.isUnset(headers.xAcsDingtalkAccessToken)) {
+      realHeaders["x-acs-dingtalk-access-token"] = Util.toJSONString(headers.xAcsDingtalkAccessToken);
+    }
+
+    let req = new $OpenApi.OpenApiRequest({
+      headers: realHeaders,
+    });
+    let params = new $OpenApi.Params({
+      action: "GetUser",
+      version: "contact_1.0",
+      protocol: "HTTP",
+      pathname: `/v1.0/contact/users/${unionId}`,
+      method: "GET",
+      authType: "AK",
+      style: "ROA",
+      reqBodyType: "none",
+      bodyType: "json",
+    });
+    return $tea.cast<GetUserResponse>(await this.execute(params, req, runtime), new GetUserResponse({}));
+  }
+
+  /**
+   * 获取用户个人信息
+   * @returns GetUserResponse
+   */
+  async getUser(unionId: string): Promise<GetUserResponse> {
+    let runtime = new $Util.RuntimeOptions({ });
+    let headers = new GetUserHeaders({ });
+    return await this.getUserWithOptions(unionId, headers, runtime);
+  }
+
+  /**
+   * 根据钉钉号获取员工信息
+   * 
+   * @param request - GetUserByDingTalkIdRequest
+   * @param headers - GetUserByDingTalkIdHeaders
+   * @param runtime - runtime options for this request RuntimeOptions
+   * @returns GetUserByDingTalkIdResponse
+   */

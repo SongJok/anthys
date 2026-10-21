@@ -1,0 +1,142 @@
+[
+  {
+    "component": "GLM",
+    "status": "BLOCKED_EXTERNAL",
+    "requires": [
+      "native multi-tool/cancel/image/structured-output live probes",
+      "600 model evaluation trajectories",
+      "enterprise data egress policy for future business data"
+    ],
+    "blocks": [
+      "P03 live",
+      "P14 ENTERPRISE_DWS"
+    ],
+    "configurationProvided": true,
+    "credentialProbe": "PASS_TEXT_SSE_CONNECTIVITY_ONLY",
+    "note": "User supplied existing .env configuration; canonical aliases are implemented. Configured values do not prove authorization or full live acceptance.",
+    "evidenceRef": "reports/probes/glm-connectivity.json"
+  },
+  {
+    "component": "DINGTALK",
+    "status": "BLOCKED_EXTERNAL",
+    "requires": [
+      "published application and visible dedicated test assets",
+      "card template and H5 HTTPS domain",
+      "two verified test users and dedicated test group",
+      "real single chat/group mention/card/active message tests",
+      "approved file/picture/rich-text test assets and exact attachment CDN allowlist",
+      "real attachment download permissions and callback certification"
+    ],
+    "blocks": [
+      "P02 live",
+      "P12 live",
+      "P14"
+    ],
+    "configurationProvided": true,
+    "credentialProbe": "PASS_APP_TOKEN_EXCHANGE_ONLY",
+    "note": "User supplied existing .env configuration; canonical aliases are implemented. Configured values do not prove authorization or full live acceptance."
+  },
+  {
+    "component": "DWS",
+    "status": "BLOCKED_EXTERNAL",
+    "requires": [
+      "enterprise CLI eligibility",
+      "two explicit dedicated test identities through independent device flow",
+      "approved test office resources and ACL",
+      "approved enterprise data egress and task delegation"
+    ],
+    "blocks": [
+      "P06 live",
+      "P10 history",
+      "P11 live",
+      "P14"
+    ],
+    "softwareProgress": "IN_PROGRESS exact-profile self-read/revocation component. Independent delegated runner/egress, device flow, document ACL and office coverage remain software work, not external blockers."
+  },
+  {
+    "component": "COMPANY_MCP",
+    "status": "BLOCKED_EXTERNAL",
+    "requires": [
+      "chat downstream read-only and per-actor resource authorization contract, approved repository/service/environment",
+      "verify actor/resource authorization and redaction",
+      "real read-only repository/deployment/log evidence",
+      "explicit COMPANY_MCP_CONFIG_FILE with server/schema/credential/review binding and independently installed per-user fixed-commit scopes; generic chat discovery cannot establish this contract"
+    ],
+    "blocks": [
+      "P05 live",
+      "P14"
+    ],
+    "configurationProvided": true,
+    "credentialProbe": "PASS_INITIALIZE_AND_TOOL_DISCOVERY_ONLY",
+    "note": "User selected chat. Both endpoints passed discovery only. Its downstream safety, scoped authorization and structured evidence remain unverified; no business LIVE_VERIFIED status is claimed.",
+    "configuredEndpointCount": 2,
+    "discoveredTools": {
+      "dd-agent": [
+        "chat",
+        "upload_api_doc",
+        "search_api_docs",
+        "fetch_api_doc"
+      ],
+      "dd-chat": [
+        "chat"
+      ]
+    },
+    "selectedAdapter": "chat",
+    "userDirection": "Use the discovered chat tool for the P05 adapter",
+    "softwareProgress": "P05 fixed-commit code adapter with reviewed scoped-proxy message contract and per-actor resource revalidation implemented locally; generic configured chat remains disabled for business access."
+  },
+  {
+    "component": "DATA",
+    "status": "BLOCKED_EXTERNAL",
+    "requires": [
+      "three approved company metric templates",
+      "gateway or read-only source registration",
+      "data steward goldens and output audience grants"
+    ],
+    "blocks": [
+      "P09 live",
+      "P14"
+    ]
+  },
+  {
+    "component": "SEARCH",
+    "status": "BLOCKED_EXTERNAL",
+    "requires": [
+      "approved provider registration and credentials",
+      "egress allowlist"
+    ],
+    "blocks": [
+      "P11 live",
+      "P14"
+    ]
+  },
+  {
+    "component": "OPERATIONS",
+    "status": "BLOCKED_EXTERNAL",
+    "requires": [
+      "production TLS domain",
+      "secret management and deployment identity",
+      "backup storage/WAL retention policy",
+      "enterprise approval and privacy policies"
+    ],
+    "blocks": [
+      "P13 production drill",
+      "P14"
+    ]
+  },
+  {
+    "component": "MODEL_BUDGET",
+    "status": "BLOCKED_EXTERNAL",
+    "requires": [
+      "enterprise-approved production quota policy with currency, timezone, token/money/concurrency ceilings and rate sources",
+      "provider billing reconciliation for UNKNOWN requests and confirmation of cache pricing rules"
+    ],
+    "blocks": [
+      "production model dispatch without an approved policy",
+      "P03 live cost certification",
+      "P14 ENTERPRISE_DWS"
+    ],
+    "configurationProvided": false,
+    "note": "No vendor prices or production spending limits are invented. Isolated test ceilings cannot authorize production. Offline budget:check validates configuration only; known usage plus an administrator-approved rate is not a provider invoice."
+  }
+]

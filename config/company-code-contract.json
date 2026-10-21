@@ -1,0 +1,34 @@
+{
+  "contract": {
+    "id": "open_aider.company.code.read",
+    "version": 1,
+    "operations": [
+      "CHECK",
+      "SEARCH",
+      "READ"
+    ],
+    "authorization": "UPSTREAM_RESOURCE_ENFORCED",
+    "sideEffects": "NONE"
+  },
+  "contractHash": "4b3803e13459f8a3800464c462a9b1bad13312122e0950cd327f464ff8cf5c8d",
+  "sdk": "@modelcontextprotocol/sdk@1.32.1",
+  "selectedUpstreamTool": "chat",
+  "wireArguments": [
+    "message"
+  ],
+  "status": "LOCAL_COMPONENT_ONLY",
+  "liveStatus": "BLOCKED_EXTERNAL",
+  "enablement": "No default configuration; administrator-reviewed read-only and per-actor contract plus source scopes required. This custom proxy envelope is not a discovered feature of the current company chat server.",
+  "sources": [
+    "https://modelcontextprotocol.io/specification/2025-11-25/basic/lifecycle",
+    "https://modelcontextprotocol.io/specification/2025-11-25/server/tools",
+    "https://modelcontextprotocol.io/docs/2025-11-25/tutorials/security/security_best_practices"
+  ],
+  "checkedAt": "2026-10-15",
+  "remaining": [
+    "company.logs.query and deployment/version correlation",
+    "OAuth/mTLS and SSE/stdio transports",
+    "review/re-enable lifecycle for changed schemas; current calls deny mismatches",
+    "actual company code/log minimal read-only acceptance"
+  ]
+}

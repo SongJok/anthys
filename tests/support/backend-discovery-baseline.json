@@ -1,0 +1,362 @@
+{
+  "schemaVersion": 1,
+  "originalSourceCommit": "4460c34bf07080e87d8115ba8fef92aa3c855a51",
+  "originalFiles": [
+    "tests/contract/cards.test.ts",
+    "tests/contract/dingtalk-reply.test.ts",
+    "tests/contract/dingtalk.test.ts",
+    "tests/contract/dm-metadata-process.test.ts",
+    "tests/contract/dm-metadata-sdk.test.ts",
+    "tests/contract/glm.test.ts",
+    "tests/contract/login.test.ts",
+    "tests/integration/active-budget.test.ts",
+    "tests/integration/attachments.test.ts",
+    "tests/integration/capability-output.test.ts",
+    "tests/integration/capture-lifecycle-boundary.test.ts",
+    "tests/integration/card-stream.test.ts",
+    "tests/integration/cards.test.ts",
+    "tests/integration/checkpoint.test.ts",
+    "tests/integration/company.test.ts",
+    "tests/integration/composite-keys.test.ts",
+    "tests/integration/controls.test.ts",
+    "tests/integration/delivery.test.ts",
+    "tests/integration/directory.test.ts",
+    "tests/integration/dws-document.test.ts",
+    "tests/integration/dws-group-members.test.ts",
+    "tests/integration/dws-signed-service.test.ts",
+    "tests/integration/dws.test.ts",
+    "tests/integration/erasure-dialogue.test.ts",
+    "tests/integration/erasure-graph.test.ts",
+    "tests/integration/finalization.test.ts",
+    "tests/integration/gateway.test.ts",
+    "tests/integration/group-clarification.test.ts",
+    "tests/integration/identity.test.ts",
+    "tests/integration/inactive-private-maintenance.test.ts",
+    "tests/integration/ingress.test.ts",
+    "tests/integration/login.test.ts",
+    "tests/integration/maintenance-health.test.ts",
+    "tests/integration/model-budget.test.ts",
+    "tests/integration/narrative-review.test.ts",
+    "tests/integration/native-memory.test.ts",
+    "tests/integration/one-shot-startup.test.ts",
+    "tests/integration/one-shot-trial.test.ts",
+    "tests/integration/permission-center.test.ts",
+    "tests/integration/persona-group.test.ts",
+    "tests/integration/persona-native.test.ts",
+    "tests/integration/persona-privacy.test.ts",
+    "tests/integration/persona-runtime.test.ts",
+    "tests/integration/persona-scope-dialogue.test.ts",
+    "tests/integration/personas.test.ts",
+    "tests/integration/private-memory.test.ts",
+    "tests/integration/queue.test.ts",
+    "tests/integration/retry-clock.test.ts",
+    "tests/integration/retry.test.ts",
+    "tests/integration/runtime.test.ts",
+    "tests/integration/schema-readiness.test.ts",
+    "tests/integration/source-choice.test.ts",
+    "tests/integration/stop.test.ts",
+    "tests/integration/trial-formal-lifecycle.test.ts",
+    "tests/integration/workbench.test.ts",
+    "tests/security/gateway-matrix.test.ts",
+    "tests/security/policy.test.ts",
+    "tests/security/role-authority-boundaries.test.ts",
+    "tests/security/runtime-role-authority.test.ts",
+    "tests/unit/attachments.test.ts",
+    "tests/unit/capability-descriptor.test.ts",
+    "tests/unit/capability-output.test.ts",
+    "tests/unit/clarification-command.test.ts",
+    "tests/unit/company.test.ts",
+    "tests/unit/config.test.ts",
+    "tests/unit/dm-metadata-cli.test.ts",
+    "tests/unit/dm-metadata-configuration.test.ts",
+    "tests/unit/dm-metadata-controller.test.ts",
+    "tests/unit/dm-metadata-file.test.ts",
+    "tests/unit/dm-metadata.test.ts",
+    "tests/unit/dws-document.test.ts",
+    "tests/unit/dws-offline-network.test.ts",
+    "tests/unit/dws.test.ts",
+    "tests/unit/final-plan.test.ts",
+    "tests/unit/formal-company-startup.test.ts",
+    "tests/unit/formal-profile.test.ts",
+    "tests/unit/formal-runtime-cli.test.ts",
+    "tests/unit/group-members.test.ts",
+    "tests/unit/maintenance-supervisor.test.ts",
+    "tests/unit/model-budget-policy.test.ts",
+    "tests/unit/narrative-review.test.ts",
+    "tests/unit/permission-manifest-cli.test.ts",
+    "tests/unit/persona-commands.test.ts",
+    "tests/unit/persona-schema.test.ts",
+    "tests/unit/record-check.test.ts",
+    "tests/unit/release.test.ts",
+    "tests/unit/schema-contract-build.test.ts",
+    "tests/unit/source-choice.test.ts",
+    "tests/unit/test-isolation.test.ts",
+    "tests/unit/tool-result-envelope.test.ts"
+  ],
+  "originalCount": 90,
+  "originalTestSpecification": {
+    "globals": true,
+    "maxWorkers": 4,
+    "setupFiles": [
+      "tests/support/isolation.ts"
+    ],
+    "exclude": [
+      "tests/e2e/**",
+      "tests/offline/**",
+      "node_modules/**",
+      "dist/**"
+    ],
+    "testTimeout": 20000,
+    "hookTimeout": 30000,
+    "reporters": [
+      "default",
+      "json"
+    ],
+    "outputFile": {
+      "json": "reports/vitest-latest.json"
+    },
+    "coverage": {
+      "provider": "v8",
+      "include": [
+        "packages/**/*.ts",
+        "apps/api/src/**/*.ts"
+      ],
+      "reporter": [
+        "text",
+        "json-summary",
+        "json"
+      ],
+      "thresholds": {
+        "lines": 85,
+        "branches": 80,
+        "functions": 85,
+        "statements": 85,
+        "packages/policy/src/index.ts": {
+          "branches": 90
+        },
+        "packages/gateway/src/index.ts": {
+          "branches": 90
+        },
+        "packages/identity/src/*.ts": {
+          "branches": 90
+        },
+        "packages/provider-glm/src/sse.ts": {
+          "branches": 90
+        },
+        "packages/runtime/src/retry.ts": {
+          "branches": 90
+        },
+        "packages/runtime/src/budget-policy.ts": {
+          "branches": 90
+        },
+        "packages/runtime/src/model-budget.ts": {
+          "branches": 90
+        },
+        "packages/runtime/src/budget-recovery.ts": {
+          "branches": 90
+        },
+        "packages/provider-glm/src/client.ts": {
+          "branches": 90
+        },
+        "packages/gateway/src/context.ts": {
+          "branches": 90
+        },
+        "packages/gateway/src/checkpoint.ts": {
+          "branches": 90
+        },
+        "packages/runtime/src/checkpoint.ts": {
+          "branches": 90
+        },
+        "packages/runtime/src/store.ts": {
+          "branches": 90
+        },
+        "packages/gateway/src/delivery.ts": {
+          "branches": 90
+        },
+        "packages/gateway/src/finalizer.ts": {
+          "branches": 90
+        },
+        "packages/gateway/src/final-delivery.ts": {
+          "branches": 90
+        },
+        "packages/runtime/src/final-plan.ts": {
+          "branches": 90
+        },
+        "packages/dingtalk/src/stop.ts": {
+          "branches": 90
+        },
+        "packages/attachments/src/capabilities.ts": {
+          "branches": 90
+        },
+        "packages/attachments/src/download.ts": {
+          "branches": 90
+        },
+        "packages/attachments/src/inspect.ts": {
+          "branches": 90
+        },
+        "packages/attachments/src/service.ts": {
+          "branches": 90
+        },
+        "packages/attachments/src/egress.ts": {
+          "branches": 90
+        },
+        "packages/storage/src/files.ts": {
+          "branches": 90
+        }
+      }
+    }
+  },
+  "knownExcludedOnlyByCLI": "tests/security/gateway-matrix.test.ts",
+  "approvedAddedFiles": [
+    "tests/contract/dm-identity-process.test.ts",
+    "tests/integration/audit.test.ts",
+    "tests/integration/bounded-migration-step.test.ts",
+    "tests/integration/company-agent-chat.test.ts",
+    "tests/integration/company-agent-connection.test.ts",
+    "tests/integration/company-agent-group.test.ts",
+    "tests/integration/company-agent-https.test.ts",
+    "tests/integration/company-agent-pilot-readiness.test.ts",
+    "tests/integration/company-agent-process.test.ts",
+    "tests/integration/company-agent-requests.test.ts",
+    "tests/integration/company-agent-runtime.test.ts",
+    "tests/integration/company-code-logs-version.test.ts",
+    "tests/integration/company-logs.test.ts",
+    "tests/integration/database-connection.test.ts",
+    "tests/integration/finite-private-pilot.test.ts",
+    "tests/integration/formal-group-admission.test.ts",
+    "tests/integration/group-case-escalations.test.ts",
+    "tests/integration/group-case-model-read.test.ts",
+    "tests/integration/group-case-roster-authority.test.ts",
+    "tests/integration/group-case-roster-signed.test.ts",
+    "tests/integration/group-cases.test.ts",
+    "tests/integration/group-escalation-boundaries.test.ts",
+    "tests/integration/group-escalation-runtime.test.ts",
+    "tests/integration/group-reminder-api.test.ts",
+    "tests/integration/group-reminder-authority.test.ts",
+    "tests/integration/group-reminder-configured-runtime.test.ts",
+    "tests/integration/group-reminder-cycle-limits.test.ts",
+    "tests/integration/group-reminder-cycle.test.ts",
+    "tests/integration/group-reminder-denials.test.ts",
+    "tests/integration/group-reminder-fixture-clock.test.ts",
+    "tests/integration/group-reminder-physical-send.test.ts",
+    "tests/integration/group-reminder-quota.test.ts",
+    "tests/integration/group-reminder-runtime.test.ts",
+    "tests/integration/group-reminder-signed.test.ts",
+    "tests/integration/independent-cluster-restore.test.ts",
+    "tests/integration/native-artifact-host.test.ts",
+    "tests/integration/native-case-members.test.ts",
+    "tests/integration/native-group-cases.test.ts",
+    "tests/integration/native-schedules.test.ts",
+    "tests/integration/operations-disaster-recovery.test.ts",
+    "tests/integration/permission-administration.test.ts",
+    "tests/integration/persona-explanation.test.ts",
+    "tests/integration/postgres-backup-snapshot.test.ts",
+    "tests/integration/postgres-restore-verification.test.ts",
+    "tests/integration/project-backup-driver.test.ts",
+    "tests/integration/project-restore-command.test.ts",
+    "tests/integration/recovery-safety-comparison.test.ts",
+    "tests/integration/schedules.test.ts",
+    "tests/integration/signed-document-read-e2e.test.ts",
+    "tests/integration/signed-group-mention-roster.test.ts",
+    "tests/integration/signed-group-read-e2e.test.ts",
+    "tests/integration/signed-native-case-roster.test.ts",
+    "tests/integration/t033-membership-boundary.test.ts",
+    "tests/integration/task-receipt.test.ts",
+    "tests/integration/task-result-artifacts.test.ts",
+    "tests/integration/trial-fresh-admission.test.ts",
+    "tests/integration/trial-process-supervision.test.ts",
+    "tests/integration/trial-recovery-isolation.test.ts",
+    "tests/unit/analysis-job-contract.test.ts",
+    "tests/unit/artifact-font-configuration.test.ts",
+    "tests/unit/artifact-preservation.test.mjs",
+    "tests/unit/artifact-rendering.test.ts",
+    "tests/unit/artifact-task-result.test.ts",
+    "tests/unit/artifacts-native-capability.test.ts",
+    "tests/unit/bounded-migration-lifetime.test.ts",
+    "tests/unit/bounded-migration-plan.test.ts",
+    "tests/unit/case-roster-protocol.test.ts",
+    "tests/unit/company-agent-chat.test.ts",
+    "tests/unit/company-agent-configuration.test.ts",
+    "tests/unit/company-agent-group-delivery.test.ts",
+    "tests/unit/company-agent-group-policy.test.ts",
+    "tests/unit/company-agent-group-surface.test.ts",
+    "tests/unit/company-agent-transport.test.ts",
+    "tests/unit/company-logs-configuration.test.ts",
+    "tests/unit/company-logs.test.ts",
+    "tests/unit/dm-identity-boundary.test.ts",
+    "tests/unit/dm-identity-cli.test.ts",
+    "tests/unit/dm-identity-controller.test.ts",
+    "tests/unit/dm-identity-diagnostic.test.ts",
+    "tests/unit/exceljs-uuid-compatibility.test.mjs",
+    "tests/unit/finite-private-pilot-cli.test.ts",
+    "tests/unit/finite-private-pilot-profile.test.ts",
+    "tests/unit/finite-private-pilot-sender.test.ts",
+    "tests/unit/formal-group-profile.test.ts",
+    "tests/unit/group-case-commands.test.ts",
+    "tests/unit/group-case-read-surface.test.ts",
+    "tests/unit/group-cases-model.test.ts",
+    "tests/unit/group-escalation-adapter.test.ts",
+    "tests/unit/group-escalation-runtime-profile.test.ts",
+    "tests/unit/group-mention-roster-transport.test.ts",
+    "tests/unit/group-reminder-database-safety.test.ts",
+    "tests/unit/group-reminder-policy.test.ts",
+    "tests/unit/group-reminder-runtime-profile.test.ts",
+    "tests/unit/implementation-placeholder.test.ts",
+    "tests/unit/native-case-roster-protocol.test.ts",
+    "tests/unit/native-case-roster-transport.test.ts",
+    "tests/unit/operations-archive.test.ts",
+    "tests/unit/operations-filestore-snapshot.test.ts",
+    "tests/unit/operations-private-file.test.ts",
+    "tests/unit/operations-process-stream.test.ts",
+    "tests/unit/persona-explanation.test.ts",
+    "tests/unit/persona-natural-preference.test.ts",
+    "tests/unit/prepare-linux-node-runtime.test.ts",
+    "tests/unit/project-backup-profile.test.ts",
+    "tests/unit/project-backup-toolchain.test.ts",
+    "tests/unit/recovery-safety-comparison.test.ts",
+    "tests/unit/schedule-commands.test.ts",
+    "tests/unit/schedule-model.test.ts",
+    "tests/unit/schedule-rules.test.ts",
+    "tests/unit/scheduled-group-protocol.test.ts",
+    "tests/unit/trial-supervisor.test.ts",
+    "tests/unit/watch-predicate.test.ts",
+    "tests/unit/watch-schedule-policy.test.ts",
+    "tests/integration/recovery-safety-source.test.ts"
+  ],
+  "additionReason": "Explicitly enumerated configured signed reads, identity diagnostic, trial admission/execution/supervision and deployment-isolation additions. Original90 files/specification, uniqueness, CLI-only T036 exclusion and discovery-noise assertions remain unchanged. Added explicit parent IPC closure protocol boundary tests; all prior102 discovered files remain. Added metadata audit and durable task-receipt regressions; all prior103 files and every original threshold remain. Added report preservation regressions; all prior105 discovered files remain, with .mjs discovery explicitly checked. Added administrator managed-resource lifecycle regression; all prior106 files and original gates preserved. Added explicit T033 roster boundary, mixed code/log T076 and persistent group-case regressions; all existing files, deadlines, discovery assertions and coverage gates preserved. Added owner-only deterministic schedule rule and persistent scheduler regressions; all existing backend files and gates retained. Add exact patched ExcelJS/uuid CJS and buffer-boundary regression; all prior120 backend files and original assertions retained. Register bounded group-case command parser; all prior121 backend files retained. Register actual SDK-shaped native group case runtime/PG/source/delivery regressions; original gates and prior122 files retained. Register closed H5-session roster protocol, actual signed transport and real PostgreSQL/API membership/transaction counterexamples; original90 unchanged. Register actual enterprise chat SDK client and raw transport boundary tests; preserve every prior file, assertion, deadline and coverage gate. Add exact mention-only enterprise MCP group policy and actual durable group request integration; retain every prior file and gate. Add explicit fixed-project production backup offline profile validation; no existing files, execution policy, or coverage gates removed. Add operations bounded process-stream actual-child tests; preserve all prior files, execution and coverage gates. Add actual owned PostgreSQL readonly snapshot and migration-lock race tests; retain all prior entries and gates. Add actual reviewed executable hash/version and private-path preflight tests, no PostgreSQL-tool certification inferred from Node fixtures. Register actual repository and private-profile preparation cancellation/monotonic-budget regressions; retain all original files, deadlines, assertions and coverage gates. Register official pinned Linux runtime offline verification and production restore CLI in an owned independent network=none PG system; original files and execution/coverage gates retained.",
+  "approvedExecutionPolicy": {
+    "maxWorkers": 1,
+    "reason": "Constrained CI CPUs must not consume fixed CLI windows through unrelated file concurrency. Explicit within-test concurrency remains active.",
+    "evidence": "reports/ci-process-closure-20261018/controlled-diagnosis.json"
+  },
+  "approvedCoverageThresholdAdditions": {
+    "packages/gateway/src/permission-administration.ts": {
+      "branches": 90
+    },
+    "packages/gateway/src/control-plane.ts": {
+      "branches": 90
+    },
+    "packages/gateway/src/reconciliation.ts": {
+      "branches": 90
+    },
+    "packages/dingtalk/src/clarification.ts": {
+      "branches": 90
+    },
+    "packages/groups/src/case-model.ts": {
+      "branches": 90
+    },
+    "packages/schedules/src/**/*.ts": {
+      "branches": 90
+    },
+    "packages/groups/src/read-capability.ts": {
+      "branches": 90
+    },
+    "packages/groups/src/case-roster.ts": {
+      "branches": 90
+    },
+    "packages/dws/src/case-roster-protocol.ts": {
+      "branches": 90
+    }
+  },
+  "coverageAdditionReason": "Document04 critical policy/action-ledger90: explicit administrator and control-plane gates. Original snapshot and every prior threshold remain unchanged. Control-plane measured93.05 at621-case affected checkpoint; exact integration CI remains required. Certified read-back branch95.34 at124-case local checkpoint; add explicit90 gate without changing the original snapshot or prior thresholds. Add explicit 90% group-case state-machine branch gate; no prior gate changed. Add 90% aggregate schedules policy branch gate; all original thresholds retained. Add 90% branch gate for the fixed group-case read authority/evidence surface; targeted actual-flow and denial tests measured 100% branches without changing prior gates. Add explicit90 branch gates for current-session/current-roster authorization and the separate signed H5 protocol; retain all previous gates."
+}

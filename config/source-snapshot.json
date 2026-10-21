@@ -1,0 +1,92 @@
+[
+  {
+    "id": "S01",
+    "url": "https://docs.bigmodel.cn/cn/guide/models/vlm/glm-5.3-flash",
+    "retrievedAt": "2026-10-14T10:23:11.203Z",
+    "sha256": "02b65116c18c2805ee8e66bc258a811e2a31768796814afc72db3b0a7dfcaff0",
+    "path": "config/sources/S01.txt",
+    "status": "FETCHED",
+    "isLiveVerification": false
+  },
+  {
+    "id": "S02",
+    "url": "https://docs.z.ai/guides/capabilities/thinking-mode",
+    "retrievedAt": "2026-10-14T10:23:12.420Z",
+    "sha256": "fc74b70ca096310bad19cf9bb2940c2566d5b04d16694e68ee97b9cd3852353a",
+    "path": "config/sources/S02.txt",
+    "status": "FETCHED",
+    "isLiveVerification": false
+  },
+  {
+    "id": "S03",
+    "url": "https://docs.z.ai/api-reference/llm/chat-completion",
+    "retrievedAt": "2026-10-14T10:23:12.548Z",
+    "sha256": "e556830116676a6d44f4162744b31531895c36f9ff81e008574857b73c503ed7",
+    "path": "config/sources/S03.txt",
+    "status": "FETCHED",
+    "isLiveVerification": false
+  },
+  {
+    "id": "S04",
+    "url": "https://open-dingtalk.github.io/developerpedia/docs/learn/bot/appbot/receive/",
+    "retrievedAt": "2026-10-14T10:23:12.306Z",
+    "sha256": "6a18e5a2c6ad3610c0f564d6a9900067e2c802d25aabf2e6bec475316cb6991f",
+    "path": "config/sources/S04.txt",
+    "status": "FETCHED",
+    "isLiveVerification": false
+  },
+  {
+    "id": "S05",
+    "url": "https://raw.githubusercontent.com/open-dingtalk/dingtalk-stream-sdk-nodejs/master/README.md",
+    "retrievedAt": "2026-10-14T10:23:11.591Z",
+    "sha256": "16cef380f4101b20a2784109be4bc4bb3dd1987f4d986b502c7232dafa27c1c4",
+    "path": "config/sources/S05.txt",
+    "status": "FETCHED",
+    "isLiveVerification": false
+  },
+  {
+    "id": "S09",
+    "url": "https://raw.githubusercontent.com/DingTalk-Real-AI/dingtalk-workspace-cli/main/README.md",
+    "retrievedAt": "2026-10-14T10:23:11.563Z",
+    "sha256": "43dbed1b08524b70fc97d56b4f55e3bf8bc7c19e572ec9e22107a655d9303d88",
+    "path": "config/sources/S09.txt",
+    "status": "FETCHED",
+    "isLiveVerification": false
+  },
+  {
+    "id": "S12",
+    "url": "https://modelcontextprotocol.io/specification/2026-07-28",
+    "retrievedAt": "2026-10-14T10:23:11.886Z",
+    "sha256": "e410c603579812950afe76f9f6723bf641edcdb3bdea36c06c22dd92a167ce0e",
+    "path": "config/sources/S12.txt",
+    "status": "FETCHED",
+    "isLiveVerification": false
+  },
+  {
+    "id": "S14",
+    "url": "https://www.postgresql.org/docs/17/ddl-rowsecurity.html",
+    "retrievedAt": "2026-10-14T10:23:13.682Z",
+    "sha256": "133a71ce281dbb4ff240dbe8ac64bed2a63f929f2b07d1b701f9cbda10e361fa",
+    "path": "config/sources/S14.txt",
+    "status": "FETCHED",
+    "isLiveVerification": false
+  },
+  {
+    "id": "S15",
+    "url": "https://raw.githubusercontent.com/timgit/pg-boss/master/README.md",
+    "retrievedAt": "2026-10-14T10:23:11.615Z",
+    "sha256": "ecc7f327638f6fc0d22e587e49dce5ba47934ceb8b48cedafd733e5df4351720",
+    "path": "config/sources/S15.txt",
+    "status": "FETCHED",
+    "isLiveVerification": false
+  },
+  {
+    "id": "S16",
+    "url": "https://nodejs.org/en/about/previous-releases",
+    "retrievedAt": "2026-10-14T10:23:11.898Z",
+    "sha256": "ef0030fed2a024d558062363f168b0d3160466404467f9cccf33771259c5f662",
+    "path": "config/sources/S16.txt",
+    "status": "FETCHED",
+    "isLiveVerification": false
+  }
+]

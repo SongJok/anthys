@@ -1,0 +1,29 @@
+import {companyConfigurationSchema,configureCompanyCode} from '../../packages/company/src/configuration.js';
+import {companyContractHash,pathAllowed,readSchema,redactCode} from '../../packages/company/src/contracts.js';
+import {CompanyChat} from '../../packages/company/src/chat.js';
+import {Client} from '@modelcontextprotocol/sdk/client/index.js';
+import {mkdtemp,writeFile,chmod,rm} from 'node:fs/promises';
+import {join} from 'node:path';
+import {tmpdir} from 'node:os';
+it('generic chat credentials never opt in to a company read connector or make a network request',async()=>{
+ const requests:unknown[]=[];expect(await configureCompanyCode({} as Parameters<typeof configureCompanyCode>[0],{AIDER_AI_DD_CHAT_MCP:'https://synthetic.invalid',AIDER_AI_DD_MCP_TOKEN:'synthetic-secret'},async(...args)=>{requests.push(args);throw Error('UNEXPECTED_NETWORK');})).toMatchObject({enabled:false});expect(requests).toHaveLength(0);
+});
+it('actual SDK HTTP initialization binds server version and file credentials; unsafe mounts and server changes never register tools',async()=>{
+ const directory=await mkdtemp(join(tmpdir(),'oa-company-config-')),tokenPath=join(directory,'token'),configPath=join(directory,'config.json'),token='synthetic-connector-token-0123456789';
+ try{
+  await writeFile(tokenPath,token,{mode:0o600});const config={schemaVersion:1,connectorId:'synthetic-company',transport:'STREAMABLE_HTTP',server:{name:'synthetic-company',version:'1.0.0'},endpoint:'https://company.example/mcp',allowedOrigin:'https://company.example',contractHash:companyContractHash,reviewed:true,readOnlyReviewRef:'synthetic-readonly-review',actorResourceReviewRef:'synthetic-actor-review',auth:{mode:'API_KEY',tokenFile:tokenPath},timeoutMs:1000,maxConcurrent:2};await writeFile(configPath,JSON.stringify(config));
+  for(const mode of ['accepted','server-change','mount','token','transport'] as const){const capabilities:{id:string;bindingHash:string}[]=[],requests:{method:string;url:string}[]=[];await chmod(tokenPath,mode==='mount'?0o644:0o600);await writeFile(tokenPath,mode==='token'?'short':token);const fetcher:typeof fetch=async(input,init)=>{requests.push({method:init?.method??'GET',url:String(input)});expect(new Headers(init?.headers).get('authorization')).toBe('Bearer '+token);expect(init?.redirect).toBe('error');expect(String(input)).toBe('https://company.example/mcp');if(mode==='transport')throw Error(token);if(init?.method==='GET')return new Response(null,{status:405});const body=JSON.parse(init!.body as string);if(body.method==='notifications/initialized')return new Response(null,{status:202});expect(body.method).toBe('initialize');return new Response(JSON.stringify({jsonrpc:'2.0',id:body.id,result:{protocolVersion:body.params.protocolVersion,capabilities:{tools:{}},serverInfo:{name:'synthetic-company',version:mode==='server-change'?'2.0.0':'1.0.0'}}}),{headers:{'content-type':'application/json'}});};
+   const gateway={register:(cap:{id:string;bindingHash:string})=>{capabilities.push(cap);}} as unknown as Parameters<typeof configureCompanyCode>[0];
+   if(mode==='accepted'){const connection=await configureCompanyCode(gateway,{COMPANY_MCP_CONFIG_FILE:configPath},fetcher);expect(connection.enabled).toBe(true);expect(capabilities.map(c=>c.id)).toEqual(['company.code.search','company.code.read']);expect(capabilities.every(c=>/^[a-f0-9]{64}$/.test(c.bindingHash))).toBe(true);await connection.close();expect(requests.filter(r=>r.method==='POST')).toHaveLength(2);expect(requests.every(r=>['POST','GET'].includes(r.method))).toBe(true);}
+   else{await expect(configureCompanyCode(gateway,{COMPANY_MCP_CONFIG_FILE:configPath},fetcher)).rejects.toThrow(mode==='mount'?'COMPANY_TOKEN_FILE_PERMISSIONS':mode==='token'?'COMPANY_TOKEN_INVALID':'COMPANY_CONNECTION_UNAVAILABLE');expect(capabilities).toHaveLength(0);if(mode==='mount'||mode==='token')expect(requests).toHaveLength(0);}
+  }
+ }finally{await rm(directory,{recursive:true,force:true});}
+});
+it('reviewed configuration binds a single HTTPS origin, explicit read-only contract and separate credential mount',()=>{
+ const config={schemaVersion:1,connectorId:'company-proxy',transport:'STREAMABLE_HTTP',server:{name:'synthetic-company',version:'1.0.0'},endpoint:'https://company.example/mcp',allowedOrigin:'https://company.example',contractHash:companyContractHash,reviewed:true,readOnlyReviewRef:'readonly-review-1',actorResourceReviewRef:'actor-review-1',auth:{mode:'API_KEY',tokenFile:'/mounted/company-token'},timeoutMs:1000,maxConcurrent:2};expect(companyConfigurationSchema.safeParse(config).success).toBe(true);
+ for(const patch of [{reviewed:false},{contractHash:'0'.repeat(64)},{endpoint:'http://company.example/mcp'},{endpoint:'https://other.example/mcp'},{endpoint:'https://secret@company.example/mcp'},{endpoint:'https://company.example/mcp?token=secret'},{allowedOrigin:'https://company.example/'},{timeoutMs:3000},{maxConcurrent:100},{actorResourceReviewRef:''}])expect(companyConfigurationSchema.safeParse({...config,...patch}).success).toBe(false);
+});
+it('line ranges and path prefixes are bounded and credential-like source literals are redacted before model context',()=>{
+ expect(pathAllowed('src/payments.ts',['src'])).toBe(true);for(const path of ['src2/private','src/../private','/src/private','src\\private','src//private'])expect(pathAllowed(path,['src'])).toBe(false);expect(readSchema.safeParse({repo:'fixture/payments',commit:'a'.repeat(40),path:'src/file',startLine:1,endLine:201}).success).toBe(false);expect(redactCode('api_key = "synthetic_secret"; Bearer synthetic_access')).toBe('api_key = "[REDACTED]"; Bearer [REDACTED]');
+ const client=new Client({name:'synthetic',version:'1'},{capabilities:{}});for(const [binding,timeout,concurrent] of [['wrong',100,1],['a'.repeat(64),5,1],['a'.repeat(64),100,9]] as const)expect(()=>new CompanyChat(client,'synthetic',binding,timeout,concurrent)).toThrow('INVALID_CONNECTOR_LIMITS');
+});

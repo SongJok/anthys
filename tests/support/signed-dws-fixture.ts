@@ -1,0 +1,22 @@
+import {mkdtemp,realpath,writeFile,rm,lstat} from 'node:fs/promises';
+import {join,resolve} from 'node:path';
+import {tmpdir} from 'node:os';
+import {generateKeyPairSync,randomUUID} from 'node:crypto';
+import {spawn,type ChildProcess} from 'node:child_process';
+import {dwsFixture} from './dws-cli.js';
+import {readBindingHash} from '../../packages/dws/src/signed-service.js';
+import {SignedDwsReadClient,postDwsSocket} from '../../packages/dws/src/signed-client.js';
+import {challengeSchema,openEnvelope,signEnvelope,rpcHash,type DwsReadDelegation,type DwsSignedReadRequest} from '../../packages/dws/src/signed-protocol.js';
+
+export async function signedDwsFixture(overrides:Record<string,unknown>={}){
+ const cli=await dwsFixture(),root=await realpath(await mkdtemp(join(await realpath(tmpdir()),'oa-dws-rpc-'))),socketPath=join(root,'runner.sock'),caller=generateKeyPairSync('ed25519'),runner=generateKeyPairSync('ed25519'),tenantId=randomUUID(),ownerId=randomUUID(),policyHash=rpcHash({review:'SYNTHETIC_RPC_POLICY_ONLY'}),bindingHash=readBindingHash(cli.runner),configFile=join(root,'config.json'),callerFile=join(root,'caller.pem'),runnerFile=join(root,'runner.pem');
+ await writeFile(callerFile,caller.publicKey.export({type:'spki',format:'pem'}),{mode:0o600});await writeFile(runnerFile,runner.privateKey.export({type:'pkcs8',format:'pem'}),{mode:0o600});
+ const config={schemaVersion:1,mode:'SYNTHETIC_TEST',socketPath,tenantId,corpId:'synthetic-corp',policyHash,callerKeyId:'synthetic-caller',callerPublicKeyFile:callerFile,runnerKeyId:'synthetic-runner',runnerPrivateKeyFile:runnerFile,maxRequestMs:3000,maxConcurrent:2,maxReplayEntries:100,binaryFile:cli.binary,binaryHash:cli.runner.config.binaryHash,schemaHash:cli.runner.config.schemaHash,root:cli.workspace,maxOutputBytes:128000,...overrides};await writeFile(configFile,JSON.stringify(config),{mode:0o600});
+ const delegation:DwsReadDelegation={tenantId,ownerId,identityId:randomUUID(),taskId:randomUUID(),runId:randomUUID(),authEpoch:1,authorizationVersion:1,capabilityBindingId:'dws.contact.me.v1',audience:{kind:'PRIVATE_USER',id:ownerId},subject:{corpId:'synthetic-corp',userId:'synthetic-user'}};
+ const clientConfig={socketPath,callerKeyId:'synthetic-caller',callerPrivateKey:caller.privateKey,runnerKeyId:'synthetic-runner',runnerPublicKey:runner.publicKey,bindingHash,policyHash,timeoutMs:Number(config.maxRequestMs)};
+ let child:ChildProcess|undefined,exit:Promise<void>|undefined,stderr='';
+ async function start(extraEnv:NodeJS.ProcessEnv={}){stderr='';child=spawn(process.execPath,['--import',resolve('scripts/test-network-guard.mjs'),'--import','tsx',resolve('apps/dws-runner/src/main.ts'),configFile],{cwd:process.cwd(),env:{PATH:process.env['PATH'],LANG:'C.UTF-8',APP_ENV:'test',OA_TEST_ISOLATED:'true',...extraEnv},stdio:['ignore','ignore','pipe','ipc']});const p=child;p.stderr!.on('data',b=>{stderr+=String(b);});exit=new Promise<void>(r=>p.once('exit',()=>r()));return new Promise<{instanceId:string}>((r,j)=>{const timer=setTimeout(()=>j(Error('RPC_FIXTURE_START_TIMEOUT')),5000);p.once('message',m=>{clearTimeout(timer);r(m as {instanceId:string});});p.once('exit',()=>{clearTimeout(timer);j(Error(stderr.trim()||'RPC_FIXTURE_EXIT'));});p.once('error',j);});}
+ async function stop(signal:NodeJS.Signals='SIGTERM'){if(child?.exitCode===null&&child.signalCode===null){child.kill(signal);const timer=setTimeout(()=>child?.kill('SIGKILL'),5000);await exit;clearTimeout(timer);}const socket=await lstat(socketPath).catch(()=>null);if(socket?.isSocket())await rm(socketPath);}
+ async function signedRequest(patch:Partial<DwsSignedReadRequest>={}){const nonce=randomUUID(),hello=await postDwsSocket(socketPath,'/v1/challenge',{protocol:'OA_DWS_READ_V1',nonce},AbortSignal.timeout(3000)),challenge=openEnvelope(hello,'synthetic-runner',runner.publicKey,challengeSchema),now=Date.now();const request:DwsSignedReadRequest={type:'READ_REQUEST',protocol:'OA_DWS_READ_V1',instanceId:challenge.instanceId,requestId:randomUUID(),bindingHash,policyHash,issuedAt:now,expiresAt:now+Number(config.maxRequestMs),operation:'READ_SELF',delegation,state:cli.state(delegation.subject),...patch};return {request,envelope:signEnvelope(request,'synthetic-caller',caller.privateKey)};}
+ return {cli,root,socketPath,caller,runner,configFile,callerFile,runnerFile,config,delegation,clientConfig,client:new SignedDwsReadClient(clientConfig),start,stop,signedRequest,stderr:()=>stderr,close:async()=>{await stop();await cli.close();await rm(root,{recursive:true,force:true});}};
+}

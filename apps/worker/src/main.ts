@@ -1,0 +1,62 @@
+import {registerNativeArtifacts} from '../../../packages/artifacts/src/runtime.js';
+import {configureArtifactFonts} from '../../../packages/artifacts/src/font-configuration.js';
+import {NativeCaseAudience} from '../../../packages/groups/src/native-audience.js';
+import {configureCompanyAgent} from '../../../packages/company/src/agent-configuration.js';
+import {registerGroupCaseRead} from '../../../packages/groups/src/read-capability.js';
+import {GroupCases} from '../../../packages/groups/src/cases.js';
+import {configureCompanyLogs} from '../../../packages/company/src/log-configuration.js';
+import {initializeLifecycle,assertLifecycleScopes,assertLifecycleBinding} from '../../../packages/config/src/lifecycle.js';
+import {RunPersonas} from '../../../packages/personas/src/runtime.js';
+import {GroupAudience} from '../../../packages/groups/src/audience.js';
+import {configureDws} from '../../../packages/dws/src/configuration.js';
+import {registerDwsCapabilities} from '../../../packages/dws/src/capabilities.js';
+import {configureCompanyCode} from '../../../packages/company/src/configuration.js';
+import {readFile} from 'node:fs/promises';
+import {z} from 'zod';
+import {loadEnvFile,config,secret} from '../../../packages/config/src/index.js';
+import {Database} from '../../../packages/storage/src/database.js';
+import {Vault} from '../../../packages/storage/src/crypto.js';
+import {RuntimeStore} from '../../../packages/runtime/src/store.js';
+import {BudgetRecovery} from '../../../packages/runtime/src/budget-recovery.js';
+import {RetryDispatcher} from '../../../packages/runtime/src/retry.js';
+import {publishWorkerCycle} from '../../../packages/runtime/src/worker-cycle.js';
+import {assertOwnedTrialService} from '../../../packages/runtime/src/trial-supervision.js';
+import {AgentRuntime,registerTaskCapability} from '../../../packages/runtime/src/loop.js';
+import {RunQueue} from '../../../packages/tasks/src/queue.js';
+import {Gateway} from '../../../packages/gateway/src/index.js';
+import {GlmProvider,ProviderError,glmRequestBody,type ModelProvider} from '../../../packages/provider-glm/src/client.js';
+import {EncryptedFileStore} from '../../../packages/storage/src/files.js';
+import {AttachmentService} from '../../../packages/attachments/src/service.js';
+import {registerAttachmentCapabilities} from '../../../packages/attachments/src/capabilities.js';
+import {DingTalkAttachmentSource,RestrictedDownloader} from '../../../packages/attachments/src/download.js';
+import {DingTalkSender} from '../../../packages/dingtalk/src/sender.js';
+loadEnvFile();const cfg=config();
+const required=(name:string)=>{const s=secret(name);if(!s)throw Error('REQUIRED_CONFIGURATION:'+name);return s;};
+const scopes=z.array(z.object({tenantId:z.uuid(),actorId:z.uuid()}).strict()).parse(JSON.parse(await readFile(process.env['WORKER_SCOPE_FILE']??'.data/worker-scopes.json','utf8')));
+const db=new Database(required('RUNTIME_DATABASE_URL')),vault=new Vault(new Map([['1',Buffer.from(required('APP_MASTER_KEY'),'hex')]]),'1'),store=new RuntimeStore(db,vault),gateway=new Gateway(store);const lifecycle=await initializeLifecycle(db,process.env,scopes,'WORKER'),trial=lifecycle.mode==='TRIAL';assertLifecycleScopes(lifecycle,scopes);if(!trial){store.configurePersonas(new RunPersonas(db,vault));registerTaskCapability(gateway);}
+if(lifecycle.mode==='TRIAL')assertOwnedTrialService(lifecycle.profile,'worker');
+const clientId=secret('DINGTALK_CLIENT_ID'),clientSecret=secret('DINGTALK_CLIENT_SECRET'),robotCode=secret('DINGTALK_ROBOT_CODE'),corpId=secret('DINGTALK_CORP_ID'),hosts=new Set((process.env['ATTACHMENT_DOWNLOAD_HOSTS']??'').split(',').map(s=>s.trim()).filter(Boolean));
+assertLifecycleBinding(lifecycle,corpId,robotCode);
+if(lifecycle.mode==='DEFAULT'&&robotCode){store.configureGroupCases(new GroupCases(db,vault,robotCode));}
+const sender=!trial&&clientId&&clientSecret&&robotCode?new DingTalkSender({clientId,clientSecret,robotCode}):undefined;
+const attachmentSource=sender&&robotCode&&hosts.size?new DingTalkAttachmentSource({robotCode,token:signal=>sender.token(signal),downloader:new RestrictedDownloader({hosts})}):undefined;
+if(!trial)registerAttachmentCapabilities(gateway,new AttachmentService(db,vault,new EncryptedFileStore(process.env['FILE_STORE_ROOT']??'.data/files',vault),attachmentSource,{corpId:corpId??'UNCONFIGURED',robotCode:robotCode??'UNCONFIGURED'}));
+if(lifecycle.mode==='DEFAULT')registerNativeArtifacts(gateway,vault,new EncryptedFileStore(process.env['FILE_STORE_ROOT']??'.data/files',vault),await configureArtifactFonts(process.env),lifecycle.mode);
+const company=lifecycle.mode==='DEFAULT'||lifecycle.mode==='FORMAL'&&lifecycle.profile.capabilities.some(c=>c.id.startsWith('company.'))?await configureCompanyCode(gateway,process.env,fetch,lifecycle.mode==='FORMAL'?lifecycle.profile.capabilities:undefined):undefined;
+const companyLogs=lifecycle.mode==='DEFAULT'||lifecycle.mode==='FORMAL'&&lifecycle.profile.capabilities.some(c=>c.id.startsWith('company.'))?await configureCompanyLogs(gateway,process.env,fetch,lifecycle.mode==='FORMAL'?lifecycle.profile.capabilities:undefined):undefined;
+if(lifecycle.mode==='DEFAULT'||lifecycle.mode==='FORMAL'&&lifecycle.profile.capabilities.some(c=>c.id.startsWith('dws.'))){const dws=await configureDws(db,vault);store.configureGroupAudience(new GroupAudience(db,vault,dws,required('DINGTALK_ROBOT_CODE')));if(lifecycle.mode==='DEFAULT'&&dws.runner?.readNativeCaseRoster)store.configureNativeCaseAudience(new NativeCaseAudience(db,vault,dws,required('DINGTALK_ROBOT_CODE')));registerDwsCapabilities(gateway,dws);if(lifecycle.mode==='DEFAULT')registerGroupCaseRead(gateway);}
+const companyAgent=!trial?configureCompanyAgent(gateway,vault,process.env,fetch,lifecycle.mode==='FORMAL'?lifecycle.profile.capabilities:undefined,lifecycle.mode==='FORMAL'?lifecycle.profile:undefined):undefined;
+if(companyAgent&&!scopes.some(s=>s.tenantId===companyAgent.scope.tenantId&&s.actorId===companyAgent.scope.actorId))throw Error('ENTERPRISE_WORKER_SUBJECT_NOT_REGISTERED');
+const apiKey=secret('GLM_API_KEY');
+const model:ModelProvider=apiKey?new GlmProvider({apiKey,baseUrl:cfg.GLM_BASE_URL,reasoningEffort:'high'}):{describeRequest:(messages,tools,limits)=>glmRequestBody(messages,tools,'high',limits),complete:async()=>{throw new ProviderError('BLOCKED_EXTERNAL:GLM_API_KEY',false,null,'NOT_SENT');}};
+const runtime=new AgentRuntime(store,model,gateway),retryDispatcher=new RetryDispatcher(db),budgetRecovery=new BudgetRecovery(db),queue=new RunQueue(required('QUEUE_DATABASE_URL'),'run',trial?db.trialProfileHash:null);queue.boss.on('error',()=>console.error('QUEUE_ERROR'));await queue.start();
+const shutdown=new AbortController();
+if(!trial){
+ await queue.workGroupReplies(async job=>{if(!scopes.some(s=>s.tenantId===job.tenantId&&s.actorId===job.actorId))throw Error('UNREGISTERED_WORKER_SUBJECT');await gateway.processGroupReply({tenantId:job.tenantId,actorId:job.actorId},job.replyId,job.generation,shutdown.signal);});
+ await queue.workSourceReplies(async job=>{if(!scopes.some(s=>s.tenantId===job.tenantId&&s.actorId===job.actorId))throw Error('UNREGISTERED_WORKER_SUBJECT');await gateway.processSourceReply({tenantId:job.tenantId,actorId:job.actorId},job.replyId,job.generation,shutdown.signal);});
+}
+await queue.work(async job=>{if(!scopes.some(s=>s.tenantId===job.tenantId&&s.actorId===job.actorId))throw Error('UNREGISTERED_WORKER_SUBJECT');await runtime.advance({tenantId:job.tenantId,actorId:job.actorId},job.runId,undefined,shutdown.signal,job.generation);});
+let publishing=false;const publish=async()=>{if(publishing||shutdown.signal.aborted)return;publishing=true;try{await publishWorkerCycle(db,scopes,{store,budgetRecovery,retryDispatcher,queue});await companyAgent?.poll();}catch{console.error('OUTBOX_PUBLISH_FAILED');}finally{publishing=false;}};
+await publish();const timer=setInterval(()=>{void publish();},1000);
+for(const signal of ['SIGTERM','SIGINT'] as const) process.once(signal,()=>{shutdown.abort(new Error('SERVICE_SHUTDOWN'));clearInterval(timer);void queue.stop().then(()=>Promise.allSettled([company?.close(),companyLogs?.close(),companyAgent?.close()])).then(()=>Promise.allSettled([store.groupAudiences?.close(),store.nativeCaseAudiences?.close()])).then(()=>db.close());});
+console.log('Worker running; model '+(apiKey?'configured, live verification required':'BLOCKED_EXTERNAL'));

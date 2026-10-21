@@ -1,0 +1,71 @@
+{
+  "agent_summary": "列出群成员并把用户与机器人分桶（支持群名语义解析）",
+  "availability": "available",
+  "avoid_when": [
+    "只需要用户成员且已有群名时可使用 +group-members；需要原始单页响应时使用底层原子命令"
+  ],
+  "canonical_path": "chat.shortcut_chat_members_list",
+  "cli_path": "chat +chat-members-list",
+  "confirmation": "not_required",
+  "constraints": {
+    "mutually_exclusive": [
+      [
+        "group",
+        "conversation-id",
+        "chat-query",
+        "chat",
+        "open-conversation-id"
+      ]
+    ],
+    "require_one_of": [
+      [
+        "group",
+        "conversation-id",
+        "chat-query",
+        "chat",
+        "open-conversation-id"
+      ]
+    ]
+  },
+  "description": "当你要完整查看一个群的参与者，并需要区分真人用户和机器人时使用；--group 可传群名或 openConversationId，也可用 --conversation-id 显式传稳定 ID、用 --chat-query 显式按群名解析。默认同时返回 users/bots 两个桶，也可用 --member-types 只取 user 或 bot；用户桶自动翻页并按稳定 ID 去重，结果用 buckets、complete、hasMore、nextCursor 和 failures 证明完整性；--page-limit 保证有界。机器人桶按下层全量列表投影。\n\n参数约束：\n  - --group、--conversation-id、--chat-query、--chat、--open-conversation-id 必须且只能指定一个\n  - --member-types 仅接受 user/bot\n  - --page-limit 必须在 1-500 之间",
+  "effect": "read",
+  "examples": [
+    "dws chat +chat-members-list --group \"项目冲刺\"",
+    "dws chat +chat-members-list --conversation-id <openConversationId> --member-types user,bot"
+  ],
+  "idempotency": "idempotent",
+  "interface_mode": "composite",
+  "interface_reason": "Reviewed composite member adapter: the executable CLI safely resolves a group, paginates and deduplicates user members, lists bots, and publishes per-bucket completeness and failures.",
+  "parameters": {
+    "chat-query": {
+      "description": "按群名解析唯一 openConversationId",
+      "required": false,
+      "type": "string"
+    },
+    "conversation-id": {
+      "description": "显式群 openConversationId",
+      "required": false,
+      "type": "string"
+    },
+    "group": {
+      "description": "群名称或 openConversationId",
+      "required": false,
+      "type": "string"
+    },
+    "member-types": {
+      "description": "成员类型；--member-types 仅接受 user/bot；不传则同时返回",
+      "required": false,
+      "type": "array"
+    },
+    "page-limit": {
+      "default": "50",
+      "description": "用户成员桶最大页数；--page-limit 必须在 1-500 之间",
+      "required": false,
+      "type": "integer"
+    }
+  },
+  "risk": "low",
+  "use_when": [
+    "当你要完整查看一个群的参与者，并需要区分真人用户和机器人时使用；--group 可传群名或 openConversationId，也可用 --conversation-id 显式传稳定 ID、用 --chat-query 显式按群名解析。默认同时返回 users/bots 两个桶，也可用 --member-types 只取 user 或 bot；用户桶自动翻页并按稳定 ID 去重，结果用 buckets、complete、hasMore、nextCursor 和 failures 证明完整性；--page-limit 保证有界。机器人桶按下层全量列表投影。"
+  ]
+}

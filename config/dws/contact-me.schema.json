@@ -1,0 +1,72 @@
+{
+  "agent_summary": "查看我自己的通讯录资料（姓名/userId/手机/部门/组织，干净投影）",
+  "availability": "available",
+  "avoid_when": [
+    "需要该 Shortcut 未公开的底层参数、原始响应或不同执行语义时，改用对应原子命令"
+  ],
+  "canonical_path": "contact.shortcut_me",
+  "cli_path": "contact +me",
+  "confirmation": "not_required",
+  "description": "当你（或 AI agent）需要知道「我是谁」——我自己的 userId、姓名、所在部门、组织、手机号，用于后续按名解析他人前先确定自己身份、或填充发起人信息时使用；内部调用零参数的 get_current_user_profile（永远是「我」，无需传姓名），再把冗长的原始资料投影成 {name,userId,mobile,dept,org,email} 几个关键字段。这是纯只读操作，不修改任何资料。",
+  "effect": "read",
+  "examples": [
+    "dws contact +me"
+  ],
+  "idempotency": "idempotent",
+  "interface_mode": "composite",
+  "interface_reason": "Reviewed built-in shortcut adapter: the executable CLI owns validation, optional multi-step orchestration, output projection, and confirmation; the complete command contract is not represented by one pinned MCP interface_ref.",
+  "parameters": {},
+  "result": {
+    "data_schema": {
+      "additionalProperties": false,
+      "description": "查看我自己的通讯录资料（姓名/userId/手机/部门/组织，干净投影）",
+      "properties": {
+        "dept": {
+          "description": "当前用户主部门名称",
+          "type": "string"
+        },
+        "email": {
+          "description": "当前用户邮箱",
+          "type": "string"
+        },
+        "mobile": {
+          "description": "当前用户手机号",
+          "type": "string"
+        },
+        "name": {
+          "description": "当前用户姓名",
+          "type": "string"
+        },
+        "org": {
+          "description": "当前用户组织名称",
+          "type": "string"
+        },
+        "userId": {
+          "description": "当前用户稳定 ID",
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "userId"
+      ],
+      "type": "object"
+    },
+    "outcomes": [
+      "success",
+      "failure"
+    ],
+    "sensitive_paths": [
+      "dept",
+      "email",
+      "mobile",
+      "name",
+      "org",
+      "userId"
+    ]
+  },
+  "risk": "low",
+  "use_when": [
+    "当你（或 AI agent）需要知道「我是谁」——我自己的 userId、姓名、所在部门、组织、手机号，用于后续按名解析他人前先确定自己身份、或填充发起人信息时使用；内部调用零参数的 get_current_user_profile（永远是「我」，无需传姓名），再把冗长的原始资料投影成 {name,userId,mobile,dept,org,email} 几个关键字段。这是纯只读操作，不修改任何资料。"
+  ]
+}

@@ -1,0 +1,51 @@
+import {randomUUID} from 'node:crypto';
+import type pg from 'pg';
+import {Client} from '@modelcontextprotocol/sdk/client/index.js';
+import {Server} from '@modelcontextprotocol/sdk/server/index.js';
+import {InMemoryTransport} from '@modelcontextprotocol/sdk/inMemory.js';
+import type {Transport} from '@modelcontextprotocol/sdk/shared/transport.js';
+import {ListToolsRequestSchema,CallToolRequestSchema} from '@modelcontextprotocol/sdk/types.js';
+import {z} from 'zod';
+import type {DbContext} from '../../packages/storage/src/database.js';
+import {canonical} from '../../packages/gateway/src/index.js';
+import {hash} from '../../packages/storage/src/crypto.js';
+import {chatSchemaHash} from '../../packages/company/src/chat.js';
+import {CompanyLogsClient} from '../../packages/company/src/log-client.js';
+import {companyLogsContractHash,logCanonicalQuerySchema,logSnapshotProofSchema,type LogScope,type LogSnapshot} from '../../packages/company/src/log-contracts.js';
+export const syntheticLogQuery={service:'payments-api',environment:'PRODUCTION' as const,start:'2026-10-18T00:00:00.000Z',end:'2026-10-18T00:05:00.000Z',filters:{levels:['ERROR' as const]},limit:10};
+const tool={name:'chat',inputSchema:{type:'object' as const,properties:{message:{type:'string'}},required:['message'],additionalProperties:false}};
+const requestSchema=z.object({contractHash:z.literal(companyLogsContractHash),operation:z.enum(['CHECK','QUERY']),nonce:z.uuid(),tenantId:z.uuid(),actorId:z.uuid(),scopeId:z.uuid(),scopeVersion:z.number().int().positive(),sourceRevision:z.string(),args:z.record(z.string(),z.unknown())}).strict();
+export async function companyLogsFixture(root:pg.Pool,ctx:DbContext,runId:string){
+ const connectorId='synthetic-logs-'+randomUUID(),connectionBinding=hash(connectorId),scopeId=randomUUID(),sourceId=randomUUID(),expiresAt=new Date(Date.now()+3600000).toISOString();
+ const initial={authorized:true,version:1,revision:'synthetic-log-policy-1',rows:[{id:'synthetic-log-1',timestamp:'2026-10-18T00:01:00.000Z',level:'ERROR' as const,message:'synthetic timeout'},{id:'synthetic-log-2',timestamp:'2026-10-18T00:02:00.000Z',level:'ERROR' as const,message:'synthetic retry exhausted'}]};
+ await root.query("INSERT INTO outbox(tenant_id,id,owner_id,kind,aggregate_id,payload_ref,dedup_key,published_at) VALUES($1,$2,$3,'SYNTHETIC_COMPANY_LOG_AUTHORITY',$4,$5,$2::uuid::text,now())",[ctx.tenantId,sourceId,ctx.actorId,runId,JSON.stringify(initial)]);
+ const scope:LogScope={id:scopeId,version:1,sourceRevision:initial.revision,schemaHash:chatSchemaHash(tool),allowedFields:['id','timestamp','level','message','traceId'],classification:'CONFIDENTIAL',expiresAt};
+ await root.query("INSERT INTO company_log_scopes(tenant_id,id,owner_id,connector_id,connection_binding,service,environment,source_revision,tool_schema_hash,contract_hash,readonly_proof_ref,authorization_proof_ref,redaction_policy_ref,window_from,window_until,max_window_ms,max_rows,allowed_fields,classification,model_egress_allowed,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'SYNTHETIC_READ_ONLY_REVIEW','SYNTHETIC_ACTOR_RESOURCE_REVIEW','SYNTHETIC_FIELDS_REDACTION_EGRESS_REVIEW','2026-10-18T00:00:00Z','2026-10-18T02:00:00Z',3600000,100,$11,'CONFIDENTIAL',true,$12)",[ctx.tenantId,scopeId,ctx.actorId,connectorId,connectionBinding,syntheticLogQuery.service,syntheticLogQuery.environment,scope.sourceRevision,scope.schemaHash,companyLogsContractHash,scope.allowedFields,expiresAt]);
+ const client=new Client({name:'open_aider_synthetic_logs',version:'0.1.0'},{capabilities:{}}),server=new Server({name:'synthetic-log-proxy',version:'1.0.0'},{capabilities:{tools:{}}}),[a,b]=InMemoryTransport.createLinkedPair(),snapshots=new Map<string,{hash:string;snapshot:LogSnapshot}>();let initialized=false,lists=0,checks=0,queries=0,queryAttempts=0,attempts=0;
+ const modes={paginate:false,noTools:false,drift:false,duplicate:false,loop:false,deny:false,queryDeny:false,delayMs:0,empty:false,sampled:false,partial:false,mutate:null as null|((value:Record<string,unknown>)=>unknown),checkHook:null as null|(()=>Promise<void>)};
+ server.oninitialized=()=>{initialized=true;};
+ const listHandler=async(req:z.infer<typeof ListToolsRequestSchema>)=>{lists++;if(modes.noTools)return {tools:[]};if(modes.loop)return {tools:[],nextCursor:'same'};if(modes.paginate&&!req.params?.cursor)return {tools:[],nextCursor:'logs-page'};return {tools:modes.duplicate?[tool,tool]:[{...tool,inputSchema:modes.drift?{type:'object',properties:{dangerous:{type:'string'}}}:tool.inputSchema}]};};
+ const callHandler=async(req:z.infer<typeof CallToolRequestSchema>)=>{
+  attempts++;if(!initialized||req.params.name!=='chat'||!req.params.arguments||Object.keys(req.params.arguments).join(',')!=='message')throw Error('SYNTHETIC_LOG_CALL_INVALID');
+  const input=requestSchema.parse(JSON.parse(req.params.arguments['message'] as string)),live=(await root.query('SELECT payload_ref FROM outbox WHERE id=$1',[sourceId])).rows[0].payload_ref as typeof initial;
+  if(input.operation==='QUERY')queryAttempts++;const args=input.operation==='CHECK'?z.object({query:logCanonicalQuerySchema,snapshot:logSnapshotProofSchema.nullable()}).strict().parse(input.args):z.object({query:logCanonicalQuerySchema}).strict().parse(input.args),query=args.query;
+  // Independent authority stored by the synthetic provider. Request metadata
+  // alone never grants a source; even a valid local scope can be denied here.
+  if(modes.deny||modes.queryDeny&&input.operation==='QUERY'||!live.authorized||input.tenantId!==ctx.tenantId||input.actorId!==ctx.actorId||input.scopeId!==scopeId||input.scopeVersion!==live.version||input.sourceRevision!==live.revision||query.service!==syntheticLogQuery.service||query.environment!==syntheticLogQuery.environment||query.start<'2026-10-18T00:00:00.000Z'||query.end>'2026-10-18T02:00:00.000Z')return {isError:true,content:[{type:'text',text:'SYNTHETIC_PROVIDER_DENIED_PRIVATE_SENTINEL'}]};
+  if(modes.delayMs)await new Promise(resolve=>setTimeout(resolve,modes.delayMs));
+  const common={contractHash:companyLogsContractHash,nonce:input.nonce,tenantId:ctx.tenantId,actorId:ctx.actorId,scopeId,scopeVersion:live.version,sourceRevision:live.revision};let reply:Record<string,unknown>;
+  if(input.operation==='CHECK'){
+   checks++;const proof=logSnapshotProofSchema.nullable().parse(input.args['snapshot']);if(proof){const saved=snapshots.get(proof.queryId);if(!saved||saved.hash!==proof.snapshotHash||canonical(saved.snapshot.query)!==canonical(query)||Date.parse(saved.snapshot.snapshotExpiresAt)<=Date.now())return {isError:true,content:[{type:'text',text:'SYNTHETIC_QUERY_SNAPSHOT_UNAVAILABLE'}]};}
+   await modes.checkHook?.();reply={...common,operation:'CHECK',allowed:true,snapshot:proof};
+  }else{
+   // The provider reports its database observation time, not the host clock.
+   const observed=(await root.query('SELECT clock_timestamp() observed')).rows[0].observed as Date;queries++;const matches=modes.empty?[]:live.rows.filter(row=>row.timestamp>=query.start&&row.timestamp<query.end&&(!query.filters.levels||query.filters.levels.includes(row.level))&&(!query.filters.traceId||('traceId' in row&&row.traceId===query.filters.traceId))),rows=matches.slice(0,query.limit),snapshot:LogSnapshot={queryId:randomUUID(),query,asOf:observed.toISOString(),snapshotExpiresAt:new Date(observed.getTime()+300000).toISOString(),timezone:'UTC',rows:modes.sampled?rows.slice(0,1):rows,totalCount:modes.partial?null:matches.length,sampling:{sampled:modes.sampled,rate:modes.sampled?0.5:1},truncated:matches.length>query.limit,partial:modes.partial};
+   const snapshotHash=hash(canonical(snapshot));snapshots.set(snapshot.queryId,{hash:snapshotHash,snapshot:structuredClone(snapshot)});reply={...common,operation:'QUERY',snapshot,snapshotHash};
+  }
+  return {content:[{type:'text',text:JSON.stringify(modes.mutate?modes.mutate(reply):reply)}]};
+ };
+ server.setRequestHandler(ListToolsRequestSchema,listHandler);server.setRequestHandler(CallToolRequestSchema,callHandler);
+ await server.connect(b as Transport);await client.connect(a as Transport);
+ const httpMethods:string[]=[];const httpFetcher=(expectedToken:string):typeof fetch=>{let ready=false;return async(input,init)=>{const url=new URL(typeof input==='string'||input instanceof URL?input:input.url);if(url.href!=='https://logs.example/mcp'||new Headers(init?.headers).get('authorization')!=='Bearer '+expectedToken)throw Error('SYNTHETIC_LOG_HTTP_BINDING_INVALID');const body=JSON.parse(init!.body as string);httpMethods.push(body.method);if(body.method==='initialize')return new Response(JSON.stringify({jsonrpc:'2.0',id:body.id,result:{protocolVersion:body.params.protocolVersion,capabilities:{tools:{}},serverInfo:{name:'synthetic-log-proxy',version:'1.0.0'}}}),{headers:{'content-type':'application/json'}});if(body.method==='notifications/initialized'){ready=true;return new Response(null,{status:202});}if(!ready)throw Error('SYNTHETIC_LOG_HTTP_NOT_INITIALIZED');const result=body.method==='tools/list'?await listHandler(ListToolsRequestSchema.parse(body)):body.method==='tools/call'?await callHandler(CallToolRequestSchema.parse(body)):null;if(result===null)throw Error('SYNTHETIC_LOG_HTTP_METHOD_INVALID');return new Response(JSON.stringify({jsonrpc:'2.0',id:body.id,result}),{headers:{'content-type':'application/json'}});};};
+ return {client,server,httpFetcher,httpMethods,adapter:new CompanyLogsClient(client,connectorId,connectionBinding,1000),scope,modes,sourceId,counts:()=>({initialized,lists,checks,queries,queryAttempts,attempts}),forgetSnapshots:()=>snapshots.clear(),changeSource:async(change:Partial<typeof initial>)=>{const live=(await root.query('SELECT payload_ref FROM outbox WHERE id=$1',[sourceId])).rows[0].payload_ref;await root.query('UPDATE outbox SET payload_ref=$2 WHERE id=$1',[sourceId,JSON.stringify({...live,...change})]);},close:async()=>{await client.close();await server.close();}};
+}

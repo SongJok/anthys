@@ -1,0 +1,38 @@
+{
+  "checkedAt": "2026-10-14T12:21:09.415192+00:00",
+  "sdk": {
+    "package": "@alicloud/dingtalk",
+    "version": "2.2.48",
+    "sourceSha256": "009a401e2451c555190cf6c9d3e90644f8c4bd67419729a4ef09b5a633388e34",
+    "snapshot": "config/sources/official-sdk/card_1_0-excerpts.ts.txt"
+  },
+  "streamSdk": {
+    "package": "dingtalk-stream",
+    "version": "2.1.5",
+    "topic": "/v1.0/card/instances/callback",
+    "ackWrapper": "socketCallBackResponse already wraps result as response; caller passes card response directly"
+  },
+  "officialCallbackSources": [
+    "https://raw.githubusercontent.com/open-dingtalk/dingtalk-stream-sdk-go/main/card/model.go",
+    "https://raw.githubusercontent.com/open-dingtalk/dingtalk-stream-sdk-go/main/card/handler.go",
+    "https://raw.githubusercontent.com/open-dingtalk/dingtalk-stream-sdk-python/main/dingtalk_stream/card_callback.py"
+  ],
+  "callbackWire": {
+    "corpId": "string",
+    "outTrackId": "string",
+    "userId": "string",
+    "userIdType": 1,
+    "type": "actionCallback",
+    "content": "JSON string containing cardPrivateData.params"
+  },
+  "scope": "OFFLINE_CONTRACT_AND_SYNTHETIC_TESTS",
+  "liveVerified": false,
+  "pending": [
+    "Real template field registration and permissions",
+    "Real private/group card receipts and callback fixture certification",
+    "Native model100chunks→policy-filtered card streaming oracle T007",
+    "Approval-card action integration in P04; current action is cancellation via authenticated H5"
+  ],
+  "finalizationState": "FINALIZED_UNVERIFIED means provider accepted isFinalize; not delivery/read-back verification",
+  "modelStreamingScope": "Current coordinator streams safe status snapshots derived from persistent task state. Native answer chunk integration is not yet complete."
+}

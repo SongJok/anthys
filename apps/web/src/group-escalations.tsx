@@ -1,0 +1,30 @@
+import React from 'react';
+import {flushSync} from 'react-dom';
+import {GroupEscalationsFlow,createEscalationUiTransport,escalationUiTarget,groupEscalationUiNotice,type EscalationUiOutcome} from './group-escalations-flow.js';
+export interface GroupEscalationsProps {csrf:string;groupId:string;caseId:string;caseVersion:number;contractVersion:number}
+const stateLabels={OPEN:'已受理',ASSIGNED:'已分派',IN_PROGRESS:'进行中',BLOCKED:'受阻'};
+const deliveryLabels={PENDING:'等待本地派发',SENDING:'本地投递处理中',APPLIED_UNVERIFIED:'提供方已接受，送达未核验',FAILED:'本地投递失败',UNKNOWN:'投递结果不明，不会重发',SUPPRESSED:'已抑制后续投递'};
+const deliveryDetails={PENDING:'仅已登记等待派发，尚无提供方接受回执。',SENDING:'本地正在尝试投递，不能确认提供方已接受或接收方已收到。',APPLIED_UNVERIFIED:'仅记录提供方接受回执，不证明接收方收到或阅读，也不代表事项解决。',FAILED:'本次本地投递未成功完成；此页面不会再次派发。',UNKNOWN:'远端结果不明，已阻止自动重发；请人工核对。',SUPPRESSED:'本地已停止此项后续投递，不能据此撤回此前已发出的通知。'};
+const date=(value:string)=>new Date(value).toLocaleString('zh-CN',{timeZoneName:'short'});
+/** An independent panel for a case chosen by the real workbench. No mount-time request or authority is created. */
+export function GroupEscalations(props:GroupEscalationsProps){
+ if(!props.csrf||!escalationUiTarget.safeParse({groupId:props.groupId,caseId:props.caseId,caseVersion:props.caseVersion,contractVersion:props.contractVersion}).success)return <section aria-label="事项升级申请"><p role="status">请登录并从当前事项列表选择可用事项。</p></section>;
+ return <EscalationSession key={JSON.stringify([props.csrf,props.groupId,props.caseId,props.caseVersion,props.contractVersion])} {...props}/>;
+}
+function EscalationSession({csrf,groupId,caseId,caseVersion,contractVersion}:GroupEscalationsProps){
+ const [flow]=React.useState(()=>{const target={groupId,caseId,caseVersion,contractVersion};return new GroupEscalationsFlow(createEscalationUiTransport(csrf,target),target);}),[reason,setReason]=React.useState(''),[notice,setNotice]=React.useState(''),[,render]=React.useReducer(n=>n+1,0),mounted=React.useRef(true),reasonId=React.useId();
+ async function perform(pending:Promise<EscalationUiOutcome|null>){render();const result=await pending;if(mounted.current&&result){setNotice(result.notice);if(!result.ok)setReason('');render();}}
+ React.useEffect(()=>{mounted.current=true;const suspend=()=>flushSync(()=>{flow.clear();setReason('');setNotice('页面已离开或隐藏，预览和正文已清除；未自动提交、确认或重发。');render();}),visibility=()=>{if(document.visibilityState!=='visible')suspend();};document.addEventListener('visibilitychange',visibility);document.addEventListener('freeze',suspend);window.addEventListener('pagehide',suspend);return()=>{mounted.current=false;flow.clear();document.removeEventListener('visibilitychange',visibility);document.removeEventListener('freeze',suspend);window.removeEventListener('pagehide',suspend);};},[flow]);
+ const expiresAt=flow.expiresAt;
+ React.useEffect(()=>{if(expiresAt===null)return;const timer=setTimeout(()=>{if(mounted.current&&flow.expire()){setReason('');setNotice('这份预览或状态已过期，不能据此确认；请重新读取原申请核对。');render();}},Math.max(0,expiresAt-Date.now())+1);return()=>clearTimeout(timer);},[flow,expiresAt]);
+ const prepared=flow.fresh?flow.prepared:null,status=flow.fresh?flow.status:null;
+ return <section aria-label="事项升级申请" aria-busy={flow.busy} style={{minWidth:0,maxWidth:'100%',overflowWrap:'anywhere',borderTop:'1px solid #ccd6df',paddingTop:12,marginTop:12}}>
+ <h4>申请同群升级</h4><p>仅处理当前选中事项。对象和权限由服务端核对，不变更负责人，不登记事项已解决；不会转为私信或默认@全员。</p>
+ {flow.canPreview&&<form aria-label="准备事项升级预览" onSubmit={event=>{event.preventDefault();if(reason.trim())void perform(flow.preview(reason));}}><label htmlFor={reasonId}>升级理由</label><textarea id={reasonId} value={reason} onChange={event=>setReason(event.target.value)} required maxLength={1000} rows={3} style={{display:'block',boxSizing:'border-box',width:'100%',maxWidth:'100%',margin:'8px 0'}}/><button disabled={!reason.trim()||flow.busy}>核对服务端预览</button></form>}
+ {notice&&<p role="status" aria-live="polite">{notice}</p>}
+ {flow.resultUnknown&&<p>上次结果尚待核对，已阻止重复提交或确认。不会自动重发；请核对原申请，无法读取时请联系管理员。</p>}
+ {prepared&&<aside aria-label="服务端升级预览" style={{background:'#f3f6f8',padding:12,borderRadius:8}}><h5>{prepared.preview.case.title}</h5><p>精确资源：{prepared.preview.case.resourceRef}</p><p>当前状态：{stateLabels[prepared.preview.case.state]}；{prepared.preview.case.ownerId?'保留已登记负责人':'尚无已登记负责人'}。</p><p>升级理由：{prepared.preview.intent.reason}</p><p><strong>当前合同升级对象</strong></p><ul>{prepared.preview.targets.map(target=><li key={target.id}>{target.name}</li>)}</ul><p>仅覆盖已登记的@／共享卡片事项，不覆盖全部群聊。</p><p><strong>事实尚未核验，通知尚未发送</strong></p><p>{prepared.preview.notice}</p><p>核对时间：{date(prepared.preview.asOf)}<br/>预览到期：{date(prepared.preview.expiresAt)}</p><details><summary>申请核对信息</summary><p>事项版本 {prepared.preview.case.version}；合同版本 {prepared.preview.contract.version}</p><code style={{overflowWrap:'anywhere'}}>预览摘要 {prepared.previewHash}</code></details><p>确认后仅申请入队；服务端仍须重新核对当前授权和发送条件。</p><button type="button" disabled={!flow.canConfirm} onClick={()=>void perform(flow.confirm())}>确认申请同群升级</button></aside>}
+ {status&&<aside aria-label="升级申请本地状态">{status.kind==='DELIVERY_STATUS'?<><h5>{deliveryLabels[status.delivery.state]}</h5><p>{deliveryDetails[status.delivery.state]}</p><p><strong>事实仍未核验；事项负责人和完成状态不变。</strong></p><p>{status.delivery.notice}</p><p>投递状态核对时间：{date(status.delivery.asOf)}</p></>:<><h5>{status.kind==='QUEUED'?'已登记入队':status.kind==='CANCELLED_LOCAL'?'已停止未派发后续':'在途状态待核对'}</h5><p>{status.kind==='QUEUED'?'入队不表示通知已送达，也不表示问题已经解决。':status.kind==='CANCELLED_LOCAL'?'只停止未派发后续，不能据此声称已撤回之前发出的通知。':'已有在途或不明结果，需要人工核对，不会自动重发。'}</p><p>{groupEscalationUiNotice}</p><p>状态核对时间：{date(status.receipt.asOf)}</p></>}</aside>}
+ <div style={{display:'flex',flexWrap:'wrap',gap:8,marginTop:12}}>{flow.hasReference&&<button type="button" disabled={flow.busy} onClick={()=>void perform(flow.read())}>读取本申请当前状态</button>}{flow.canCancel&&<button type="button" onClick={()=>void perform(flow.cancel())}>停止未派发后续</button>}{flow.busy&&<button type="button" onClick={()=>{flow.clear();setReason('');setNotice('已停止本地等待，服务端结果可能仍需核对；不会自动重发。');render();}}>停止等待并清除预览</button>}</div>
+ </section>;
+}

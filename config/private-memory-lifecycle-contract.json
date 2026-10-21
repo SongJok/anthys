@@ -1,0 +1,111 @@
+{
+  "schemaVersion": 1,
+  "status": "IN_PROGRESS_LOCAL_PARTIAL_GRAPH_VERIFIED",
+  "operationScopes": {
+    "forget": "One owner/tenant memory UUID, including all its revisions and actual dependency references.",
+    "eraseUserPersona": "Explicit H5/verified DM action on the active owner USER persona, preserving GLOBAL/GROUP/other owners and independent memory. Clears private history/requests and exact runtime/proposal/native inbox dependencies; empty monotonic marker fences old writes."
+  },
+  "association": "Only persisted source IDs/revisions are edges. No text matching or owner-wide task purge.",
+  "graph": {
+    "root": [
+      "memory_items",
+      "memory_revisions",
+      "memory_search_index",
+      "memory_requests.input_ref"
+    ],
+    "runtime": [
+      "run_memory_sources -> exact run_persona_snapshots -> owning runs",
+      "provider_journals",
+      "context_checkpoints",
+      "runs.result/context_ref",
+      "run_steps.result_ref/safe_payload",
+      "tool_actions.input_ref/result",
+      "run_finalizations.plan_ref",
+      "run_narrative_reviews.review_ref",
+      "run_user_messages.message_ref",
+      "run_source_choices.payload_ref",
+      "source_choice_replies.answer_ref",
+      "deliveries.content_ref"
+    ],
+    "nativeCopies": [
+      "Native save/correction source event_inbox IDs",
+      "Accepted native clarification source event IDs attached to affected runs",
+      "Accepted native source-choice reply source event IDs; exact SOURCE_REPLY outbox aggregate IDs"
+    ]
+  },
+  "stateMachine": [
+    "Acquire exclusive owner memory barrier before graph discovery; runtime writes acquire shared barrier before run locks.",
+    "Validate current private identity/session and tombstone exactly the selected memory; preserve idempotency, no resurrection.",
+    "Fence/cancel only graph-dependent runs/tasks, revoke and clear their derived encrypted snapshots.",
+    "Remove memory revisions/indexes/request bodies and scrub the listed dependent content stores in the same transaction.",
+    "Retain contentless audit/idempotency/action accounting; uncertain external effects and model money reservations stay conservative UNKNOWN, never silently retry.",
+    "Record counts and honest upstream/backup bounds; commit only with complete scrub or rollback."
+  ],
+  "preserve": [
+    "Unrelated tasks, memory UUIDs and persona revisions",
+    "Other users/tenants",
+    "Shared enterprise source code/documents/logs and authoritative business data"
+  ],
+  "externalBounds": [
+    "Cannot unsend bytes already dispatched to a model, DingTalk or another external party.",
+    "Online logical erasure does not promise instant physical PostgreSQL/WAL zeroization.",
+    "Backup retention/erasure and restore filtering require reviewed operations evidence; currently unknown and not enterprise accepted."
+  ],
+  "plannedValidation": [
+    "Actual H5 save/correction/expiry and frozen new native request use",
+    "Canary erasure from every recorded live content store, restored/replayed old sources denied",
+    "Memory deletion during suspended model and between delivery checks",
+    "SIGKILL before/after delete commit; duplicate save/delete cannot resurrect",
+    "Unrelated-task/shared-source/other-owner preservation",
+    "Separate USER persona erasure and source native copy cleanup"
+  ],
+  "enterprisePass": false,
+  "migration050": "Applied only to isolated synthetic PostgreSQL127.0.0.1:53331; immutable after this application.",
+  "unimplemented": [
+    "Full graph beyond the recorded and verified private dependencies, remaining group cases/other memory kinds and enterprise critical coverage.",
+    "Independent deletion-log replay for whole backup restores that lose or roll back retained deletion ledgers or persona privacy state; reviewed backup retention/restore operations.",
+    "180-day metadata housekeeping and verified backup retention; logical erasure does not certify PostgreSQL/WAL physical zeroization.",
+    "Remaining R10 kinds and full P00–P14 objective; production migration/deployment acceptance."
+  ],
+  "migrations": [
+    "050_private_preference_lifecycle.sql",
+    "051_native_memory_receipts.sql",
+    "052_memory_restore_tombstones.sql",
+    "053_user_persona_privacy_erasure.sql",
+    "054_persona_erasure_content_helper.sql",
+    "055_persona_erasure_request_alias.sql",
+    "056_persona_known_erasure_repair.sql",
+    "057_erasure_ledger_runtime_veto.sql",
+    "058_retained_erasure_dependency_repair.sql",
+    "059_source_choice_private_copy_erasure.sql",
+    "060_owner_erasure_veto_after_departure.sql",
+    "065_inactive_private_erasure_maintenance.sql"
+  ],
+  "maintenance": "Independent internal-only entrypoint on explicitly configured existing tenant/owner subjects, including departed/suspended users and suspended tenants: bounded consented preference expiry, retained-ledger memory repair, and exact USER persona repair requiring retained persona privacy state/generation and ledger. No inactive private reads or business authority are restored. No enterprise execution; independent whole-backup deletion-log replay remains unfinished.",
+  "restoreVeto": "Retained contentless deletion metadata and source graph veto every guarded runtime write and acquisition, even when a trusted restorer reinstates an old live lease. Does not certify a whole-backup restore that rolls back the deletion ledger itself. A contentless SECURITY DEFINER tenant/owner predicate keeps this veto after subject departure without enabling private-table reads. Late tool-result retention holds the shared erasure barrier and vetoes restored old attempts; ordinary uncertain effects remain UNKNOWN. Current production does not populate/consume runs.context_ref; the dialogue matrix explicitly distinguishes a trusted synthetic legacy-body restoration fault from actual checkpoint/journal persistence. In-flight delivery receipt retention uses the shared owner barrier and the originally loaded source run. Same-attempt restored content is scrubbed; uncertain already-dispatched effects stay UNKNOWN without redispatch, including after departure. This cannot unsend bytes.",
+  "inactiveMaintenance": {
+    "status": "LOCAL_COMPONENT_VERIFIED_SYNTHETIC",
+    "scope": "Exact tenant/owner known-deletion repair and consented expiry; no inactive private read, save, model, provider or business rights are restored.",
+    "migration": "065_inactive_private_erasure_maintenance.sql",
+    "entry": "pnpm start:maintenance using existing explicit WORKER_SCOPE_FILE and internal DB/key only",
+    "authority": "Real user+tenant must exist, including inactive subjects. Known memory repair requires its retained exact owner deletion ledger; USER persona repair also requires retained persona privacy state/generation and matching ledger/cutoff. Expiry uses the locked current revision and PostgreSQL clock_timestamp; future revisions, independent memories and shared sources remain untouched.",
+    "result": "Status/counts only; private helpers have no public/runtime EXECUTE grant.",
+    "tombstone": "Repair restores the authoritative deleted_version, including earlier root restores; closed content cannot reopen.",
+    "transactions": "Owner barrier before graph locks; atomic erasure/ledger/audit, bounded batches, crash retry idempotence.",
+    "limits": "Retained deletion ledger required; whole-backup rollback and independent deletion-log replay remain unfinished. 180-day metadata/backup retention are separate remaining work.",
+    "commands": [
+      "node scripts/test-environment.ts via tsx (isolated migration only)",
+      "node scripts/run-tests.mjs vitest run tests/integration/inactive-private-maintenance.test.ts tests/integration/erasure-graph.test.ts --maxWorkers=2",
+      "pnpm start:maintenance (explicit internal DB/key and WORKER_SCOPE_FILE; never invoked on enterprise data this run)"
+    ]
+  },
+  "maintenanceHealth": {
+    "schemaContract": "packages/storage/src/required-migrations.json",
+    "startup": "Exact release migration names/hashes must match before trial guard and first cleanup, and again before every later cleanup cycle; no automatic migration.",
+    "ready": "READY is emitted only after successful startup gates and a complete successful first cycle.",
+    "failure": "Immediate FAILED state and sanitized operation/scope index/scope digest/allowlisted SQLSTATE; complete independent same-cycle work, then exit1. No future tick retries or false READY.",
+    "shutdown": "Wait for in-flight bounded database work; a failure cannot be rewritten to STOPPED or success.",
+    "evidence": "reports/schema-maintenance-candidate.json",
+    "enterprisePass": false
+  }
+}

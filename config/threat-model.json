@@ -1,0 +1,13 @@
+{
+  "version": "1.0.0",
+  "boundaries": ["verified DingTalk transport to inbox", "authenticated session to tenant-scoped repository", "model output to capability gateway", "gateway to separately authorized provider", "private evidence to current audience", "DWS runner credentials to sandbox without credentials"],
+  "threats": [
+    {"id":"TM01","threat":"Cross-tenant/owner resource substitution","controls":["composite foreign keys","FORCE RLS","transaction-local actor context","download reauthorization"],"tests":["T023","T025","T032","T102"]},
+    {"id":"TM02","threat":"Model/tool result injection elevates identity or audience","controls":["server-built principal","reviewed registry","deny by default","no generic shell/SQL/HTTP"],"tests":["T035","T038","T079","T088"]},
+    {"id":"TM03","threat":"Crash or lost response repeats external write","controls":["durable inbox/outbox","unique action key","lease fence","UNKNOWN reconciliation"],"tests":["T003","T005","T059","T117"]},
+    {"id":"TM04","threat":"Reasoning or credentials exposed","controls":["AAD-bound AES-GCM envelopes","runtime-only journals","metadata-only logs","secret mounts"],"tests":["T014","T072","T125"]},
+    {"id":"TM05","threat":"CLI injection or shared DWS identity","controls":["fixed binary hash","exact profile","isolated credentials","schema-reviewed argv","shell:false"],"tests":["T061","T062","T064","T065"]},
+    {"id":"TM06","threat":"Network/analysis escape","controls":["public egress IP checks","per-hop validation","no-network rootless analysis jobs","no Docker socket in app"],"tests":["T097","T098","T103","T123"]}
+  ],
+  "residualRisks": ["External providers cannot guarantee exactly once", "Sent message content cannot be recalled by ACL revocation", "Live enterprise credentials, external resource grants and deployment network policy are not yet available"]
+}

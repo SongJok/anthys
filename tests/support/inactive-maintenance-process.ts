@@ -1,0 +1,13 @@
+import './isolation.js';
+import {secret} from '../../packages/config/src/index.js';
+import {Database,type DbContext} from '../../packages/storage/src/database.js';
+import {Vault} from '../../packages/storage/src/crypto.js';
+import {PrivatePreferences} from '../../packages/memory/src/service.js';
+import {Personas} from '../../packages/personas/src/service.js';
+const [phase,kind,context]=process.argv.slice(2);
+if(!['before-commit','after-commit'].includes(phase!)||!['MEMORY','USER_PERSONA'].includes(kind!))throw Error('INVALID_SYNTHETIC_FAILPOINT');
+const ctx=JSON.parse(context!) as DbContext,db=new Database(secret('RUNTIME_DATABASE_URL')!,1),vault=new Vault(new Map([['1',Buffer.from(secret('APP_MASTER_KEY')!,'hex')]]),'1'),scope=db.scope.bind(db);
+const hold=()=>new Promise<void>(()=>{setInterval(()=>{process.stdout.write('');},1000);});
+if(phase==='before-commit')db.scope=<T>(principal:DbContext,fn:(client:import('pg').PoolClient)=>Promise<T>)=>scope(principal,async c=>{const result=await fn(c);process.stdout.write('INACTIVE_MAINTENANCE_UNCOMMITTED\n');await hold();return result;});
+if(kind==='MEMORY')await new PrivatePreferences(db,vault).maintain(ctx);else await new Personas(db,vault).repairPrivateErasure(ctx);
+process.stdout.write('INACTIVE_MAINTENANCE_COMMITTED\n');await hold();

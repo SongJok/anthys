@@ -1,0 +1,67 @@
+{
+  "observedAt": "2026-10-14T10:52:47.245495+00:00",
+  "node": {
+    "version": "24.21.0",
+    "image": "node:24.21.0-bookworm-slim@sha256:d6aa754f16b3197301076f047b5def2f02ea1dbbc2ca920407d46d7ec7f87b20"
+  },
+  "pnpm": "10.34.7",
+  "postgres": {
+    "version": "17.11",
+    "image": "postgres:17-bookworm@sha256:3645570cccdfa447589da9f57dd740faa29b30938e861289a5574b6ca6b03826"
+  },
+  "dws": {
+    "localVersion": "v1.0.61",
+    "localPlatform": "darwin-arm64",
+    "binarySha256": "b41b5d3250fc809dbb80e1471b9a3768e0df3af088e296b457bd381f5e1df3de",
+    "productionBindingStatus": "UNVERIFIED",
+    "reason": "Linux binary, per-product schemas, complete credential paths and live authorization must be certified in P06; DWS execution remains disabled.",
+    "wrapperSha256": "8a9b1484148dc86e7c4905d229ad130243700e5c6d089847db2f694fc698705c",
+    "correction": "Previous binarySha256 was the npm JS wrapper hash. Corrected after verifying the official v1.0.61 release checksums and extracted executable.",
+    "artifactLock": "config/dws/lock.json"
+  },
+  "officialDingTalkSdk": {
+    "package": "@alicloud/dingtalk",
+    "version": "2.2.48",
+    "robotSourceSha256": "9afa4db83ea111adfb41d3825a32d4f68b5c8e006eba89397ecf35127751e69e",
+    "oauthSourceSha256": "45fbe842c8aabeaa462f4a491614b6a5c8c08e77394515860aba3aad36867944",
+    "contactCurrentUserExcerptSha256": "17b33c95ee7cdce14d4ccd98576c564912df9b346dc8dde534e5df7acd674235"
+  },
+  "installedDirectDependencies": {
+    "@fastify/cookie": "11.1.3",
+    "fastify": "5.12.7",
+    "react-dom": "19.3.0",
+    "@fastify/helmet": "13.2.0",
+    "pg": "8.23.1",
+    "@modelcontextprotocol/sdk": "1.32.1",
+    "react": "19.3.0",
+    "pg-boss": "12.38.0",
+    "zod": "4.6.7",
+    "@fastify/static": "10.1.6",
+    "dingtalk-stream": "2.1.5",
+    "exceljs": "4.4.0",
+    "decimal.js": "10.6.0",
+    "kysely": "0.29.6",
+    "pdfkit": "0.20.2",
+    "docx": "9.11.0",
+    "@opentelemetry/api": "1.9.1"
+  },
+  "installedDevDependencies": {
+    "vite": "8.3.4",
+    "@vitejs/plugin-react": "6.1.2",
+    "typescript": "6.0.3",
+    "tsx": "4.23.15",
+    "vitest": "5.0.4",
+    "@vitest/coverage-v8": "5.0.4",
+    "@playwright/test": "1.64.0",
+    "@types/node": "24.10.1",
+    "@types/pg": "8.23.1",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "eslint": "10.12.0",
+    "typescript-eslint": "8.71.2",
+    "fast-check": "4.10.2",
+    "testcontainers": "12.2.1",
+    "@types/pdfkit": "0.17.6"
+  },
+  "lockSha256": "a3b3e089eb27ab2422629b04b05c9757df4c155ddcf73e06df60e888d24246a6"
+}

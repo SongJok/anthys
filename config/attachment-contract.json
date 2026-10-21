@@ -1,0 +1,104 @@
+{
+  "checkedAt": "2026-10-14T13:31:51.651114+00:00",
+  "officialSdk": {
+    "package": "@alicloud/dingtalk",
+    "version": "2.2.48",
+    "snapshot": "config/sources/official-sdk/robot_1_0.ts.txt",
+    "sha256": "9afa4db83ea111adfb41d3825a32d4f68b5c8e006eba89397ecf35127751e69e"
+  },
+  "inboundSources": [
+    "https://raw.githubusercontent.com/open-dingtalk/dingtalk-stream-sdk-python/main/dingtalk_stream/chatbot.py",
+    "https://raw.githubusercontent.com/DingTalk-Real-AI/dingtalk-openclaw-connector/main/src/core/message-handler.ts"
+  ],
+  "receivedTypes": [
+    "text",
+    "picture",
+    "richText",
+    "file"
+  ],
+  "downloadApi": {
+    "method": "POST",
+    "origin": "https://api.dingtalk.com",
+    "path": "/v1.0/robot/messageFiles/download",
+    "bodyKeys": [
+      "downloadCode",
+      "robotCode"
+    ],
+    "replyKey": "downloadUrl"
+  },
+  "policy": {
+    "maximumBytes": 8388608,
+    "maximumAttachments": 8,
+    "cdnHosts": "exact explicit ATTACHMENT_DOWNLOAD_HOSTS; no default wildcard",
+    "dns": "all answers must be public; selected address pinned to one TLS connection; each redirect rechecked",
+    "readyFormats": [
+      "inert UTF8 txt",
+      "markdown",
+      "csv",
+      "JSON"
+    ],
+    "complexBinaryFormats": "QUARANTINED: decoders/malware inspection/verified image input still incomplete",
+    "fileStorage": "encrypted local volume; no raw bytes or download code in metadata/queue",
+    "modelEgress": "explicit per-resource grant and reviewed schema/policy binding; bounded UTF16 page, encrypted cache and opaque journal",
+    "revocation": "recheck cached facts/history, finish, notification and authenticated file download"
+  },
+  "liveVerified": false,
+  "testEnvironment": "synthetic source transports and model responses, real dedicated PostgreSQL and local encrypted filesystem",
+  "pending": [
+    "Dedicated enterprise file/picture/rich-text assets and approved CDN allowlist",
+    "Real provider download/callback certification",
+    "Additional binary format inspectors and isolated parsing in P09/P13",
+    "T020 actual approved image modality test"
+  ],
+  "inboundSnapshots": [
+    {
+      "repository": "open-dingtalk/dingtalk-stream-sdk-python",
+      "commit": "e9a24f3b377c9fdd8e04afc0ceb36d0a00741963",
+      "path": "dingtalk_stream/chatbot.py",
+      "sourceUrl": "https://raw.githubusercontent.com/open-dingtalk/dingtalk-stream-sdk-python/e9a24f3b377c9fdd8e04afc0ceb36d0a00741963/dingtalk_stream/chatbot.py",
+      "sha256": "1ffed8dfc0f22e95ac20240ee6e19c53983fa6fcbeee9fde4e5eefd12daeaade",
+      "bytes": 30934,
+      "scope": "PUBLIC_SOURCE_READ_ONLY_NO_PROVIDER_CREDENTIALS"
+    },
+    {
+      "repository": "DingTalk-Real-AI/dingtalk-openclaw-connector",
+      "commit": "028686d632800c5a1d1f037af89f2b029fcaca01",
+      "path": "src/core/message-handler.ts",
+      "sourceUrl": "https://raw.githubusercontent.com/DingTalk-Real-AI/dingtalk-openclaw-connector/028686d632800c5a1d1f037af89f2b029fcaca01/src/core/message-handler.ts",
+      "sha256": "1fd4c06e7acc671d3b0df74386db1769ef77ac08718cb7cc3dae7501bde839ef",
+      "bytes": 59269,
+      "scope": "PUBLIC_SOURCE_READ_ONLY_NO_PROVIDER_CREDENTIALS"
+    }
+  ],
+  "snapshotCheckedAt": "2026-10-14T13:35:16.638Z",
+  "readTextContract": {
+    "logicalId": "attachments.read_text",
+    "version": "1.0.0",
+    "bindingHash": "851eac554dd56b7c1ad39bc353782fb86a80d9b1a4ee149385bd33b9f856959f",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "attachmentId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 8388608,
+          "default": 0
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 2,
+          "maximum": 8192,
+          "default": 8192
+        }
+      },
+      "required": [
+        "attachmentId"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

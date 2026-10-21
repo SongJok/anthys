@@ -1,0 +1,11 @@
+import {execFile} from 'node:child_process';
+import {promisify} from 'node:util';
+import {mkdtemp,writeFile,rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {permissionManifestSchema} from '../../packages/gateway/src/permissions.js';
+const exec=promisify(execFile),tenant='00000000-0000-4000-8000-000000000001',doc={schemaVersion:'1.0',capabilityId:'synthetic.cli',capabilityVersion:'1.0.0',manifestVersion:1,bindingHash:'a'.repeat(64),inputSchemaHash:'b'.repeat(64),description:'Synthetic CLI format check',provider:'MCP',risk:'READ',authMode:'SERVICE',applicationRef:'synthetic-app',requiredScopes:['Synthetic.Read'],resourcePreconditions:['owner_only'],officialDocRefs:['S12'],reviewReference:'SYNTHETIC_ONLY_NOT_LIVE'};
+async function check(input:unknown){const dir=await mkdtemp(join(tmpdir(),'oa-permission-cli-'));try{const path=join(dir,'manifest.json');await writeFile(path,JSON.stringify(input),{mode:0o600});return await exec(process.execPath,['--import','tsx','scripts/install-permission-manifest.ts',tenant,path,'--check'],{env:{...process.env,MIGRATION_DATABASE_URL:'postgresql://unused:unused@127.0.0.1:1/unused'},timeout:10000});}finally{await rm(dir,{recursive:true,force:true});}}
+it('offline CLI validates the exact manifest without contacting an unusable database or installing authority',async()=>{const result=await check(doc);expect(JSON.parse(result.stdout)).toEqual({status:'VALID_FORMAT',installed:false,platformPermissionsVerified:false});expect(result.stderr).toBe('');});
+it('CLI rejects unknown credential fields without printing their content',async()=>{try{await check({...doc,clientSecret:'SYNTHETIC_PRIVATE_CLI_CANARY'});throw Error('UNEXPECTED_SUCCESS');}catch(error){const e=error as {code:number;stdout:string;stderr:string};expect(e.code).toBe(1);expect(e.stdout).toBe('');expect(JSON.parse(e.stderr)).toEqual({error:'PERMISSION_MANIFEST_INSTALL_FAILED'});expect(e.stderr).not.toContain('SYNTHETIC_PRIVATE_CLI_CANARY');}});
+it.each([{manifestVersion:0},{capabilityVersion:'latest'},{bindingHash:'unreviewed'},{resourcePreconditions:[]}])('invalid version/binding/preconditions cannot be installed: %j',patch=>{expect(permissionManifestSchema.safeParse({...doc,...patch}).success).toBe(false);});
