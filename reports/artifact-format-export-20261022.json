@@ -1,0 +1,99 @@
+{
+  "status": "PASS",
+  "scope": "LOCAL_SYNTHETIC_TASK_RESULT_MULTI_FORMAT_EXPORT",
+  "live": false,
+  "generatedAt": "2026-10-22T11:42:00Z",
+  "source": {
+    "baseCommit": "68790aaf2fa3d92d513176dc746b2a96693bf77d",
+    "workingTree": true,
+    "files": {
+      "tests/integration/artifact-format-export.test.ts": "8831faff8d6e8bf3c82f8141887345d09e220be4bc769c65552749349d4473ad",
+      "tests/support/artifact-font.ts": "4cf24a9428661dddc4ad43ae441465e0e35f5ed72c357e08b68585ff04295eb1",
+      "tests/support/artifact-world.ts": "2f5451a0e791639eec603ad806c6fdf195d4dbb0c91255c862cd7bec8df411b2",
+      "tests/support/backend-discovery-baseline.json": "9640eb778762632f9befc016459de1731a971798a2752b3f7f6f13913b7cb889",
+      "config/test-catalog.json": "93a36e662a67611c66be3dac9a466cdcebbcd27448bdafae16a8c4763324b0b4",
+      "docs/04_TEST_ACCEPTANCE_AND_OPERATIONS.md": "45ce1a05c0a40c3630ea75021de237f581147fdd573c42a8c70b1b42d5a3dabd"
+    }
+  },
+  "surface": {
+    "entry": "tests/integration/artifact-format-export.test.ts, driving the real HTTP surface of apps/api/src/artifacts.ts (POST /api/v1/tasks/:id/artifacts, POST /api/v1/artifacts/:id/download-ticket, GET /api/v1/artifacts/:id/download) over the real packages/artifacts renderer and the real packages/artifacts/src/service.ts authorization, storage and delivery path",
+    "host": "an isolated PostgreSQL on port 64711 with a finalized SUCCEEDED run whose certified result text carries the decimal 900719925474099312345.000000000000000000001, a synthetic upstream substitute for the single recorded source read, and a synthetic reviewed TrueType fixture",
+    "transport": "loopback HTTP on 127.0.0.1:64702 through the real Fastify server, with the real session cookie, CSRF token and idempotency key",
+    "singleAuthority": "No new endpoint, table, capability or export path was added. The export renders the already certified and persisted result; it never re-reads the business source and never re-derives the number."
+  },
+  "behavior": {
+    "everyFormatOpensWithItsOwnReader": "The same certified result is exported into all eight supported formats (md, txt, csv, json, html, xlsx, docx, pdf) and each file is then opened with the reader of its own format: markdown and text are decoded as UTF-8, json is parsed, html is entity-decoded, csv is parsed by the artifact CSV reader, xlsx is loaded by ExcelJS, docx is unzipped and its word/document.xml w:t text runs are read, and pdf is parsed by the artifact PDF inspector with its page count checked.",
+    "exactNumbersSurvive": "Every one of the eight files contains the exact decimal 900719925474099312345.000000000000000000001 and none of them contains the double rendering 900719925474099312345, so no format rounds the value through an IEEE-754 double. Every line of the result survives in every format, and the source notice, the verification status and the source mode (VERIFIED_TASK_RESULT, verification UNVERIFIED) are carried in all of them.",
+    "spreadsheetCellsStayText": "Every xlsx cell is written as text, so a spreadsheet engine cannot reinterpret the exact decimal as a number and round it. The header row is line/content, row 2 carries the source notice with line number 0, and each result line follows in order.",
+    "downloadContractHeld": "Create answers 201 with replayed false, the ticket is minted, and the download returns the stored mime type, the recorded byte size and the recorded sha256, which are recomputed from the delivered bytes.",
+    "noSourceReread": "The export never re-queries the certified source, so the recorded upstream call count stays at 1 across all eight exports.",
+    "reviewedFontThroughTheProductionPath": "The source notice is Chinese, so the DOCX and PDF branches require a reviewed Unicode font. The oracle supplies one through the production configuration path only (ARTIFACT_FONT_MANIFEST_FILE -> configureArtifactFonts -> TaskResultArtifacts), using a self-contained synthetic TrueType fixture that carries exactly the glyphs of the exported text. No font is downloaded and no system font is used.",
+    "refusalIsExplicitAndTerminal": "With no reviewed font configured, the DOCX and PDF exports are refused with 422 and the codes ARTIFACT_DOCX_FONT_REQUIRED and ARTIFACT_PDF_FONT_REQUIRED, while the other formats still export. A missing font is reported as a refusal, never silently substituted with an unreviewed fallback.",
+    "catalogAttributionCorrected": "T101 is the R22 artifact export case and is not one of the deferred 4.8 statistics-template, calculation-semantics or data-permission cases. Its catalog coverage note was a mis-attributed copy of the phase-two text and was replaced with an honest note describing what the local oracle actually proves."
+  },
+  "tests": {
+    "commands": [
+      "node scripts/run-tests.mjs vitest run tests/integration/artifact-format-export.test.ts",
+      "node scripts/run-tests.mjs vitest run tests/integration/artifact-format-export.test.ts tests/unit/test-isolation.test.ts tests/unit/artifact-font-configuration.test.ts tests/unit/artifact-rendering.test.ts tests/unit/artifact-task-result.test.ts tests/unit/artifact-preservation.test.mjs tests/integration/task-result-artifacts.test.ts",
+      "node scripts/update-schema-contract.mjs --check",
+      "node --import tsx scripts/capability-output-contracts.ts --check",
+      "node --import tsx scripts/verify-requirements.ts --baseline",
+      "node --import tsx scripts/verify-requirements.ts",
+      "pnpm typecheck",
+      "pnpm lint",
+      "pnpm build"
+    ],
+    "integration": {
+      "files": 1,
+      "passed": 2,
+      "failed": 0,
+      "skipped": 0,
+      "newFile": {
+        "path": "tests/integration/artifact-format-export.test.ts",
+        "passed": 2,
+        "failed": 0
+      },
+      "source": "isolated PostgreSQL on port 64711 with the real artifact renderer, the real service authorization and delivery path, the real Fastify API on 127.0.0.1:64702 and a self-contained synthetic TrueType fixture",
+      "covered": [
+        "one certified task result is exported into all eight supported formats through the real HTTP API, and each file is opened with the reader of its own format",
+        "every format keeps the exact decimal, loses no result line and does not contain the lossy double rendering",
+        "create answers 201, the download returns the stored mime type, byte size and sha256, and the export never re-queries the certified source",
+        "csv keeps the line/content header, the source notice on line 0 and every result line, and xlsx keeps the same rows as text",
+        "the pdf export reports a positive page count and the docx export yields the text runs of word/document.xml",
+        "without a reviewed Unicode font the docx and pdf exports are refused with 422 ARTIFACT_DOCX_FONT_REQUIRED and ARTIFACT_PDF_FONT_REQUIRED, while the other formats still export"
+      ]
+    },
+    "regression": {
+      "command": "node scripts/run-tests.mjs vitest run tests/integration/artifact-format-export.test.ts tests/unit/test-isolation.test.ts tests/unit/artifact-font-configuration.test.ts tests/unit/artifact-rendering.test.ts tests/unit/artifact-task-result.test.ts tests/unit/artifact-preservation.test.mjs tests/integration/task-result-artifacts.test.ts",
+      "files": 7,
+      "filesPassed": 7,
+      "filesFailed": 0,
+      "skipped": 0,
+      "tests": 120,
+      "testsPassed": 120,
+      "testsFailed": 0
+    },
+    "typecheck": "PASS",
+    "lint": "PASS",
+    "build": "PASS",
+    "schemaContractCheck": "PASS",
+    "capabilityOutputContractCheck": "PASS",
+    "requirementsBaseline": "PASS",
+    "requirementsFull": "FAIL_PREEXISTING",
+    "requirementsFullNote": "53 errors remain from stages still in progress: 36 R-items that are not yet IMPLEMENTED, TESTED or LIVE_VERIFIED and 17 later T-cases whose implementation file does not yet exist. It is down from 54 because T101 now points at an implementation file that carries its stable identifier. The remaining unmapped T-cases are the live-enterprise cases T020, T069, T070, T082 and T096, the deferred phase-two data cases T089, T090 and T094 and the still-open product cases T021, T044, T045, T081, T116, T118, T121, T126 and T129. No error involves this slice and the baseline integrity mode passes.",
+    "liveProviderCalls": 0
+  },
+  "notProven": [
+    "live GLM, DingTalk, DWS or company MCP acceptance",
+    "the enterprise file-format acceptance oracle, including how the enterprise judges a PDF or document as free of key truncation",
+    "any real enterprise task result, any real enterprise file and any real reviewer sign-off on a font",
+    "the rendering of a result that contains scripts or right-to-left text beyond the synthetic fixture glyphs",
+    "real development database on port 64710 or any deployment",
+    "T101 full catalog acceptance or R22 completion"
+  ],
+  "statusUnchanged": {
+    "T101": "NOT_RUN",
+    "R22": "IN_PROGRESS",
+    "liveAcceptance": "BLOCKED_EXTERNAL"
+  }
+}

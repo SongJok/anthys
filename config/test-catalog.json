@@ -1649,9 +1649,12 @@
     "layer": "E2E",
     "precondition": "输出MD、CSV、JSON、HTML、XLSX、DOCX、PDF",
     "oracle": "文件真实可打开，数字一致；PDF/文档无关键截断",
-    "implementation": null,
+    "implementation": "tests/integration/artifact-format-export.test.ts",
     "status": "NOT_RUN",
-    "coverageNote": "Deferred to phase two by the product directive of 2026-10-22: the 4.8 statistics templates, calculation semantics and data permission management are out of scope for the first phase, so no local oracle is added for this case. The existing local template registry, the template publish and rollback lifecycle and the template administration view stay in the code base as phase-two assets and are not claimed as accepted by the first-phase gates. The data query path itself still runs through the reviewed upstream company MCP. The live enterprise acceptance stays BLOCKED_EXTERNAL."
+    "coverageNote": "Local synthetic component: one certified task result whose text holds a decimal that no IEEE-754 double can carry (900719925474099312345.000000000000000000001) is exported through the real HTTP API into all eight supported formats (md, txt, csv, json, html, xlsx, docx, pdf); each file is then opened with the reader of its own format - markdown and text are decoded, json is parsed, html is entity-decoded, csv is parsed by the artifact CSV reader, xlsx is loaded by ExcelJS, docx is unzipped and its word/document.xml text runs are read, pdf is parsed by the artifact PDF inspector - and every file keeps the exact decimal, loses no result line and does not contain the lossy double rendering. The download contract is checked end to end: create returns 201, the ticket is minted, the download returns the stored mime type, byteSize and sha256. The export never re-queries the certified source, so the recorded upstream call count stays 1. Because the notice is Chinese, the DOCX and PDF branches require a reviewed Unicode font; the oracle supplies one through the production configuration path (ARTIFACT_FONT_MANIFEST_FILE -> configureArtifactFonts -> TaskResultArtifacts) using a self-contained synthetic TrueType fixture that carries the result glyphs, and a second case proves the refusal is explicit and terminal (422 ARTIFACT_DOCX_FONT_REQUIRED and ARTIFACT_PDF_FONT_REQUIRED) when no reviewed font is configured, while the other formats still export. The full T101 catalog run, the enterprise file-format oracle and any live acceptance remain NOT_RUN.",
+    "supplementaryImplementations": [
+      "tests/support/artifact-font.ts"
+    ]
   },
   {
     "id": "T102",

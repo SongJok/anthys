@@ -210,6 +210,7 @@
   "approvedAddedFiles": [
     "tests/contract/dm-identity-process.test.ts",
     "tests/integration/analysis-sandbox.test.ts",
+    "tests/integration/artifact-format-export.test.ts",
     "tests/integration/audit.test.ts",
     "tests/integration/bounded-migration-step.test.ts",
     "tests/integration/channel-boundary.test.ts",

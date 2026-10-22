@@ -1536,3 +1536,13 @@ T072「Linux runner 镜像、文件权限与日志」（`tests/security/runner-i
 T123「镜像、进程用户、capabilities 与 Docker socket」（同文件）：`deploy/images/app.Dockerfile` 与 `deploy/images/dws-runner.Dockerfile` 都以摘要固定基础镜像并以 `10001:10001` 运行，镜像内不含 `/var/run/docker.sock`；`packages/sandbox/src/executor.ts` 的容器创建参数包含 `--user 10001:10001`、`--cap-drop ALL`、`--security-opt no-new-privileges=true`、`--network none` 与 `--read-only`；真实的生产与开发编排文件中，`/var/run/docker.sock` 只挂载进隔离的 `sandbox-broker` 服务，`api`、`worker`、`ingress`、`notifier`、`scheduler`、`maintenance` 与 `dws-runner` 均不挂载。已记录的离线镜像探针证据显示 capability 集合全为 0、`noNewPrivs=1`、无 Docker socket、无 TCP 监听、只读根文件系统与受限 tmpfs。真实镜像仓库构建与线上容器检查仍未执行。
 
 以上两个用例在测试目录中仍为 NOT_RUN，R33 未因本切片宣告完成，真实企业验收保持 BLOCKED_EXTERNAL。
+
+### 2026-10-22 任务成果多格式导出用例证据（T101仍为NOT_RUN）
+
+本切片为 R22 的成果导出用例补齐可追溯实现文件与本地断言，并纠正此前测试目录中的一处错误归属：T101「输出MD、CSV、JSON、HTML、XLSX、DOCX、PDF」既不属于 4.8 的统计模板/口径/数据权限，也不因此被划入二期——它是成果导出格式用例，其覆盖说明此前被误抄成二期推迟文字，现已替换为与本用例一致的诚实说明。
+
+T101「文件真实可打开，数字一致」（`tests/integration/artifact-format-export.test.ts`）：在隔离 PostgreSQL 64711 上用一个已认证任务的权威结果构造导出，其结果文本含一个任何 IEEE-754 双精度都无法承载的十进制串 `900719925474099312345.000000000000000000001`（其双精度舍入值 `900719925474099312345` 被断言为不得出现）。用例通过真实 HTTP API 完成创建（201）、下载票据签发与下载，校验返回的 MIME、字节长度与 sha256 与制品元数据一致；随后用各格式的真实读取器打开产物：Markdown 与纯文本按 UTF-8 解码、JSON 解析、HTML 实体解码、CSV 由制品 CSV 读取器解析、XLSX 由 ExcelJS 载入、DOCX 解压后读取 `word/document.xml` 的 `w:t` 文本游程、PDF 由制品 PDF 检查器解析并核对页数。八种格式都断言保留精确十进制串、保留结果每一行、且不含双精度舍入值；CSV 与 XLSX 另行核对表头 `line`/`content`、第 0 行来源核验声明与逐行内容（XLSX 全部单元格按文本写入，避免表格引擎把精确十进制舍入）。导出过程不回查权威来源，上游调用计数保持 1。
+
+本用例同时固定了成果导出的字体边界：来源核验声明为中文，因此 DOCX 与 PDF 分支要求经过复核的 Unicode 字体。用例通过生产配置路径（`ARTIFACT_FONT_MANIFEST_FILE` → `configureArtifactFonts` → `TaskResultArtifacts`）注入一份自带所需字形的合成 TrueType 夹具（`tests/support/artifact-font.ts`），不走任何外部下载或系统字体；第二条用例证明未配置复核字体时拒绝是显式且终局的（`ARTIFACT_DOCX_FONT_REQUIRED`、`ARTIFACT_PDF_FONT_REQUIRED`，均为 422），且其余格式仍可正常导出。
+
+以上证据只证明本地合成环境下的多格式导出行为与文件可打开性、数字一致性，不涉及真实企业成果数据、真实文件格式验收标准与企业现场验收。T101 在测试目录中仍为 NOT_RUN，R22 未因本切片宣告完成，真实企业验收保持 BLOCKED_EXTERNAL。
