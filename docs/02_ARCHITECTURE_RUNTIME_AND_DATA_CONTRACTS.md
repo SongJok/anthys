@@ -659,6 +659,8 @@ interface ApiError {
 
 密码/密钥使用信封加密，主密钥来自外部 secret mount/KMS，不入 PG 同表、不入 git。key_version 支持轮换；日志脱敏覆盖 headers、argv、环境变量、错误堆栈、SSE 与附件链接。
 
+迁移 SQL 在被应用前必须先过隔离测试夹具的 schema-only 扫描：集群级操作（角色、用户、组、数据库、表空间、订阅）、`REASSIGN/DROP OWNED`、`CALL/INSERT/UPDATE/DELETE/MERGE/TRUNCATE/COPY`、`SET ROLE`、`SET SESSION AUTHORIZATION`、没有 `ON` 的 `GRANT/REVOKE`，以及除 `SELECT pg_catalog.set_config(…)` 外的 `SELECT` 一律拒绝。`DO` 块在应用时会真正执行其函数体，因此默认拒绝；只有函数体原文的 sha256 命中已评审白名单时才放行，函数体一旦变更必须重新评审。该规则不改变已应用迁移不可变的约定，也不放宽任何默认拒绝项。
+
 ## 14. 可观测性
 
 至少采集：入站量/ACK耗时、重复事件数、队列年龄、运行活跃/等待/失败、模型首响应/总时延/token/预算、工具耗时与错误、权限拒绝原因分类、DWS授权过期、MCP可用性、schedule lag、UNKNOWN动作、投递失败、DB连接/锁/慢查询、沙箱超限与清理失败。
@@ -1201,6 +1203,36 @@ STOP先在一事务提交永久veto，再用独立事务复用原task取消；�
 
 本节不新增迁移、不新增执行入口、不宣称取得上游 `queryId`，也不证明真实上游超时的现场行为；T092 仍为 NOT_RUN，R20/R30 仍为 IN_PROGRESS，真实公司数据验收保持 BLOCKED_EXTERNAL。
 
+## 2026-10-22 上游 MCP 拒绝的归类契约（局部实现）
+
+`packages/company/src/upstream-error.ts` 是代码、日志、数据三条上游 MCP 路径共用的唯一归类面。上游企业 AI 底座在自己的错误信封里给出拒绝原因，anthys 只如实转述，不替上游补全任何 scope，也不把无法归因的拒绝说成权限问题。
+
+归类的前提是绑定：只有 `contractHash`、`nonce`、`tenantId`、`actorId`、`scopeId` 与本次调用完全一致的信封才会被归类。任一字段不符（跨契约哈希、外来 scope、缺失 nonce）即判为 `UNKNOWN`，不产生任何权限诉求。信封按非严格模式解析，多余的绑定字段被剥离而不是被判为非法；响应体只读取单个不超过 96000 字节的文本块并仅按 JSON 解析，上游的自然语言拒绝原样不被回显，也不会被解析成任何归类。
+
+归类结果与网关结果的对应关系固定：`MISSING_SCOPES` 且带 scope 时为 `NEEDS_AUTH`，`remediation.kind='UPSTREAM_MISSING_SCOPES'`，`requiredScopes` 只保留上游点名的 scope（去重、每项不超过 128 字符、最多 32 项），不新增任何一项；`MISSING_SCOPES` 但没有点名 scope 时为 `DENIED`/`UPSTREAM_MISSING_SCOPES_UNKNOWN`，因为没有可问的权限就不得转成权限请求；`RESOURCE_ACCESS_DENIED` 为 `DENIED`/`UPSTREAM_RESOURCE_ACCESS_DENIED`；`APPLICATION_UNAVAILABLE` 为 `PERMANENT_ERROR`/`UPSTREAM_APPLICATION_UNAVAILABLE`；其余一律为 `DENIED`/`UPSTREAM_ERROR_UNKNOWN` 且 `completeness='UNKNOWN'`。所有拒绝类结果都不携带 `requiredScopes`，因此未知原因永远不会要求用户去开通权限。
+
+`CompanyUpstreamError` 独立于 `CompanySourceError` 定义，以免与 `chat.ts` 形成 ESM 循环依赖；`packages/company/src/code.ts`、`packages/company/src/logs.ts`、`packages/company/src/data.ts` 在捕获上游错误后先调用 `upstreamErrorResult`，非上游错误才回落到原有的 `PERMANENT_ERROR`/`RETRYABLE_ERROR` 映射。运行时据此把 `NEEDS_AUTH` 落到 `WAITING_AUTH`（`last_error='UPSTREAM_MISSING_SCOPES'`）并暂停该次运行，而不是沿读重试路径再次调用上游。
+
+本节不新增迁移、不新增执行入口，也不证明真实上游在现场会以何种原因拒绝；T026/T027 仍为 NOT_RUN，R08 仍为 IN_PROGRESS，真实公司数据验收保持 BLOCKED_EXTERNAL。
+
+## 2026-10-22 标准通道边界契约（局部实现）
+
+标准通道只处理它真实收到且合法的事件。合法事件的定义是：机器人主题的回调、企业与机器人代码匹配、发送者在租户目录内、且不是机器人自身消息。其它情况一律拒绝（`UNSUPPORTED_CALLBACK`、`IDENTITY_MISMATCH`、`UNMAPPED_IDENTITY`）或不产生任务（机器人自身消息）。每个合法事件只对应一个任务、一个运行和一条 inbox 事件；通道不得为未收到的事件补造任何输入。
+
+群会话的 `source_mode` 固定为 `MENTION_ONLY`。机器人只能依据被送达的那条 @ 消息作答，其模型请求、运行结果与群回复都不得包含未被送达的群消息内容，群回复也不得声称读取了未送达的消息（`packages/gateway/src/delivery.ts` 的群回复只输出「本次信息来源仅为 @机器人消息。」这类来源边界）。
+
+审批决定权不随卡片转发。审批 nonce 绑定到签发它的会话（`payload.session`），审批行绑定到被指定的审批人（`approvals.approver_id`），二者任一不符即在状态变更前拒绝；动作发起人不能自批。转发方既不能读取审批单，也不能用转发票据上的 nonce 提交决定，且不得产生任何派发或业务副作用。
+
+DWS 授权是按能力生效的，不是全局闸门。缺少个人 DWS 连接时，普通问答照常完成（不产生工具动作、不调用 DWS 命令行，只有一条承载该回答的结果投递），而需要 DWS 的操作返回 `NEEDS_AUTH`/`DWS_USER_CONSENT_REQUIRED`，运行停在 `WAITING_AUTH`、结果为 NULL、除任务回执外没有结果投递，也不会沿读重试路径重复调用上游。
+
 ## 阶段划分：4.8 统计模板、口径与数据权限为二期范围
 
 按 2026-10-22 的产品指示，验收文档 4.8 节的统计模板、统计口径与数据权限管理（目录 T083–T096）作为二期项目开发，一期不再围绕该模块新增功能。已有的本地模板注册表、模板发布/回滚生命周期与模板管理视图作为二期资产保留在代码库中，一期门禁不把它们宣称为已验收，也不为它们补做功能；数据查询、代码分析与日志查询的执行路径仍全部经由上游 MCP。
+
+## 2026-10-22 私人记忆生命周期契约（局部实现）
+
+私人记忆的写入只有两条合法来源：私聊中明确的「记住：…」（来源 `DINGTALK_TEXT`、依据 `EXPLICIT_USER_SAVE`）与本人经 H5 记忆接口的显式保存（来源 `H5`）；其余任何输入——包括模型回答、用户顺口提到的敏感属性、未认证或缺 CSRF 的网页请求——都不得生成持久记录。回执只承载编号与版本，不含偏好正文；本人后续会话用真实会话凭据可检索到同一条目。
+
+私人记忆不进入群体上下文。群租约在检索之前即被排除（`GROUP_EXCLUDED`，零条目、未截断、未扫描），私聊租约只在目标为本人时成立，否则拒绝（`MEMORY_AUDIENCE_DENIED`）；排除发生在检索与送模型之前。模型可见的私人偏好只在单独的、已批准且未过期的模型策略下，按敏感级与受众上限裁剪后冻结进本次运行；续接运行重新解析授权上下文，不复用上一所有者的原始 provider 会话。
+
+删除是按条目记录的依赖擦除：修订与检索索引删除、请求正文置为 `CONTENT_REMOVED`、相关运行的 provider journal 与上下文检查点删除、运行转 `CANCELLED` 且结果为 NULL、人物快照证明置空、最终化转 `REJECTED`、投递正文置空并抑制；删除账本记录覆盖范围、计数、原因与外部边界，并明示已发送内容与备份不承诺即时擦除、物理归零不主张。纠正保留历史修订且当前修订生效；已过期条目在检索阶段即被过滤，不被后续运行复活。

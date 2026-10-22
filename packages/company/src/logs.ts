@@ -7,6 +7,7 @@ import {reviewedCapability} from '../../gateway/src/reviewed-capabilities.js';
 import {blocked,type ToolResult} from '../../contracts/src/index.js';
 import {hash} from '../../storage/src/crypto.js';
 import {CompanySourceError} from './chat.js';
+import {upstreamErrorResult} from './upstream-error.js';
 import {CompanyLogsClient} from './log-client.js';
 import {companyLogsResultContract} from './log-result-contract.js';
 import {companyLogsContractHash,logQuerySchema,logResource,logCheckReplySchema,logQueryReplySchema,logSourceReceiptSchema,redactLogText,type LogQuery,type LogScope} from './log-contracts.js';
@@ -42,5 +43,5 @@ async function execute(store:RuntimeStore,client:CompanyLogsClient,ctx:DbContext
   const source={scopeId:scope.id,scopeVersion:scope.version,sourceRevision:scope.sourceRevision,service:args.service,environment:args.environment,queryId:snapshot.queryId,snapshotHash:reply.data.snapshotHash,snapshotExpiresAt:snapshot.snapshotExpiresAt,classification:scope.classification},partial=snapshot.partial||snapshot.sampling.sampled||snapshot.truncated||snapshot.totalCount===null;
   const rows=snapshot.rows.map(row=>({...row,message:redactLogText(row.message)}));if(rows.some(row=>row.message.length>4096))return blocked('PERMANENT_ERROR','COMPANY_LOG_REDACTION_LIMIT');
   return {status:partial?'PARTIAL':rows.length?'OK':'EMPTY',data:{source,query:args,queryId:snapshot.queryId,asOf:snapshot.asOf,timezone:snapshot.timezone,rows,totalCount:snapshot.totalCount,sampling:snapshot.sampling,truncated:snapshot.truncated,partial:snapshot.partial,deploymentVersionVerification:'UNVERIFIED',untrustedContent:true},evidenceIds:[`company-logs:${client.connectorId}:${snapshot.queryId}`],externalRequestId:snapshot.queryId,completeness:snapshot.partial||snapshot.totalCount===null?'UNKNOWN':snapshot.sampling.sampled?'SAMPLED':snapshot.truncated?'TRUNCATED':'COMPLETE',verification:{state:'VERIFIED',method:'CERTIFIED_PROXY_CURRENT_ACTOR_IMMUTABLE_LOG_QUERY'}};
- }catch(error){return blocked(error instanceof CompanySourceError?error.code==='COMPANY_LOG_UPSTREAM_DENIED'?'DENIED':'PERMANENT_ERROR':'RETRYABLE_ERROR',error instanceof CompanySourceError?error.code:'COMPANY_LOG_TRANSPORT_UNAVAILABLE');}
+ }catch(error){const upstream=upstreamErrorResult(error);if(upstream)return upstream;return blocked(error instanceof CompanySourceError?'PERMANENT_ERROR':'RETRYABLE_ERROR',error instanceof CompanySourceError?error.code:'COMPANY_LOG_TRANSPORT_UNAVAILABLE');}
 }

@@ -40,7 +40,7 @@ async function contractWorld(currency:'CNY'|'USD'='CNY'){
  const save=(key=randomUUID())=>service.put(principal,{delegationId:profile.document.id,expectedVersion:0,document},key);
  return {f,admin,principal,service,session,profile,document,approve,save};
 }
-it('real group-admin flow reads the trusted API, pauses and revokes once, persists versions and suppresses a prepared reply',async()=>{
+it('T107 T112 real group-admin flow reads the trusted API, pauses and revokes once, persists versions and suppresses a prepared reply',async()=>{
  const w=await contractWorld();await w.approve();await w.save();await w.f.runtime.advance(w.f.ctx,w.f.runId);expect(w.f.requests).toHaveLength(2);const before=(await root.query('SELECT to_jsonb(q) value FROM quota_ledger q WHERE run_id=$1 ORDER BY id',[w.f.runId])).rows;
  const api=await createServer({config:config(),db:appDb,sessionSecret:secret('SESSION_SECRET')!,groupContracts:w.service});let posts=0;
  try{
@@ -50,7 +50,7 @@ it('real group-admin flow reads the trusted API, pauses and revokes once, persis
   expect((await flow.read(w.profile.document.id))?.ok).toBe(true);expect(flow.canChange('PAUSED')).toBe(false);expect(flow.prepare('REVOKED').ok).toBe(true);expect((await flow.confirm())?.ok).toBe(true);expect(posts).toBe(2);expect(await flow.confirm()).toBeNull();expect((await w.service.get(w.principal,w.profile.document.id)).contract?.document).toMatchObject({version:3,state:'REVOKED'});expect(w.f.requests).toHaveLength(2);
  }finally{await api.app.close();}
 });
-it('real group-admin API rejects stale confirmation, missing CSRF and a different authenticated actor without persistence',async()=>{
+it('T107 real group-admin API rejects stale confirmation, missing CSRF and a different authenticated actor without persistence',async()=>{
  const w=await contractWorld();await w.approve();await w.save();const api=await createServer({config:config(),db:appDb,sessionSecret:secret('SESSION_SECRET')!,groupContracts:w.service});
  try{
   const transport=(cookie:string,csrf?:string)=>async(path:string,body?:unknown,key?:string)=>{const response=await api.app.inject({url:'/api/v1'+path,method:body===undefined?'GET':'POST',headers:{cookie:'oa_session='+cookie,...(body===undefined?{}:{origin:config().APP_ORIGIN,...(csrf?{'x-csrf-token':csrf}:{}),'idempotency-key':key!})},...(body===undefined?{}:{payload:body as object})});if(response.statusCode!==200)throw new GroupContractAdminFailure(response.statusCode);return response.json().data;};
@@ -71,7 +71,7 @@ it('operator delegation approval is idempotent without reviving revoked or chang
  const w=await contractWorld();await w.approve();expect((await w.approve()).rows[0].value).toMatchObject({replayed:true});
  await root.query('SELECT public.oa_group_contract_delegation_revoke($1,$2,$3)',[w.profile.document.id,w.profile.hash,'SYNTHETIC_DELEGATION_STOP_REVIEW']);await expect(w.approve()).rejects.toThrow('GROUP_DELEGATION_REPLAY_CONFLICT');
 });
-it('a paused contract suppresses the already prepared question delivery and preserves all model reservations',async()=>{
+it('T112 a paused contract suppresses the already prepared question delivery and preserves all model reservations',async()=>{
  const w=await contractWorld();await w.approve();await w.save();await w.f.runtime.advance(w.f.ctx,w.f.runId);expect(w.f.requests).toHaveLength(2);
  const ledger=(await root.query('SELECT to_jsonb(q) value FROM quota_ledger q WHERE run_id=$1 ORDER BY id',[w.f.runId])).rows;
  await w.service.transition(w.principal,w.document.id,{delegationId:w.profile.document.id,expectedVersion:1,state:'PAUSED'},randomUUID());

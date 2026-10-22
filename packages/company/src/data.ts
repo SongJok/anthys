@@ -11,6 +11,7 @@ import {CompanyDataClient,CompanyDataTimeoutError,type DataNonce} from './data-c
 import {companyDataResultContract} from './data-result-contract.js';
 import {companyDataContractHash,dataCanonicalQuerySchema,dataParametersHash,dataQuerySchema,dataResource,dataRowScopeSchema,dataSourceReceiptSchema,dataTemplateRef,dataWireArguments,dataReplyStatus,parseDataCheckReply,parseDataQueryReply,type DataQuery,type DataScope} from './data-contracts.js';
 import {recordDataExecution,type DataExecutionAudit} from './data-execution.js';
+import {upstreamErrorResult} from './upstream-error.js';
 import {dataTemplateHash,type DataTemplate} from './data-templates.js';
 export const companyDataBindingHash=(connectorId:string,connectionBinding:string,toolName:string,inputSchemaHash:string,registryHash:string)=>hash(canonical({id:'company.data.query',version:'1.0.0',connectorId,connectionBinding,toolName,inputSchemaHash,registryHash,contractHash:companyDataContractHash,outputSchema:companyDataResultContract.outputSchema}));
 async function scopeFor(c:pg.PoolClient,ctx:DbContext,client:CompanyDataClient,args:DataQuery):Promise<DataScope|null>{
@@ -42,7 +43,8 @@ export function dataFailure(error:unknown):ToolResult{
  // execution is not retryable: a retry would open another upstream query while
  // the first one may still be running.
  if(error instanceof CompanyDataTimeoutError)return blocked('UNKNOWN',error.code);
- if(error instanceof CompanySourceError){const denied=['COMPANY_DATA_UPSTREAM_DENIED','COMPANY_DATA_TEMPLATE_UNKNOWN','COMPANY_DATA_TEMPLATE_NOT_CERTIFIED','COMPANY_DATA_TEMPLATE_MISMATCH','COMPANY_DATA_TEMPLATE_PARAMETERS_INVALID','COMPANY_DATA_TEMPLATE_OPERATION_INVALID'].includes(error.code);return blocked(denied?'DENIED':'PERMANENT_ERROR',error.code);}
+ const upstream=upstreamErrorResult(error);if(upstream)return upstream;
+ if(error instanceof CompanySourceError){const denied=['COMPANY_DATA_TEMPLATE_UNKNOWN','COMPANY_DATA_TEMPLATE_NOT_CERTIFIED','COMPANY_DATA_TEMPLATE_MISMATCH','COMPANY_DATA_TEMPLATE_PARAMETERS_INVALID','COMPANY_DATA_TEMPLATE_OPERATION_INVALID'].includes(error.code);return blocked(denied?'DENIED':'PERMANENT_ERROR',error.code);}
  return blocked('RETRYABLE_ERROR','COMPANY_DATA_TRANSPORT_UNAVAILABLE');
 }
 // The upstream request that timed out may still be running. The local side

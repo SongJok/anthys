@@ -1448,6 +1448,91 @@ Docker开发栈检查：postgres、api、worker与sandbox-broker容器均为运�
 
 这些证据只证明合成上游替身在隔离数据库上的超时与取消行为，不调用真实公司数据MCP，也不证明真实上游超时的现场对账已验收。T092在测试目录中仍为NOT_RUN，R20/R30仍为IN_PROGRESS，P09仍为IN_PROGRESS，真实公司数据验收保持BLOCKED_EXTERNAL；准确源码摘要与执行记录见 `reports/company-data-timeout-reconciliation-20261022.json`。
 
+### 2026-10-22 上游 MCP 拒绝归类组件证据（T026/T027仍为NOT_RUN）
+
+`packages/company/src/upstream-error.ts` 为代码、日志、数据三条上游 MCP 路径提供唯一归类面：只有 `contractHash`、`nonce`、`tenantId`、`actorId`、`scopeId` 与本次调用完全一致的错误信封才会被归类，`MISSING_SCOPES` 只报告上游点名的 scope（去重、有界）并转成 `NEEDS_AUTH`/`UPSTREAM_MISSING_SCOPES`，没有点名 scope 的拒绝转成 `DENIED`/`UPSTREAM_MISSING_SCOPES_UNKNOWN`，`RESOURCE_ACCESS_DENIED` 转成 `DENIED`，`APPLICATION_UNAVAILABLE` 转成 `PERMANENT_ERROR`，其余（含上游自然语言拒绝、跨契约哈希、外来 scope、缺失 nonce、超过 96000 字节的响应体）一律 `DENIED`/`UPSTREAM_ERROR_UNKNOWN` 且 `completeness='UNKNOWN'`；所有拒绝类结果都不携带 `requiredScopes`，因此未知原因不会被转写成“请去开通权限”。`CompanyUpstreamError` 独立于 `CompanySourceError` 定义，避免与 `chat.ts` 形成 ESM 循环依赖。
+
+契约证据：`tests/unit/company-upstream-error.test.ts` 8项全部通过——归类必须与本次调用绑定（逐字段不符即 `UNKNOWN`，并覆盖来自日志与数据契约的跨契约哈希）；只报告上游点名的 scope（去重、每项长度与总条数有界，超界判 `UNKNOWN`）；带 scope 的缺失权限拒绝成为只含所点名 scope 的权限请求；不带 scope 的拒绝永不成为权限请求；资源拒绝与应用未发布保持为两种不同的拒绝；散文、超长、多块与未绑定的拒绝都不被解析成任何归类；绑定到另一 nonce 的拒绝即使点名 scope 也不被信任；非上游失败保持自身归类。
+
+真实隔离数据库证据：`tests/integration/company-upstream-error.test.ts` 4项全部通过（隔离 PostgreSQL 64711，经钉钉回调建立租户、任务、运行与租约，使用合成代码/日志/数据 MCP 替身）：
+
+1. 缺失 scope 拒绝：代码、日志、数据三条能力均返回 `NEEDS_AUTH`，`remediation` 为 `{kind:'UPSTREAM_MISSING_SCOPES',requiredScopes:['scope.payments.read','scope.payments.write']}`，结果不含数据，`tool_actions` 行为 `{capability_id,state:'PREPARED',retry_safety:'CERTIFIED_READ'}`。
+2. 拒绝原因分别归类：资源 ACL 拒绝为 `DENIED`/`UPSTREAM_RESOURCE_ACCESS_DENIED`，应用未发布为 `PERMANENT_ERROR`/`UPSTREAM_APPLICATION_UNAVAILABLE`，两者都不携带 `requiredScopes`。
+3. 无法归因的拒绝：散文拒绝与外来 scope 绑定均为 `DENIED`/`UPSTREAM_ERROR_UNKNOWN`，且永不出现 `NEEDS_AUTH`。
+4. 运行期行为：上游拒绝缺失权限后，运行时只调用模型一次，运行状态停在 `WAITING_AUTH`、`last_error='UPSTREAM_MISSING_SCOPES'`、`result` 为 NULL，不产生任何投递行；上游读取次数为 0 而尝试次数大于 0，说明不再沿读重试路径重复调用上游。
+
+回归与门禁：`tsc --noEmit`、仓库 ESLint、116 份迁移的 schema contract 检查、能力输出契约检查、需求基线完整性检查与 `pnpm build` 全部通过。本次切片同时清理了被新归类取代的死路径：`packages/company/src/logs.ts` 的 `COMPANY_LOG_UPSTREAM_DENIED` 与 `packages/company/src/data.ts` 的 `COMPANY_DATA_UPSTREAM_DENIED` 分支及其对应断言已删除，`tests/integration/company-logs.test.ts` 相应改为断言 `COMPANY_UPSTREAM_ERROR_UNKNOWN`。`tests/support/backend-discovery-baseline.json` 补登记了本切片新增的 2 个用例文件及前两切片遗留的 4 个未登记文件，后端发现基线用例 `tests/unit/test-isolation.test.ts` 8 项通过。
+
+这些证据只证明合成上游替身与隔离数据库上的归类行为，不调用真实公司代码/日志/数据 MCP，也不证明真实上游现场会以何种原因拒绝或企业权限体系已验收。T026/T027 在测试目录中仍为 NOT_RUN，R08 仍为 IN_PROGRESS，P05 仍为 IN_PROGRESS，真实公司数据验收保持 BLOCKED_EXTERNAL；准确源码摘要与执行记录见 `reports/company-upstream-error-classification-20261022.json`。
+
+### 2026-10-22 测试夹具 schema-only 扫描修复（恢复34项既有失败用例）
+
+隔离测试夹具 `tests/support/group-reminder-database.ts` 的 `schemaOnly` 扫描器默认拒绝任何以 `DO` 开头的语句，因为 `DO` 块在迁移被应用时会真正执行其函数体，无法只靠扫描判定其安全性。前一切片新增的 `db/migrations/115_role_binding_administration.sql` 含有一个 `DO $$ … $$;` DDL 块（仅用于按名删除历史唯一约束），而该扫描器自迁移 095 起生效、覆盖到 115，导致依赖该夹具的 7 个用例文件、34 项既有用例在安装夹具时全部以 `TEST_SCHEMA_CLUSTER_OPERATION_REJECTED` 失败。
+
+修复方式不改动任何已应用迁移，也不放宽默认拒绝：
+
+1. 扫描器在遇到 `DO` 语句时取出其 `$$` 体的原文并计算 sha256，只有命中已评审哈希白名单时才放行；白名单当前只含 `f6a530362232755f4400e9d9f0755e7cfaf647b13f7f49cd36f6ccdd0c936a6a`（即 115 号迁移中那段只删除 `role_bindings` 唯一约束的 `DO` 体）。函数体一旦被改动，哈希不再匹配，必须重新评审才能放行。
+2. `DO` 之外的拒绝规则完全不变：`CREATE/ALTER/DROP ROLE|USER|GROUP|DATABASE|TABLESPACE|SUBSCRIPTION`、`REASSIGN/DROP OWNED`、`CALL/INSERT/UPDATE/DELETE/MERGE/TRUNCATE/COPY`、`SET ROLE`、`SET SESSION AUTHORIZATION`、没有 `ON` 的 `GRANT/REVOKE`，以及除 `SELECT pg_catalog.set_config(…)` 以外的 `SELECT` 仍然一律拒绝。
+3. 扫描器新增导出 `schemaOnlyRejection(sql)`，返回拒绝码或 `null`，用于直接断言扫描结论而不需要触发异常。
+
+新增回归用例 `tests/unit/schema-only-safety.test.ts` 3项全部通过：迁移目录中自第 94 份起的每一份迁移都通过 schema-only 扫描（包含 115 号迁移的已评审 `DO` 体）；已评审 `DO` 体被接受，而含 `DELETE`、`CREATE ROLE`、`UPDATE`、`PERFORM` 的 `DO` 体一律被拒绝；DML、角色、会话设置、无 `ON` 的 `GRANT` 与普通 `SELECT` 被拒绝，而 `CREATE TABLE`、`GRANT SELECT ON …` 与 `SELECT pg_catalog.set_config(…)` 被接受。
+
+受影响的 7 个用例文件（`bounded-migration-step`、`t033-membership-boundary`、`group-reminder-fixture-clock`、`independent-cluster-restore`、`operations-disaster-recovery`、`recovery-safety-comparison`、`recovery-safety-source`）共 35 项测试逐个复跑全部通过。这只证明夹具扫描器与迁移 SQL 的静态检查结论，不改变任何数据库内容，也不改变历史迁移不可变的约定。
+
+### 2026-10-22 标准通道边界用例证据（T002/T008/T028仍为NOT_RUN）
+
+本切片补齐三个 P0 边界用例的本地断言，全部在隔离 PostgreSQL 64711 上用真实入口与真实能力路径执行，只使用合成上游替身。
+
+T002「标准通道仅处理收到的合法事件；不声称读取未送达消息」（`tests/integration/channel-boundary.test.ts`）：一个真实送达的合法群事件只产生一条 inbox 事件、一个任务和一个运行；非机器人回调（`UNSUPPORTED_CALLBACK`）、同企业另一机器人的回调（`IDENTITY_MISMATCH`）、机器人自身消息（返回 null）与目录外的发送者（`UNMAPPED_IDENTITY`）全部被拒绝，不新增任何任务或运行；会话保持 `source_mode='MENTION_ONLY'`；模型请求体、运行结果与最终投递的群回复中都不含从未送达的群消息标记，因此通道既没有读到、也没有声称读到未送达的消息。
+
+T008「BOB不能批准CAROL的动作；副作用为0」（`tests/integration/controls.test.ts`）：审批卡被转发给 BOB 后，BOB 连审批单都读不到（`CONTROL_NOT_FOUND`），用转发票据上的 nonce 提交决定在状态变更前即被拒绝（`DECISION_NONCE_INVALID`），动作发起人 CAROL 同样不能自批；此时审批仍为 `PENDING` 且归属原指定审批人，动作仍为 `APPROVAL_REQUIRED`，`outbox` 中没有派发行，业务副作用计数保持 0，只有原指定审批人仍持有决定权。
+
+T028「机器人正常问答；DWS操作进入WAITING_AUTH」（`tests/integration/channel-boundary.test.ts`）：完全没有个人 DWS 连接的用户提普通问题时照常得到回答（状态 `SUCCEEDED`，结果为回答正文），没有任何 `tool_actions`、DWS 命令行一次都没有被调用，只有一条承载该普通回答的结果投递（解密后与回答正文逐字一致）；同一用户改问办公事项时运行停在 `WAITING_AUTH`、`last_error='DWS_USER_CONSENT_REQUIRED'`、结果为 NULL，除任务回执外没有任何结果投递，模型只被调用一次，且始终没有产生任何 DWS 身份记录。
+
+这些证据只证明本地合成环境下的边界行为，不涉及真实钉钉发布群、真实 DWS 设备授权流与企业现场验收。T002/T008/T028 在测试目录中仍为 NOT_RUN，R01/R03/R05/R08/R15/R23/R28 均未宣告完成，真实企业验收保持 BLOCKED_EXTERNAL。
+
 ### 2026-10-22 阶段划分：4.8 统计模板、口径与数据权限为二期范围
 
 按产品指示，验收文档 4.8 节的统计模板、统计口径与数据权限管理（目录 T083–T096）作为二期项目开发，一期不再围绕该模块新增功能，也不为它补做实现或用例。已有的本地模板注册表、模板发布/回滚生命周期与模板管理视图作为二期资产保留在代码库中，一期门禁不宣称其已验收；数据查询、代码分析与日志查询的执行路径仍全部经由上游 MCP。本次切片的超时对账属于上游调用可靠性，不属于该模块功能。
+
+### 2026-10-22 私人记忆生命周期用例证据（T039–T043/T046仍为NOT_RUN）
+
+本切片为 R10/R29 的六个私人记忆用例补齐本地断言，全部在隔离 PostgreSQL 64711 上执行真实入口（钉钉私聊 ingress、H5 记忆接口、真实运行与投递路径），只使用合成模型与合成上游替身。
+
+T039「ALICE明确要求记住偏好，再新会话提问」（`tests/integration/private-memory-lifecycle.test.ts`）：私聊「记住：…」产生一条 `memory_control_responses`（`SAVED`、版本 1）与其当前修订；修订记录 `source_kind='DINGTALK_TEXT'`、来源为该事件、`consent_basis='EXPLICIT_USER_SAVE'`、敏感级 `CONFIDENTIAL`；回执投递只含编号与版本、不含偏好正文；同一所有者的新会话用真实会话凭据检索到同一条目（同一编号、正文、版本与来源）。
+
+T040「BOB或另一群请求ALICE私人记忆」（同文件）：BOB 的检索结果为空，其真实模型请求体不含该正文、`run_memory_sources` 为空；群租约的 `issue` 直接返回 `GROUP_EXCLUDED`（零条目、未截断、未扫描），且 `currentInTransaction` 未被调用——排除发生在检索与送模型之前，而不是先送模型再要求不说。
+
+T041「删除后派生内容与任务摘要全部失效」（同文件）：删除后修订与检索索引行清零、请求正文置为 `CONTENT_REMOVED`、该运行的 provider journal 与上下文检查点删除、运行转 `CANCELLED` 且结果为 NULL、人物快照证明置空、最终化转 `REJECTED`、投递正文为空且状态 `SUPPRESSED`；删除账本记录 `coverage='RECORDED_DEPENDENCIES'`、计数 `revisions/indexes/runs`、原因 `USER_FORGET`，并明示物理擦除不承诺（`physicalStorage` 写明不主张物理归零）；此后检索为空。
+
+T042「有效修订优先且过期偏好不被复活」（同文件）：纠正产生版本 2 并保留 1、2 两个修订，当前修订为版本 2；更相似的新条目在有效期内排在前面，其到期后检索只剩被纠正的条目且内容为纠正后的正文，真实模型请求不再含过期条目、只含纠正后的正文。
+
+T043「续接者重建授权上下文而不是复用上一所有者的原始provider会话」（同文件）：ALICE 的运行把记忆绑定到自己名下（`run_memory_sources` 归属 ALICE 的运行与 owner）；BOB 以 ALICE 为目标发起私聊租约被 `MEMORY_AUDIENCE_DENIED` 拒绝，群租约被 `GROUP_EXCLUDED` 排除；BOB 自己的续接运行拥有独立的运行与 owner，不绑定任何记忆，模型请求不含 ALICE 的正文；两次运行的 provider journal 按 owner 隔离。
+
+T046「资料不能自动生成持久敏感个人档案」（同文件）：仅在提问中提到身份证号不会生成任何记忆条目、事件或控制回执；未登录的 H5 记忆读取返回 401、未登录的记忆写入因 CSRF 守卫先于会话解析而返回 403、已登录但缺少 CSRF 的写入返回 403、已登录读取返回 200，四者都不产生记忆条目；只有明确的「记住：…」才创建一条 `consent_basis='EXPLICIT_USER_SAVE'`、`source_kind='DINGTALK_TEXT'`、`sensitivity='CONFIDENTIAL'` 的记录。
+
+这些证据只证明本地合成环境下的私人记忆生命周期行为，不涉及真实钉钉私聊、真实模型与企业现场验收。T039–T043/T046 在测试目录中仍为 NOT_RUN，R10/R29 均未宣告完成，真实企业验收保持 BLOCKED_EXTERNAL。
+
+### 2026-10-22 群合同授权、待办镜像与控制台逐项授权用例证据（T071/T107/T112/T130仍为NOT_RUN）
+
+本切片为四个此前缺少可追溯断言的用例补齐本地实现文件映射：把已有的真实断言标注稳定用例编号，并在测试目录中登记实现文件与诚实的覆盖边界，不新增任何"已完成"声明。
+
+T071「测试待办读后核对」（`tests/integration/office-todo-mirror.test.ts`）：本地待办 UUID 与外部待办 ID 始终分离，外部快照只由读回结果链接，RLS 下其他所有者既读不到也链接不了；写意图先落库再发起外部调用，只在逐字段完全一致的读回后才置为已核验，读回不一致或调用丢失时保持 `UNKNOWN` 且拒绝把差异远端当成成功；远端修订只写入外部快照，本地标题/到期/完成状态必须显式采纳后才变化，越界值与非法状态转换不改变持久镜像。真实 DWS/OpenAPI 测试待办、日历、文档、表格写入、外部清理与企业现场验收仍未执行。
+
+T107「群主可授权、他人拒绝、版本与撤销路径完整」（`tests/integration/group-clarification.test.ts`）：只有经复核的群管理员能创建与迁移合同，合同以版本 1 持久化且每次被接受的迁移只追加一条不可变修订；过期期望版本与缺失 CSRF 均被拒绝且不产生任何持久化；另一个已认证主体（BOB 角色）读取被拒且拿不到快照、修订版本不变，撤销路径在本地组件上完整。真实群主授权、真实钉钉群管理界面、平台合同责任人与退役路径仍为 NOT_RUN。
+
+T112「合同撤销后停止新监控、旧任务受控终止」（同文件）：管理员撤销后持久合同状态为 `REVOKED` 且版本递增，运行时不再发起新的模型请求；合同暂停后已准备的问题投递被抑制且实际发送次数为零，同时保留全部模型预留，旧任务无法继续向群发送。机器人退群路径、平台合同责任人与退役路径、真实钉钉群管理界面仍为 NOT_RUN。
+
+T130「管理员与普通用户逐项授权」（`tests/integration/permission-center.test.ts`）：权限控制台列表要求已登录所有者，未认证请求返回 401，外来主体拿到与不存在资源相同的 not-found 边界而不泄露存在性，缺失 CSRF 或未声明字段的请求被拒绝，响应为 private 且 no-store 且不含已存凭据，所有者撤销资源后旧会话立即失效且控制台请求被拒。控制台页面渲染部分由 Playwright 控制台规格覆盖（真实 Permissions 管理列表与精确过滤分页、非管理员只保留自有查看与撤销而不取管理元数据、所有者任务页解释保留的 UNKNOWN 预算）与 `tests/integration/audit.test.ts` 的审计读取。真实控制台上的企业权限、预算与审计数据、跨租户控制台部署与企业验收仍未执行。
+
+以上四个用例在测试目录中仍为 NOT_RUN，R06/R13/R18/R19/R24/R25/R31/R32/R34 均未因本切片宣告完成，真实企业验收保持 BLOCKED_EXTERNAL。
+
+### 2026-10-22 Linux runner 镜像与容器最小权限用例证据（T072/T123仍为NOT_RUN）
+
+本切片为两个此前缺少可追溯实现文件的安全用例补齐本地断言：新增 `tests/security/runner-image-security.test.ts`，直接核对仓库真实镜像定义、真实运行时权限守卫与真实编排文件，并核对已记录的离线镜像探针证据；不新增任何"已完成"声明，也不接触任何企业凭据。
+
+T072「Linux runner 镜像、文件权限与日志」（`tests/security/runner-image-security.test.ts`）：`deploy/images/dws-runner.Dockerfile` 的两个基础镜像都按 `@sha256:` 摘要固定，进程用户为 `10001:10001`，发布二进制以 `--chmod=0555` 只读拷贝、许可与清单以 `--chmod=0444` 拷贝，镜像构建期清除组/其他可写位与 setuid/setgid 位，且不声明任何端口或卷；`.dockerignore` 排除 `.env`、`.env.*` 与 `.secrets`，主机密钥不会进入构建上下文。运行时权限守卫为真实代码路径：socket 父目录被改成 0755 时 `safeSocketParent` 以 `DWS_RPC_SOCKET_UNSAFE` 拒绝、改回 0700 后接受；broker 密钥文件为 0660 时 `readSandboxBrokerAuthKey` 以 `SANDBOX_BROKER_AUTH_KEY_UNSAFE` 拒绝、改为 0600 后接受；上游 MCP 令牌文件为 0644 时 `configureCompanyCode` 以 `COMPANY_TOKEN_FILE_PERMISSIONS` 拒绝。已记录的离线镜像探针证据显示 socket 为 0600、父目录为 0700、配置与密钥文件为 0600、信封为 AES-256-GCM AAD、argv 与日志不含密钥，且业务 CLI 调用数与授权调用数均为 0、未使用任何企业凭据。真实 Linux runner 上的镜像构建、真实权限与日志检查仍未执行。
+
+T123「镜像、进程用户、capabilities 与 Docker socket」（同文件）：`deploy/images/app.Dockerfile` 与 `deploy/images/dws-runner.Dockerfile` 都以摘要固定基础镜像并以 `10001:10001` 运行，镜像内不含 `/var/run/docker.sock`；`packages/sandbox/src/executor.ts` 的容器创建参数包含 `--user 10001:10001`、`--cap-drop ALL`、`--security-opt no-new-privileges=true`、`--network none` 与 `--read-only`；真实的生产与开发编排文件中，`/var/run/docker.sock` 只挂载进隔离的 `sandbox-broker` 服务，`api`、`worker`、`ingress`、`notifier`、`scheduler`、`maintenance` 与 `dws-runner` 均不挂载。已记录的离线镜像探针证据显示 capability 集合全为 0、`noNewPrivs=1`、无 Docker socket、无 TCP 监听、只读根文件系统与受限 tmpfs。真实镜像仓库构建与线上容器检查仍未执行。
+
+以上两个用例在测试目录中仍为 NOT_RUN，R33 未因本切片宣告完成，真实企业验收保持 BLOCKED_EXTERNAL。

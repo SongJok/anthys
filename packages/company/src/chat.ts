@@ -5,6 +5,7 @@ import type {DbContext} from '../../storage/src/database.js';
 import {canonical} from '../../gateway/src/index.js';
 import {hash} from '../../storage/src/crypto.js';
 import {companyContractHash,type CodeScope} from './contracts.js';
+import {upstreamErrorFrom} from './upstream-error.js';
 
 export class CompanySourceError extends Error{constructor(readonly code:string){super(code);this.name='CompanySourceError';}}
 export function chatSchemaHash(tool:{inputSchema:unknown;outputSchema?:unknown;annotations?:unknown}):string{return hash(canonical({inputSchema:tool.inputSchema,outputSchema:tool.outputSchema??null,annotations:tool.annotations??null}));}
@@ -24,7 +25,7 @@ export class CompanyChat {
    // No free-form model prompt, shared conversationId, images, sampling or
    // elicitation. A separately certified proxy must enforce this envelope.
    const reply=CallToolResultSchema.parse(await this.client.callTool({name:'chat',arguments:{message}},CallToolResultSchema,options));
-   if(reply.isError)throw new CompanySourceError('COMPANY_UPSTREAM_DENIED');
+   if(reply.isError)throw upstreamErrorFrom(reply,{contractHash:companyContractHash,nonce,tenantId:ctx.tenantId,actorId:ctx.actorId,scopeId:scope.id});
    if(reply.content.length!==1||reply.content[0]?.type!=='text'||Buffer.byteLength(reply.content[0].text,'utf8')>96000)throw new CompanySourceError('COMPANY_RESPONSE_INVALID');
    let value:unknown;try{value=JSON.parse(reply.content[0].text);}catch{throw new CompanySourceError('COMPANY_RESPONSE_INVALID');}
    return {value,nonce};

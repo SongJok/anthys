@@ -45,6 +45,25 @@ it('forwarding, self approval, different sessions, missing CSRF, and changed par
  const second=await f.api.sessions.create({tenantId:f.ctx.tenantId,actorId:f.api.approverId});expect((await f.api.app.inject({method:'POST',url:`/api/v1/approvals/${p.id}/decision`,headers:f.api.headers(second),payload})).statusCode).toBe(409);
  expect((await f.api.decide(p.id,{...p.data,argsHash:hash('changed')})).statusCode).toBe(409);expect(f.effects()).toBe(0);
 });
+it('T008 component: a forwarded approval card gives the forwarder no decision right and leaves zero side effects',async()=>{
+ const f=await fresh(),p=await pending(f),bobId=randomUUID();
+ await admin.query("INSERT INTO users(tenant_id,id,external_user_id,display_name,status) VALUES($1,$2,$2::uuid::text,'BOB the forwardee','ACTIVE')",[f.ctx.tenantId,bobId]);
+ const bob=await f.api.sessions.create({tenantId:f.ctx.tenantId,actorId:bobId}),bobHeaders=f.api.headers(bob),payload={nonce:p.data.nonce,argsHash:p.data.argsHash,version:p.data.version,decision:'APPROVE'};
+ // BOB holds the forwarded card but was never the designated approver, so he cannot even read the approval.
+ expect((await f.api.app.inject({method:'GET',url:`/api/v1/approvals/${p.id}`,headers:bobHeaders})).statusCode).toBe(409);
+ // Replaying the forwarded nonce as BOB is refused before any state changes.
+ const decision=await f.api.app.inject({method:'POST',url:`/api/v1/approvals/${p.id}/decision`,headers:bobHeaders,payload});
+ expect(decision.statusCode).toBe(409);expect(decision.json().error.code).toBe('DECISION_NONCE_INVALID');
+ // CAROL, the owner of the action, still cannot approve her own action.
+ expect((await f.api.app.inject({method:'POST',url:`/api/v1/approvals/${p.id}/decision`,headers:f.api.headers(f.api.requester),payload})).statusCode).toBe(409);
+ expect(f.effects()).toBe(0);
+ const approval=(await db.scope(f.ctx,c=>c.query('SELECT state,approver_id FROM approvals WHERE id=$1',[p.id]))).rows[0];
+ expect(approval).toMatchObject({state:'PENDING',approver_id:f.api.approverId});
+ expect((await db.scope(f.ctx,c=>c.query('SELECT state FROM tool_actions WHERE id=$1',[f.action.id]))).rows[0].state).toBe('APPROVAL_REQUIRED');
+ expect((await db.scope(f.ctx,c=>c.query('SELECT id FROM outbox WHERE dedup_key=$1',[`approval:${p.id}:run`]))).rowCount).toBe(0);
+ // Only the designated approver keeps the decision right, and the decision alone is not the side effect.
+ expect((await f.api.decide(p.id,p.data)).statusCode).toBe(200);expect(f.effects()).toBe(0);
+});
 it('20 concurrent decisions consume a nonce once; the original runtime resumes one verified database write',async()=>{
  const f=await fresh();await store.pause(f.ctx,f.lease,'WAITING_APPROVAL','APPROVAL_REQUIRED');const p=await pending(f),decisions=await Promise.all(Array.from({length:20},()=>f.api.decide(p.id,p.data)));expect(decisions.filter(r=>r.statusCode===200)).toHaveLength(1);expect(decisions.filter(r=>r.statusCode===409)).toHaveLength(19);expect(f.effects()).toBe(0);
  const jobs=(await db.scope(f.ctx,c=>c.query("SELECT payload_ref FROM outbox WHERE dedup_key=$1",[`approval:${p.id}:run`]))).rows;expect(jobs).toHaveLength(1);expect(jobs[0].payload_ref).toMatchObject({tenantId:f.ctx.tenantId,actorId:f.ctx.actorId,runId:f.runId,generation:1});let modelCalls=0;const runtime=new AgentRuntime(store,{complete:async messages=>{modelCalls++;return {message:{role:'assistant',content:finalFromMessages(messages)},usage:null,requestId:'synthetic',finishReason:'stop'};}},f.gateway);await runtime.advance(f.ctx,f.runId);await runtime.advance(f.ctx,f.runId);expect(f.effects()).toBe(1);expect(modelCalls).toBe(1);const run=(await new TaskStore(appDb).get(f.ctx,f.taskId))!.runs[0];expect(run.status).toBe('SUCCEEDED');expect((await db.scope(f.ctx,c=>c.query('SELECT state FROM approvals WHERE id=$1',[p.id]))).rows[0].state).toBe('CONSUMED');

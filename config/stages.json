@@ -249,12 +249,14 @@
       "reports/checks/p03-finalization-enterprise.json",
       "reports/checks/p03-finalization-secret-scan.json",
       "reports/p03-narrative-candidate.json",
-      "reports/one-shot-controls-candidate.json"
+      "reports/one-shot-controls-candidate.json",
+      "reports/standard-channel-boundary-20261022.json"
     ],
     "updatedAt": "2026-10-16T05:33:16.745747+00:00",
     "codeCommit": "764d6704dc00501bea02ee242a64ae2cdbd24d50",
     "stateBasis": "Implementation and real automated evidence only; no live provider PASS is inferred.",
     "remaining": [
+      "Live DingTalk group and single message acceptance with the real callback, card and attachment assets remains BLOCKED_EXTERNAL; the T002 local oracle covers the legal-event and undelivered-message boundary only",
       "P02 real enterprise single/group message, card template/callback, OAuth and attachment assets/permission acceptance",
       "P04 binding/grant administration and P09/P13 binary inspectors remain adjacent stage work"
     ],
@@ -336,7 +338,9 @@
       "Retry deadline beyond task expiry suppresses updates; no long sleeps",
       "Cancellation stops final publication; UNKNOWN card response never repeats; exactly one accepted final update on success",
       "Final deliveries remain bound to their original source run/session; unbound legacy pending writes withheld",
-      "Workbench shows safe recovery summaries; newest tasks first with stable owner-scoped pagination"
+      "Workbench shows safe recovery summaries; newest tasks first with stable owner-scoped pagination",
+      "Standard channel admits only the legal events it actually received: an unsupported topic, another robot code, the bot own message and an unmapped sender are all refused without creating a task, a run or a claim about a message that was never delivered",
+      "The mention-only source mode is asserted as a durable conversation fact, and the delivered answer is checked to exclude any undelivered marker"
     ],
     "risks": [
       "Synthetic provider transports/OAuth are not enterprise integration",
@@ -815,12 +819,14 @@
       "reports/self-dm-closure-20261018/permission-cache-maintenance.json",
       "reports/p04-descriptor-checkpoint.json",
       "reports/self-dm-closure-20261018/stage-state-reconciliation.json",
-      "reports/permission-administration-20261018/local.json"
+      "reports/permission-administration-20261018/local.json",
+      "reports/standard-channel-boundary-20261022.json"
     ],
     "updatedAt": "2026-10-16T10:03:04.944139+00:00",
     "codeCommit": "764d6704dc00501bea02ee242a64ae2cdbd24d50",
     "stateBasis": "Implementation and real automated evidence only; no live provider PASS is inferred.",
     "remaining": [
+      "The live DingTalk approval card surface, the DWS device authorization flow and live per-user grant acceptance remain BLOCKED_EXTERNAL; the T008 and T028 local oracles cover the forwarded-card and unauthorized-DWS boundaries only",
       "Complete administrator role/delegation grant/renewal/revocation lifecycle remains unfinished. The Descriptor/output-schema contract is implemented for the eight registered capabilities; this does not certify new providers or permissions.",
       "P04 certified connector read-only reconciliation, final proof of NOT_APPLIED, fresh approval plus explicit owner retry, and correction/read-back of APPLIED_UNVERIFIED outcomes",
       "Complete Gateway authorization/dependency-revocation matrix across certified shared-group sources, DWS/user-specific delegation, classification and model-egress. Private-source actual10000 subset verified; full T036 remains NOT_RUN.",
@@ -837,7 +843,9 @@
       "20 parallel original-run Runtime.advance invocations and 5 stale-generation invocations after genuine HTTP approval produce one actual PostgreSQL effect and one model request; this concurrency case directly invokes the worker runtime rather than a broker",
       "Signed nonce expiry under an explicit test clock and real PostgreSQL nonce deadline both deny decisions; approved role/resource revocation blocks actual recovery before model or physical writes",
       "A committed UNKNOWN write blocks a different new write in the same run; read-only diagnostics remain available",
-      "Real Chrome desktop/mobile control pages were inspected; repeatable synthetic identities revoke old grants, and post-login role revocation denies subsequent data and direct page access"
+      "Real Chrome desktop/mobile control pages were inspected; repeatable synthetic identities revoke old grants, and post-login role revocation denies subsequent data and direct page access",
+      "A forwarded approval card carries no decision right: a non-approver session is refused on both preview and decision, the approval and the action stay untouched, and the outbox receives no run dispatch",
+      "An ordinary question is still answered normally without a personal DWS connection, with no tool action and no CLI invocation, while a DWS operation pauses the run at WAITING_AUTH with DWS_USER_CONSENT_REQUIRED and produces no delivery"
     ],
     "migrations": [
       "067_typed_action_role_authority.sql",
@@ -989,7 +997,8 @@
       "reports/checks/p05-company-requirements.json",
       "reports/checks/p05-company-enterprise.json",
       "reports/checks/p05-company-secret-scan.json",
-      "reports/checks/p05-company-publication-secret-scan.json"
+      "reports/checks/p05-company-publication-secret-scan.json",
+      "reports/company-upstream-error-classification-20261022.json"
     ],
     "updatedAt": "2026-10-15T04:51:09.425569+00:00",
     "codeCommit": "e0d5c09bdf1b659bbbeefdd24f94342595701212",
@@ -1006,7 +1015,8 @@
       "Cross-tenant/actor local denial and deliberately misgranted local scope followed by independent upstream actor rejection both verified.",
       "Adversarial source text reaches actual native substitute; unknown send and foreign repository calls are denied, source credentials redacted, no authority/audience expansion or business write.",
       "Dispatched READ timeout yields no body and retains CERTIFIED_READ/PREPARED; safe recovery reads once more then uses certified cache.",
-      "Actual desktop/mobile Chrome page displays exact code citation and confidentiality; source output remains structured JSON, general narrative UX remains unfinished."
+      "Actual desktop/mobile Chrome page displays exact code citation and confidentiality; source output remains structured JSON, general narrative UX remains unfinished.",
+      "Upstream MCP refusals are classified by cause in one shared module and only when the refusal is bound to the exact call: MISSING_SCOPES becomes NEEDS_AUTH with only the scopes the upstream named, RESOURCE_ACCESS_DENIED becomes DENIED, APPLICATION_UNAVAILABLE becomes PERMANENT_ERROR and any unattributable refusal becomes DENIED/UPSTREAM_ERROR_UNKNOWN with completeness UNKNOWN; no denial class carries requiredScopes."
     ],
     "remaining": [
       "P03 general natural-language Q&A, free-narrative entailment, valid clarification and semantic goal fulfillment remain incomplete; native loop70.83% is below enterprise critical branch90%.",
@@ -1015,6 +1025,7 @@
       "P04/P05 full versioned permission management and audited review/re-enable workflow after schema change remain incomplete; this code denies schema mismatch and cannot silently promote it.",
       "P05 OAuth/mTLS and SSE/stdio production adapters are not implemented in this component.",
       "Actual enterprise chat read-only/per-actor resource/structured-evidence contract, approved code/log assets and egress authorization remain BLOCKED_EXTERNAL; discovered generic chat is not auto-enabled.",
+      "Live upstream refusal scenarios (a real upstream 403 caused by a resource ACL or an unpublished application) remain BLOCKED_EXTERNAL; the local classification is exercised only against a reviewed synthetic MCP fixture.",
       "P06–P14 and full ENTERPRISE_DWS requirements remain outstanding."
     ],
     "migrations": [
@@ -1024,7 +1035,8 @@
       "packages/company/src/contracts.ts",
       "packages/company/src/chat.ts",
       "packages/company/src/code.ts",
-      "packages/company/src/configuration.ts"
+      "packages/company/src/configuration.ts",
+      "packages/company/src/upstream-error.ts"
     ],
     "nextStageInput": "Complete logs/version/permission-review and critical coverage gaps; proceed with isolated DWS contract work without using real local profiles or enterprise calls."
   },
@@ -1263,7 +1275,8 @@
       "Evidence-grounded full work guidance and complete goal verification remain incomplete; the task-page persona snapshot explanation already has a local implemented component, without certifying full P07.",
       "SRE alert/code/log, BI certified statistics and PMO schedules/group/todo/sending dependencies require independent implementation and authorization.",
       "Original P02–P06 incomplete integrations, P04 controls, P05 logs/deployment correlation and P06 independent signed restricted DWS runner/device flow/full office coverage remain work; legacy in-process configureDws rejects DWS_RUNNER_SERVICE_REQUIRED, while independently reviewed signed group/document read modes exist and do not certify full production office integration.",
-      "P08–P14 original full scope, real quality/adversarial/load-soak/mutation/restore/production acceptance remain required."
+      "P08–P14 original full scope, real quality/adversarial/load-soak/mutation/restore/production acceptance remain required.",
+      "The private memory lifecycle now has local oracles for T039-T043/T046 (DingTalk private-chat save receipt and its source/consent basis, group exclusion before retrieval, recorded dependency erasure with the retention boundary, correction precedence and expiry, owner-scoped continuation and the explicit-consent-only creation rule); these are local synthetic oracles and do not close the live private-chat, live model or enterprise acceptance gaps."
     ],
     "sourceTreeHash": "4d58df409da98221f6d1acf48733e123989875b308694397cb9c909155dfd2b4",
     "committedSourceTreeHash": "ee3f61a3bb6a035fe27c36e56ceb16ce1761d2f1117570f5bb26c7fd110539f4",
@@ -1285,7 +1298,8 @@
       "reports/p07-erasure-dialogue-candidate.json",
       "reports/checks/p07-erasure-dialogue.json",
       "reports/p07-erasure-send-candidate.json",
-      "reports/checks/p07-erasure-send-backend.json"
+      "reports/checks/p07-erasure-send-backend.json",
+      "reports/private-memory-lifecycle-20261022.json"
     ],
     "followupCodeCommit": "551d5731451075d2cf89b98599c29f94b746f078",
     "followupSourceTreeHash": "2d54e699e17b1d4e7e0ae5bda1b4936d45a118daf48347871c0fdd932f338642",

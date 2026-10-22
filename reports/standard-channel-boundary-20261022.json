@@ -1,0 +1,91 @@
+{
+  "status": "PASS",
+  "scope": "LOCAL_SYNTHETIC_STANDARD_CHANNEL_BOUNDARY_ORACLES",
+  "live": {
+    "status": "BLOCKED_EXTERNAL",
+    "reason": "Live DingTalk group and single message acceptance, the real approval card surface, the DWS device authorization flow and the live per-user grant require enterprise credentials that are not present in this environment. T002, T008 and T028 therefore remain NOT_RUN in config/test-catalog.json and R01, R08, R15 and R23 remain IN_PROGRESS."
+  },
+  "generatedAt": "2026-10-22T11:00:00Z",
+  "source": {
+    "baseCommit": "d93c8a2f169d21efa48c4fe50c8096665dc62475",
+    "workingTree": true,
+    "files": {
+      "tests/integration/channel-boundary.test.ts": "d93b5be287a03384abae8562404d940cbdee3ee720fcef0b8f04ca34fd65aa8e",
+      "tests/integration/controls.test.ts": "3aa7539a01de2de66f0e35a2a10e324fe238629635d3e8113ac5096e53e1cbab",
+      "tests/support/backend-discovery-baseline.json": "68d549424d20758ca70a575867513e14d7297a14dd70f9881e128336d8f933b5",
+      "tests/support/group-runtime.ts": "fea289807c59e97672092d97e3f922c0e01a43312cd052a0b2bb06a97a6d2ccd",
+      "packages/dingtalk/src/ingress.ts": "23e5ae8963f18af4c7ed5112b9a80217c66abf4a913cdb859f4a305cdb2f6158",
+      "packages/gateway/src/control-plane.ts": "741e89f0300974b340f5c8fe1d4e5aa1f76a540a41ffc02088554502a7552bf5",
+      "packages/dws/src/capabilities.ts": "52fdc91eaf701d0efcbde14eeb3da2132474a2c6deedd3e9a22fcd5ab01fdb98",
+      "packages/runtime/src/loop.ts": "66b1e49b41e8d35b939114b0a9d3a535120f5ca7350202d2d6812343ac0e0bff",
+      "config/test-catalog.json": "3dbd716bc6f84a9f724d4055c6c484a71f1a8e97b72bcde83a0f86f38cb447ad",
+      "config/requirements.json": "141a9d0340d41f1de84eb179055b72fca6e007fe7bacedb5afbf5afde4a04467",
+      "config/stages.json": "018ee3bd45414a570fe524f72a7b66a710e8245c2974b61ef7dbd00589cb2c65",
+      "docs/02_ARCHITECTURE_RUNTIME_AND_DATA_CONTRACTS.md": "cf81cfe06ebd8481084206f0f6ff027ac0086267b26468f0666665eafc7adff7",
+      "docs/04_TEST_ACCEPTANCE_AND_OPERATIONS.md": "63e91da032bfd9e3bc8904c782e811a3f91cbb66da354310f50cc83e36fd6a0e"
+    }
+  },
+  "surface": {
+    "entry": "tests/integration/channel-boundary.test.ts and the T008 case inside tests/integration/controls.test.ts",
+    "host": "the real DingTalk ingress, the real gateway capability path, the real control plane and the real delivery gateway on the isolated PostgreSQL 64711 cluster",
+    "transport": "synthetic DingTalk robot callbacks and synthetic GLM SSE answers over the reviewed local stack; no live DingTalk, DWS, GLM or company MCP credential is used",
+    "singleAuthority": "No new endpoint, table, capability or execution path was added. The channel keeps its existing admission rules, the approval keeps its existing session and approver binding, and DWS keeps its existing per-capability authorization gate."
+  },
+  "behavior": {
+    "t002LegalEventsOnly": "The standard channel admits only the legal events it actually received. One delivered group event yields exactly one inbox event, one task and one run; a callback on a non-robot topic, a callback carrying another robot code in the same corp, the bot own message and a sender outside the tenant directory are all refused without creating an inbox event, a task or a run. The group conversation stays MENTION_ONLY and neither the model requests, the run result nor the delivered reply contains a message that was never delivered.",
+    "t008ForwardedCardCarriesNoDecisionRight": "A forwarded approval card gives the forwarder no decision right. A non-approver session is refused on preview and on decision, replaying the forwarded nonce is refused with DECISION_NONCE_INVALID before any state change, the owner still cannot approve her own action, the approval row stays PENDING for the designated approver, no outbox dispatch row is written and the business effect counter stays zero.",
+    "t028UnauthorizedDws": "An ordinary question is still answered normally while the personal DWS connection is missing: the run reaches SUCCEEDED with the ordinary answer, exactly one result delivery carries that answer, no tool action is created and the DWS CLI is never invoked. The same user asking for an office action is paused, not answered and not retried: the run reaches WAITING_AUTH with last_error DWS_USER_CONSENT_REQUIRED, carries no result and produces no result delivery.",
+    "honesty": "Every assertion is a real database or delivery observation on the isolated test cluster. No live provider was contacted, no credential was read and no undelivered message was simulated as if it had been received."
+  },
+  "cases": [
+    {
+      "id": "T002",
+      "catalogStatus": "NOT_RUN",
+      "localOracle": "tests/integration/channel-boundary.test.ts",
+      "executed": true
+    },
+    {
+      "id": "T008",
+      "catalogStatus": "NOT_RUN",
+      "localOracle": "tests/integration/controls.test.ts",
+      "executed": true
+    },
+    {
+      "id": "T028",
+      "catalogStatus": "NOT_RUN",
+      "localOracle": "tests/integration/channel-boundary.test.ts",
+      "executed": true
+    }
+  ],
+  "tests": {
+    "targeted": {
+      "command": "node scripts/run-tests.mjs vitest run tests/integration/channel-boundary.test.ts tests/integration/controls.test.ts",
+      "files": 2,
+      "filesPassed": 2,
+      "filesFailed": 0,
+      "skipped": 0,
+      "tests": 103,
+      "testsPassed": 103,
+      "testsFailed": 0
+    },
+    "typecheck": "PASS",
+    "lint": "PASS",
+    "schemaContractCheck": "PASS",
+    "capabilityOutputContractCheck": "PASS",
+    "build": "PASS",
+    "requirementsBaseline": "PASS",
+    "requirementsFull": "FAIL_PREEXISTING",
+    "requirementsFullNote": "54 errors remain from stages still in progress: 36 R-items that are not yet IMPLEMENTED, TESTED or LIVE_VERIFIED and 18 later T-cases whose implementation file does not yet exist. It is down from 78 because T002, T008, T028, T026, T027, T072, T123 and the private-memory lifecycle cases T039-T043/T046 now point at files that carry their stable identifiers. The remaining unmapped T-cases are the live-enterprise cases T020, T069, T070, T082 and T096, the deferred phase-two data cases T089, T090 and T094 and the still-open product cases T021, T044, T045, T081, T101, T116, T118, T121, T126 and T129. No error involves this slice and the baseline integrity mode passes.",
+    "liveProviderCalls": 0,
+    "regression": {
+      "command": "node scripts/run-tests.mjs vitest run tests/integration/private-memory-lifecycle.test.ts tests/security/runner-image-security.test.ts tests/integration/channel-boundary.test.ts tests/integration/controls.test.ts tests/integration/group-clarification.test.ts tests/integration/permission-center.test.ts tests/integration/office-todo-mirror.test.ts tests/unit/test-isolation.test.ts",
+      "files": 8,
+      "filesPassed": 8,
+      "filesFailed": 0,
+      "skipped": 0,
+      "tests": 216,
+      "testsPassed": 216,
+      "testsFailed": 0
+    }
+  }
+}

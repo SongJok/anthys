@@ -169,9 +169,14 @@
       "db/migrations/115_role_binding_administration.sql",
       "apps/web/src/role-admin-flow.ts",
       "apps/web/src/role-admin.tsx",
-      "apps/web/src/permissions.tsx"
+      "apps/web/src/permissions.tsx",
+      "packages/company/src/upstream-error.ts",
+      "packages/company/src/code.ts",
+      "packages/company/src/logs.ts",
+      "packages/company/src/data.ts"
     ],
     "status": "IN_PROGRESS",
+    "remaining": "Upstream MCP refusals are classified by cause and bound to the exact call: a MISSING_SCOPES refusal yields NEEDS_AUTH with only the scopes the upstream named, RESOURCE_ACCESS_DENIED yields DENIED, APPLICATION_UNAVAILABLE yields PERMANENT_ERROR and any unattributable refusal yields DENIED/UPSTREAM_ERROR_UNKNOWN, so an unknown cause never asks the user for new permissions. Local role-binding administration and managed grant admission are implemented. The local T028 oracle is covered: without a personal DWS connection an ordinary question is still answered normally with no tool action and no CLI invocation, while a DWS operation pauses the run at WAITING_AUTH with DWS_USER_CONSENT_REQUIRED and produces no delivery. The DWS device flow and the live per-user grant, the full permission and version review lifecycle, upstream-grant reconciliation against the enterprise AI platform and live enterprise acceptance remain incomplete.",
     "intendedModules": [
       "packages/gateway/src/index.ts"
     ]
@@ -223,7 +228,8 @@
     "status": "IN_PROGRESS",
     "intendedModules": [
       "packages/memory"
-    ]
+    ],
+    "remaining": "The private preference lifecycle is locally implemented and locally asserted for the DingTalk private-chat receipt path, the H5 memory API, the separately approved model-policy freeze, group exclusion before retrieval, correction, expiry and the recorded dependency erasure graph, with local oracles for T017 and T039-T043/T046 in tests/integration/private-memory-lifecycle.test.ts and tests/integration/runtime.test.ts. Live DingTalk private chat, real model runs, the enterprise 90% critical coverage of the memory/persona critical path and the complete P07 graph remain unfinished; R10 is not declared complete and the enterprise acceptance stays BLOCKED_EXTERNAL."
   },
   "R11": {
     "tests": [
@@ -745,7 +751,8 @@
     "intendedModules": [
       "packages/policy/src/index.ts",
       "db/migrations/001_identity.sql"
-    ]
+    ],
+    "remaining": "Owner-scoped authorization boundaries are locally verified for private memory: group audiences are excluded before retrieval, a foreign owner's private audience is denied, provider journals stay owner-scoped per run and the erased dependency graph is recorded instead of silently dropping references. The remaining R29 cases T068, T081 have no local implementation file yet, and the live enterprise authorization acceptance stays BLOCKED_EXTERNAL."
   },
   "R30": {
     "tests": [

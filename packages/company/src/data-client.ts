@@ -5,6 +5,7 @@ import type {DbContext} from '../../storage/src/database.js';
 import {chatSchemaHash,CompanySourceError} from './chat.js';
 import {companyDataContractHash,type DataScope} from './data-contracts.js';
 import {requireDataTemplate,type DataTemplate,type DataTemplateRegistry} from './data-templates.js';
+import {upstreamErrorFrom} from './upstream-error.js';
 // A timed-out upstream request may still be running. The local side keeps the
 // request handle it issued so the execution stays reconcilable, and never
 // compensates the timeout with another query.
@@ -31,7 +32,7 @@ export class CompanyDataClient{
    try{raw=await this.client.callTool({name:this.toolName,arguments:{message}},CallToolResultSchema,options);}
    catch(error){if(signal.aborted)throw new CompanyDataTimeoutError(nonce,'CANCELLED');if(timeoutSignal.aborted)throw new CompanyDataTimeoutError(nonce,'TIMEOUT');throw error;}
    const reply=CallToolResultSchema.parse(raw);if(signal.aborted)throw new CompanyDataTimeoutError(nonce,'CANCELLED');
-   if(reply.isError)throw new CompanySourceError('COMPANY_DATA_UPSTREAM_DENIED');
+   if(reply.isError)throw upstreamErrorFrom(reply,{contractHash:companyDataContractHash,nonce,tenantId:ctx.tenantId,actorId:ctx.actorId,scopeId:scope.id});
    if(reply.content.length!==1||reply.content[0]?.type!=='text'||Buffer.byteLength(reply.content[0].text,'utf8')>96000)throw new CompanySourceError('COMPANY_DATA_RESPONSE_INVALID');
    let value:unknown;try{value=JSON.parse(reply.content[0].text);}catch{throw new CompanySourceError('COMPANY_DATA_RESPONSE_INVALID');}return {value,nonce};
   }finally{this.active--;}

@@ -1,0 +1,80 @@
+{
+  "status": "PASS",
+  "scope": "LOCAL_SYNTHETIC_RUNNER_IMAGE_AND_MINIMUM_PERMISSION_ORACLES",
+  "live": {
+    "status": "BLOCKED_EXTERNAL",
+    "reason": "The enterprise Linux runner image build, the live container inspection and the real runtime log inspection need the enterprise CI environment and its registry, which are not present in this environment. T072 and T123 therefore remain NOT_RUN in config/test-catalog.json and R33 remains IN_PROGRESS."
+  },
+  "generatedAt": "2026-10-22T10:38:00Z",
+  "source": {
+    "baseCommit": "d93c8a2f169d21efa48c4fe50c8096665dc62475",
+    "workingTree": true,
+    "files": {
+      "tests/security/runner-image-security.test.ts": "14ac9861274471692ceca4dfc18f88b5a81e87cb861ffaf2338c70e633945d15",
+      "packages/dws/src/signed-service.ts": "bd91f5d579ee361931e3570f2b437f50dcd4e9c7a935708722c1793847660b1f",
+      "packages/sandbox/src/service-auth.ts": "760aa40d829567f54170b3879dc5aa0485d8424fe5da17748dbedc128e89e1f7",
+      "packages/sandbox/src/executor.ts": "c96fc70023d7678969af7594d63c84d2583da14fbda00d51d98a72a929525213",
+      "packages/company/src/configuration.ts": "cc31e72f99bde25c6dbc251e2d69d33fb6f3286ed92d86aacdb2bfb092714b5c",
+      "packages/company/src/contracts.ts": "8930ed118b2460f361a6cb3036a092f1f0c43055f9ee60cd683891673171af10",
+      "deploy/images/dws-runner.Dockerfile": "7e9656ad91b8c2ecc03672b1e90cc45c96f29b021b0c9cf5c5e7f15141a9f2c3",
+      "deploy/images/app.Dockerfile": "0c8dfd978ba67070f9d98d9ee6b968b70c5aa6d055d0a673782dec55a94f8b7d",
+      "deploy/compose/compose.prod.yml": "98d93ec9740043bc951324387e87e7a44489698309653c32ac897619c68484cb",
+      "deploy/compose/compose.dev.yml": "ed654112d06303795c4e954270eb76aeb3520b50f0a754061de027b03d62e841",
+      ".dockerignore": "60e346d39fb3a7896e897f09c8f084bc93b09c9cc719ddf46d68368f2ffe4658",
+      "scripts/verify-dws-image.mjs": "f110b81b7391011fbc932a5dc98d0ed4791cc0c892de76357dab535f8d5d3ef9",
+      "scripts/verify-app-image.mjs": "0c26402fcc97d4af7b3b1830dbc4fb81e1b8660739cb3f56c89c7153d8f87c73",
+      "scripts/probe-dws-signed-offline.mjs": "1ac993f5494a16243b24493906b5807d23ece24866c5880f8adc0af9fe0e45f7",
+      "reports/dws-runner-security-20261022/result.json": "faa46fae4b6edff93e3d9ec838fc5a88ad8811bc40e1fab8c6aef3e8d4a96c67",
+      "config/test-catalog.json": "3dbd716bc6f84a9f724d4055c6c484a71f1a8e97b72bcde83a0f86f38cb447ad",
+      "config/requirements.json": "141a9d0340d41f1de84eb179055b72fca6e007fe7bacedb5afbf5afde4a04467",
+      "config/stages.json": "018ee3bd45414a570fe524f72a7b66a710e8245c2974b61ef7dbd00589cb2c65",
+      "docs/04_TEST_ACCEPTANCE_AND_OPERATIONS.md": "63e91da032bfd9e3bc8904c782e811a3f91cbb66da354310f50cc83e36fd6a0e"
+    }
+  },
+  "surface": {
+    "entry": "tests/security/runner-image-security.test.ts",
+    "host": "the real DWS runner and application image definitions, the real runtime permission guards in packages/dws, packages/sandbox and packages/company, the real production and development compose files, and the recorded offline image probe in reports/dws-runner-security-20261022/result.json",
+    "transport": "local filesystem inspection and in-process calls to the real permission guards; no docker daemon, no container is started, no network call is made and no credential is read",
+    "singleAuthority": "No new endpoint, table, capability or execution path was added. The image definition, the runtime permission rules and the compose topology stay the single authority, and the recorded probe stays the single recorded image evidence."
+  },
+  "behavior": {
+    "t072RunnerImagePermissionsAndLogs": "The Linux runner image pins both base images by digest, runs as uid 10001, copies the fixed CLI read-only with mode 0555 and the release license with mode 0444, strips every group or world write bit and every setuid or setgid bit at build time, declares no port and no volume, and keeps .env, .env.* and .secrets out of the build context. The real guards enforce the 0700 socket parent, the 0600 broker key and the 0600 upstream token file: a 0755 parent is refused with DWS_RPC_SOCKET_UNSAFE, a 0660 key with SANDBOX_BROKER_AUTH_KEY_UNSAFE and a 0644 token with COMPANY_TOKEN_FILE_PERMISSIONS, while the 0700, 0600 and 0600 forms are accepted. The recorded offline probe shows the socket at 0600, the parent at 0700, the config and key files at 0600, an AES-256-GCM AAD envelope, argv and logs that carry no secret, zero business CLI calls, zero authorization calls and no enterprise credential.",
+    "t123ImageUserCapabilitiesAndSocket": "The application and runner images pin their base by digest and run as uid 10001 with no Docker socket inside the image. The sandbox executor creates containers with user 10001:10001, all capabilities dropped, no-new-privileges, no network and a read-only root filesystem. In both the real production and the real development compose file the Docker socket is mounted only into the isolated sandbox-broker service and never into the api, worker, ingress, notifier, scheduler, maintenance or dws-runner services. The recorded offline probe shows every capability set at zero, noNewPrivs 1, no Docker socket, no TCP listener, a read-only root filesystem and a bounded tmpfs.",
+    "honesty": "Every assertion is a real file, a real in-process refusal or a real recorded probe result. No container was started, no image was rebuilt, no enterprise runner was contacted and no acceptance is claimed beyond the local scope."
+  },
+  "cases": [
+    {
+      "id": "T072",
+      "catalogStatus": "NOT_RUN",
+      "localOracle": "tests/security/runner-image-security.test.ts",
+      "executed": true
+    },
+    {
+      "id": "T123",
+      "catalogStatus": "NOT_RUN",
+      "localOracle": "tests/security/runner-image-security.test.ts",
+      "executed": true
+    }
+  ],
+  "tests": {
+    "targeted": {
+      "command": "node scripts/run-tests.mjs vitest run tests/security/runner-image-security.test.ts",
+      "files": 1,
+      "filesPassed": 1,
+      "filesFailed": 0,
+      "skipped": 0,
+      "tests": 2,
+      "testsPassed": 2,
+      "testsFailed": 0
+    },
+    "typecheck": "PASS",
+    "lint": "PASS",
+    "schemaContractCheck": "PASS",
+    "capabilityOutputContractCheck": "PASS",
+    "build": "PASS",
+    "requirementsBaseline": "PASS",
+    "requirementsFull": "FAIL_PREEXISTING",
+    "requirementsFullNote": "54 errors remain from stages still in progress: 36 R-items that are not yet IMPLEMENTED, TESTED or LIVE_VERIFIED and 18 later T-cases whose implementation file does not yet exist. It is down from 56 because T072 and T123 now point at a test file that carries the stable case identifiers. No error involves the runner image and minimum permission slice, and the baseline integrity mode passes.",
+    "liveProviderCalls": 0
+  }
+}

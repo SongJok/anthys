@@ -1,0 +1,136 @@
+{
+  "status": "PASS",
+  "scope": "LOCAL_SYNTHETIC_UPSTREAM_MCP_REFUSAL_CLASSIFICATION",
+  "live": false,
+  "generatedAt": "2026-10-22T11:00:00Z",
+  "source": {
+    "baseCommit": "d93c8a2f169d21efa48c4fe50c8096665dc62475",
+    "workingTree": true,
+    "files": {
+      "packages/company/src/upstream-error.ts": "8786b77aeffa6d736eacd98418e001a7448ae0af6c4723a3d8ead3c0039e29bb",
+      "packages/company/src/chat.ts": "d8fec99cba9de426d7c3d69a4ed3aa6998bb2caf5a80e8e352cde50a5ffb26ca",
+      "packages/company/src/code.ts": "c49a114ddbd89b6505576af34568bb9432522eb1a6a903e180491005495abec7",
+      "packages/company/src/logs.ts": "4597d2dc07dd18181e640994b6ca487fd05b9a8f41eed0194da16e2768654dc8",
+      "packages/company/src/log-client.ts": "d4adc0d4882bd9b67f52ebe478a08c3e25de3a4cef28fe1ce91744d51bb775fc",
+      "packages/company/src/data.ts": "0b6d626038e3e18ba42b04fdcd6472d7a931dcb31f94e8d2bb8b33d455a538b6",
+      "packages/company/src/data-client.ts": "b9bee33e999bd6722350036bb3844c5853aebb8fe1fb08afd24f60b8315861b1",
+      "tests/unit/company-upstream-error.test.ts": "2514447afbc440cd95278907398abbc40ab9207062baa286ec369a3866dce754",
+      "tests/integration/company-upstream-error.test.ts": "a95d96576d164c64636a4f279da60df273bba4df49fd63164e0fb4d7ea15be19",
+      "tests/support/company-mcp.ts": "91e33b230201bf9650ca21538d3148dff91a19860ea14d4fa5cf14248b317c34",
+      "tests/support/company-logs-mcp.ts": "9cd22a4c0b450ce201b1b3d1b79819819de6d1d896e3281dac2f2a8df77a407d",
+      "tests/support/company-data-mcp.ts": "38f95540f5fbb9866874f8d26bbaf74999f7ed479e4eabd354b33e75b5b69ade",
+      "tests/unit/company-data-contracts.test.ts": "a052236b296677c09a71563d0fabede32c740ffc3fddbc08b757ad64aaf5e2b7",
+      "tests/integration/company-logs.test.ts": "228c45c3a20c8958e61619c5d3b853482ff017180e3af376cc2b0c9de1a31434",
+      "tests/support/backend-discovery-baseline.json": "68d549424d20758ca70a575867513e14d7297a14dd70f9881e128336d8f933b5",
+      "config/requirements.json": "141a9d0340d41f1de84eb179055b72fca6e007fe7bacedb5afbf5afde4a04467",
+      "config/stages.json": "018ee3bd45414a570fe524f72a7b66a710e8245c2974b61ef7dbd00589cb2c65",
+      "config/test-catalog.json": "3dbd716bc6f84a9f724d4055c6c484a71f1a8e97b72bcde83a0f86f38cb447ad",
+      "docs/02_ARCHITECTURE_RUNTIME_AND_DATA_CONTRACTS.md": "cf81cfe06ebd8481084206f0f6ff027ac0086267b26468f0666665eafc7adff7",
+      "docs/04_TEST_ACCEPTANCE_AND_OPERATIONS.md": "63e91da032bfd9e3bc8904c782e811a3f91cbb66da354310f50cc83e36fd6a0e"
+    }
+  },
+  "surface": {
+    "entry": "packages/company/src/upstream-error.ts, used by packages/company/src/chat.ts, packages/company/src/log-client.ts and packages/company/src/data-client.ts when the upstream MCP answers with an error, and by packages/company/src/code.ts, packages/company/src/logs.ts and packages/company/src/data.ts when the result is produced",
+    "host": "the gateway capabilities company.code.search, company.code.read, company.logs.query and company.data.query, reached only through the reviewed upstream MCP connectors",
+    "transport": "MCP callTool error replies over the reviewed company code, log and data connectors, with the same contractHash, nonce, tenantId, actorId and scopeId binding the request already carries",
+    "singleAuthority": "No new endpoint, table, capability or second execution path was added. The upstream MCP remains the only way code, logs and data are read, and the upstream remains the only authority on why it refused. Anthys reports that refusal as it stands instead of inventing a reason or a scope."
+  },
+  "behavior": {
+    "bindingGatedClassification": "A refusal is classified only when its envelope carries exactly the contractHash, nonce, tenantId, actorId and scopeId of the call that produced it. Any mismatch, including a contract hash from the log or data contract, a foreign scope or a different nonce, is classified as UNKNOWN, so a refusal that cannot be attributed to this call is never attributed to it.",
+    "noInventedScope": "A MISSING_SCOPES refusal reports exactly the scopes the upstream named, deduplicated, each at most 128 characters and at most 32 in total. A refusal that names no scope has nothing to ask the user for and is reported as a refusal, never as a permission request.",
+    "separateRefusalCauses": "A resource ACL denial becomes DENIED with UPSTREAM_RESOURCE_ACCESS_DENIED and an unpublished application becomes PERMANENT_ERROR with UPSTREAM_APPLICATION_UNAVAILABLE. An unknown cause becomes DENIED with UPSTREAM_ERROR_UNKNOWN and completeness UNKNOWN. No denial class carries requiredScopes, so an unknown cause never asks the user for new permissions.",
+    "noProseParsing": "Only a single text block of at most 96000 bytes is inspected, and only as JSON. Upstream prose, an empty body, a multi-block body, a non-text block and an oversized body are never parsed into a classification and are never echoed back.",
+    "runtimePause": "The NEEDS_AUTH result makes the runtime pause the run at WAITING_AUTH with last_error UPSTREAM_MISSING_SCOPES and no result, instead of retrying the upstream. The upstream read count stays at zero while the attempt count is positive, so a missing permission does not amplify into repeated upstream calls.",
+    "singleClassificationSurface": "CompanyUpstreamError extends Error instead of CompanySourceError so that upstream-error.ts does not import chat.ts, which would create an ESM import cycle. The three capability modules call upstreamErrorResult first and fall back to the previous PERMANENT_ERROR or RETRYABLE_ERROR mapping for failures that are not upstream refusals.",
+    "deadPathsRemoved": "The COMPANY_LOG_UPSTREAM_DENIED branch in packages/company/src/logs.ts, the COMPANY_DATA_UPSTREAM_DENIED branch in packages/company/src/data.ts and their dead assertions were removed, because the shared classification now decides those outcomes."
+  },
+  "tests": {
+    "commands": [
+      "node scripts/run-tests.mjs vitest run tests/unit/company-upstream-error.test.ts",
+      "node scripts/run-tests.mjs vitest run tests/integration/company-upstream-error.test.ts",
+      "node scripts/run-tests.mjs vitest run tests/unit/company-upstream-error.test.ts tests/integration/company-upstream-error.test.ts tests/integration/company-logs.test.ts tests/integration/company-data.test.ts tests/unit/company-data-contracts.test.ts tests/unit/test-isolation.test.ts",
+      "node scripts/update-schema-contract.mjs --check",
+      "node --import tsx scripts/capability-output-contracts.ts --check",
+      "node --import tsx scripts/verify-requirements.ts --baseline",
+      "node --import tsx scripts/verify-requirements.ts",
+      "node <typescript>/bin/tsc --noEmit",
+      "node <eslint>/bin/eslint.js apps packages scripts tests",
+      "pnpm build"
+    ],
+    "unit": {
+      "files": 1,
+      "passed": 8,
+      "failed": 0,
+      "skipped": 0,
+      "newFile": {
+        "path": "tests/unit/company-upstream-error.test.ts",
+        "passed": 8,
+        "failed": 0
+      },
+      "source": "pure contract assertions on the shared classification module, with synthetic contract hashes, nonces and scope identifiers",
+      "covered": [
+        "a refusal is classified only when it is bound to this exact call: every one of contractHash, nonce, tenantId, actorId and scopeId must match, and a hash from the log or data contract is a different contract and stays UNKNOWN",
+        "only the scopes the upstream named are reported, deduplicated and bounded, and an unknown kind is not parsed into a classification",
+        "a missing scope refusal becomes a permission request for exactly the named scopes",
+        "a refusal that names no scope never becomes a permission request",
+        "a resource denial and an unavailable application stay two distinct refusals, and neither carries requiredScopes",
+        "prose, empty, multi-block, non-text and oversized bodies are never parsed into a classification and never become NEEDS_AUTH",
+        "a refusal bound to another nonce is not trusted even when it names scopes",
+        "a failure that is not an upstream refusal keeps its own classification and is not routed into the upstream mapping"
+      ]
+    },
+    "integration": {
+      "files": 1,
+      "passed": 4,
+      "failed": 0,
+      "skipped": 0,
+      "newFile": {
+        "path": "tests/integration/company-upstream-error.test.ts",
+        "passed": 4,
+        "failed": 0
+      },
+      "source": "isolated PostgreSQL on port 64711 with the reviewed synthetic code, log and data MCP substitutes and the real gateway capability path",
+      "covered": [
+        "a missing scope refusal becomes NEEDS_AUTH with exactly the scopes the upstream named on the code, log and data capabilities, returns no data and leaves the action as PREPARED with CERTIFIED_READ",
+        "a resource ACL denial and an unavailable application stay separate refusals and never request a scope",
+        "a prose refusal and a refusal bound to a foreign scope both become DENIED with UPSTREAM_ERROR_UNKNOWN and are never presented as a permission problem",
+        "a missing scope refusal pauses the run at WAITING_AUTH with last_error UPSTREAM_MISSING_SCOPES, produces no delivery, and does not read the upstream again"
+      ]
+    },
+    "regression": {
+      "command": "node scripts/run-tests.mjs vitest run tests/integration/private-memory-lifecycle.test.ts tests/security/runner-image-security.test.ts tests/integration/channel-boundary.test.ts tests/integration/controls.test.ts tests/integration/group-clarification.test.ts tests/integration/permission-center.test.ts tests/integration/office-todo-mirror.test.ts tests/unit/test-isolation.test.ts",
+      "files": 8,
+      "filesPassed": 8,
+      "filesFailed": 0,
+      "skipped": 0,
+      "tests": 216,
+      "testsPassed": 216,
+      "testsFailed": 0
+    },
+    "typecheck": "PASS",
+    "lint": "PASS",
+    "schemaContractCheck": "PASS",
+    "capabilityOutputContractCheck": "PASS",
+    "requirementsBaseline": "PASS",
+    "requirementsFull": "FAIL_PREEXISTING",
+    "requirementsFullNote": "54 errors remain from stages still in progress: 36 R-items that are not yet IMPLEMENTED, TESTED or LIVE_VERIFIED and 18 later T-cases whose implementation file does not yet exist. It is down from 78 because T002, T008, T028, T026, T027, T072, T123 and the private-memory lifecycle cases T039-T043/T046 now point at files that carry their stable identifiers. The remaining unmapped T-cases are the live-enterprise cases T020, T069, T070, T082 and T096, the deferred phase-two data cases T089, T090 and T094 and the still-open product cases T021, T044, T045, T081, T101, T116, T118, T121, T126 and T129. No error involves this slice and the baseline integrity mode passes.",
+    "build": "PASS",
+    "liveProviderCalls": 0
+  },
+  "notProven": [
+    "live GLM, DingTalk, DWS or company MCP acceptance",
+    "the real upstream refusal reasons, including a genuine 403 caused by a resource ACL or by an unpublished application",
+    "the upstream side of a missing-scope refusal, including whether the upstream names the scopes the same way in production",
+    "any enterprise permission administration or upstream grant reconciliation",
+    "real development database on port 64710 or any deployment",
+    "T026, T027 or T028 full catalog acceptance or R08 completion"
+  ],
+  "statusUnchanged": {
+    "T026": "NOT_RUN",
+    "T027": "NOT_RUN",
+    "T028": "NOT_RUN",
+    "R08": "IN_PROGRESS",
+    "P05": "IN_PROGRESS",
+    "liveAcceptance": "BLOCKED_EXTERNAL"
+  }
+}

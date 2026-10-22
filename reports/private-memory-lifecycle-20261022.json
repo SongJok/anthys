@@ -1,0 +1,115 @@
+{
+  "status": "PASS",
+  "scope": "LOCAL_SYNTHETIC_PRIVATE_MEMORY_LIFECYCLE_ORACLES",
+  "live": {
+    "status": "BLOCKED_EXTERNAL",
+    "reason": "Live DingTalk private chat, real model runs and the enterprise memory acceptance need enterprise credentials that are not present in this environment. T039, T040, T041, T042, T043 and T046 therefore remain NOT_RUN in config/test-catalog.json and R10 and R29 remain IN_PROGRESS."
+  },
+  "generatedAt": "2026-10-22T11:00:00Z",
+  "source": {
+    "baseCommit": "d93c8a2f169d21efa48c4fe50c8096665dc62475",
+    "workingTree": true,
+    "files": {
+      "tests/integration/private-memory-lifecycle.test.ts": "204e4bfe50a38f95a43a55ff10bed748a3c30b1c83db58e09b2bd76d3b2ce40d",
+      "tests/support/backend-discovery-baseline.json": "68d549424d20758ca70a575867513e14d7297a14dd70f9881e128336d8f933b5",
+      "packages/memory/src/service.ts": "6ef64dc7f947a002ff1303a19bb854ba9c0ce201618cd80b04b4857f19aafe91",
+      "packages/memory/src/runtime.ts": "52cde05a372856b4ff1c700fb74aed7ce532691cca2daaa627ae5e14f3a48a65",
+      "packages/memory/src/commands.ts": "2382d315fdd1fa1e386c14e965c36d253392e632edcc79311b534685bb2d97ad",
+      "packages/dingtalk/src/memories.ts": "8e4225f6858c6371b470c3992c5aab465bf7addc49cd53ebbab6e417a2f6a2fa",
+      "packages/dingtalk/src/ingress.ts": "23e5ae8963f18af4c7ed5112b9a80217c66abf4a913cdb859f4a305cdb2f6158",
+      "packages/personas/src/runtime.ts": "3c7beabb2e66de4e6ba8159a240c282baa3fb0f4338bc8e99541d3ff55408e91",
+      "apps/api/src/memories.ts": "942d941cde13cea6daf7e92b29654ef700006f54fb0579ce1f371d779c1bd8fd",
+      "db/migrations/058_retained_erasure_dependency_repair.sql": "5fb564625e525f67dc8298b5a7f868ca288756e44e4078adf83005fac3d88053",
+      "db/migrations/051_native_memory_receipts.sql": "963c682716992e7427e5631d6c5a0e5a848b5a2dbce5215a4fb54e7bcbe5adee",
+      "config/test-catalog.json": "3dbd716bc6f84a9f724d4055c6c484a71f1a8e97b72bcde83a0f86f38cb447ad",
+      "config/requirements.json": "141a9d0340d41f1de84eb179055b72fca6e007fe7bacedb5afbf5afde4a04467",
+      "config/stages.json": "018ee3bd45414a570fe524f72a7b66a710e8245c2974b61ef7dbd00589cb2c65",
+      "docs/02_ARCHITECTURE_RUNTIME_AND_DATA_CONTRACTS.md": "cf81cfe06ebd8481084206f0f6ff027ac0086267b26468f0666665eafc7adff7",
+      "docs/04_TEST_ACCEPTANCE_AND_OPERATIONS.md": "63e91da032bfd9e3bc8904c782e811a3f91cbb66da354310f50cc83e36fd6a0e"
+    }
+  },
+  "surface": {
+    "entry": "tests/integration/private-memory-lifecycle.test.ts",
+    "host": "the real DingTalk private-chat ingress, the real H5 memory API, the real private preference service and model policy, the real runtime and delivery path on the isolated PostgreSQL 64711 cluster",
+    "transport": "synthetic DingTalk robot callbacks and synthetic GLM SSE answers over the reviewed local stack; no live DingTalk, DWS, GLM or company MCP credential is used",
+    "singleAuthority": "No new endpoint, table, capability or execution path was added. The private memory keeps its existing explicit-consent creation rule, its existing group exclusion before retrieval and its existing recorded dependency erasure."
+  },
+  "behavior": {
+    "t039ExplicitSaveAndLaterRetrieval": "An explicit private-chat remember request produces one SAVED control response at version 1 whose current revision carries source_kind DINGTALK_TEXT, the originating event as its source, consent_basis EXPLICIT_USER_SAVE and the CONFIDENTIAL sensitivity. The receipt delivery carries the identifier and the version but not the preference body, and a later session of the same owner retrieves the same entry with the same identifier, body, version and source.",
+    "t040ExclusionBeforeRetrieval": "Another owner retrieves nothing and no private body reaches the model request; a group lease is answered with GROUP_EXCLUDED (no item, not truncated, nothing scanned) and the retrieval call itself is never made, so the exclusion happens before retrieval and before the model request instead of being asked for in the prompt.",
+    "t041RecordedDependencyErasure": "Deleting the entry clears its revisions and search index, removes the request body, deletes the provider journal and the context checkpoint of the run that used it, cancels that run with a null result, empties the persona proof, rejects the finalization and suppresses the delivery. The deletion ledger records the coverage, the revision, index and run counts, the USER_FORGET cause and states that physical erasure is not asserted; a later search returns nothing.",
+    "t042CorrectionPrecedenceAndExpiry": "A correction produces version 2 while keeping revisions 1 and 2, and the current revision is version 2. A more similar entry ranks first while it is valid; after it expires the search returns only the corrected entry with the corrected body, and the real model request carries the corrected body and not the expired one.",
+    "t043OwnerScopedContinuation": "The first run binds the memory to its own owner. A private lease that targets another owner is refused with MEMORY_AUDIENCE_DENIED and a group lease is excluded with GROUP_EXCLUDED. The continuing actor gets its own run and owner, binds no memory, and no private body reaches its model request; the provider journals of the two runs stay owner-scoped.",
+    "t046ExplicitConsentOnlyCreation": "Mentioning an identifier number in a goal creates no memory item, no memory event and no control response. An unauthenticated H5 read is refused with 401 and an unauthenticated H5 write is refused with 403 because the CSRF guard runs before the session is resolved, an authenticated write without CSRF is refused with 403 and an authenticated read returns 200; none of these calls creates a record. Only the explicit remember request creates one entry with consent_basis EXPLICIT_USER_SAVE, source_kind DINGTALK_TEXT and sensitivity CONFIDENTIAL.",
+    "honesty": "Every assertion is a real database or delivery observation on the isolated test cluster. No live provider was contacted, no credential was read and no acceptance is claimed beyond the local synthetic scope."
+  },
+  "cases": [
+    {
+      "id": "T039",
+      "catalogStatus": "NOT_RUN",
+      "localOracle": "tests/integration/private-memory-lifecycle.test.ts",
+      "executed": true
+    },
+    {
+      "id": "T040",
+      "catalogStatus": "NOT_RUN",
+      "localOracle": "tests/integration/private-memory-lifecycle.test.ts",
+      "executed": true
+    },
+    {
+      "id": "T041",
+      "catalogStatus": "NOT_RUN",
+      "localOracle": "tests/integration/private-memory-lifecycle.test.ts",
+      "executed": true
+    },
+    {
+      "id": "T042",
+      "catalogStatus": "NOT_RUN",
+      "localOracle": "tests/integration/private-memory-lifecycle.test.ts",
+      "executed": true
+    },
+    {
+      "id": "T043",
+      "catalogStatus": "NOT_RUN",
+      "localOracle": "tests/integration/private-memory-lifecycle.test.ts",
+      "executed": true
+    },
+    {
+      "id": "T046",
+      "catalogStatus": "NOT_RUN",
+      "localOracle": "tests/integration/private-memory-lifecycle.test.ts",
+      "executed": true
+    }
+  ],
+  "tests": {
+    "targeted": {
+      "command": "node scripts/run-tests.mjs vitest run tests/integration/private-memory-lifecycle.test.ts",
+      "files": 1,
+      "filesPassed": 1,
+      "filesFailed": 0,
+      "skipped": 0,
+      "tests": 6,
+      "testsPassed": 6,
+      "testsFailed": 0
+    },
+    "typecheck": "PASS",
+    "lint": "PASS",
+    "schemaContractCheck": "PASS",
+    "capabilityOutputContractCheck": "PASS",
+    "build": "PASS",
+    "requirementsBaseline": "PASS",
+    "requirementsFull": "FAIL_PREEXISTING",
+    "liveProviderCalls": 0,
+    "regression": {
+      "command": "node scripts/run-tests.mjs vitest run tests/integration/private-memory-lifecycle.test.ts tests/security/runner-image-security.test.ts tests/integration/channel-boundary.test.ts tests/integration/controls.test.ts tests/integration/group-clarification.test.ts tests/integration/permission-center.test.ts tests/integration/office-todo-mirror.test.ts tests/unit/test-isolation.test.ts",
+      "files": 8,
+      "filesPassed": 8,
+      "filesFailed": 0,
+      "skipped": 0,
+      "tests": 216,
+      "testsPassed": 216,
+      "testsFailed": 0
+    },
+    "requirementsFullNote": "54 errors remain from stages still in progress: 36 R-items that are not yet IMPLEMENTED, TESTED or LIVE_VERIFIED and 18 later T-cases whose implementation file does not yet exist. It is down from 78 because T002, T008, T028, T026, T027, T072, T123 and the private-memory lifecycle cases T039-T043/T046 now point at files that carry their stable identifiers. The remaining unmapped T-cases are the live-enterprise cases T020, T069, T070, T082 and T096, the deferred phase-two data cases T089, T090 and T094 and the still-open product cases T021, T044, T045, T081, T101, T116, T118, T121, T126 and T129. No error involves this slice and the baseline integrity mode passes."
+  }
+}

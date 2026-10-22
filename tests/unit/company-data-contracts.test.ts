@@ -2,6 +2,7 @@ import {randomUUID} from 'node:crypto';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {CompanySourceError} from '../../packages/company/src/chat.js';
+import {CompanyUpstreamError} from '../../packages/company/src/upstream-error.js';
 import {companyDataContractHash,companyDataToolSchemaHash,dataQuerySchema,dataReplyStatus,dataTemplateRef,parseDataQueryReply,type DataQuery,type DataScope} from '../../packages/company/src/data-contracts.js';
 import {dataFailure} from '../../packages/company/src/data.js';
 import {dataTemplateHash,loadDataTemplates,requireDataTemplate,type DataTemplate} from '../../packages/company/src/data-templates.js';
@@ -26,7 +27,8 @@ describe('T083/T084/T087 deterministic MCP data response mapping',()=>{
   expect(new Set([dataReplyStatus(valid),dataReplyStatus(empty),dataReplyStatus(truncated)])).toEqual(new Set(['OK','EMPTY','PARTIAL']));
  });
  it('keeps DENIED, EMPTY and PARTIAL distinct at the deterministic failure boundary',()=>{
-  expect(dataFailure(new CompanySourceError('COMPANY_DATA_UPSTREAM_DENIED'))).toMatchObject({status:'DENIED',completeness:'UNKNOWN',remediation:{kind:'COMPANY_DATA_UPSTREAM_DENIED'}});
+  expect(dataFailure(new CompanyUpstreamError({kind:'UNKNOWN'}))).toMatchObject({status:'DENIED',completeness:'UNKNOWN',remediation:{kind:'UPSTREAM_ERROR_UNKNOWN'}});
+  expect(dataFailure(new CompanyUpstreamError({kind:'MISSING_SCOPES',requiredScopes:['scope.a']}))).toMatchObject({status:'NEEDS_AUTH',remediation:{kind:'UPSTREAM_MISSING_SCOPES',requiredScopes:['scope.a']}});
   expect(dataFailure(new CompanySourceError('COMPANY_DATA_TEMPLATE_UNKNOWN'))).toMatchObject({status:'DENIED',remediation:{kind:'COMPANY_DATA_TEMPLATE_UNKNOWN'}});
   expect(dataFailure(new CompanySourceError('COMPANY_DATA_RESPONSE_INVALID'))).toMatchObject({status:'PERMANENT_ERROR',remediation:{kind:'COMPANY_DATA_RESPONSE_INVALID'}});
   expect(dataFailure(new Error('socket closed'))).toMatchObject({status:'RETRYABLE_ERROR',remediation:{kind:'COMPANY_DATA_TRANSPORT_UNAVAILABLE'}});

@@ -9,6 +9,7 @@ import {blocked,type ToolResult} from '../../contracts/src/index.js';
 import {hash} from '../../storage/src/crypto.js';
 import {CompanyChat,CompanySourceError} from './chat.js';
 import {companyContractHash,searchSchema,readSchema,codeResource,pathAllowed,checkReplySchema,searchReplySchema,readReplySchema,sourceReceiptSchema,redactCode,type CodeScope,type CodeSearch,type CodeRead} from './contracts.js';
+import {upstreamErrorResult} from './upstream-error.js';
 
 type Args=CodeSearch|CodeRead;
 export const companyCodeBindingHash=(id:string,connectorId:string,connectionBinding:string)=>hash(canonical({id,version:'1.0.0',connectorId,connectionBinding,contractHash:companyContractHash,outputSchema:id==='company.code.search'?companySearchResultContract.outputSchema:companyReadResultContract.outputSchema}));
@@ -50,5 +51,5 @@ async function execute(store:RuntimeStore,chat:CompanyChat,ctx:DbContext,operati
   const source={scopeId:scope.id,scopeVersion:scope.version,sourceRevision:scope.sourceRevision,repo:args.repo,commit:args.commit,classification:scope.classification},clean=fragments.map(f=>({...f,snippet:redactCode(f.snippet),contentHash:hash(redactCode(f.snippet))}));
   const data='matches' in reply.data?{source,queryId:reply.data.queryId,matches:clean,totalCount:reply.data.totalCount,untrustedContent:true}:{source,queryId:reply.data.queryId,fragment:clean[0]!,totalLines:reply.data.totalLines,untrustedContent:true};
   return {status:'matches' in reply.data&&!reply.data.matches.length?'EMPTY':'OK',data,evidenceIds:[`company:${chat.connectorId}:${reply.data.queryId}`],completeness:reply.data.truncated?'TRUNCATED':'COMPLETE',verification:{state:'VERIFIED',method:'CERTIFIED_PROXY_EXACT_COMMIT_AND_CURRENT_ACTOR_SCOPE'}};
- }catch(error){return blocked(error instanceof CompanySourceError?'PERMANENT_ERROR':'RETRYABLE_ERROR',error instanceof CompanySourceError?error.code:'COMPANY_TRANSPORT_UNAVAILABLE');}
+ }catch(error){const upstream=upstreamErrorResult(error);if(upstream)return upstream;return blocked(error instanceof CompanySourceError?'PERMANENT_ERROR':'RETRYABLE_ERROR',error instanceof CompanySourceError?error.code:'COMPANY_TRANSPORT_UNAVAILABLE');}
 }

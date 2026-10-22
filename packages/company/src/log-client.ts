@@ -4,6 +4,7 @@ import {CallToolResultSchema} from '@modelcontextprotocol/sdk/types.js';
 import type {DbContext} from '../../storage/src/database.js';
 import {chatSchemaHash,CompanySourceError} from './chat.js';
 import {companyLogsContractHash,type LogScope} from './log-contracts.js';
+import {upstreamErrorFrom} from './upstream-error.js';
 export class CompanyLogsClient{
  private active=0;
  constructor(readonly client:Client,readonly connectorId:string,readonly connectionBinding:string,readonly timeoutMs=1500,readonly maxConcurrent=4){if(!/^[A-Za-z0-9._-]{1,128}$/.test(connectorId)||!/^[a-f0-9]{64}$/.test(connectionBinding)||!Number.isInteger(timeoutMs)||timeoutMs<50||timeoutMs>2000||!Number.isInteger(maxConcurrent)||maxConcurrent<1||maxConcurrent>8)throw new CompanySourceError('COMPANY_LOG_LIMITS_INVALID');}
@@ -17,7 +18,7 @@ export class CompanyLogsClient{
    if(!found||chatSchemaHash(found)!==scope.schemaHash)throw new CompanySourceError('COMPANY_LOG_SCHEMA_CHANGED');
    const nonce=randomUUID(),message=JSON.stringify({contractHash:companyLogsContractHash,operation,nonce,tenantId:ctx.tenantId,actorId:ctx.actorId,scopeId:scope.id,scopeVersion:scope.version,sourceRevision:scope.sourceRevision,args});
    const reply=CallToolResultSchema.parse(await this.client.callTool({name:'chat',arguments:{message}},CallToolResultSchema,options));deadline.throwIfAborted();
-   if(reply.isError)throw new CompanySourceError('COMPANY_LOG_UPSTREAM_DENIED');
+   if(reply.isError)throw upstreamErrorFrom(reply,{contractHash:companyLogsContractHash,nonce,tenantId:ctx.tenantId,actorId:ctx.actorId,scopeId:scope.id});
    if(reply.content.length!==1||reply.content[0]?.type!=='text'||Buffer.byteLength(reply.content[0].text,'utf8')>96000)throw new CompanySourceError('COMPANY_LOG_RESPONSE_INVALID');
    let value:unknown;try{value=JSON.parse(reply.content[0].text);}catch{throw new CompanySourceError('COMPANY_LOG_RESPONSE_INVALID');}return {value,nonce};
   }finally{this.active--;}

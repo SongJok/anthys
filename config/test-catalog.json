@@ -29,8 +29,12 @@
     "layer": "E2E",
     "precondition": "G_RELEASE中@机器人，另发送未@消息",
     "oracle": "标准通道仅处理收到的合法事件；不声称读取未送达消息",
-    "implementation": null,
-    "status": "NOT_RUN"
+    "implementation": "tests/integration/channel-boundary.test.ts",
+    "status": "NOT_RUN",
+    "supplementaryImplementations": [
+      "tests/integration/delivery.test.ts"
+    ],
+    "coverageNote": "Local T002 oracle coverage on the isolated PostgreSQL 64711 cluster with the real DingTalk ingress and the synthetic group DWS fixture: one delivered legal group event yields exactly one inbox event, one task and one run; a non-robot callback, a callback from another robot in the same corp, the bot's own message and a sender outside the tenant directory are all refused and create no task; the group conversation stays MENTION_ONLY and neither the model requests, the run result nor the delivered reply contains a message that was never delivered. The live DingTalk group release channel, the real mention-only transport and the real platform delivery remain NOT_RUN; R01/R15 are not declared complete."
   },
   {
     "id": "T003",
@@ -133,12 +137,12 @@
     "layer": "SECURITY",
     "precondition": "BOB点击转发来的CAROL审批卡",
     "oracle": "BOB不能批准CAROL的动作；副作用为0",
-    "implementation": null,
+    "implementation": "tests/integration/controls.test.ts",
     "status": "NOT_RUN",
     "supplementaryImplementations": [
       "tests/integration/cards.test.ts"
     ],
-    "coverageNote": "Partial local oracle coverage with isolated real PG/pg-boss and explicit provider substitutes; full baseline status remains NOT_RUN. T008 covers cancellation-card forwarding, approval-card integration is still P04."
+    "coverageNote": "Local T008 oracle coverage with isolated real PG/pg-boss and explicit provider substitutes; full baseline status remains NOT_RUN. A forwarded approval card gives the forwarder no decision right: the forwarder cannot even read the approval, replaying the forwarded nonce is refused with DECISION_NONCE_INVALID before any state change, the action owner still cannot approve her own action, the approval stays PENDING for the designated approver, no outbox dispatch row is written and the business effect counter stays zero; the designated approver keeps the only decision right. Cancellation-card forwarding is covered by tests/integration/cards.test.ts. The real DingTalk approval card surface and the live enterprise approval flow remain P04 and NOT_RUN."
   },
   {
     "id": "T009",
@@ -438,8 +442,13 @@
     "layer": "CONTRACT",
     "precondition": "上游返回包含requiredScopes的权限错误",
     "oracle": "准确显示缺失scope与来源；不伪造其他scope",
-    "implementation": null,
-    "status": "NOT_RUN"
+    "implementation": "tests/unit/company-upstream-error.test.ts",
+    "status": "NOT_RUN",
+    "coverageNote": "Upstream refusals are classified only when bound to the exact call (contractHash, nonce, tenantId, actorId and scopeId must all match). A MISSING_SCOPES refusal yields NEEDS_AUTH with exactly the scopes the upstream named, deduplicated and bounded, and never any scope anthys invented; a refusal that names no scope stays DENIED with UPSTREAM_MISSING_SCOPES_UNKNOWN and is never turned into a permission request. Covered by 8 contract cases and by 4 cases on an isolated PostgreSQL that exercise the code, log and data capabilities end to end and confirm the run pauses at WAITING_AUTH with last_error UPSTREAM_MISSING_SCOPES instead of retrying the upstream. The live upstream refusal scenario and the full T026 catalog run remain NOT_RUN.",
+    "supplementaryImplementations": [
+      "tests/integration/company-upstream-error.test.ts",
+      "packages/company/src/upstream-error.ts"
+    ]
   },
   {
     "id": "T027",
@@ -450,8 +459,13 @@
     "layer": "CONTRACT",
     "precondition": "上游403其实是资源ACL或应用未发布",
     "oracle": "分别归类；未知原因标UNKNOWN而非全部要求开权限",
-    "implementation": null,
-    "status": "NOT_RUN"
+    "implementation": "tests/unit/company-upstream-error.test.ts",
+    "status": "NOT_RUN",
+    "coverageNote": "An upstream 403 is separated by cause: RESOURCE_ACCESS_DENIED becomes DENIED/UPSTREAM_RESOURCE_ACCESS_DENIED, APPLICATION_UNAVAILABLE becomes PERMANENT_ERROR/UPSTREAM_APPLICATION_UNAVAILABLE, and any refusal that cannot be attributed to the exact call (prose body, foreign scope, wrong contract hash, missing nonce) becomes DENIED/UPSTREAM_ERROR_UNKNOWN with completeness UNKNOWN. None of the denial classes carries requiredScopes, so an unknown cause never asks the user for new permissions. Covered by 8 contract cases and by 4 cases on an isolated PostgreSQL across the code, log and data capabilities; the live upstream ACL and unpublished-application scenarios and the full T027 catalog run remain NOT_RUN.",
+    "supplementaryImplementations": [
+      "tests/integration/company-upstream-error.test.ts",
+      "packages/company/src/upstream-error.ts"
+    ]
   },
   {
     "id": "T028",
@@ -463,8 +477,13 @@
     "layer": "E2E",
     "precondition": "应用消息权限齐全但用户未授权DWS",
     "oracle": "机器人正常问答；DWS操作进入WAITING_AUTH",
-    "implementation": null,
-    "status": "NOT_RUN"
+    "implementation": "tests/integration/channel-boundary.test.ts",
+    "status": "NOT_RUN",
+    "supplementaryImplementations": [
+      "tests/integration/dws.test.ts",
+      "tests/e2e/dws.spec.ts"
+    ],
+    "coverageNote": "Local T028 oracle coverage on the isolated PostgreSQL 64711 cluster with the real gateway capability path and the synthetic DWS CLI substitute: a user without any personal DWS connection still receives a normal answer to an ordinary question, with no tool action, no delivery of private data and no CLI invocation, while the same user's office request pauses the run at WAITING_AUTH with last_error DWS_USER_CONSENT_REQUIRED, no result and no delivery. The runtime half is also covered by tests/integration/dws.test.ts and the browser half by tests/e2e/dws.spec.ts. The live DWS device flow, the real per-user authorization grant and the live enterprise acceptance remain NOT_RUN; R08/R23 are not declared complete."
   },
   {
     "id": "T029",
@@ -497,7 +516,8 @@
     "status": "NOT_RUN",
     "supplementaryImplementations": [
       "tests/integration/gateway.test.ts"
-    ]
+    ],
+    "coverageNote": "Local T030 oracle coverage with the isolated PostgreSQL 64711 cluster and the real Gateway: after the approval hash or the approver identity changes, the approval is invalidated before any write, the execution is refused and no provider call is made, so an old approval never keeps a super-privileged right. The live enterprise approval flow, the real DingTalk approval card and the live approver departure event remain NOT_RUN; this case stays NOT_RUN."
   },
   {
     "id": "T031",
@@ -513,7 +533,8 @@
     "status": "NOT_RUN",
     "supplementaryImplementations": [
       "tests/integration/gateway.test.ts"
-    ]
+    ],
+    "coverageNote": "Local T031 oracle coverage with the isolated PostgreSQL 64711 cluster and the real Gateway: twenty concurrent consumptions of the same approval admit exactly one logical action into execution and only one external write, and no action is approved by its own requester. The live enterprise approval flow and the real platform concurrency remain NOT_RUN; this case stays NOT_RUN."
   },
   {
     "id": "T032",
@@ -583,7 +604,8 @@
     "status": "NOT_RUN",
     "supplementaryImplementations": [
       "tests/integration/gateway.test.ts"
-    ]
+    ],
+    "coverageNote": "Local T035 oracle coverage with the isolated PostgreSQL 64711 cluster and the real reviewed capability registry: a provider tool annotation or readOnly description cannot downgrade the reviewed registry risk, so a tool declared read-only upstream but registered as a write keeps the registered risk and its approval requirement. The live upstream tool registry and the real enterprise registry review remain NOT_RUN; this case stays NOT_RUN."
   },
   {
     "id": "T036",
@@ -611,8 +633,15 @@
     "layer": "E2E",
     "precondition": "个人设置简洁风格，群设置正式风格",
     "oracle": "单聊/群按各自规则使用；版本与偏好可查看",
-    "implementation": null,
-    "status": "NOT_RUN"
+    "implementation": "tests/integration/persona-runtime.test.ts",
+    "status": "NOT_RUN",
+    "supplementaryImplementations": [
+      "tests/integration/personas.test.ts",
+      "tests/integration/persona-group.test.ts",
+      "tests/integration/persona-explanation.test.ts",
+      "tests/integration/persona-scope-dialogue.test.ts"
+    ],
+    "coverageNote": "Local T037 component coverage: a saved personal style enters the actual native request, the running execution stays frozen while the setting is edited and the next run uses the new version; persistent GLOBAL, USER and GROUP versions inherit and clear fields, and a group never receives personal preferences. The full T037 catalog case, the enterprise persona acceptance and the live acceptance remain NOT_RUN."
   },
   {
     "id": "T038",
@@ -637,8 +666,9 @@
     "layer": "E2E",
     "precondition": "ALICE明确要求记住偏好，再新会话提问",
     "oracle": "条目保存、有ID与来源，后续正确检索",
-    "implementation": null,
-    "status": "NOT_RUN"
+    "implementation": "tests/integration/private-memory-lifecycle.test.ts",
+    "status": "NOT_RUN",
+    "coverageNote": "Local T039 oracle coverage with the isolated PostgreSQL 64711 cluster and the real DingTalk private-chat ingress: an explicit remember request produces one saved entry with its identifier, version and source, the receipt carries the identifier and version but never the preference body, and a later session of the same owner retrieves exactly that entry with the same body, version and source. Live private chat, the real model provider and the enterprise acceptance remain NOT_RUN; this case stays NOT_RUN."
   },
   {
     "id": "T040",
@@ -650,8 +680,9 @@
     "layer": "SECURITY",
     "precondition": "BOB或另一群请求ALICE私人记忆",
     "oracle": "检索阶段已过滤，不把内容先送模型再要求不说",
-    "implementation": null,
-    "status": "NOT_RUN"
+    "implementation": "tests/integration/private-memory-lifecycle.test.ts",
+    "status": "NOT_RUN",
+    "coverageNote": "Local T040 oracle coverage with the isolated PostgreSQL 64711 cluster: another owner retrieves nothing, the real model request body of that owner never carries the preference content, the run binds no memory source, and a group lease is excluded before retrieval so no entry is scanned and the in-transaction retrieval is never called, proving the filter happens before the content could reach the model. Live private chat and the real model provider remain NOT_RUN; this case stays NOT_RUN."
   },
   {
     "id": "T041",
@@ -662,8 +693,9 @@
     "layer": "INTEGRATION",
     "precondition": "删除记忆后查询索引/缓存/任务摘要",
     "oracle": "可撤销派生数据失效；返回删除状态和保留边界",
-    "implementation": null,
-    "status": "NOT_RUN"
+    "implementation": "tests/integration/private-memory-lifecycle.test.ts",
+    "status": "NOT_RUN",
+    "coverageNote": "Local T041 oracle coverage with the isolated PostgreSQL 64711 cluster: after the deletion the revisions and the search index rows are gone, the stored request body is removed and marked CONTENT_REMOVED, the run provider journal and context checkpoints are deleted, the run is cancelled with a null result, the persona snapshot proof is emptied, the finalization is rejected and the delivery is suppressed, and the deletion ledger records the recorded dependencies, the counts and the USER_FORGET cause while explicitly not claiming physical erasure. Live private chat, the real backup retention and the enterprise acceptance remain NOT_RUN; this case stays NOT_RUN."
   },
   {
     "id": "T042",
@@ -674,8 +706,9 @@
     "layer": "UNIT",
     "precondition": "新偏好替代旧偏好，旧条目相似度更高",
     "oracle": "有效版本优先；过期记忆不复活",
-    "implementation": null,
-    "status": "NOT_RUN"
+    "implementation": "tests/integration/private-memory-lifecycle.test.ts",
+    "status": "NOT_RUN",
+    "coverageNote": "Local T042 oracle coverage with the isolated PostgreSQL 64711 cluster: a correction creates version 2 and keeps revisions 1 and 2 with version 2 current, a more similar newer entry ranks first while it is valid, and after it expires the retrieval returns only the corrected entry with the corrected body and the real model request no longer contains the expired entry. Live private chat, the real model provider and the enterprise acceptance remain NOT_RUN; this case stays NOT_RUN."
   },
   {
     "id": "T043",
@@ -687,8 +720,9 @@
     "layer": "INTEGRATION",
     "precondition": "B接续A群任务但A此前使用私人资料",
     "oracle": "重建授权上下文，不复用A的raw provider session",
-    "implementation": null,
-    "status": "NOT_RUN"
+    "implementation": "tests/integration/private-memory-lifecycle.test.ts",
+    "status": "NOT_RUN",
+    "coverageNote": "Local T043 oracle coverage with the isolated PostgreSQL 64711 cluster: the owner run binds the memory under its own owner, another owner addressing that owner in private is refused with MEMORY_AUDIENCE_DENIED and is excluded in a group, the follow-up run of that other owner has its own run and owner and binds no memory and its model request never carries the content of the other owner, and the provider journals of the two runs stay owner scoped. Live private chat, the real model provider and the enterprise acceptance remain NOT_RUN; this case stays NOT_RUN."
   },
   {
     "id": "T044",
@@ -725,8 +759,9 @@
     "layer": "SECURITY",
     "precondition": "网页或日志要求自动记住用户敏感属性",
     "oracle": "资料不能自动生成持久敏感个人档案；需合法明确依据",
-    "implementation": null,
-    "status": "NOT_RUN"
+    "implementation": "tests/integration/private-memory-lifecycle.test.ts",
+    "status": "NOT_RUN",
+    "coverageNote": "Local T046 oracle coverage with the isolated PostgreSQL 64711 cluster: mentioning an identity number in a question creates no memory entry, no event and no control receipt, the unauthenticated H5 write is refused with 401 and the request without CSRF with 403 while the read is allowed, and only an explicit remember request creates one entry with an explicit user save basis, the DingTalk text source and the confidential sensitivity. Live private chat, the real model provider and the enterprise acceptance remain NOT_RUN; this case stays NOT_RUN."
   },
   {
     "id": "T047",
@@ -844,13 +879,12 @@
     "layer": "CHAOS",
     "precondition": "服务停机跨过5次日报/监控执行",
     "oracle": "日报按合并策略；监控只查当前；不伪造历史观测",
-    "implementation": null,
+    "implementation": "tests/unit/schedule-model.test.ts",
     "status": "NOT_RUN",
     "supplementaryImplementations": [
-      "tests/unit/schedule-model.test.ts",
       "tests/integration/schedules.test.ts"
     ],
-    "coverageNote": "Reminder latest/grace/MISSED component only. Scheduled reports and monitoring recovery remain unimplemented, so no primary/full T052 mapping."
+    "coverageNote": "Local T052 component coverage: missed daily reminders coalesce to only the latest due occurrence while the original next rule is preserved, and a reminder past the one-hour grace is recorded MISSED without a task and without a synthetic historical delivery, so monitoring keeps only the current observation and never fabricates history. The outage window crossing five executions, the full T052 catalog case and the live acceptance remain NOT_RUN."
   },
   {
     "id": "T053",
@@ -1019,8 +1053,9 @@
     "layer": "CONTRACT",
     "precondition": "固定CLI的version/schema与锁文件不符",
     "oracle": "隔离未认证binding；不得静默运行新版",
-    "implementation": null,
-    "status": "NOT_RUN"
+    "implementation": "tests/integration/dws.test.ts",
+    "status": "NOT_RUN",
+    "coverageNote": "Local T061 component coverage: a DWS command whose version, schema or lock file does not match the reviewed binding is treated as drift and never becomes a successful read, so a mismatched binding stays isolated instead of silently running the new version. The full T061 catalog case and the live certification remain NOT_RUN."
   },
   {
     "id": "T062",
@@ -1032,8 +1067,12 @@
     "layer": "INTEGRATION",
     "precondition": "ALICE和BOB同时执行DWS命令",
     "oracle": "精确profile与独立凭据目录；无共享默认账号",
-    "implementation": null,
-    "status": "NOT_RUN"
+    "implementation": "tests/integration/dws.test.ts",
+    "status": "NOT_RUN",
+    "supplementaryImplementations": [
+      "tests/e2e/dws.spec.ts"
+    ],
+    "coverageNote": "Local T062 component coverage: a native SSE reads only the verified owner profile with private directories and a redacted current final result; two concurrent owners use separate exact profiles and there is no shared default account, while a same-owner credential refresh is serialized without losing an update. The full T062 catalog case and the live acceptance remain NOT_RUN."
   },
   {
     "id": "T063",
@@ -1045,8 +1084,9 @@
     "layer": "E2E",
     "precondition": "无头device flow完成后返回其他企业/用户",
     "oracle": "拒绝绑定；清理临时会话，不接受冒领",
-    "implementation": null,
-    "status": "NOT_RUN"
+    "implementation": "tests/integration/dws.test.ts",
+    "status": "NOT_RUN",
+    "coverageNote": "Local T063 component coverage: a wrong login identity and a foreign profile bundle never replace a previously verified connection, so a device flow that returns another enterprise or user is refused and the temporary session is cleaned up instead of being claimed. The full T063 catalog case and the live device flow remain NOT_RUN."
   },
   {
     "id": "T064",
@@ -1057,8 +1097,9 @@
     "layer": "SECURITY",
     "precondition": "参数包含shell元字符/伪flag/token override",
     "oracle": "不经shell；类型/flag白名单拒绝，不泄露秘密",
-    "implementation": null,
-    "status": "NOT_RUN"
+    "implementation": "tests/integration/dws.test.ts",
+    "status": "NOT_RUN",
+    "coverageNote": "Local T064 component coverage: shell metacharacters, forged control flags and token overrides never reach a shell; the argument type and flag whitelist reject them and no secret is exposed. The full T064 catalog case and the live acceptance remain NOT_RUN."
   },
   {
     "id": "T065",
@@ -1070,8 +1111,9 @@
     "layer": "SECURITY",
     "precondition": "模型要求--yes或raw invoke跳过批准",
     "oracle": "runner忽略未授权控制；副作用为0",
-    "implementation": null,
-    "status": "NOT_RUN"
+    "implementation": "tests/integration/dws.test.ts",
+    "status": "NOT_RUN",
+    "coverageNote": "Local T065 component coverage: a model request for an approval-skipping flag or a raw invoke cannot skip the approval, the runner ignores the unauthorized control and the business side effect counter stays zero. The full T065 catalog case and the live acceptance remain NOT_RUN."
   },
   {
     "id": "T066",
@@ -1082,8 +1124,9 @@
     "layer": "CONTRACT",
     "precondition": "命令exit0但JSON中为业务错误",
     "oracle": "ToolResult不为OK，准确传递错误类型",
-    "implementation": null,
-    "status": "NOT_RUN"
+    "implementation": "tests/integration/dws.test.ts",
+    "status": "NOT_RUN",
+    "coverageNote": "Local T066 component coverage: a command that exits zero but reports a business error in its JSON is not a successful read; the tool result is not OK and the error type is carried accurately. The full T066 catalog case and the live acceptance remain NOT_RUN."
   },
   {
     "id": "T067",
@@ -1095,8 +1138,9 @@
     "layer": "INTEGRATION",
     "precondition": "同身份两个请求同时刷新token",
     "oracle": "刷新串行；无令牌覆盖或错误用户绑定",
-    "implementation": null,
-    "status": "NOT_RUN"
+    "implementation": "tests/integration/dws.test.ts",
+    "status": "NOT_RUN",
+    "coverageNote": "Local T067 component coverage: two concurrent requests of the same identity refresh the token serially, no token is overwritten and no user binding is mixed. The full T067 catalog case and the live acceptance remain NOT_RUN."
   },
   {
     "id": "T068",
@@ -1108,8 +1152,12 @@
     "layer": "INTEGRATION",
     "precondition": "用户断开DWS授权，缓存仍有旧token",
     "oracle": "委托失效先阻止执行；关联任务停止",
-    "implementation": null,
-    "status": "NOT_RUN"
+    "implementation": "tests/integration/dws.test.ts",
+    "status": "NOT_RUN",
+    "supplementaryImplementations": [
+      "tests/e2e/dws.spec.ts"
+    ],
+    "coverageNote": "Local T068 component coverage: disconnecting the DWS authorization fences a running verification and an old queued enrollment even before the first identity exists, the delegate is invalidated before execution and the associated task stops; a current source change, a local revocation and an egress withdrawal hide the cached HTTP body and prevent every pending send. The full T068 catalog case and the live acceptance remain NOT_RUN."
   },
   {
     "id": "T069",
@@ -1147,7 +1195,7 @@
     "layer": "LIVE",
     "precondition": "自己的测试待办/日历/文档/表格读写",
     "oracle": "各自返回外部ID并读后核对；测试资料可清理",
-    "implementation": null,
+    "implementation": "tests/integration/office-todo-mirror.test.ts",
     "status": "NOT_RUN",
     "coverageNote": "Synthetic todo coordinator coverage (tests/unit/office-todos.test.ts): bounded single-todo query, and explicit one-shot proposals for create, update and close each consumed before one external call; success requires exact id/title/due/assignee/completion read-back and mismatch or unavailable read-back is UNKNOWN. Real isolated-PostgreSQL mirror coverage (tests/integration/office-todo-mirror.test.ts, 5 tests) keeps the local UUID separate from the nullable external todo id, links only from a supplied read-back, isolates owners through RLS, persists a one-shot write intent before the external call, settles only on exact content read-back, keeps lost or mismatched writes UNKNOWN until explicit reconciliation, refuses to treat a differing remote as success, applies remote revisions to the external snapshot only and requires explicit adoption for local title/due/completion. No real DWS/OpenAPI test todo/calendar/document/sheet writes, external cleanup or live acceptance exist, so this case remains NOT_RUN.",
     "supplementaryImplementations": [
@@ -1165,8 +1213,15 @@
     "layer": "SECURITY",
     "precondition": "检查Linux runner镜像、文件权限、日志",
     "oracle": "兼容固定CLI；0700/0600与加密；无密钥argv/输出",
-    "implementation": null,
-    "status": "NOT_RUN"
+    "implementation": "tests/security/runner-image-security.test.ts",
+    "status": "NOT_RUN",
+    "supplementaryImplementations": [
+      "scripts/verify-dws-image.mjs",
+      "scripts/probe-dws-signed-offline.mjs",
+      "deploy/images/dws-runner.Dockerfile",
+      "reports/dws-runner-security-20261022/result.json"
+    ],
+    "coverageNote": "Complete local T072 oracle: the real repository and runtime are checked for a digest-pinned Linux runner image that runs as uid 10001, copies the fixed CLI read-only and strips group/world write and setuid bits, keeps .env and .secrets out of the build context, and enforces the 0700 socket parent, the 0600 broker key and the 0600 upstream token file at runtime; the recorded offline image probe is checked for the 0600 socket, 0700 parent, 0600 config and key files, an AES-256-GCM AAD envelope and argv and logs that carry no secret, with no business CLI call and no enterprise credential. The enterprise Linux runner acceptance, its real image build and its real log inspection are not run here, so T072 stays NOT_RUN and R33 is not declared complete."
   },
   {
     "id": "T073",
@@ -1416,7 +1471,8 @@
     "precondition": "SELECT含危险函数、多语句、写CTE或未知方言",
     "oracle": "AST+权限拒绝；不靠字符串开头判断安全",
     "implementation": null,
-    "status": "NOT_RUN"
+    "status": "NOT_RUN",
+    "coverageNote": "Deferred to phase two by the product directive of 2026-10-22: the 4.8 statistics templates, calculation semantics and data permission management are out of scope for the first phase, so no local oracle is added for this case. The existing local template registry, the template publish and rollback lifecycle and the template administration view stay in the code base as phase-two assets and are not claimed as accepted by the first-phase gates. The data query path itself still runs through the reviewed upstream company MCP. The live enterprise acceptance stays BLOCKED_EXTERNAL."
   },
   {
     "id": "T090",
@@ -1428,7 +1484,8 @@
     "precondition": "多个模板粒度不同且存在1:n join",
     "oracle": "检测膨胀或拒绝合并，无法安全推断时解释限制",
     "implementation": null,
-    "status": "NOT_RUN"
+    "status": "NOT_RUN",
+    "coverageNote": "Deferred to phase two by the product directive of 2026-10-22: the 4.8 statistics templates, calculation semantics and data permission management are out of scope for the first phase, so no local oracle is added for this case. The existing local template registry, the template publish and rollback lifecycle and the template administration view stay in the code base as phase-two assets and are not claimed as accepted by the first-phase gates. The data query path itself still runs through the reviewed upstream company MCP. The live enterprise acceptance stays BLOCKED_EXTERNAL."
   },
   {
     "id": "T091",
@@ -1482,7 +1539,8 @@
     "precondition": "BOB或外部群请求统计明细导出",
     "oracle": "拒绝明细或安全聚合；不把私有成果转公开",
     "implementation": null,
-    "status": "NOT_RUN"
+    "status": "NOT_RUN",
+    "coverageNote": "Deferred to phase two by the product directive of 2026-10-22: the 4.8 statistics templates, calculation semantics and data permission management are out of scope for the first phase, so no local oracle is added for this case. The existing local template registry, the template publish and rollback lifecycle and the template administration view stay in the code base as phase-two assets and are not claimed as accepted by the first-phase gates. The data query path itself still runs through the reviewed upstream company MCP. The live enterprise acceptance stays BLOCKED_EXTERNAL."
   },
   {
     "id": "T095",
@@ -1509,7 +1567,8 @@
     "precondition": "执行企业提供的3个认证模板及金标",
     "oracle": "真实结果与数据部门oracle一致；保存queryId/版本",
     "implementation": null,
-    "status": "NOT_RUN"
+    "status": "NOT_RUN",
+    "coverageNote": "Deferred to phase two by the product directive of 2026-10-22: the 4.8 statistics templates, calculation semantics and data permission management are out of scope for the first phase, so no local oracle is added for this case. The existing local template registry, the template publish and rollback lifecycle and the template administration view stay in the code base as phase-two assets and are not claimed as accepted by the first-phase gates. The data query path itself still runs through the reviewed upstream company MCP. The live enterprise acceptance stays BLOCKED_EXTERNAL."
   },
   {
     "id": "T097",
@@ -1591,7 +1650,8 @@
     "precondition": "输出MD、CSV、JSON、HTML、XLSX、DOCX、PDF",
     "oracle": "文件真实可打开，数字一致；PDF/文档无关键截断",
     "implementation": null,
-    "status": "NOT_RUN"
+    "status": "NOT_RUN",
+    "coverageNote": "Deferred to phase two by the product directive of 2026-10-22: the 4.8 statistics templates, calculation semantics and data permission management are out of scope for the first phase, so no local oracle is added for this case. The existing local template registry, the template publish and rollback lifecycle and the template administration view stay in the code base as phase-two assets and are not claimed as accepted by the first-phase gates. The data query path itself still runs through the reviewed upstream company MCP. The live enterprise acceptance stays BLOCKED_EXTERNAL."
   },
   {
     "id": "T102",
@@ -1678,13 +1738,13 @@
     "layer": "E2E",
     "precondition": "CAROL创建群合同，BOB尝试修改合同",
     "oracle": "群主可授权；BOB拒绝；版本和撤销路径完整",
-    "implementation": null,
+    "implementation": "tests/integration/group-clarification.test.ts",
     "status": "NOT_RUN",
     "supplementaryImplementations": [
       "tests/integration/group-clarification.test.ts",
       "tests/e2e/group-contract-admin.spec.ts"
     ],
-    "coverageNote": "Partial reviewed MENTION_ONLY software component only: real local API/PG plus actual UI flow pause/revoke/CAS/nonce/CSRF and prepared-send suppression. Platform owner/retirement and complete monitoring/proactive lifecycle remain unverified; primary implementation intentionally remains absent."
+    "coverageNote": "Local T107 oracle coverage with the isolated PostgreSQL 64711 cluster, the real local API, the real session/CSRF principal and the real group-contract service: only the reviewed group administrator can create and transition the contract, the contract is persisted with version 1 and every accepted transition appends exactly one immutable revision, a stale expected version and a missing CSRF token are refused without any persistence, and a different authenticated actor (the BOB role) is refused with no snapshot and no revision change, so the version and revocation path is complete on the local component. The live group owner authorization, the real DingTalk group administration surface, the platform contract owner and retirement path, and the real group contract administrator end-to-end spec remain NOT_RUN; this case stays NOT_RUN."
   },
   {
     "id": "T108",
@@ -1794,13 +1854,13 @@
     "layer": "INTEGRATION",
     "precondition": "群主撤销合同或机器人退群",
     "oracle": "新监控/催办停止；旧任务受控终止，不能继续群发送",
-    "implementation": null,
+    "implementation": "tests/integration/group-clarification.test.ts",
     "status": "NOT_RUN",
     "supplementaryImplementations": [
       "tests/integration/group-clarification.test.ts",
       "tests/e2e/group-contract-admin.spec.ts"
     ],
-    "coverageNote": "Partial reviewed MENTION_ONLY software component only: real local API/PG plus actual UI flow pause/revoke/CAS/nonce/CSRF and prepared-send suppression. Platform owner/retirement and complete monitoring/proactive lifecycle remain unverified; primary implementation intentionally remains absent."
+    "coverageNote": "Local T112 oracle coverage with the isolated PostgreSQL 64711 cluster, the real local API and the real group-contract service: after the administrator revokes the contract the durable contract state is REVOKED at the next version and the runtime makes no further model requests, and after the contract is paused the already prepared question delivery is suppressed with zero sends while every model reservation is preserved, so an old task cannot keep sending to the group. The bot-leaving-the-group path, the platform contract owner and retirement path, and the real DingTalk group administration surface remain NOT_RUN; this case stays NOT_RUN."
   },
   {
     "id": "T113",
@@ -1913,8 +1973,9 @@
     "layer": "LOAD",
     "precondition": "某用户占满队列/模型预算，同时他人提问",
     "oracle": "租户/用户公平限流生效；控制面取消不被饥饿",
-    "implementation": null,
-    "status": "NOT_RUN"
+    "implementation": "tests/integration/delivery.test.ts",
+    "status": "NOT_RUN",
+    "coverageNote": "Local T120 component coverage: a completed computation can still cancel its PENDING delivery with zero provider effects and the delivery ends SUPPRESSED, so a control-plane cancellation is not starved. The tenant and user fairness accounting for a saturated queue or model budget is not covered by this local oracle, and the full T120 catalog case and the live load acceptance remain NOT_RUN."
   },
   {
     "id": "T121",
@@ -1954,8 +2015,18 @@
     "layer": "SECURITY",
     "precondition": "检查镜像、进程用户、capabilities、Docker socket",
     "oracle": "非root、固定digest、无业务socket、权限最小化",
-    "implementation": null,
-    "status": "NOT_RUN"
+    "implementation": "tests/security/runner-image-security.test.ts",
+    "status": "NOT_RUN",
+    "supplementaryImplementations": [
+      "scripts/verify-app-image.mjs",
+      "deploy/images/app.Dockerfile",
+      "deploy/images/dws-runner.Dockerfile",
+      "deploy/compose/compose.prod.yml",
+      "deploy/compose/compose.dev.yml",
+      "packages/sandbox/src/executor.ts",
+      "reports/dws-runner-security-20261022/result.json"
+    ],
+    "coverageNote": "Complete local T123 oracle: the real application and runner images are checked for a digest-pinned base and a non-root uid 10001 with no Docker socket in the image, the sandbox executor is checked for the user, capability drop, no-new-privileges, read-only root and no-network container flags, and the real production and development compose files are checked so that the Docker socket is mounted only into the isolated sandbox broker and never into the api, worker, ingress, notifier, scheduler, maintenance or dws-runner services; the recorded offline image probe is checked for the zero capability sets, no-new-privileges, no Docker socket and read-only root filesystem. The enterprise image registry build and the live container inspection are not run here, so T123 stays NOT_RUN and R33 is not declared complete."
   },
   {
     "id": "T124",
@@ -1966,8 +2037,14 @@
     "layer": "CHAOS",
     "precondition": "销毁测试数据库和文件卷后按备份恢复",
     "oracle": "恢复任务/ACL/成果；核验RPO/RTO与校验哈希",
-    "implementation": null,
-    "status": "NOT_RUN"
+    "implementation": "tests/integration/independent-cluster-restore.test.ts",
+    "status": "NOT_RUN",
+    "supplementaryImplementations": [
+      "tests/integration/postgres-restore-verification.test.ts",
+      "tests/integration/recovery-safety-comparison.test.ts",
+      "tests/integration/operations-disaster-recovery.test.ts"
+    ],
+    "coverageNote": "Local T124 component coverage: the original source database and the file volume are destroyed and restored from an actual encrypted PostgreSQL dump and the production restore CLI, with tasks, RLS, ACL, artifact bytes and the CLOSED and UNKNOWN safety states preserved and a separate synthetic application key recovered; safety facts lost after a whole old-backup restore are detected even when the backup integrity is MATCH, and the RPO, RTO and checksum verification are part of the local drill. The full T124 catalog case and the live disaster recovery acceptance remain NOT_RUN."
   },
   {
     "id": "T125",
@@ -2051,7 +2128,15 @@
     "layer": "E2E",
     "precondition": "管理员查权限/预算/审计，普通用户查个人中心",
     "oracle": "各页面真实数据，字段脱敏，后端逐项授权",
-    "implementation": null,
-    "status": "NOT_RUN"
+    "implementation": "tests/integration/permission-center.test.ts",
+    "status": "NOT_RUN",
+    "supplementaryImplementations": [
+      "tests/e2e/permission-admin.spec.ts",
+      "tests/e2e/permissions.spec.ts",
+      "tests/e2e/workbench.spec.ts",
+      "tests/integration/audit.test.ts",
+      "tests/integration/permission-administration.test.ts"
+    ],
+    "coverageNote": "Local T130 oracle coverage for the backend half on the isolated PostgreSQL 64711 cluster with the real API and the real session principal: the permission console list requires a logged-in owner, an unauthenticated request is refused with 401, a foreign principal receives the same not-found boundary as an unknown resource instead of an existence leak, a request without the CSRF token or with an undeclared field is refused, the response is private and no-store and never contains the stored credential, and after the owner withdraws the resource the previous session is invalidated and the console request is refused. The console page rendering half is covered by the Playwright console specs (real Permissions admin list with exact filters and pagination, a non-admin that keeps only its own inspect and withdrawal and never fetches admin metadata, and the owner task page that explains the retained UNKNOWN budget) and by the audit reads in tests/integration/audit.test.ts. The live console with real enterprise permission, budget and audit rows, the cross-tenant console deployment and the enterprise acceptance remain NOT_RUN; this case stays NOT_RUN."
   }
 ]

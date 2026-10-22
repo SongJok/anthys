@@ -1,0 +1,380 @@
+{
+  "status": "PASS",
+  "scope": "DWS_RUNNER_IMAGE_SECURITY_EVIDENCE_ONLY",
+  "catalogStatus": {
+    "T072": "NOT_RUN",
+    "T123": "NOT_RUN"
+  },
+  "live": false,
+  "source": {
+    "commit": "d65488b59aa25beecd085f57a1ed0f84657be228",
+    "dockerfileSha256": "7e9656ad91b8c2ecc03672b1e90cc45c96f29b021b0c9cf5c5e7f15141a9f2c3",
+    "baseImagesPinned": true,
+    "buildContextExcludesEnvSecrets": true
+  },
+  "image": {
+    "reference": "anthys:p06-dws-security-20261022",
+    "id": "sha256:c926a972e83ae75cec23d4bb674ddb889335ac8d6f54c8bb78a262e433c1c968",
+    "architecture": "arm64",
+    "os": "linux",
+    "repoDigests": [
+      "anthys@sha256:c926a972e83ae75cec23d4bb674ddb889335ac8d6f54c8bb78a262e433c1c968"
+    ]
+  },
+  "checks": {
+    "pinnedCli": true,
+    "rootOwnedReadOnlyCode": true,
+    "noGroupWorldWriteOrSetuid": true,
+    "nonRootUid10001": true,
+    "zeroCapabilities": true,
+    "noNewPrivileges": true,
+    "noDockerSocket": true,
+    "noEnterpriseSecretPaths": true,
+    "noTcpListener": true,
+    "unixSocket0600": true,
+    "socketParent0700": true,
+    "configAndKeyFiles0600": true,
+    "noSecretArgvOrLogs": true,
+    "aes256GcmAadEnvelope": true,
+    "boundedTmpfs": true,
+    "readOnlyRootfs": true
+  },
+  "cliProbe": {
+    "result": {
+      "kind": "OFFLINE_CLI",
+      "status": "PASS",
+      "live": false,
+      "startedAt": "2026-10-22T04:09:42.152Z",
+      "endedAt": "2026-10-22T04:09:47.431Z",
+      "platform": "linux-arm64",
+      "uid": 10001,
+      "gid": 10001,
+      "networkInterfaces": {
+        "lo": [
+          {
+            "address": "127.0.0.1",
+            "netmask": "255.0.0.0",
+            "family": "IPv4",
+            "mac": "00:00:00:00:00:00",
+            "internal": true,
+            "cidr": "127.0.0.1/8"
+          },
+          {
+            "address": "::1",
+            "netmask": "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff",
+            "family": "IPv6",
+            "mac": "00:00:00:00:00:00",
+            "internal": true,
+            "cidr": "::1/128",
+            "scopeid": 0
+          }
+        ]
+      },
+      "networkDevices": [
+        {
+          "name": "erspan0",
+          "flags": 4098,
+          "operstate": "down"
+        },
+        {
+          "name": "gre0",
+          "flags": 128,
+          "operstate": "down"
+        },
+        {
+          "name": "gretap0",
+          "flags": 4098,
+          "operstate": "down"
+        },
+        {
+          "name": "ip6_vti0",
+          "flags": 128,
+          "operstate": "down"
+        },
+        {
+          "name": "ip6gre0",
+          "flags": 128,
+          "operstate": "down"
+        },
+        {
+          "name": "ip6tnl0",
+          "flags": 128,
+          "operstate": "down"
+        },
+        {
+          "name": "ip_vti0",
+          "flags": 128,
+          "operstate": "down"
+        },
+        {
+          "name": "lo",
+          "flags": 9,
+          "operstate": "unknown"
+        },
+        {
+          "name": "sit0",
+          "flags": 128,
+          "operstate": "down"
+        },
+        {
+          "name": "tunl0",
+          "flags": 128,
+          "operstate": "down"
+        }
+      ],
+      "routeInterfaces": {
+        "ipv4": [],
+        "ipv6": [
+          "lo",
+          "lo",
+          "lo"
+        ]
+      },
+      "workspace": {
+        "filesystem": "tmpfs",
+        "mode": "0700",
+        "startedEmpty": true,
+        "personalProfileMounted": false
+      },
+      "version": "Version:        v1.0.61\nEdition:        open\nBuild:          2026-08-31T14:46:17Z\nCommit:         50eb73a0\nArchitecture:   MCP Static Endpoint Mode\nGo:             1.24+",
+      "binaryHash": "23c5e06b3175cf3910bf4c9af960545e0f995c621e1ff0aaadf58478fb84d90c",
+      "schemaHash": "73f06237dc449c32d2f698d180f3649a334b5e606ed34fcfb4c8ea2ef015e484",
+      "documentSchemaHash": "b5242dc7d6de7d35918099dd653a2c0022e8442d5cb390c608653d64932720f4",
+      "documentResultSchemaPublished": false,
+      "commands": [
+        {
+          "executable": "/usr/local/bin/dws",
+          "args": [
+            "version"
+          ],
+          "exitCode": 0,
+          "stdoutSha256": "d3d1086510120fa2faef790c2495e8155131210800a9fddc608cfcd72fa96682"
+        },
+        {
+          "executable": "/usr/local/bin/dws",
+          "args": [
+            "schema",
+            "--cli-path",
+            "contact +me",
+            "--compact",
+            "--format",
+            "json"
+          ],
+          "exitCode": 0,
+          "stdoutSha256": "3e08536b80cea0b218cc72a33a17bc91c2e9d72a88ae1894648519dbd883f8f9"
+        },
+        {
+          "executable": "/usr/local/bin/dws",
+          "args": [
+            "schema",
+            "--cli-path",
+            "doc +fetch",
+            "--compact",
+            "--format",
+            "json"
+          ],
+          "exitCode": 0,
+          "stdoutSha256": "e6ddef0c89b2431224246a06e8c345c90740f45a8754f6f77f41accaf7733c49"
+        }
+      ],
+      "businessCalls": 0,
+      "authorizationCalls": 0,
+      "applicationStarted": false,
+      "deployed": false
+    },
+    "container": {
+      "id": "2ac805dbd49ffebbaba3c301cb879177cec1570ab49660994636acfb71824689",
+      "createCommand": [
+        "docker",
+        "create",
+        "--pull=never",
+        "--network",
+        "none",
+        "--read-only",
+        "--user",
+        "10001:10001",
+        "--cap-drop",
+        "ALL",
+        "--security-opt",
+        "no-new-privileges:true",
+        "--pids-limit",
+        "64",
+        "--memory",
+        "512m",
+        "--cpus",
+        "1",
+        "--tmpfs",
+        "/run/dws:rw,noexec,nosuid,nodev,size=32m,mode=700,uid=10001,gid=10001",
+        "--entrypoint",
+        "node",
+        "anthys:p06-dws-security-20261022",
+        "scripts/probe-dws-offline.mjs"
+      ],
+      "startCommand": [
+        "docker",
+        "start",
+        "--attach",
+        "2ac805dbd49ffebbaba3c301cb879177cec1570ab49660994636acfb71824689"
+      ],
+      "networkMode": "none",
+      "readOnlyRootfs": true,
+      "user": "10001:10001",
+      "tmpfs": "rw,noexec,nosuid,nodev,size=32m,mode=700,uid=10001,gid=10001",
+      "tmpfsOptions": [
+        "rw",
+        "noexec",
+        "nosuid",
+        "nodev",
+        "size=32m",
+        "mode=700",
+        "uid=10001",
+        "gid=10001"
+      ],
+      "exitCode": 0,
+      "removedAfterProbe": true
+    }
+  },
+  "signedProbe": {
+    "result": {
+      "status": "PASS",
+      "scope": "LINUX_OFFLINE_SIGNED_PROTOCOL_AND_IMAGE_SECURITY",
+      "platform": "linux-arm64",
+      "uid": 10001,
+      "network": "none",
+      "networkObservation": {
+        "devices": [
+          {
+            "name": "erspan0",
+            "flags": 4098
+          },
+          {
+            "name": "gre0",
+            "flags": 128
+          },
+          {
+            "name": "gretap0",
+            "flags": 4098
+          },
+          {
+            "name": "ip6_vti0",
+            "flags": 128
+          },
+          {
+            "name": "ip6gre0",
+            "flags": 128
+          },
+          {
+            "name": "ip6tnl0",
+            "flags": 128
+          },
+          {
+            "name": "ip_vti0",
+            "flags": 128
+          },
+          {
+            "name": "lo",
+            "flags": 9
+          },
+          {
+            "name": "sit0",
+            "flags": 128
+          },
+          {
+            "name": "tunl0",
+            "flags": 128
+          }
+        ],
+        "ipv4Routes": "Iface\tDestination\tGateway \tFlags\tRefCnt\tUse\tMetric\tMask\t\tMTU\tWindow\tIRTT                                                       \n",
+        "ipv6Routes": "00000000000000000000000000000000 00 00000000000000000000000000000000 00 00000000000000000000000000000000 ffffffff 00000001 00000000 00200200       lo\n00000000000000000000000000000001 80 00000000000000000000000000000000 00 00000000000000000000000000000000 00000000 00000002 00000000 80200001       lo\n00000000000000000000000000000000 00 00000000000000000000000000000000 00 00000000000000000000000000000000 ffffffff 00000001 00000000 00200200       lo\n",
+        "capabilitySets": {
+          "CapInh": "0000000000000000",
+          "CapPrm": "0000000000000000",
+          "CapEff": "0000000000000000",
+          "CapBnd": "0000000000000000",
+          "CapAmb": "0000000000000000"
+        },
+        "noNewPrivs": 1
+      },
+      "readonlyRoot": true,
+      "privateTmpfs": true,
+      "binarySha256": "23c5e06b3175cf3910bf4c9af960545e0f995c621e1ff0aaadf58478fb84d90c",
+      "challengeSignatureVerified": true,
+      "invalidCredentialStateRejectedBeforeCli": true,
+      "replayRejected": true,
+      "socketMode": "0600",
+      "socketParentMode": "0700",
+      "configFileMode": "0600",
+      "keyFileMode": "0600",
+      "tcpListeners": 0,
+      "dockerSocket": false,
+      "secretPaths": false,
+      "appCodeOwner": "root",
+      "appFilePermissions": "NO_GROUP_WORLD_WRITE_NO_SETUID",
+      "argvSecretFree": true,
+      "logsSecretFree": true,
+      "cryptoEnvelope": "AES_256_GCM_AAD",
+      "capabilitySets": {
+        "CapInh": "0000000000000000",
+        "CapPrm": "0000000000000000",
+        "CapEff": "0000000000000000",
+        "CapBnd": "0000000000000000",
+        "CapAmb": "0000000000000000"
+      },
+      "noNewPrivs": 1,
+      "enterpriseCredentials": false,
+      "businessCliExecuted": false,
+      "live": false
+    },
+    "container": {
+      "id": "328d616e780452bdf98d95131b1daef58e2934516e6b01ba498d99e9cacc640d",
+      "createCommand": [
+        "docker",
+        "create",
+        "--pull=never",
+        "--network",
+        "none",
+        "--read-only",
+        "--user",
+        "10001:10001",
+        "--cap-drop",
+        "ALL",
+        "--security-opt",
+        "no-new-privileges:true",
+        "--pids-limit",
+        "64",
+        "--memory",
+        "512m",
+        "--cpus",
+        "1",
+        "--tmpfs",
+        "/run/dws:rw,noexec,nosuid,nodev,size=32m,mode=700,uid=10001,gid=10001",
+        "--entrypoint",
+        "node",
+        "anthys:p06-dws-security-20261022",
+        "scripts/probe-dws-signed-offline.mjs"
+      ],
+      "startCommand": [
+        "docker",
+        "start",
+        "--attach",
+        "328d616e780452bdf98d95131b1daef58e2934516e6b01ba498d99e9cacc640d"
+      ],
+      "networkMode": "none",
+      "readOnlyRootfs": true,
+      "user": "10001:10001",
+      "tmpfs": "rw,noexec,nosuid,nodev,size=32m,mode=700,uid=10001,gid=10001",
+      "tmpfsOptions": [
+        "rw",
+        "noexec",
+        "nosuid",
+        "nodev",
+        "size=32m",
+        "mode=700",
+        "uid=10001",
+        "gid=10001"
+      ],
+      "exitCode": 0,
+      "removedAfterProbe": true
+    }
+  }
+}

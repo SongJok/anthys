@@ -54,12 +54,18 @@ function localDocker(){
   ||!Array.isArray(bindings)||bindings.length!==1||bindings[0]?.HostIp!=='127.0.0.1'||bindings[0]?.HostPort!=='64711')fail('TEST_DOCKER_CONTAINER_REJECTED');
  return (command:string[],input?:Buffer)=>docker([...prefix,'exec',...(input?['-i']:[]),ids[0]!,...command],input);
 }
+// A DO block runs its body when the migration is applied, so every DO block is
+// rejected unless the exact body was reviewed. The only reviewed body is the
+// role-binding DDL of migration 115, which only drops a unique constraint; its
+// hash pins it, so a changed body has to be reviewed again.
+const reviewedDoBodies=new Set(['f6a530362232755f4400e9d9f0755e7cfaf647b13f7f49cd36f6ccdd0c936a6a']);
 /** Inspect top-level commands, preserving quoted function bodies and faithful object ACLs. */
 function schemaOnly(sql:string){
- let statement='';
+ let statement='',doBody='';
  const check=()=>{
-  const code=statement.trim().toUpperCase();statement='';if(!code)return;
-  if(/^(?:CREATE|ALTER|DROP)\s+(?:(?:OR\s+REPLACE\s+)?(?:ROLE|USER|GROUP|DATABASE|TABLESPACE|SUBSCRIPTION)|SYSTEM)\b|^(?:REASSIGN|DROP)\s+OWNED\b|^(?:DO|CALL|INSERT|UPDATE|DELETE|MERGE|TRUNCATE|COPY)\b|^SET\s+(?:ROLE|SESSION\s+AUTHORIZATION)\b/.test(code))fail('TEST_SCHEMA_CLUSTER_OPERATION_REJECTED');
+  const code=statement.trim().toUpperCase(),body=doBody;statement='';doBody='';if(!code)return;
+  if(/^DO\b/.test(code)){if(!reviewedDoBodies.has(digest(body)))fail('TEST_SCHEMA_CLUSTER_OPERATION_REJECTED');return;}
+  if(/^(?:CREATE|ALTER|DROP)\s+(?:(?:OR\s+REPLACE\s+)?(?:ROLE|USER|GROUP|DATABASE|TABLESPACE|SUBSCRIPTION)|SYSTEM)\b|^(?:REASSIGN|DROP)\s+OWNED\b|^(?:CALL|INSERT|UPDATE|DELETE|MERGE|TRUNCATE|COPY)\b|^SET\s+(?:ROLE|SESSION\s+AUTHORIZATION)\b/.test(code))fail('TEST_SCHEMA_CLUSTER_OPERATION_REJECTED');
   if(/^(?:GRANT|REVOKE)\b/.test(code)&&!/\bON\b/.test(code))fail('TEST_SCHEMA_CLUSTER_OPERATION_REJECTED');
   if(/^SELECT\b/.test(code)&&!/^SELECT\s+PG_CATALOG\.SET_CONFIG\s*\(\s*_STRING_\s*,\s*_STRING_\s*,\s*(?:TRUE|FALSE)\s*\)$/.test(code))fail('TEST_SCHEMA_CLUSTER_OPERATION_REJECTED');
  };
@@ -82,11 +88,15 @@ function schemaOnly(sql:string){
   }
   if(ch==='$'){
    const tag=/^\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$/.exec(sql.slice(i))?.[0];
-   if(tag){const end=sql.indexOf(tag,i+tag.length);if(end<0)fail('TEST_SCHEMA_CLUSTER_OPERATION_REJECTED');statement+='_BODY_';i=end+tag.length;continue;}
+   if(tag){const end=sql.indexOf(tag,i+tag.length);if(end<0)fail('TEST_SCHEMA_CLUSTER_OPERATION_REJECTED');if(statement.trim().toUpperCase()==='DO')doBody=sql.slice(i+tag.length,end);statement+='_BODY_';i=end+tag.length;continue;}
   }
   if(ch===';'){check();i++;continue;}statement+=ch;i++;
  }
  check();
+}
+/** Report the rejection code of a schema-only scan, or null when the scan accepts it. */
+export function schemaOnlyRejection(sql:string):string|null{
+ try{schemaOnly(sql);return null;}catch(error){return error instanceof SafetyError?error.message:'TEST_SCHEMA_CLUSTER_OPERATION_REJECTED';}
 }
 async function files(){
  // The clone's base snapshot is fixed at 094. Every later source migration is
