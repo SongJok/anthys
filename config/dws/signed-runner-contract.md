@@ -87,6 +87,28 @@ and checks the binary hash. It performs no business CLI operation, device login
 or enterprise API request. The independent process tests use a synthetic CLI and
 synthetic credential bundles; these are not enterprise success evidence.
 
+The hardened verifier runs both the pinned-CLI probe and the signed-protocol
+probe under the same reviewed container flags:
+
+```sh
+node scripts/verify-dws-image.mjs IMAGE
+```
+
+It rejects unpinned base images, secret-like image environment entries, exposed
+ports or volumes, a missing non-root user or fixed entrypoint, and any container
+with a writable rootfs, extra mounts, added capabilities, missing
+no-new-privileges/pid/memory/CPU limits, or a tmpfs without
+`noexec,nosuid,nodev,0700,uid=10001,gid=10001`. Inside the image it checks
+root-owned code with no group/world write or setuid/setgid bits, no Docker socket
+or baked `.env`/`.secrets`, no TCP listener, a 0600 Unix socket in a 0700 parent,
+0600 config/key files, no secret material in argv or logs, and an AES-256-GCM
+AAD-bound envelope self-test. The 2026-10-22 local run rebuilt from a clean HEAD
+context with the pinned v1.0.61 release and passed both probes; the report is
+`reports/dws-runner-security-20261022/result.json` for image
+`anthys:p06-dws-security-20261022`. This is component evidence only: T072/T123
+remain NOT_RUN, the image is not deployed, and no enterprise authorization,
+egress, device flow or live business CLI call occurred.
+
 No new SQL migration is required: the transport persists no credential or task
 records and uses instance-scoped nonce memory. Existing migrations 001–065 are
 unchanged; P06 identity storage still uses 033/034. No database is connected by
