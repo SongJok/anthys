@@ -517,13 +517,14 @@
       "apps/web/src/data-result-flow.ts",
       "apps/web/src/data-result.tsx",
       "tests/offline/data-result.test.ts",
-      "tests/integration/data-result-read-model.test.ts"
+      "tests/integration/data-result-read-model.test.ts",
+      "tests/integration/data-timeout-reconciliation.test.ts"
     ],
     "status": "IN_PROGRESS",
     "intendedModules": [
       "packages/company"
     ],
-    "remaining": "One certified payments daily success-rate template executes end to end through a reviewed company MCP data tool with exact decimals, server-injected scope, queryId/watermark evidence and audited provenance. A local lifecycle now publishes or rolls back reviewed template versions with immutable version/request receipts, local golden-oracle validation and superseded-version execution denial. A tenant-admin template administration view now lists registered versions, publishes a reviewed version and rolls back to an earlier one with exact revision CAS, one idempotency key per confirmation, no automatic resend and no upstream data access, rendered in the workbench permissions page for an active tenant administrator. A workbench certified data result view now projects only the actor's own audited certified results and the locally certified catalog, refuses an overall conclusion when the result is truncated or the watermark lags the allowed freshness limit while still showing scope, window and freshness, and turns a business question without any certified template into a pending definition that states no number. No live enterprise MCP acceptance (T096), additional certified templates/oracles, enterprise template approval or catalog publication, upstream data department certification or full T091/T093/T095/T096 catalog acceptance exist yet; upstream SQL safety and certification remain owned by the company MCP."
+    "remaining": "One certified payments daily success-rate template executes end to end through a reviewed company MCP data tool with exact decimals, server-injected scope, queryId/watermark evidence and audited provenance. A local lifecycle now publishes or rolls back reviewed template versions with immutable version/request receipts, local golden-oracle validation and superseded-version execution denial. A tenant-admin template administration view now lists registered versions, publishes a reviewed version and rolls back to an earlier one with exact revision CAS, one idempotency key per confirmation, no automatic resend and no upstream data access, rendered in the workbench permissions page for an active tenant administrator. A workbench certified data result view now projects only the actor's own audited certified results and the locally certified catalog, refuses an overall conclusion when the result is truncated or the watermark lags the allowed freshness limit while still showing scope, window and freshness, and turns a business question without any certified template into a pending definition that states no number. No live enterprise MCP acceptance (T096), additional certified templates/oracles, enterprise template approval or catalog publication, upstream data department certification or full T091/T093/T095/T096 catalog acceptance exist yet; upstream SQL safety and certification remain owned by the company MCP. A timed-out upstream query is now terminal instead of retryable: the local side keeps the issued request handle, issues exactly one bounded reconciliation check with the same nonce and never opens a second upstream query, so the execution stays reconcilable with UNKNOWN completeness instead of being silently retried. Per the 2026-10-22 product directive the statistics template, metric definition and data permission administration of section 4.8 belong to a phase 2 scope, so the phase 1 gate does not claim that module."
   },
   "R21": {
     "tests": [
@@ -763,7 +764,8 @@
       "packages/runtime/src/budget.ts",
       "packages/runtime/src/budget-policy.ts",
       "packages/runtime/src/model-budget.ts",
-      "packages/runtime/src/budget-recovery.ts"
+      "packages/runtime/src/budget-recovery.ts",
+      "tests/integration/data-timeout-reconciliation.test.ts"
     ],
     "status": "IN_PROGRESS",
     "intendedModules": [

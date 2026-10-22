@@ -40,7 +40,7 @@ describe('T083/T084/T087 deterministic MCP data response mapping',()=>{
   const incomplete=structuredClone(reply());incomplete.result.watermark=new Date(Date.parse(query.end)-1000).toISOString();incomplete.result.completeness='COMPLETE';rejection(()=>parseDataQueryReply(incomplete,expectation()),'COMPANY_DATA_WATERMARK_INCOMPLETE');
   const partial={...incomplete,result:{...incomplete.result,completeness:'TRUNCATED' as const}};expect(dataReplyStatus(parseDataQueryReply(partial,expectation()))).toBe('PARTIAL');
  });
- it('rejects tenant, actor, scope, template, row-scope and window substitutions',()=>{
+ it('T085 rejects tenant, actor, scope, template, row-scope and window substitutions',()=>{
   const cases=[['tenantId',randomUUID()],['actorId',randomUUID()],['scopeId',randomUUID()],['sourceRevision','other-revision'],['nonce',randomUUID()],['contractHash','0'.repeat(64)],['scopeVersion',999]] as const;
   for(const [field,value] of cases){const bad=structuredClone(reply()) as unknown as Record<string,unknown>;bad[field]=value;rejection(()=>parseDataQueryReply(bad,expectation()),'COMPANY_DATA_RESPONSE_INVALID');}
   for(const mutate of [(value:ReturnType<typeof reply>)=>{value.template={...value.template,version:'1.0.1'};},(value:ReturnType<typeof reply>)=>{value.template={...value.template,hash:'f'.repeat(64)};},(value:ReturnType<typeof reply>)=>{value.rowScope={tenant_id:'A',department_id:'d_other'};},(value:ReturnType<typeof reply>)=>{value.rowScope={tenant_id:'B',department_id:'d_pay'};}]){

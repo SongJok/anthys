@@ -1,0 +1,116 @@
+{
+  "status": "PASS",
+  "scope": "LOCAL_SYNTHETIC_DATA_QUERY_TIMEOUT_RECONCILIATION",
+  "live": false,
+  "generatedAt": "2026-10-22T07:12:00Z",
+  "source": {
+    "baseCommit": "504cbe72fce67b3edec96ee2fe4ad15884d21f25",
+    "workingTree": true,
+    "files": {
+      "packages/company/src/data-client.ts": "26e0251d06a01f05faaf040820fdf3e9f20ee82712ed014fb4425c8fad82d093",
+      "packages/company/src/data.ts": "e36a9ef981aba1d426597e74e64e036d605eacfa6dddff3bdc52c623143e8fbe",
+      "tests/support/company-data-mcp.ts": "8f26f0a2fa0fb7aec9cafefcd458adb6699b2bae56e30382cdebb6107a9da9b0",
+      "tests/integration/data-timeout-reconciliation.test.ts": "613e8bd0bad386c70c80b40aa70173b188a1cd7eee482f5227a92d7859b567ca",
+      "tests/unit/company-data-contracts.test.ts": "e20554c3428582b29d3cdb6f7b4c2fd59a105eda83dd96edbd440130bb9c565d",
+      "tests/unit/company-data-templates.test.ts": "5d330e064bdcf34da0e57ffdf9a223868469fec47d18c89aca5971d661ea0992",
+      "tests/unit/office-extensions.test.ts": "64c499748afdecbe4aaf4eaffb3ea8a1d56f87623151179eb24fc98c4cd3ea55",
+      "config/requirements.json": "a7c8c427ba3f2a2a49054d7f17b82320247a15c3efbefa4d2a0d70d008c13fc6",
+      "config/stages.json": "4c19f20611c31790fa66baa6bc81d96e528bc7df9f67e2407bdcc6f974b975fe",
+      "config/test-catalog.json": "0fee6d4ac53787d8c120e30f3a33419d208d9a4f70bf357166ce86d801f99034",
+      "docs/02_ARCHITECTURE_RUNTIME_AND_DATA_CONTRACTS.md": "e5741682783236bd6d51c6e4e64021e4d6824227c0821e4b41eb79cb88319164",
+      "docs/04_TEST_ACCEPTANCE_AND_OPERATIONS.md": "2561fb7346f2cfe46f74bcfd335427ab0953292a219983fbca4f4df2c6773bd5"
+    }
+  },
+  "surface": {
+    "entry": "packages/company/src/data-client.ts CompanyDataClient.request and packages/company/src/data.ts execute",
+    "host": "the gateway capability company.data.query, reached only through the reviewed upstream MCP data proxy",
+    "transport": "MCP callTool over the reviewed company data connector, with the local AbortSignal deadline and the SDK request timeout combined",
+    "singleAuthority": "No new endpoint, table or second execution path was added. The upstream MCP remains the only way data is queried, and a timeout is reported instead of being compensated locally."
+  },
+  "behavior": {
+    "terminalTimeout": "A timeout or a caller cancellation is raised as CompanyDataTimeoutError and mapped to the UNKNOWN result state instead of RETRYABLE_ERROR. The gateway therefore persists the action as UNKNOWN and the runtime pauses the run with RECONCILIATION_REQUIRED, so no retry is scheduled and no second upstream query is ever opened.",
+    "callerCancellation": "A caller cancellation is reported as COMPANY_DATA_CALLER_CANCELLED and is distinct from an upstream timeout. It is raised before the upstream call is dispatched when the signal is already aborted, so a cancelled action never reaches the upstream.",
+    "deterministicDeadline": "The request deadline is AbortSignal.any of the caller signal and an AbortSignal.timeout of the configured timeout, while the MCP SDK request timeout is the same budget plus 50 ms. The local deadline therefore always fires first, so a timeout is attributed to the local clock and never to an ambiguous transport error.",
+    "durableHandle": "The upstream query id is genuinely unavailable when a query times out, so the local side keeps the nonce it issued as the durable request handle company-data:<connectorId>:timeout:<nonce>. The handle is persisted with the audit row and stays stable across restarts.",
+    "boundedReconciliation": "After a timeout the local side issues exactly one bounded CHECK with the same nonce and the same scope, and never a second QUERY. If the check succeeds the handle gains the :reconciled suffix; if it fails the original handle is kept, so the outcome stays unknown and truthful rather than being guessed.",
+    "auditRecord": "The timeout is recorded in data_executions with status UNKNOWN, completeness UNKNOWN, a null query_id and the durable handle as the evidence reference. The existing schema already permits this shape, so no migration was needed.",
+    "noResultProjection": "Because the action state is UNKNOWN and no result row is written, the certified data result read model never projects a timed-out query. An overall conclusion cannot be derived from a query whose upstream outcome is unknown.",
+    "noCompensation": "The local side never cancels or compensates the upstream query, because the upstream owns the query lifecycle and the local side cannot prove the query stopped. The handle exists so an operator can reconcile the query against the upstream instead."
+  },
+  "tests": {
+    "commands": [
+      "node scripts/run-tests.mjs vitest run tests/integration/data-timeout-reconciliation.test.ts",
+      "node scripts/run-tests.mjs vitest run tests/integration/company-data.test.ts tests/integration/data-template-lifecycle.test.ts tests/integration/data-result-read-model.test.ts tests/integration/role-administration.test.ts tests/integration/data-timeout-reconciliation.test.ts tests/unit/company-data-configuration.test.ts tests/unit/company-data-contracts.test.ts tests/unit/company-data-templates.test.ts tests/unit/capability-descriptor.test.ts tests/unit/capability-output.test.ts tests/unit/office-extensions.test.ts",
+      "node scripts/update-schema-contract.mjs --check",
+      "node --import tsx scripts/capability-output-contracts.ts --check",
+      "node --import tsx scripts/verify-requirements.ts --baseline",
+      "node <typescript>/bin/tsc --noEmit",
+      "node <eslint>/bin/eslint.js apps packages scripts tests",
+      "pnpm build"
+    ],
+    "integration": {
+      "files": 1,
+      "passed": 3,
+      "failed": 0,
+      "skipped": 0,
+      "newFile": {
+        "path": "tests/integration/data-timeout-reconciliation.test.ts",
+        "passed": 3,
+        "failed": 0
+      },
+      "source": "isolated PostgreSQL on port 64711 with the local synthetic company data MCP substitute whose delayed query keeps running upstream, and the real gateway capability path",
+      "covered": [
+        "a timed-out upstream query is never compensated by a new query: the upstream fixture records exactly one query attempt, the action ends as UNKNOWN, the runtime pauses with RECONCILIATION_REQUIRED, and the local side issues exactly one bounded reconciliation check with the same nonce",
+        "a timeout inside the upstream gate never produces a result row: the data_executions audit row records status UNKNOWN with a null query_id, the durable handle company-data:<connectorId>:timeout:<nonce> is kept as the evidence reference, and the certified data result read model projects nothing",
+        "a caller cancellation is distinct from an upstream timeout and never opens a query: the client raises COMPANY_DATA_CALLER_CANCELLED, the gateway denies the action before dispatch, and neither an action row nor an audit row is written"
+      ],
+      "defectFoundAndFixed": "A TypeScript error was exposed by the typecheck gate after the change: the nonce parameter of CompanyDataClient.request was inferred from the randomUUID default as a UUID template literal type, so the plain string nonce of CompanyDataTimeoutError was not assignable. The nonce type is now named DataNonce and used by the error, the request signature and the reconciliation helper. The typecheck and lint gates pass after the fix."
+    },
+    "regression": {
+      "files": 11,
+      "passed": 85,
+      "failed": 0,
+      "skipped": 0,
+      "breakdown": {
+        "data-timeout-reconciliation": 3,
+        "company-data": 4,
+        "data-result-read-model": 5,
+        "data-template-lifecycle": 5,
+        "role-administration": 5,
+        "company-data-configuration": 7,
+        "company-data-contracts": 5,
+        "company-data-templates": 6,
+        "capability-descriptor": 8,
+        "capability-output": 32,
+        "office-extensions": 5
+      }
+    },
+    "typecheck": "PASS",
+    "lint": "PASS",
+    "schemaContractCheck": "PASS",
+    "capabilityOutputContractCheck": "PASS",
+    "requirementsBaseline": "PASS",
+    "requirementsFull": "FAIL_PREEXISTING",
+    "requirementsFullNote": "83 errors remain from stages still in progress (implementation incomplete for R-items, missing implementations for later T-cases), down from 87 because T092 now points at an implemented test file with stable case identifiers. No error involves the timeout reconciliation slice, and the baseline integrity mode passes.",
+    "build": "PASS",
+    "liveProviderCalls": 0
+  },
+  "notProven": [
+    "live GLM, DingTalk, DWS or company MCP acceptance",
+    "the real upstream chaos scenario of a query that times out while the backend keeps executing, and the upstream-side reconciliation of the issued request handle",
+    "any enterprise data-department oracle or golden files beyond the local synthetic payments fixture",
+    "the upstream-side guarantee that a timed-out query stops on its own",
+    "real development database on port 64710 or any deployment",
+    "T092, T093, T095 or T096 full catalog acceptance, R20 completion or R30 completion"
+  ],
+  "statusUnchanged": {
+    "T092": "NOT_RUN",
+    "T093": "NOT_RUN",
+    "T095": "NOT_RUN",
+    "T096": "NOT_RUN",
+    "R20": "IN_PROGRESS",
+    "R30": "IN_PROGRESS",
+    "P09": "IN_PROGRESS",
+    "liveAcceptance": "BLOCKED_EXTERNAL"
+  }
+}

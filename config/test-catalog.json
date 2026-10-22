@@ -1453,8 +1453,9 @@
     "layer": "CHAOS",
     "precondition": "查询超时但后端仍执行",
     "oracle": "保存queryId并执行合法取消/核对；不无限开新查询",
-    "implementation": null,
-    "status": "NOT_RUN"
+    "implementation": "tests/integration/data-timeout-reconciliation.test.ts",
+    "status": "NOT_RUN",
+    "coverageNote": "A timed-out upstream query is terminal instead of retryable: the gateway persists the UNKNOWN outcome, the runtime pauses with RECONCILIATION_REQUIRED instead of opening a new upstream query, the local side keeps the issued request handle, issues exactly one bounded reconciliation check with the same nonce and never sends a second query. Covered by 3 cases on an isolated PostgreSQL with a reviewed MCP data fixture that keeps executing the delayed query upstream; the live upstream chaos scenario remains NOT_RUN."
   },
   {
     "id": "T093",

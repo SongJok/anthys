@@ -7,7 +7,7 @@ const request=(capabilityId:OfficeCapabilityId,params:OfficeRequest['params']={}
 const certification=(capabilityId:OfficeCapabilityId,overrides:Partial<OfficeCertification>={}):OfficeCertification=>({capabilityId,version,schemaHash,connectorId:'synthetic-dws',certifiedBy:'security-review',certifiedAt:'2026-10-20T00:00:00.000Z',expiresAt:'2026-11-20T00:00:00.000Z',...overrides});
 function connector(){const seen:string[]=[];const value:OfficeConnector={connectorId:'synthetic-dws',execute:async req=>{seen.push(req.capabilityId);return {receiptId:randomUUID(),verification:'ACCEPTED_BY_UPSTREAM'};}};return {seen,value};}
 
-it('default-denies auto approval decisions, clock-in, bulk member removal and public sharing before any connector call',async()=>{
+it('T115 default-denies auto approval decisions, clock-in, bulk member removal and public sharing before any connector call',async()=>{
  const c=connector(),broker=new OfficeExtensionBroker({connectors:{'synthetic-dws':c.value},certifications:dangerous.map(id=>certification(id)),now:()=>now});
  for(const id of dangerous){const preview=broker.preview(request(id),{tenantId,actorId});if(preview.status!=='PREVIEW')throw Error(preview.code);
   expect(await broker.execute(request(id),{tenantId,actorId,signal:new AbortController().signal,previewToken:preview.token})).toMatchObject({status:'NEEDS_APPROVAL',code:'OFFICE_DANGEROUS_REQUIRES_FORMAL_APPROVAL',dispatched:false,effect:'NONE'});}

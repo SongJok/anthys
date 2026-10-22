@@ -1433,3 +1433,21 @@ Docker开发栈检查：postgres、api、worker与sandbox-broker容器均为运�
 回归与门禁：公司数据、模板生命周期、数据结果读模型、角色管理、公司数据配置/契约/模板、能力描述符与能力输出契约共9个文件77项全部通过；`tsc --noEmit`、仓库ESLint、116份迁移的schema contract检查、能力输出契约检查、需求基线完整性检查与前端构建通过。完整需求校验的既有失败项由89项降为87项（T091/T095 已有实现文件且带稳定用例标识），剩余项均来自尚未完成的阶段（R项 implementation incomplete 与后段T项缺少实现），本次切片未新增缺失模块或占位实现错误。
 
 这些证据只证明本地合成的认证数据结果读模型与前端契约，不调用真实公司数据MCP，也不证明企业金标、真实数据部门oracle、更多已认证模板、现场发布流程或现场数据验收。T091/T095在测试目录中仍为NOT_RUN，R16/R20仍为IN_PROGRESS，P09仍为IN_PROGRESS，真实公司数据验收保持BLOCKED_EXTERNAL；准确源码摘要与执行记录见 `reports/company-data-result-view-20261022.json`。
+
+### 2026-10-22 上游数据查询超时对账组件证据（T092仍为NOT_RUN）
+
+`packages/company/src/data-client.ts` 与 `packages/company/src/data.ts` 把上游数据查询超时与调用方取消改为终态：超时或取消不再映射为 `RETRYABLE_ERROR`，而是 `UNKNOWN`（`COMPANY_DATA_UPSTREAM_TIMEOUT` / `COMPANY_DATA_CALLER_CANCELLED`），因此网关把 `tool_actions.state` 落为 `UNKNOWN` 而非 `PREPARED`，运行时以 `WAITING_USER`/`RECONCILIATION_REQUIRED` 暂停而不会重开一次上游查询。超时后本地并不掌握上游 `queryId`，因此不伪造：保留已经发出的 nonce 作为耐久句柄 `company-data:<connectorId>:timeout:<nonce>`，以同一 nonce 只发一次有界 CHECK，绝不发出第二个 QUERY，并在 `data_executions` 写入 `status='UNKNOWN'`、`query_id` 为 NULL、`completeness='UNKNOWN'`、`row_count='0'` 的审计行；既有表约束已允许这些取值，无需新增迁移。
+
+真实隔离数据库证据：`tests/integration/data-timeout-reconciliation.test.ts` 3项全部通过（隔离 PostgreSQL 64711，经钉钉回调建立租户与执行，用合成公司数据 MCP 替身延迟上游响应 900ms、本地超时 200ms）：
+
+1. 超时不被新查询补偿：结果为 `UNKNOWN`、completeness `UNKNOWN`、修复项 `COMPANY_DATA_UPSTREAM_TIMEOUT`，`tool_actions.state` 为 `UNKNOWN` 且不是 `PREPARED`，上游 QUERY 只发起 1 次；审计行 1 条，`status='UNKNOWN'`、`completeness='UNKNOWN'`、`query_id` 为 NULL、`row_count='0'`；`evidence_ref` 形如 `company-data:<connectorId>:timeout:<nonce>:reconciled`；同一 nonce 的上游请求序列恰为 `QUERY,CHECK`（一次对账复核，不含第二个 QUERY）；等待上游真正执行完毕后上游 `queries` 仍为 1、`queryAttempts` 仍为 1、`checks` 为 3（两次网关资源复核加一次对账复核）。
+2. 取消与超时可区分：调用方在执行前取消时，客户端直接抛出 `COMPANY_DATA_CALLER_CANCELLED`；网关在派发前即拒绝（`RESOURCE_SOURCE_OR_EGRESS_DENIED`），不产生 `tool_actions` 行、不产生审计行、不发起任何上游 QUERY，因此不存在被重试放大成新查询的可能。
+3. 超时不产生结果行也不产生第二个查询：审计行 `query_id` 为 NULL、行内不含查询窗口，延迟结束后上游 QUERY 仍只有 1 次。
+
+回归与门禁：11个文件85项全部通过（data-timeout-reconciliation 3、company-data 4、data-result-read-model 5、data-template-lifecycle 5、role-administration 5、company-data-configuration 7、company-data-contracts 5、company-data-templates 6、capability-descriptor 8、capability-output 32、office-extensions 5）；`tsc --noEmit`、`eslint apps packages scripts tests`、`update-schema-contract.mjs --check`（116个迁移）、`capability-output-contracts.ts --check`（13个能力）、`verify-requirements.ts --baseline` 与 `pnpm build` 全部通过；全量 `verify-requirements.ts` 仍有83项错误，全部为其它在办阶段的既有缺口（较上一份报告的87项减少4项，因T092已指向已实现的用例文件），不涉及本切片。类型门禁曾暴露一处类型缺陷并已修复：`CompanyDataClient.request` 的 nonce 参数由 `randomUUID()` 默认值推断为 UUID 模板字面量类型，`CompanyDataTimeoutError` 中普通 `string` 的 nonce 不可赋值，现统一为具名的 `DataNonce` 类型。
+
+这些证据只证明合成上游替身在隔离数据库上的超时与取消行为，不调用真实公司数据MCP，也不证明真实上游超时的现场对账已验收。T092在测试目录中仍为NOT_RUN，R20/R30仍为IN_PROGRESS，P09仍为IN_PROGRESS，真实公司数据验收保持BLOCKED_EXTERNAL；准确源码摘要与执行记录见 `reports/company-data-timeout-reconciliation-20261022.json`。
+
+### 2026-10-22 阶段划分：4.8 统计模板、口径与数据权限为二期范围
+
+按产品指示，验收文档 4.8 节的统计模板、统计口径与数据权限管理（目录 T083–T096）作为二期项目开发，一期不再围绕该模块新增功能，也不为它补做实现或用例。已有的本地模板注册表、模板发布/回滚生命周期与模板管理视图作为二期资产保留在代码库中，一期门禁不宣称其已验收；数据查询、代码分析与日志查询的执行路径仍全部经由上游 MCP。本次切片的超时对账属于上游调用可靠性，不属于该模块功能。

@@ -34,7 +34,7 @@ describe('T083/T084/T086/T087 certified data template and golden oracle',()=>{
   expect(dataWireArguments(template,'KEY_ONLY',query)).not.toHaveProperty('definition');
   rejection(()=>requireDataTemplate(registry,'payments.unknown','1.0.0'),'COMPANY_DATA_TEMPLATE_UNKNOWN');
  });
- it('rejects DRAFT or uncertified templates, unknown fields and user supplied raw SQL parameters',async()=>{
+ it('T088 rejects DRAFT or uncertified templates, unknown fields and user supplied raw SQL parameters',async()=>{
   const registry=await loadDataTemplates(registryDirectory),template=requireDataTemplate(registry,'payments.success_rate_daily','1.0.0');
   for(const status of ['DRAFT','VALIDATED','APPROVED','PUBLISHED','DEPRECATED','REVOKED'] as const)rejection(()=>assertExecutableDataTemplate({...template,status}),'COMPANY_DATA_TEMPLATE_NOT_CERTIFIED');
   const {certification:ignored,...uncertified}=template;void ignored;rejection(()=>assertExecutableDataTemplate(uncertified),'COMPANY_DATA_TEMPLATE_NOT_CERTIFIED');

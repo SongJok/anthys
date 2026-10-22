@@ -7,7 +7,7 @@ import {reviewedCapability} from '../../gateway/src/reviewed-capabilities.js';
 import {blocked,type ToolResult} from '../../contracts/src/index.js';
 import {hash} from '../../storage/src/crypto.js';
 import {CompanySourceError} from './chat.js';
-import {CompanyDataClient} from './data-client.js';
+import {CompanyDataClient,CompanyDataTimeoutError,type DataNonce} from './data-client.js';
 import {companyDataResultContract} from './data-result-contract.js';
 import {companyDataContractHash,dataCanonicalQuerySchema,dataParametersHash,dataQuerySchema,dataResource,dataRowScopeSchema,dataSourceReceiptSchema,dataTemplateRef,dataWireArguments,dataReplyStatus,parseDataCheckReply,parseDataQueryReply,type DataQuery,type DataScope} from './data-contracts.js';
 import {recordDataExecution,type DataExecutionAudit} from './data-execution.js';
@@ -38,13 +38,29 @@ export function registerCompanyDataCapabilities(gateway:Gateway,client:CompanyDa
  const cap:Capability={...companyDataResultContract,...reviewedCapability('company.data.query',`mcp:${client.connectorId}:${client.toolName}:${client.connectionBinding}`),id:'company.data.query',version:'1.0.0',description:'Execute one certified aggregate data template for the current tenant and actor through a reviewed company MCP data proxy. Results carry exact decimals, template/version provenance, time window, watermark and explicit completeness. Upstream template execution is UNVERIFIED until live certification; user input never selects raw SQL, tables or tenant scope.',provider:'MCP',connectorId:client.connectorId,risk:'READ',state:'READY',protectResult:true,retryableRead:true,schema:dataQuerySchema,jsonSchema:z.toJSONSchema(dataQuerySchema,{io:'input'}),bindingHash:companyDataBindingHash(client.connectorId,client.connectionBinding,client.toolName,client.inputSchemaHash,client.templates.registryHash),resource:a=>dataResource(a as DataQuery),classifyResult:r=>{const source=cachedSource(r);return source?source.classification:'RESTRICTED';},allowResource:async(a,{principal,lease,signal},c,cached)=>!!await current(c,principal,lease,client,a as DataQuery,cached,signal??new AbortController().signal),retainFact:async(a,{principal,lease},c,result)=>{if(!await current(c,principal,lease,client,a as DataQuery,result,new AbortController().signal))throw new CompanySourceError('COMPANY_DATA_SOURCE_CHANGED');},execute:async(a,{principal,signal})=>execute(gateway.store,client,principal,a as DataQuery,signal)};gateway.register(cap);
 }
 export function dataFailure(error:unknown):ToolResult{
+ // A timeout or a cancellation leaves the upstream outcome unknown, so the
+ // execution is not retryable: a retry would open another upstream query while
+ // the first one may still be running.
+ if(error instanceof CompanyDataTimeoutError)return blocked('UNKNOWN',error.code);
  if(error instanceof CompanySourceError){const denied=['COMPANY_DATA_UPSTREAM_DENIED','COMPANY_DATA_TEMPLATE_UNKNOWN','COMPANY_DATA_TEMPLATE_NOT_CERTIFIED','COMPANY_DATA_TEMPLATE_MISMATCH','COMPANY_DATA_TEMPLATE_PARAMETERS_INVALID','COMPANY_DATA_TEMPLATE_OPERATION_INVALID'].includes(error.code);return blocked(denied?'DENIED':'PERMANENT_ERROR',error.code);}
  return blocked('RETRYABLE_ERROR','COMPANY_DATA_TRANSPORT_UNAVAILABLE');
+}
+// The upstream request that timed out may still be running. The local side
+// keeps the handle it issued, verifies the same scope once with a bounded
+// check that never issues another query, and records the outcome so the
+// execution stays reconcilable instead of silently retried.
+async function reconcileTimeout(client:CompanyDataClient,ctx:DbContext,scope:DataScope,args:DataQuery,nonce:DataNonce):Promise<string>{
+ const handle=`company-data:${client.connectorId}:timeout:${nonce}`;
+ try{
+  const template=client.template(args.templateKey,args.templateVersion),{value}=await client.request(ctx,scope,'CHECK',dataWireArguments(template,client.templateMode,args),new AbortController().signal,nonce);
+  parseDataCheckReply(value,{ctx,scope,template,nonce,query:args});return handle+':reconciled';
+ }catch{return handle;}
 }
 async function execute(store:RuntimeStore,client:CompanyDataClient,ctx:DbContext,args:DataQuery,signal:AbortSignal):Promise<ToolResult>{
  let scope:DataScope|null;try{scope=await store.db.scope(ctx,c=>scopeFor(c,ctx,client,args));}catch(error){return dataFailure(error);}if(!scope)return blocked('DENIED','COMPANY_DATA_SCOPE_UNAVAILABLE');
  try{return await executeDataQuery(client,ctx,scope,args,signal,record=>recordDataExecution(store.db,ctx,record));}
- catch(error){const result=dataFailure(error);try{await recordDataExecution(store.db,ctx,{templateKey:args.templateKey,templateVersion:args.templateVersion,paramsHash:dataParametersHash(args),queryId:null,status:result.status,watermark:null,observedAt:null,completeness:'UNKNOWN',rowCount:'0',evidenceRef:result.remediation?.kind??'COMPANY_DATA_FAILURE'});}catch{}return result;}
+ catch(error){const result=dataFailure(error),handle=error instanceof CompanyDataTimeoutError?await reconcileTimeout(client,ctx,scope,args,error.nonce):null;
+  try{await recordDataExecution(store.db,ctx,{templateKey:args.templateKey,templateVersion:args.templateVersion,paramsHash:dataParametersHash(args),queryId:null,status:result.status,watermark:null,observedAt:null,completeness:'UNKNOWN',rowCount:'0',evidenceRef:handle??result.remediation?.kind??'COMPANY_DATA_FAILURE'});}catch{}return result;}
 }
 export async function executeDataQuery(client:CompanyDataClient,ctx:DbContext,scope:DataScope,args:DataQuery,signal:AbortSignal,audit:(record:DataExecutionAudit)=>Promise<void>):Promise<ToolResult>{
  const template:DataTemplate=client.template(args.templateKey,args.templateVersion);if(template.key!==scope.templateKey||template.version!==scope.templateVersion||dataTemplateHash(template)!==scope.templateHash)throw new CompanySourceError('COMPANY_DATA_TEMPLATE_MISMATCH');

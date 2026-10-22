@@ -1190,3 +1190,17 @@ STOP先在一事务提交永久veto，再用独立事务复用原task取消；�
 结论判定规则固定：结果被截断或为抽样、执行状态非 OK、或水位落后分钟数超过目录登记的新鲜度上限（缺省 1440 分钟）时，一律拒绝给出总体确定结论，只展示统计口径、时间窗口、行范围与新鲜度差；否则在已授权行范围与该时间窗口内给出成功率等结论，并明确该结论只覆盖已授权范围与该时间窗口。业务问题只有在命中已认证口径名称或模板标识时才指向该口径；没有任何认证模板覆盖时，只生成待开发口径要素（统计对象与口径边界、分子与分母定义、去重与有效性规则、时间粒度与时区、数据新鲜度上限、数据分类与允许角色、认证凭据与金标用例），不返回任何数字。
 
 `apps/web/src/data-result.tsx` 在工作台 `/data` 路由对已登录账号渲染认证数据结果、认证口径目录与业务问题核对表单；页面不可见或组件卸载时清除已取结果与迟到回执，401 会清空全部资料并触发既有会话失效回调，4xx/5xx 与网络异常都不回显服务端私有文本。该视图不访问上游数据工具、不新增执行入口，也不证明企业金标、真实数据部门 oracle 或现场发布流程已验收；T091/T095 仍为 NOT_RUN，R16/R20 仍为 IN_PROGRESS，真实公司数据验收保持 BLOCKED_EXTERNAL。
+
+## 2026-10-22 上游数据查询超时对账（局部实现）
+
+`packages/company/src/data-client.ts` 新增 `CompanyDataTimeoutError`：它携带本地已经发出的请求 nonce 与 `TIMEOUT`/`CANCELLED` 原因，错误码分别为 `COMPANY_DATA_UPSTREAM_TIMEOUT` 与 `COMPANY_DATA_CALLER_CANCELLED`。请求期使用 `AbortSignal.any([调用方信号, AbortSignal.timeout(timeoutMs)])` 作为唯一截止信号，并把 MCP SDK 自身的 `timeout`/`maxTotalTimeout` 设为 `timeoutMs+50`，使本地信号必定先触发，超时与取消的判定唯一：调用方信号已取消抛 `CANCELLED`，超时信号触发抛 `TIMEOUT`，两者都不再被当作普通传输故障。
+
+`packages/company/src/data.ts` 的 `dataFailure` 把这两类错误映射为 `UNKNOWN` 而不是 `RETRYABLE_ERROR`。网关据此把 `tool_actions.state` 落为 `UNKNOWN`（`PREPARED` 只留给可重试读），运行时因此以 `WAITING_USER`/`RECONCILIATION_REQUIRED` 暂停，而不会沿读重试路径再发起一次上游查询——此前一次超时会变成一次新的上游查询，这正是必须消除的放大风险。
+
+超时后上游确实可能仍在执行，本地此时并不掌握上游 `queryId`，因此不伪造。`reconcileTimeout` 保留本地已经发出的 nonce 作为耐久对账句柄 `company-data:<connectorId>:timeout:<nonce>`，以同一 nonce 只发起一次有界 CHECK（不会发出第二个 QUERY），并在 `data_executions` 写入一条 `status='UNKNOWN'`、`query_id` 为 NULL、`completeness='UNKNOWN'`、`row_count='0'` 的审计行，其 `evidence_ref` 为 `company-data:<connectorId>:timeout:<nonce>[:reconciled]`。该表既有约束已允许 UNKNOWN 状态、空 `query_id` 与 2048 字符 `evidence_ref`，且没有不可变触发器，因此无需新增迁移。认证数据结果读模型只投影已核实的执行，不会把这条记录当成结果呈现。
+
+本节不新增迁移、不新增执行入口、不宣称取得上游 `queryId`，也不证明真实上游超时的现场行为；T092 仍为 NOT_RUN，R20/R30 仍为 IN_PROGRESS，真实公司数据验收保持 BLOCKED_EXTERNAL。
+
+## 阶段划分：4.8 统计模板、口径与数据权限为二期范围
+
+按 2026-10-22 的产品指示，验收文档 4.8 节的统计模板、统计口径与数据权限管理（目录 T083–T096）作为二期项目开发，一期不再围绕该模块新增功能。已有的本地模板注册表、模板发布/回滚生命周期与模板管理视图作为二期资产保留在代码库中，一期门禁不把它们宣称为已验收，也不为它们补做功能；数据查询、代码分析与日志查询的执行路径仍全部经由上游 MCP。
