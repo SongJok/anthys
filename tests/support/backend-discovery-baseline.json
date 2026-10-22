@@ -290,6 +290,7 @@
     "tests/integration/watch-api.test.ts",
     "tests/security/runner-image-security.test.ts",
     "tests/security/search-egress.test.ts",
+    "tests/security/upstream-credential-binding.test.ts",
     "tests/unit/analysis-job-contract.test.ts",
     "tests/unit/artifact-font-configuration.test.ts",
     "tests/unit/artifact-preservation.test.mjs",

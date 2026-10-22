@@ -1546,3 +1546,22 @@ T101「文件真实可打开，数字一致」（`tests/integration/artifact-for
 本用例同时固定了成果导出的字体边界：来源核验声明为中文，因此 DOCX 与 PDF 分支要求经过复核的 Unicode 字体。用例通过生产配置路径（`ARTIFACT_FONT_MANIFEST_FILE` → `configureArtifactFonts` → `TaskResultArtifacts`）注入一份自带所需字形的合成 TrueType 夹具（`tests/support/artifact-font.ts`），不走任何外部下载或系统字体；第二条用例证明未配置复核字体时拒绝是显式且终局的（`ARTIFACT_DOCX_FONT_REQUIRED`、`ARTIFACT_PDF_FONT_REQUIRED`，均为 422），且其余格式仍可正常导出。
 
 以上证据只证明本地合成环境下的多格式导出行为与文件可打开性、数字一致性，不涉及真实企业成果数据、真实文件格式验收标准与企业现场验收。T101 在测试目录中仍为 NOT_RUN，R22 未因本切片宣告完成，真实企业验收保持 BLOCKED_EXTERNAL。
+
+### 2026-10-22 上游 MCP 凭据绑定用例证据（T081仍为NOT_RUN）
+
+本切片为 R29 的上游凭据绑定安全用例补齐可追溯实现文件与本地断言：新增 `tests/security/upstream-credential-binding.test.ts`，直接驱动生产配置路径 `configureCompanyCode`，用记录全部请求的合成上游替代企业底座，不接触任何企业凭据，不新增任何"已完成"声明。
+
+用例的前提与判据来自 T081「OAuth token audience/issuer不匹配或跨服务复用」与「拒绝认证；不能token passthrough」。本项目在上游只实现了一种鉴权形态——`auth.mode` 被约束为 `API_KEY`（令牌文件 + 0600 权限），没有 OAuth/JWT 适配器。因此本用例证明的是与该前提等价且真实可执行的性质：被复核的凭据必须与一个被复核的端点、一个被复核的连接器身份、一个被复核的凭据三者绑定，跨服务或跨身份的凭据在任何上游请求之前即被拒绝，且凭据绝不随重定向流向别的服务。
+
+T081「拒绝认证；不能token passthrough」（`tests/security/upstream-credential-binding.test.ts`）共六条断言：
+
+- **跨服务凭据在任何请求之前被拒绝**：把被复核配置指向一枚为另一个服务签发的凭据后，连接为 `enabled=false`，`company.code.read` 能力未注册，合成上游记录到的请求数为 0。
+- **被复核凭据换用另一个服务身份同样被拒绝**：同一枚凭据挂在另一个 `connectorId` 下时结论不变——连接禁用、能力未注册、零上游请求。绑定由 `hash(canonical({config, credentialHash: hash(token)}))` 与 `companyCodeBindingHash(id, connectorId, connectionBinding)` 共同决定，端点、身份与凭据缺一不可。
+- **未经复核的鉴权形态被直接拒绝，而不是改用别的认证方式**：配置写入未复核的 `auth.mode` 时 `configureCompanyCode` 直接抛错，零请求、无能力注册；项目不存在可退化的第二条凭据路径。
+- **只发送被复核的那一枚凭据**：`authorization` 恒为 `Bearer <被复核令牌>`；上游若以另一个服务身份应答则连接以 `COMPANY_CONNECTION_UNAVAILABLE` 失败，且失败前发出的请求同样只携带被复核凭据。
+- **上游 401 是终局**：只发出一次 `POST initialize`，没有任何 GET，没有 `.well-known` / `oauth-protected-resource` / 动态客户端注册请求，也没有第二枚凭据；失败信息不含凭据，能力未注册。
+- **重定向不带走凭据**：上游返回指向另一服务的 302 时连接失败，全部请求都停留在被复核端点上，凭据从未出现在跳转目标上。
+
+为证明该用例不是空断言，做过一次变异检查：把 `packages/company/src/configuration.ts` 中的绑定哈希比较替换为常量后重跑，跨服务凭据与跨身份凭据两条断言随即失败（`expected false, received true`），随后生产文件被按字节还原，`git diff` 确认无残留改动。
+
+以上证据只证明本地合成环境下的凭据绑定、重定向与认证失败边界，不涉及真实企业上游 MCP 的真实令牌形态、真实 issuer/audience 校验与企业现场验收。T081 在测试目录中仍为 NOT_RUN，R29 未因本切片宣告完成，真实企业验收保持 BLOCKED_EXTERNAL。

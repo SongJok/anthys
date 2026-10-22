@@ -1364,8 +1364,9 @@
     "layer": "SECURITY",
     "precondition": "OAuth token audience/issuer不匹配或跨服务复用",
     "oracle": "拒绝认证；不能token passthrough",
-    "implementation": null,
-    "status": "NOT_RUN"
+    "implementation": "tests/security/upstream-credential-binding.test.ts",
+    "status": "NOT_RUN",
+    "coverageNote": "Local synthetic component: the reviewed upstream credential is bound to one reviewed endpoint, one reviewed connector identity and one reviewed credential through the production configuration path (configureCompanyCode -> canonical(config, credentialHash) -> companyCodeBindingHash). A credential issued for another service is refused before any upstream request (no capability is registered and the synthetic upstream records zero requests); the reviewed credential presented under another connector identity is refused the same way; an unreviewed auth mode is rejected outright instead of authenticating another way, and the project ships no OAuth/JWT adapter, so there is no second credential path to fall back to. With the reviewed credential the connector sends exactly 'Bearer <reviewed token>' on every request and refuses a server whose identity is not the reviewed one (COMPANY_CONNECTION_UNAVAILABLE). An upstream 401 is terminal: exactly one POST initialize is sent, no GET, no .well-known / oauth-protected-resource / dynamic client registration request and no second credential, the failure message carries no credential, and no capability is registered. A redirect to another service is never followed and every request stayed on the reviewed endpoint, so the credential is never carried to a foreign origin. A mutation check (replacing the binding-hash comparison with a constant) makes the foreign-credential and foreign-identity cases fail, so the oracle is not vacuous. The full T081 catalog run and any live enterprise acceptance remain NOT_RUN."
   },
   {
     "id": "T082",

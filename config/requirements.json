@@ -752,7 +752,7 @@
       "packages/policy/src/index.ts",
       "db/migrations/001_identity.sql"
     ],
-    "remaining": "Owner-scoped authorization boundaries are locally verified for private memory: group audiences are excluded before retrieval, a foreign owner's private audience is denied, provider journals stay owner-scoped per run and the erased dependency graph is recorded instead of silently dropping references. The remaining R29 cases T068, T081 have no local implementation file yet, and the live enterprise authorization acceptance stays BLOCKED_EXTERNAL."
+    "remaining": "Owner-scoped authorization boundaries are locally verified for private memory: group audiences are excluded before retrieval, a foreign owner's private audience is denied, provider journals stay owner-scoped per run and the erased dependency graph is recorded instead of silently dropping references. Every R29 case now names a local implementation file, including T068 (DWS delegation revocation) and T081 (the upstream credential bound to one reviewed endpoint, connector identity and credential: a cross-service credential is refused before any request, an unreviewed auth mode is refused, a 401 is terminal without discovery or a second credential, and the credential never reaches a redirect target). All of them remain NOT_RUN until the catalog run is executed, and the live enterprise authorization acceptance stays BLOCKED_EXTERNAL."
   },
   "R30": {
     "tests": [
