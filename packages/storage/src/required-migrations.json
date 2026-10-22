@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "compatibility": "EXACT_SET",
-  "lastMigration": "115_role_binding_administration.sql",
-  "contractHash": "9f87e17993fa046c33a9ee7f5200b9134b1506d9a1a5c387f2ac83238f6da876",
+  "lastMigration": "116_company_data_template_lifecycle.sql",
+  "contractHash": "473b7415afaae98c2e384fa32e0da1dfe6d82b2ea24996c31f466f184d8efc94",
   "migrations": [
     {
       "name": "001_identity.sql",
@@ -463,6 +463,10 @@
     {
       "name": "115_role_binding_administration.sql",
       "hash": "9110764945294c90937d4f67f3d16f299361fd8cadbfb6ecbb5ecb95a3cbf3c1"
+    },
+    {
+      "name": "116_company_data_template_lifecycle.sql",
+      "hash": "b98444a46b112b8c807355c5bb6143896e2a8655bf8627002ef8d871fb726082"
     }
   ]
 }

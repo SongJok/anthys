@@ -1156,3 +1156,13 @@ STOP先在一事务提交永久veto，再用独立事务复用原task取消；�
 2026-10-20 有界迁移执行合同补充：planBoundedMigrationStep(raw, signal?)传播取消并对104份SQL/契约准备累计单调预算，plan允许过去/未来执行窗作检查，不读连接或授予执行。apply复用一次lifetime而非为准备/连接/事务重置预算，截止取maxDuration与validUntil剩余较小值，PG超时使用剩余额度；本次Socket由执行器独占。工作结束前停止后续SQL，清理最多另1秒确认end/close，UNCONFIRMED及末尾overrun独立于COMMIT知识，CLI不得将其当成功。CLI必须先读取有界私有profile才能得知其预算，读后复核取消；已开始的本机文件系统操作仍须settlement后检查，未承诺OS系统调用硬实时中断。本地连接关闭不证明外部业务结果或恢复授权，CLOSED/UNKNOWN及撤销摘要保护未减。
 
 2026-10-20 独立恢复测试契约：固定PG镜像、随机自有容器name/label/full ID；network=none、无host bind/端口、只读根，数据tmpfs为noexec，仅私有runtime子挂载exec，实际读mountinfo复核。通过docker exec stdin写入且重核hash，不挂载工作区/.env/.secrets。内部仍用原test-network-guard与127.0.0.1:64711，端口相同但网络命名空间与PG系统均独立；原护栏未放宽。官方Node24.21.0双架构归档与提取bin均固定SHA，缓存私有并再验证ELF/架构/字节，SHA校验不冒称发行签名验证；test:prepare只增加公共运行时准备，应用运行时不接入新容器。
+
+## 2026-10-22 公司数据模板认证与发布/回滚生命周期（schema 116 局部实现）
+
+116_company_data_template_lifecycle.sql 新增三张租户 RLS/FORCE RLS 表：`company_data_template_versions` 保存已审核模板的 key/version、template/golden/certification 三个 SHA-256 摘要与发布者，行不可变；`company_data_template_active` 保存每个 key 的当前版本及 bigint revision；`company_data_template_requests` 保存 PUBLISH/ROLLBACK 的 operation、args/review 摘要和不可变结果回执。应用角色只对 versions/active 有 SELECT，直接写表、改版本或删除历史均被拒绝；requests 仅所有者可读，不授予应用角色写权限。
+
+`oa_company_data_template_is_active(key,version)` 为 SECURITY DEFINER，数据查询在获取范围时即调用它：某 key 尚无生命周期指针时保持原有 scope 行为；一旦发布过活动版本，只有该版本可通过，旧版本在获取和保留复核阶段均被拒绝，避免已被替代的认证模板继续执行。`oa_company_data_template_list` 只返回脱敏摘要与 `platformCertification:'LOCAL_GOLDEN_ONLY'`、`liveVerified:false`。
+
+`oa_company_data_template_admin` 仅由 API 的模板管理服务调用，要求当前活动的 TENANT_ADMIN/TENANT 绑定与租户 advisory lock；PUBLISH 只接受注册表中已审核的 key/version 并要求 template hash、认证引用和金标 hash，ROLLBACK 还要求精确 expected revision 与已存三项摘要一致，否则拒绝。参数摘要保证同一 request_id 幂等重放，不同参数复用同一 request_id 返回冲突。API 仅提供 GET 列表与 POST publish/rollback，幂等键为 UUID，CSRF/权限沿用原会话机制；只在 DEFAULT 模式接线，不接受任意模板正文、行范围、凭据或上游工具名。
+
+本地模板注册表从 `config/data-templates` 读取，金标从 `config/data-goldens` 读取；当前仅有 `payments.success_rate_daily@1.0.0` 的本地合成金标 oracle，其他模板发布以 `DATA_TEMPLATE_GOLDEN_UNAVAILABLE` 失败关闭。金标文件必须匹配模板 key/version/hash、仅含 synthetic 租户事件、覆盖去重/边界/空集/范围/渠道等必需方面，并由本地聚合 oracle 重算一致。该实现不调用上游数据 MCP，也不证明企业金标、真实数据部门 oracle、更多模板、模板目录或现场发布流程已验收；T093 仍为 NOT_RUN，R20/R28 仍为 IN_PROGRESS，真实公司数据验收保持 BLOCKED_EXTERNAL。

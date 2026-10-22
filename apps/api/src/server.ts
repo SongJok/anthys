@@ -12,6 +12,8 @@ import type {GroupCases} from '../../../packages/groups/src/cases.js';
 import {GroupCaseError} from '../../../packages/groups/src/case-model.js';
 import {GroupContracts,GroupContractError} from '../../../packages/groups/src/contracts.js';
 import {permissionRoutes} from './permissions.js';
+import {dataTemplateRoutes} from './data-templates.js';
+import {DataTemplateError,type DataTemplateAdministration} from '../../../packages/company/src/data-template-administration.js';
 import {PermissionAdministration} from '../../../packages/gateway/src/permission-administration.js';
 import {PermissionCenter,PermissionError} from '../../../packages/gateway/src/permissions.js';
 import {memoryRoutes} from './memories.js';
@@ -44,7 +46,7 @@ import {artifactRoutes} from './artifacts.js';
 import {companyAgentRoutes} from './company-agent.js';
 import type {CompanyAgentRequests} from '../../../packages/company/src/agent-requests.js';
 declare module 'fastify' {interface FastifyRequest {principal:Principal|null}}
-export async function createServer(deps:{config:Config;db:Database;sessionSecret:string;formalSubject?:{tenantId:string;actorId:string};login?:{tenantId:string;corpId:string;provider:LoginIdentityProvider;clientId?:string};webRoot?:string;attachments?:AttachmentService;artifacts?:TaskResultArtifacts;companyRequests?:Pick<CompanyAgentRequests,'list'>;controls?:ControlPlane;finalReader?:Gateway;dws?:DwsIdentities;personas?:Personas;memories?:PrivatePreferences;groupContracts?:GroupContracts;groupCases?:Pick<GroupCases,'list'|'create'|'update'>;schedules?:Schedules;watches?:WatchApi;watchSources?:WatchSourceBindingApi;groupReminders?:Pick<GroupReminders,'list'|'preview'|'create'|'mutate'>;groupEscalations?:GroupEscalationApi}) {
+export async function createServer(deps:{config:Config;db:Database;sessionSecret:string;formalSubject?:{tenantId:string;actorId:string};login?:{tenantId:string;corpId:string;provider:LoginIdentityProvider;clientId?:string};webRoot?:string;attachments?:AttachmentService;artifacts?:TaskResultArtifacts;companyRequests?:Pick<CompanyAgentRequests,'list'>;controls?:ControlPlane;finalReader?:Gateway;dws?:DwsIdentities;personas?:Personas;memories?:PrivatePreferences;groupContracts?:GroupContracts;groupCases?:Pick<GroupCases,'list'|'create'|'update'>;schedules?:Schedules;watches?:WatchApi;watchSources?:WatchSourceBindingApi;groupReminders?:Pick<GroupReminders,'list'|'preview'|'create'|'mutate'>;groupEscalations?:GroupEscalationApi;dataTemplates?:DataTemplateAdministration}) {
  const app=Fastify({logger:false,bodyLimit:1048576,genReqId:()=>randomUUID()});
  const sessions=new Sessions(deps.db,deps.sessionSecret);
  const tasks=new TaskStore(deps.db);
@@ -63,7 +65,7 @@ export async function createServer(deps:{config:Config;db:Database;sessionSecret
   if(!req.principal) return reply.code(401).send({error:{code:'UNAUTHENTICATED',message:'请先登录',correlationId:req.id}});
   if(deps.formalSubject){const p=req.principal;if(p.tenantId!==deps.formalSubject.tenantId||p.actorId!==deps.formalSubject.actorId||!await deps.db.scope(p,async c=>{const state=(await c.query("SELECT public.oa_formal_state('API') state")).rows[0].state;return state?.allowed===true;}))return reply.code(403).send({error:{code:'FORMAL_SUBJECT_DENIED',correlationId:req.id}});}
  });
- app.setErrorHandler((err,req,reply)=>{reply.code(err instanceof ZodError?400:err instanceof ControlError||err instanceof PersonaError||err instanceof MemoryError||err instanceof PermissionError||err instanceof GroupContractError||err instanceof GroupCaseError||err instanceof ScheduleError||err instanceof GroupReminderError?err.status:500).send({error:{code:err instanceof ZodError?'INVALID_INPUT':err instanceof ControlError||err instanceof PersonaError||err instanceof MemoryError||err instanceof PermissionError||err instanceof GroupContractError||err instanceof GroupCaseError||err instanceof ScheduleError||err instanceof GroupReminderError?err.code:'INTERNAL_ERROR',message:err instanceof ZodError?'输入无效':'请求处理失败',correlationId:req.id}});});
+ app.setErrorHandler((err,req,reply)=>{reply.code(err instanceof ZodError?400:err instanceof ControlError||err instanceof PersonaError||err instanceof MemoryError||err instanceof PermissionError||err instanceof GroupContractError||err instanceof GroupCaseError||err instanceof ScheduleError||err instanceof GroupReminderError||err instanceof DataTemplateError?err.status:500).send({error:{code:err instanceof ZodError?'INVALID_INPUT':err instanceof ControlError||err instanceof PersonaError||err instanceof MemoryError||err instanceof PermissionError||err instanceof GroupContractError||err instanceof GroupCaseError||err instanceof ScheduleError||err instanceof GroupReminderError||err instanceof DataTemplateError?err.code:'INTERNAL_ERROR',message:err instanceof ZodError?'输入无效':'请求处理失败',correlationId:req.id}});});
  app.get('/api/v1/health/live',async()=>({data:{status:'ALIVE'}}));
  app.get('/api/v1/health/ready',async(_req,reply)=>{try {if(!await deps.db.ready()) throw Error('SCHEMA');return {data:{status:'READY'}};} catch {return reply.code(503).send({data:{status:'NOT_READY',dependency:'database/schema'}});}});
  app.get('/api/v1/auth/dingtalk/state',async(req,reply)=>{
@@ -94,7 +96,7 @@ export async function createServer(deps:{config:Config;db:Database;sessionSecret
  groupContractRoutes(app,deps.groupContracts);
  groupCaseRoutes(app,deps.groupCases);groupEscalationRoutes(app,deps.groupEscalations);groupReminderRoutes(app,deps.groupReminders);scheduleRoutes(app,deps.schedules);watchRoutes(app,deps.watches,deps.watchSources);
  const capabilityMetadata=(id:string,version:string)=>deps.finalReader?.describeCapability(id,version)??null;
- const permissionCenter=new PermissionCenter(deps.db,capabilityMetadata);permissionRoutes(app,permissionCenter,new PermissionAdministration(deps.db,capabilityMetadata));
+ const permissionCenter=new PermissionCenter(deps.db,capabilityMetadata);permissionRoutes(app,permissionCenter,new PermissionAdministration(deps.db,capabilityMetadata));dataTemplateRoutes(app,deps.dataTemplates);
  app.get<{Params:{token:string}}>('/api/v1/cards/actions/:token',async(req,reply)=>{reply.header('cache-control','no-store');const action=await cardActions.preview(req.principal!,req.params.token);return action?{data:action}:reply.code(404).send({error:{code:'NOT_FOUND',correlationId:req.id}});});
  app.post<{Params:{token:string}}>('/api/v1/cards/actions/:token/execute',async(req,reply)=>{reply.header('cache-control','no-store');const result=await cardActions.execute(req.principal!,req.params.token);return result?{data:result}:reply.code(404).send({error:{code:'NOT_FOUND',correlationId:req.id}});});
  const controls=()=>{if(!deps.controls)throw new ControlError('CONTROLS_UNCONFIGURED',503);return deps.controls;};

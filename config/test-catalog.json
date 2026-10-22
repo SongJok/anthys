@@ -1466,8 +1466,9 @@
     "layer": "INTEGRATION",
     "precondition": "发布未通过金标的模板或修改旧版本",
     "oracle": "拒绝发布/就地覆盖；版本审批和回滚生效",
-    "implementation": null,
-    "status": "NOT_RUN"
+    "implementation": "tests/integration/data-template-lifecycle.test.ts",
+    "status": "NOT_RUN",
+    "coverageNote": "Local synthetic component: publish rejects templates without a certified reviewed artifact, local golden oracle, matching hashes or intact golden file; existing versions cannot be overwritten in place; immutable version receipts, admin publish/rollback, revision CAS and superseded-version execution denial are enforced. Enterprise template certification/oracle, template catalog publication, live company data provider acceptance and the full T093 catalog run remain NOT_RUN."
   },
   {
     "id": "T094",

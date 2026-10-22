@@ -1,0 +1,125 @@
+{
+  "schemaVersion": "1.0",
+  "templateKey": "payments.success_rate_daily",
+  "templateVersion": "1.0.0",
+  "templateHash": "970e2f6ead6741b0609c0d19e13e40a489bc5bfba7a7cb390bca052233bbd344",
+  "cases": [
+    {
+      "caseId": "boundary-window",
+      "aspect": "BOUNDARY",
+      "scope": {
+        "start": "2026-10-12T16:00:00.000Z",
+        "end": "2026-10-13T16:00:00.000Z",
+        "tenantId": "synthetic-tenant-A",
+        "departmentId": "d_pay"
+      },
+      "events": [
+        {"eventId": "b01", "attemptId": "boundary-left", "tenantId": "synthetic-tenant-A", "departmentId": "d_pay", "eventTime": "2026-10-12T16:00:00.000Z", "channel": "app", "status": "success", "valid": true},
+        {"eventId": "b02", "attemptId": "boundary-right", "tenantId": "synthetic-tenant-A", "departmentId": "d_pay", "eventTime": "2026-10-13T15:59:59.999Z", "channel": "app", "status": "failed", "valid": true},
+        {"eventId": "b03", "attemptId": "boundary-exclusive-end", "tenantId": "synthetic-tenant-A", "departmentId": "d_pay", "eventTime": "2026-10-13T16:00:00.000Z", "channel": "app", "status": "success", "valid": true},
+        {"eventId": "b04", "attemptId": "boundary-before-start", "tenantId": "synthetic-tenant-A", "departmentId": "d_pay", "eventTime": "2026-10-12T15:59:59.999Z", "channel": "web", "status": "failed", "valid": true}
+      ],
+      "expected": {
+        "attempts": "2",
+        "successes": "1",
+        "successRate": "0.5",
+        "byChannel": [
+          {"channel": "app", "attempts": "2", "successes": "1", "successRate": "0.5"}
+        ]
+      }
+    },
+    {
+      "caseId": "empty-after-filters",
+      "aspect": "EMPTY",
+      "scope": {
+        "start": "2026-10-12T16:00:00.000Z",
+        "end": "2026-10-13T16:00:00.000Z",
+        "tenantId": "synthetic-tenant-A",
+        "departmentId": "d_pay"
+      },
+      "events": [
+        {"eventId": "m01", "attemptId": "empty-before", "tenantId": "synthetic-tenant-A", "departmentId": "d_pay", "eventTime": "2026-10-12T15:00:00.000Z", "channel": "app", "status": "success", "valid": true},
+        {"eventId": "m02", "attemptId": "empty-invalid", "tenantId": "synthetic-tenant-A", "departmentId": "d_pay", "eventTime": "2026-10-13T04:00:00.000Z", "channel": "app", "status": "success", "valid": false}
+      ],
+      "expected": {
+        "attempts": "0",
+        "successes": "0",
+        "successRate": null,
+        "byChannel": []
+      }
+    },
+    {
+      "caseId": "scope-tenant-department-validity",
+      "aspect": "SCOPE_FILTER",
+      "scope": {
+        "start": "2026-10-12T16:00:00.000Z",
+        "end": "2026-10-13T16:00:00.000Z",
+        "tenantId": "synthetic-tenant-A",
+        "departmentId": "d_pay"
+      },
+      "events": [
+        {"eventId": "s01", "attemptId": "scope-kept", "tenantId": "synthetic-tenant-A", "departmentId": "d_pay", "eventTime": "2026-10-13T04:00:00.000Z", "channel": "app", "status": "success", "valid": true},
+        {"eventId": "s02", "attemptId": "scope-other-tenant", "tenantId": "synthetic-tenant-B", "departmentId": "d_pay", "eventTime": "2026-10-13T04:01:00.000Z", "channel": "app", "status": "success", "valid": true},
+        {"eventId": "s03", "attemptId": "scope-other-department", "tenantId": "synthetic-tenant-A", "departmentId": "d_other", "eventTime": "2026-10-13T04:02:00.000Z", "channel": "app", "status": "success", "valid": true},
+        {"eventId": "s04", "attemptId": "scope-invalid", "tenantId": "synthetic-tenant-A", "departmentId": "d_pay", "eventTime": "2026-10-13T04:03:00.000Z", "channel": "app", "status": "success", "valid": false}
+      ],
+      "expected": {
+        "attempts": "1",
+        "successes": "1",
+        "successRate": "1",
+        "byChannel": [
+          {"channel": "app", "attempts": "1", "successes": "1", "successRate": "1"}
+        ]
+      }
+    },
+    {
+      "caseId": "dedup-latest-event",
+      "aspect": "DEDUP",
+      "scope": {
+        "start": "2026-10-12T16:00:00.000Z",
+        "end": "2026-10-13T16:00:00.000Z",
+        "tenantId": "synthetic-tenant-A",
+        "departmentId": "d_pay"
+      },
+      "events": [
+        {"eventId": "d01", "attemptId": "dedup-a1", "tenantId": "synthetic-tenant-A", "departmentId": "d_pay", "eventTime": "2026-10-13T04:00:00.000Z", "channel": "app", "status": "success", "valid": true},
+        {"eventId": "d02", "attemptId": "dedup-a1", "tenantId": "synthetic-tenant-A", "departmentId": "d_pay", "eventTime": "2026-10-13T05:00:00.000Z", "channel": "app", "status": "failed", "valid": true},
+        {"eventId": "d03", "attemptId": "dedup-a2", "tenantId": "synthetic-tenant-A", "departmentId": "d_pay", "eventTime": "2026-10-13T06:00:00.000Z", "channel": "web", "status": "success", "valid": true},
+        {"eventId": "d04", "attemptId": "dedup-a2", "tenantId": "synthetic-tenant-A", "departmentId": "d_pay", "eventTime": "2026-10-13T06:00:00.000Z", "channel": "web", "status": "failed", "valid": true}
+      ],
+      "expected": {
+        "attempts": "2",
+        "successes": "0",
+        "successRate": "0",
+        "byChannel": [
+          {"channel": "app", "attempts": "1", "successes": "0", "successRate": "0"},
+          {"channel": "web", "attempts": "1", "successes": "0", "successRate": "0"}
+        ]
+      }
+    },
+    {
+      "caseId": "channel-web-only",
+      "aspect": "CHANNEL",
+      "scope": {
+        "start": "2026-10-12T16:00:00.000Z",
+        "end": "2026-10-13T16:00:00.000Z",
+        "tenantId": "synthetic-tenant-A",
+        "departmentId": "d_pay",
+        "channel": "web"
+      },
+      "events": [
+        {"eventId": "c01", "attemptId": "channel-app", "tenantId": "synthetic-tenant-A", "departmentId": "d_pay", "eventTime": "2026-10-13T04:00:00.000Z", "channel": "app", "status": "success", "valid": true},
+        {"eventId": "c02", "attemptId": "channel-web-success", "tenantId": "synthetic-tenant-A", "departmentId": "d_pay", "eventTime": "2026-10-13T04:01:00.000Z", "channel": "web", "status": "success", "valid": true},
+        {"eventId": "c03", "attemptId": "channel-web-failed", "tenantId": "synthetic-tenant-A", "departmentId": "d_pay", "eventTime": "2026-10-13T04:02:00.000Z", "channel": "web", "status": "failed", "valid": true}
+      ],
+      "expected": {
+        "attempts": "2",
+        "successes": "1",
+        "successRate": "0.5",
+        "byChannel": [
+          {"channel": "web", "attempts": "2", "successes": "1", "successRate": "0.5"}
+        ]
+      }
+    }
+  ]
+}

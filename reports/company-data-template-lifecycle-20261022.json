@@ -1,0 +1,108 @@
+{
+  "status": "PASS",
+  "scope": "LOCAL_SYNTHETIC_COMPANY_DATA_TEMPLATE_LIFECYCLE",
+  "live": false,
+  "generatedAt": "2026-10-22T04:34:45Z",
+  "source": {
+    "baseCommit": "173d4ca78c55d834d09227df95a83df9c386262c",
+    "workingTree": true,
+    "files": {
+      "db/migrations/116_company_data_template_lifecycle.sql": "b98444a46b112b8c807355c5bb6143896e2a8655bf8627002ef8d871fb726082",
+      "packages/company/src/data-template-administration.ts": "6bae0e54d8af06cd15bf54b6edbfdbf8f524d57a5348bcfe4ebbe0c148410a86",
+      "apps/api/src/data-templates.ts": "2e823aaec7473e5807bbc37388ca32d222b0f86e3beada7327389d83a7ac767e",
+      "apps/api/src/server.ts": "7bba70f378479eadfbf36e251872b1c19a430ac2f81889842aee460e06af9ba1",
+      "apps/api/src/main.ts": "f71d5d3c2f76169d7b2464d6f3d83b204f2da53173ddd70078362a51930b4c00",
+      "packages/company/src/data.ts": "9ed502c00ccf287af193c61d674767067a81b5ac90b95d53c637de03aee79188",
+      "config/data-templates/payments.success_rate_daily.json": "802b1d59c21c7318a3faa9de35c5c7a52fee45f2f4df49d2582641b1ed96aea3",
+      "config/data-goldens/payments.success_rate_daily.1.0.0.json": "e7531ce2bba4f7acf693837798c23a015395d49453da21d3167c5c41ca77c136",
+      "tests/integration/data-template-lifecycle.test.ts": "1f463e9c8f078be77cdfae2e97a700055f55e43a8bed3ccd9c0e1f6e266da95a",
+      "config/test-catalog.json": "f8156a721281a0a2c3396b909660c5b045e11fc4b1c2822f9d952f94dc42fc3f",
+      "packages/storage/src/required-migrations.json": "de63414e52c8210d29df18a0e7c204e0b8e3971cc28cc8c908b94a5b66850bf9"
+    }
+  },
+  "migrationContract": {
+    "migrations": 116,
+    "lastMigration": "116_company_data_template_lifecycle.sql",
+    "contractHash": "473b7415afaae98c2e384fa32e0da1dfe6d82b2ea24996c31f466f184d8efc94"
+  },
+  "database": {
+    "target": "loopback:64711/anthys_test",
+    "composeProject": "anthys-test",
+    "realDevelopmentDatabaseTouched": false,
+    "migrationDrift": false,
+    "migrationsApplied": 116
+  },
+  "behavior": {
+    "reviewedArtifactsOnly": "The administration API accepts only template key/version, review reference and, for rollback, the expected revision; template hash, golden hash and certification reference are computed from reviewed local files and never accepted from the caller.",
+    "localGoldenOracle": "Only payments.success_rate_daily@1.0.0 has a local synthetic golden oracle. Other templates fail closed with DATA_TEMPLATE_GOLDEN_UNAVAILABLE.",
+    "publish": "Requires a reviewed template artifact, a local golden file whose template key/version/hash match, the five required golden aspects, synthetic-only tenant events and oracle equality. Duplicate versions are rejected; existing versions cannot be overwritten in place.",
+    "rollback": "Requires the version to exist, the passed template/certification/golden hashes to equal the stored immutable version, and an exact active-revision CAS. Semantic version ordering is preserved in listings.",
+    "executionGate": "oa_company_data_template_is_active is checked when a data scope is acquired and rechecked during execution retention. After a newer version is published, a superseded version is denied locally with no upstream call and no new audit row.",
+    "permissions": [
+      "live TENANT_ADMIN binding with TENANT scope is required for publish and rollback",
+      "tenant-scoped advisory lock protects the active pointer",
+      "immutable tenant/admin/request receipts bind operation, arguments hash and review hash; replay returns the stored result, mismatched reuse returns a conflict",
+      "oa_app reads template versions and the active pointer only; oa_runtime additionally executes only the active-version predicate",
+      "oa_app and oa_runtime cannot write lifecycle tables or execute the admin mutation function"
+    ],
+    "http": [
+      "GET /api/v1/data/templates lists local lifecycle summaries with cache-control private, no-store",
+      "POST /api/v1/data/templates/publish and POST /api/v1/data/templates/rollback require session, CSRF and a UUID idempotency key",
+      "unknown fields are rejected; employee sessions receive 403",
+      "wired only in DEFAULT runtime mode"
+    ],
+    "audit": "Existing company data execution audit remains status/completeness/queryId/template provenance only; superseded-version denial writes no execution row."
+  },
+  "tests": {
+    "commands": [
+      "node scripts/update-schema-contract.mjs --check",
+      "node --import tsx scripts/capability-output-contracts.ts --check",
+      "node scripts/run-tests.mjs vitest run tests/integration/data-template-lifecycle.test.ts tests/integration/company-data.test.ts tests/integration/role-administration.test.ts tests/integration/permission-administration.test.ts tests/unit/company-data-configuration.test.ts tests/unit/company-data-templates.test.ts tests/unit/company-data-contracts.test.ts tests/unit/capability-descriptor.test.ts",
+      "node --import tsx scripts/test-environment.ts",
+      "node --import tsx scripts/verify-requirements.ts --baseline",
+      "node <typescript>/bin/tsc --noEmit",
+      "node <eslint>/bin/eslint.js <changed files>"
+    ],
+    "lifecycleIntegration": {
+      "files": 1,
+      "passed": 5,
+      "failed": 0,
+      "skipped": 0
+    },
+    "regression": {
+      "files": 7,
+      "passed": 79,
+      "failed": 0,
+      "skipped": 0,
+      "breakdown": {
+        "company-data": 4,
+        "role-administration": 5,
+        "permission-administration": 44,
+        "company-data-configuration": 7,
+        "company-data-templates": 6,
+        "company-data-contracts": 5,
+        "capability-descriptor": 8
+      }
+    },
+    "typecheck": "PASS",
+    "lint": "PASS",
+    "schemaContractCheck": "PASS",
+    "capabilityOutputContractCheck": "PASS",
+    "requirementsBaseline": "PASS",
+    "testEnvironmentMigrationCheck": "PASS",
+    "liveProviderCalls": 0
+  },
+  "notProven": [
+    "live GLM, DingTalk, DWS or company MCP acceptance",
+    "enterprise certified templates, enterprise data-department oracle or golden files beyond the local synthetic payments.success_rate_daily@1.0.0 fixture",
+    "additional template catalog entries, template content publishing/rollback workflow or four-eyes enterprise approval",
+    "real development database on port 64710 or any deployment",
+    "T093 full catalog acceptance, R20 completion or R28 completion"
+  ],
+  "statusUnchanged": {
+    "T093": "NOT_RUN",
+    "R20": "IN_PROGRESS",
+    "R28": "IN_PROGRESS",
+    "liveAcceptance": "BLOCKED_EXTERNAL"
+  }
+}
