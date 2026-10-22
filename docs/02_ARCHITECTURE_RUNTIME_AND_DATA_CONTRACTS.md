@@ -1178,3 +1178,15 @@ STOP先在一事务提交永久veto，再用独立事务复用原task取消；�
 `apps/web/src/data-template-admin.tsx` 只在会话中存在活动的 TENANT_ADMIN/TENANT 绑定时随 `/permissions` 页面渲染：列出已登记版本及其当前生效版本与记录版本，提供发布与回退表单、显式确认与回执区。页面不可见或组件卸载时清除旧登记、未完成确认与迟到回执。非管理员既不渲染该视图，也不发起任何登记请求。
 
 该视图不访问上游数据工具、不证明企业金标、企业模板审批、现场发布流程或工作台数据结果视图已验收；T093 仍为 NOT_RUN，R20/R28 仍为 IN_PROGRESS，真实公司数据验收保持 BLOCKED_EXTERNAL。
+
+## 2026-10-22 认证数据结果读模型与工作台视图（前后端局部实现）
+
+`packages/company/src/data-results.ts` 是只读读模型，不新增任何执行入口：它只投影本账号自己经审计网关能力（`company.data.query`）产生并已留痕的结果，以及本地已认证的模板目录。列表查询按 `tool_actions` 的租户与所有者 RLS 限定 `capability_id='company.data.query'` 且状态为 `VERIFIED`/`FAILED`（`PARTIAL` 即截断/抽样结果在网关落为 FAILED），并额外显式限定 `tenant_id`，可按 `task_id` 过滤；密文结果在进程内由 `RuntimeStore.openToolResult` 解封，随后与同租户的 `data_executions` 审计行逐项比对（模板 key/version、状态、完整性、水位、观测时间、行数），任一项不一致即丢弃该条记录，因此相互矛盾或来路不明的数据不会出现在界面上。目录来自本地注册表与 `company_data_template_active` 的当前生效版本，只登记口径定义、粒度、分子分母、新鲜度上限、允许角色与认证引用，并声明 `platformCertification:'LOCAL_GOLDEN_ONLY'`、`liveVerified:false`。`tests/integration/data-result-read-model.test.ts` 在隔离 PostgreSQL 上以真实网关能力路径验证该投影：本人可见而同租户其他账号与其他租户为空，篡改 `data_executions.row_count` 后该条结果随即消失，说明审计比对真实生效。
+
+`apps/api/src/data-results.ts` 仅提供 `GET /api/v1/data/results`（可选 `taskId`）与 `GET /api/v1/data/catalog` 两个只读接口，沿用既有会话与 CSRF 机制，响应带 `cache-control: private, no-store`；只在 DEFAULT 模式接线，不接受模板正文、SQL、行范围、凭据或上游工具名，也不代表平台认证或真实数据已核实。
+
+`apps/web/src/data-result-flow.ts` 是纯前端流程。解析结果列表时逐项校验：UUID、模板 key/version 形态、64位十六进制 template hash、UTC 时间戳、水位不晚于观测时间、时间窗口首尾有序、`rowCount` 与分子分母口径一致、`rowScope` 为 1 至 16 项合法键值、上游认证声明为 `UNVERIFIED`；并要求载荷声明 `platformCertification:'LOCAL_GOLDEN_ONLY'`、`liveVerified:false`、记录唯一且不超过 50 条，目录不超过 64 条。目录不可用时一并清除已取结果，因为缺少新鲜度上限就无法判断能否给出总体结论。
+
+结论判定规则固定：结果被截断或为抽样、执行状态非 OK、或水位落后分钟数超过目录登记的新鲜度上限（缺省 1440 分钟）时，一律拒绝给出总体确定结论，只展示统计口径、时间窗口、行范围与新鲜度差；否则在已授权行范围与该时间窗口内给出成功率等结论，并明确该结论只覆盖已授权范围与该时间窗口。业务问题只有在命中已认证口径名称或模板标识时才指向该口径；没有任何认证模板覆盖时，只生成待开发口径要素（统计对象与口径边界、分子与分母定义、去重与有效性规则、时间粒度与时区、数据新鲜度上限、数据分类与允许角色、认证凭据与金标用例），不返回任何数字。
+
+`apps/web/src/data-result.tsx` 在工作台 `/data` 路由对已登录账号渲染认证数据结果、认证口径目录与业务问题核对表单；页面不可见或组件卸载时清除已取结果与迟到回执，401 会清空全部资料并触发既有会话失效回调，4xx/5xx 与网络异常都不回显服务端私有文本。该视图不访问上游数据工具、不新增执行入口，也不证明企业金标、真实数据部门 oracle 或现场发布流程已验收；T091/T095 仍为 NOT_RUN，R16/R20 仍为 IN_PROGRESS，真实公司数据验收保持 BLOCKED_EXTERNAL。

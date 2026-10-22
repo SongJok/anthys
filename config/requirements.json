@@ -405,7 +405,10 @@
       "T095"
     ],
     "modules": [
-      "packages/runtime/src/loop.ts"
+      "packages/runtime/src/loop.ts",
+      "apps/web/src/data-result-flow.ts",
+      "apps/web/src/data-result.tsx",
+      "tests/offline/data-result.test.ts"
     ],
     "status": "IN_PROGRESS",
     "intendedModules": [
@@ -508,13 +511,19 @@
       "db/migrations/105_company_data_executions.sql",
       "db/migrations/116_company_data_template_lifecycle.sql",
       "tests/integration/data-template-lifecycle.test.ts",
-      "tests/offline/data-template-admin.test.ts"
+      "tests/offline/data-template-admin.test.ts",
+      "packages/company/src/data-results.ts",
+      "apps/api/src/data-results.ts",
+      "apps/web/src/data-result-flow.ts",
+      "apps/web/src/data-result.tsx",
+      "tests/offline/data-result.test.ts",
+      "tests/integration/data-result-read-model.test.ts"
     ],
     "status": "IN_PROGRESS",
     "intendedModules": [
       "packages/company"
     ],
-    "remaining": "One certified payments daily success-rate template executes end to end through a reviewed company MCP data tool with exact decimals, server-injected scope, queryId/watermark evidence and audited provenance. A local lifecycle now publishes or rolls back reviewed template versions with immutable version/request receipts, local golden-oracle validation and superseded-version execution denial. A tenant-admin template administration view now lists registered versions, publishes a reviewed version and rolls back to an earlier one with exact revision CAS, one idempotency key per confirmation, no automatic resend and no upstream data access, rendered in the workbench permissions page for an active tenant administrator. No live enterprise MCP acceptance (T096), additional certified templates/oracles, enterprise template approval or catalog publication, workbench E2E data-result views or full T093/T095/T096 catalog acceptance exist yet; upstream SQL safety and certification remain owned by the company MCP."
+    "remaining": "One certified payments daily success-rate template executes end to end through a reviewed company MCP data tool with exact decimals, server-injected scope, queryId/watermark evidence and audited provenance. A local lifecycle now publishes or rolls back reviewed template versions with immutable version/request receipts, local golden-oracle validation and superseded-version execution denial. A tenant-admin template administration view now lists registered versions, publishes a reviewed version and rolls back to an earlier one with exact revision CAS, one idempotency key per confirmation, no automatic resend and no upstream data access, rendered in the workbench permissions page for an active tenant administrator. A workbench certified data result view now projects only the actor's own audited certified results and the locally certified catalog, refuses an overall conclusion when the result is truncated or the watermark lags the allowed freshness limit while still showing scope, window and freshness, and turns a business question without any certified template into a pending definition that states no number. No live enterprise MCP acceptance (T096), additional certified templates/oracles, enterprise template approval or catalog publication, upstream data department certification or full T091/T093/T095/T096 catalog acceptance exist yet; upstream SQL safety and certification remain owned by the company MCP."
   },
   "R21": {
     "tests": [

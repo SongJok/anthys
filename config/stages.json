@@ -1357,12 +1357,19 @@
       "apps/web/src/data-template-admin-flow.ts",
       "apps/web/src/data-template-admin.tsx",
       "tests/offline/data-template-admin.test.ts",
-      "config/data-goldens/payments.success_rate_daily.1.0.0.json"
+      "config/data-goldens/payments.success_rate_daily.1.0.0.json",
+      "reports/company-data-result-view-20261022.json",
+      "packages/company/src/data-results.ts",
+      "apps/api/src/data-results.ts",
+      "apps/web/src/data-result-flow.ts",
+      "apps/web/src/data-result.tsx",
+      "tests/offline/data-result.test.ts",
+      "tests/integration/data-result-read-model.test.ts"
     ],
-    "updatedAt": "2026-10-22T05:30:00Z",
+    "updatedAt": "2026-10-22T06:45:00Z",
     "codeCommit": null,
-    "stateBasis": "Local template publish/rollback, golden validation and execution gating are verified on the isolated cluster, and the tenant-admin administration view is verified offline against the real component; no live upstream or whole-stage acceptance is inferred.",
-    "note": "Reviewed local template versions can be published or rolled back by a tenant administrator only after local golden-oracle validation; versions and receipts are immutable, exact CAS applies, and execution rejects a superseded active version. The workbench permissions page now lists registered template versions and performs publish/rollback with one idempotency key per confirmation, no automatic resend and no upstream data access. The payments template is the only local oracle and upstream certification remains UNVERIFIED.",
+    "stateBasis": "Local template publish/rollback, golden validation and execution gating are verified on the isolated cluster, the tenant-admin administration view is verified offline against the real component, and the certified data result view is verified offline against the real component and against the real gateway capability path on the isolated database; no live upstream or whole-stage acceptance is inferred.",
+    "note": "Reviewed local template versions can be published or rolled back by a tenant administrator only after local golden-oracle validation; versions and receipts are immutable, exact CAS applies, and execution rejects a superseded active version. The workbench permissions page now lists registered template versions and performs publish/rollback with one idempotency key per confirmation, no automatic resend and no upstream data access. A workbench certified data result page, backed by a read-only server model that unseals the current actor own audited result and cross-checks it against the retained execution audit row, now lists only the current actor own audited certified results and the locally certified catalog, shows scope, time window, row scope and freshness, refuses an overall conclusion when the result is truncated or the watermark lags the allowed freshness limit, and turns a business question without any certified template into a pending definition that states no number. The payments template is the only local oracle and upstream certification remains UNVERIFIED.",
     "remaining": [
       "Live upstream certified data goldens and enterprise template approval",
       "Additional certified templates and complete parameter/catalog coverage",

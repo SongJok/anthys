@@ -1439,9 +1439,9 @@
     "layer": "E2E",
     "precondition": "查询结果truncated或水位落后24h",
     "oracle": "不能输出总体确定结论；展示范围/新鲜度",
-    "implementation": "tests/unit/company-data-contracts.test.ts",
+    "implementation": "tests/offline/data-result.test.ts",
     "status": "NOT_RUN",
-    "coverageNote": "Component contract maps TRUNCATED/SAMPLED and rejects missing watermark; full workbench E2E display is not implemented."
+    "coverageNote": "Component contract maps TRUNCATED/SAMPLED and rejects missing watermark; a workbench read model now projects only the actor's own audited certified results and the locally certified catalog, and the workbench view refuses an overall conclusion when the result is truncated or the watermark lags the allowed freshness limit while still showing scope, window and freshness. Covered offline by 9 flow cases, by 9 route-mocked browser cases and by 5 cases on an isolated PostgreSQL that cross-check the projection against the retained data_executions audit row; live upstream certification, the enterprise data department oracle and the full T091 catalog run remain NOT_RUN."
   },
   {
     "id": "T092",
@@ -1493,8 +1493,9 @@
     "layer": "E2E",
     "precondition": "业务问题没有任何认证模板",
     "oracle": "说明不能直接统计并生成待开发口径，不返回假数字",
-    "implementation": null,
-    "status": "NOT_RUN"
+    "implementation": "tests/offline/data-result.test.ts",
+    "status": "NOT_RUN",
+    "coverageNote": "A business question without any certified template now yields a pending definition that lists the still-undefined metric elements and states no number, while a question naming a certified metric is answered from the locally certified catalog. Covered offline by 9 flow cases and 9 route-mocked browser cases; enterprise metric definition, data department certification and the full T095 catalog run remain NOT_RUN."
   },
   {
     "id": "T096",

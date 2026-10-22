@@ -1419,3 +1419,17 @@ Docker开发栈检查：postgres、api、worker与sandbox-broker容器均为运�
 回归与门禁：公司数据、模板生命周期、角色管理、权限管理与能力描述符共8个文件84项全部通过；`tsc --noEmit`、仓库ESLint、116份迁移的schema contract检查、能力输出契约检查与需求基线完整性检查通过。完整需求校验仍有89项既有失败项，来自尚未完成的阶段（R项 implementation incomplete 与后段T项缺少实现），本次切片未新增缺失模块或占位实现错误。
 
 这些证据只证明本地合成模板登记在真实组件下的前端契约与隔离数据库下的后端生命周期，不调用真实公司数据MCP，也不证明企业金标、企业模板审批、现场发布流程或工作台数据结果视图已验收。T093在测试目录中仍为NOT_RUN，R20/R28仍为IN_PROGRESS，P09仍为IN_PROGRESS，真实公司数据验收保持BLOCKED_EXTERNAL；准确源码摘要与执行记录见 `reports/company-data-template-admin-ui-20261022.json`。
+
+### 2026-10-22 认证数据结果视图组件证据（T091/T095仍为NOT_RUN）
+
+新增只读读模型 `packages/company/src/data-results.ts`、只读路由 `apps/api/src/data-results.ts`（`GET /api/v1/data/results` 可选 `taskId`、`GET /api/v1/data/catalog`）与前端 `apps/web/src/data-result-flow.ts`、`apps/web/src/data-result.tsx`。读模型不新增任何执行入口：它只投影本账号自己经审计网关能力 `company.data.query` 产生并已留痕的结果（`tool_actions` 限定 `capability_id` 与 `VERIFIED`/`FAILED` 状态，可按 `task_id` 过滤），在进程内由 `RuntimeStore.openToolResult` 解封后与 `data_executions` 审计行逐项比对（模板 key/version、状态、完整性、水位、观测时间、行数），任一项不一致即丢弃该条记录；目录只登记本地已认证口径的定义、粒度、分子分母、新鲜度上限、允许角色与认证引用，并声明 `platformCertification:'LOCAL_GOLDEN_ONLY'`、`liveVerified:false`。
+
+前端流程严格解析结果与目录：UUID、模板 key/version 形态、64位十六进制 hash、UTC 时间戳、水位不晚于观测时间、时间窗口首尾有序、`rowCount` 与统计口径一致、`rowScope` 为 1 至 16 项合法键值、上游认证声明 `UNVERIFIED`，载荷须声明 `LOCAL_GOLDEN_ONLY`、`liveVerified:false`、记录唯一且结果不超过 50 条、目录不超过 64 条；目录不可用时一并清除已取结果，因为缺少新鲜度上限就无法判断能否给出总体结论。结果被截断或为抽样、执行状态非 OK、或水位落后分钟数超过目录登记的新鲜度上限（缺省 1440 分钟）时，一律拒绝给出总体确定结论，只展示统计口径、时间窗口、行范围与新鲜度差；否则结论明确限定在已授权行范围与该时间窗口内。业务问题只有在命中已认证口径名称或模板标识时才指向该口径，没有任何认证模板覆盖时只生成待开发口径要素（统计对象与口径边界、分子与分母定义、去重与有效性规则、时间粒度与时区、数据新鲜度上限、数据分类与允许角色、认证凭据与金标用例），不返回任何数字。视图在工作台 `/data` 路由渲染，页面不可见或卸载时清除已取结果与迟到回执，401 清空全部资料并触发既有会话失效回调，4xx/5xx 与网络异常不回显服务端私有文本。
+
+离线证据：`tests/offline/data-result.test.ts` 9项全部通过（畸形/自相矛盾/谎称平台认证的结果与目录被拒且不保留资料、完整且新鲜结果可给出总体结论、截断结果拒绝总体结论、水位落后超过上限拒绝总体结论、无认证模板问题生成不含数字的待开发口径、命中已认证口径指向目录、服务不可用清除全部资料、clear 丢弃迟到回执）；`tests/e2e/data-result.spec.ts` 9项路由替身浏览器用例（完整且新鲜结果显示口径/行范围/新鲜度差与总体结论、截断结果拒绝总体结论、水位落后超过 24 小时拒绝总体结论、目录只显示本地认证与新鲜度上限、无认证模板问题生成不含数字的待开发口径、命中已认证口径显示已认证口径、401 清空资料并触发会话失效、畸形与不可用载荷不显示结果也不回显私有文本、可见性变化清除已加载结果）。专用 runner `scripts/test-data-result.mjs` 现为离线流程9项、浏览器9项，全部通过且无跳过、无 flaky；浏览器阶段只使用真实 DataResultView 组件bundle与路由替身，不启动后端或数据库，也不发起任何真实提供方调用。
+
+真实隔离数据库证据：`tests/integration/data-result-read-model.test.ts` 5项全部通过（隔离 PostgreSQL 64711 上经钉钉回调建立租户与执行、经合成公司数据 MCP 替身产生一次受审计的 `company.data.query` 执行后，读模型投影出本人该条结果：行数 `5`、成功率 `0.6`、分渠道 `app 3/2/0.666666666667` 与 `web 2/1/0.5`、行范围 `{tenant_id:'A',department_id:'d_pay'}`、模板 hash 与登记一致；同一租户的另一账号与另一租户均为空列表；直接篡改 `data_executions.row_count` 后该条结果随即消失，证实审计比对真实生效；目录只登记本地已认证口径并声明 `freshnessMaxMinutes:60`、`allowedRoles:['PAYMENTS_ANALYST']`、`active:false`；HTTP 路由返回 200 与 `cache-control: private, no-store`，匿名请求 401，未知 `taskId` 返回空列表）。该用例同时暴露并修正了读模型两处 SQL 缺陷（原列表查询绑定三个参数却未引用 `$1`、审计查询缺少租户限定），修正后已在本隔离库上复跑通过。
+
+回归与门禁：公司数据、模板生命周期、数据结果读模型、角色管理、公司数据配置/契约/模板、能力描述符与能力输出契约共9个文件77项全部通过；`tsc --noEmit`、仓库ESLint、116份迁移的schema contract检查、能力输出契约检查、需求基线完整性检查与前端构建通过。完整需求校验的既有失败项由89项降为87项（T091/T095 已有实现文件且带稳定用例标识），剩余项均来自尚未完成的阶段（R项 implementation incomplete 与后段T项缺少实现），本次切片未新增缺失模块或占位实现错误。
+
+这些证据只证明本地合成的认证数据结果读模型与前端契约，不调用真实公司数据MCP，也不证明企业金标、真实数据部门oracle、更多已认证模板、现场发布流程或现场数据验收。T091/T095在测试目录中仍为NOT_RUN，R16/R20仍为IN_PROGRESS，P09仍为IN_PROGRESS，真实公司数据验收保持BLOCKED_EXTERNAL；准确源码摘要与执行记录见 `reports/company-data-result-view-20261022.json`。

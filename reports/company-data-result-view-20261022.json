@@ -1,0 +1,139 @@
+{
+  "status": "PASS",
+  "scope": "LOCAL_SYNTHETIC_CERTIFIED_DATA_RESULT_VIEW",
+  "live": false,
+  "generatedAt": "2026-10-22T06:40:00Z",
+  "source": {
+    "baseCommit": "cbcb52e21e701ce01b7e3621cea5946610f6f7d7",
+    "workingTree": true,
+    "files": {
+      "packages/company/src/data-results.ts": "696bb516f76fb7b5f8bb01d0076bd9b1843a0b02f999bfaf96ba944b4eedd227",
+      "apps/api/src/data-results.ts": "96402b0df9b408baf259a3dc663bc8169baa0f0a39b7154d1a00f8b48fff7c2b",
+      "apps/api/src/server.ts": "bbe91140ddbfbaf7c479d644e115b9614f4023f347f4b931c2f6df51da9a8e4c",
+      "apps/api/src/main.ts": "9364982b98466e8c9daa0ad09379d7a639422eaf8bee220636dbf41b52d798c0",
+      "apps/web/src/data-result-flow.ts": "2a031f3c469ed69984f68abd21f50c27cca4188de6360fc12af4e8e2480f00b6",
+      "apps/web/src/data-result.tsx": "b5d4d59b1e1de441752dd37dbabe48d04572ca167a1a459a8b9091c84192e6b2",
+      "apps/web/src/main.tsx": "5b6034313a2fa206a9a2965a8c662029950467f85ec62e5fec4cca0ed493f2b0",
+      "tests/offline/data-result.test.ts": "207a6df5492b1094de8105b5a357d76a3663ae12af35614574e4e993aa4aae38",
+      "tests/e2e/data-result.spec.ts": "96556fe9fd40ff3e0bf804083ac208a83427c3e7308b64e2cb3157230842f536",
+      "tests/integration/data-result-read-model.test.ts": "386218970d0e38450d27606b7f7cd0c2c3e3a41f7655bac51562a9a9228f7dea",
+      "scripts/test-data-result.mjs": "0578dcfc8e15c08f30dd744fe43f265f2a8e333354d0fc108577382059c3d28d",
+      "config/requirements.json": "2a7eb1a98c6b69b6a5402fb6f53fa010706c348a29cc4b3da8b0d2d8b2772fd3",
+      "config/stages.json": "b4f010e33cfc959d2777e06ea7795ed3ab2a07cac664646337b6b3da1713991f",
+      "config/test-catalog.json": "2f98993533aaee12834e76272cde4262799d9511c298123851096db6cdde0ae6",
+      "docs/02_ARCHITECTURE_RUNTIME_AND_DATA_CONTRACTS.md": "9352f4ce571724a7f9a1cf8d31b8490046e7f7187d40848d65e7ecb71288332c",
+      "docs/04_TEST_ACCEPTANCE_AND_OPERATIONS.md": "17e95440c2dd034b830b071da3555e8afa9596cd362686ed0222b132350093ea"
+    }
+  },
+  "surface": {
+    "entry": "GET /api/v1/data/results (optional taskId), GET /api/v1/data/catalog",
+    "host": "apps/web/src/main.tsx renders the view on the /data workbench route for every signed-in actor",
+    "transport": "same-origin read-only fetch with cache no-store and the existing x-csrf-token header",
+    "singleAuthority": "No new execution endpoint was added; certified results still originate only from the audited gateway capability company.data.query"
+  },
+  "behavior": {
+    "readModelScope": "The read model projects only the actor's own audited results. The query is limited by tenant and owner RLS to tool_actions rows with capability_id 'company.data.query' and state VERIFIED or FAILED, is additionally constrained by an explicit tenant predicate, optionally filtered by task_id, and the sealed payload is unsealed in process by RuntimeStore.openToolResult.",
+    "auditCrossCheck": "Every unsealed result is compared item by item against its data_executions audit row within the same tenant (template key and version, status, completeness, watermark, observed_at, row_count). Any mismatch drops the record, so contradictory or unattributable data never reaches the view.",
+    "strictListParsing": "Each result must carry a UUID, well-formed template key and version, a 64-hex template hash, canonical UTC timestamps, a watermark no later than the observation, an ordered time window, a row count equal to the metric attempts, a row scope of one to sixteen valid key-value pairs and an upstreamCertification of UNVERIFIED. The list must declare platformCertification LOCAL_GOLDEN_ONLY, liveVerified false, a boolean truncated flag and at most 50 unique rows; the catalog holds at most 64 rows.",
+    "catalogGatedLoading": "If the catalog cannot be read, every result is cleared as well, because the freshness limit registered per metric is required to decide whether an overall conclusion is permitted.",
+    "conclusionRules": "A truncated or sampled result, an execution status other than OK, or a watermark lagging more than the registered freshness limit (1440 minutes by default) always refuses an overall conclusion; the view still shows the metric definition, time window, row scope and freshness lag. Otherwise the conclusion is stated inside the authorized row scope and that time window only.",
+    "pendingDefinition": "A business question is answered from the certified catalog only when it names a certified metric or template identifier. With no certified template covering it, the view produces the pending definition elements (scope and metric boundary, numerator and denominator, deduplication and validity rules, time grain and time zone, freshness ceiling, classification and allowed roles, certification evidence and golden cases) and states no number.",
+    "failureHandling": "4xx, 5xx and network failures produce Chinese notices only, never server text, never a retained old result; 401 clears all data and invokes the existing session-lost callback.",
+    "lifecycle": "A visibility change or unmount clears the loaded results and any late reply, and the notice asks for an explicit reload.",
+    "noUpstreamAccess": "The view never reads or writes upstream data, carries no SQL, row scope rule, credential or upstream tool name, and never claims platform certification or live verification."
+  },
+  "tests": {
+    "commands": [
+      "node --import ./scripts/test-network-guard.mjs scripts/test-data-result.mjs",
+      "node scripts/run-tests.mjs vitest run tests/integration/data-result-read-model.test.ts",
+      "node scripts/run-tests.mjs vitest run tests/integration/company-data.test.ts tests/integration/data-template-lifecycle.test.ts tests/integration/data-result-read-model.test.ts tests/integration/role-administration.test.ts tests/unit/company-data-configuration.test.ts tests/unit/company-data-contracts.test.ts tests/unit/company-data-templates.test.ts tests/unit/capability-descriptor.test.ts tests/unit/capability-output.test.ts",
+      "node scripts/update-schema-contract.mjs --check",
+      "node --import tsx scripts/capability-output-contracts.ts --check",
+      "node --import tsx scripts/verify-requirements.ts --baseline",
+      "node <typescript>/bin/tsc --noEmit",
+      "node <eslint>/bin/eslint.js apps packages scripts tests"
+    ],
+    "offlineFlow": {
+      "files": 1,
+      "passed": 9,
+      "failed": 0,
+      "skipped": 0,
+      "newFile": {
+        "path": "tests/offline/data-result.test.ts",
+        "passed": 9,
+        "failed": 0
+      }
+    },
+    "offlineBrowser": {
+      "passed": 9,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "newCases": 9,
+      "source": "real DataResultView bundle with route mocks only; no backend or database started"
+    },
+    "integration": {
+      "files": 1,
+      "passed": 5,
+      "failed": 0,
+      "skipped": 0,
+      "newFile": {
+        "path": "tests/integration/data-result-read-model.test.ts",
+        "passed": 5,
+        "failed": 0
+      },
+      "source": "isolated PostgreSQL on port 64711 with the local synthetic company data MCP substitute and the real gateway capability path",
+      "covered": [
+        "the read model projects the actor's own audited certified result with the exact row scope, row count, success rate and per-channel decimals, and the template hash matches the registered template",
+        "another actor in the same tenant and another tenant both see an empty list",
+        "tampering with the retained data_executions row count makes the projected result disappear, so the audit cross-check is effective",
+        "the catalog registers only the locally certified metric with its freshness limit, allowed roles and inactive state",
+        "the read-only HTTP routes answer with private, no-store caching, reject anonymous callers and return an empty list for an unknown task id"
+      ],
+      "defectsFoundAndFixed": "Two SQL defects in packages/company/src/data-results.ts were exposed by this run and fixed: the list query bound three parameters while leaving $1 unreferenced, and the audit lookup did not constrain the tenant. Both were re-verified on the isolated database after the fix."
+    },
+    "regression": {
+      "files": 9,
+      "passed": 77,
+      "failed": 0,
+      "skipped": 0,
+      "breakdown": {
+        "company-data": 4,
+        "data-template-lifecycle": 5,
+        "data-result-read-model": 5,
+        "role-administration": 5,
+        "company-data-configuration": 7,
+        "company-data-contracts": 5,
+        "company-data-templates": 6,
+        "capability-descriptor": 8,
+        "capability-output": 32
+      }
+    },
+    "typecheck": "PASS",
+    "lint": "PASS",
+    "schemaContractCheck": "PASS",
+    "capabilityOutputContractCheck": "PASS",
+    "requirementsBaseline": "PASS",
+    "requirementsFull": "FAIL_PREEXISTING",
+    "requirementsFullNote": "87 errors remain from stages still in progress (implementation incomplete for R-items, missing implementations for later T-cases), down from 89 because T091 and T095 now point at an implemented test file with stable case identifiers. No missing module or placeholder error involves this slice, and the baseline integrity mode passes.",
+    "build": "PASS",
+    "liveProviderCalls": 0
+  },
+  "notProven": [
+    "live GLM, DingTalk, DWS or company MCP acceptance",
+    "enterprise certified templates, enterprise data-department oracle or golden files beyond the local synthetic payments.success_rate_daily@1.0.0 fixture",
+    "any real upstream query execution, cancellation or task-flow result for the read model",
+    "real development database on port 64710 or any deployment",
+    "T091, T093, T095 or T096 full catalog acceptance, R16 completion or R20 completion"
+  ],
+  "statusUnchanged": {
+    "T091": "NOT_RUN",
+    "T093": "NOT_RUN",
+    "T095": "NOT_RUN",
+    "T096": "NOT_RUN",
+    "R16": "IN_PROGRESS",
+    "R20": "IN_PROGRESS",
+    "P09": "IN_PROGRESS",
+    "liveAcceptance": "BLOCKED_EXTERNAL"
+  }
+}
