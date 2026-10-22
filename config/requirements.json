@@ -165,7 +165,11 @@
       "db/migrations/080_managed_grant_descriptor_snapshot.sql",
       "db/migrations/081_managed_grant_auth_mode_review.sql",
       "packages/storage/src/database.ts",
-      "db/migrations/082_managed_grant_reader_admission.sql"
+      "db/migrations/082_managed_grant_reader_admission.sql",
+      "db/migrations/115_role_binding_administration.sql",
+      "apps/web/src/role-admin-flow.ts",
+      "apps/web/src/role-admin.tsx",
+      "apps/web/src/permissions.tsx"
     ],
     "status": "IN_PROGRESS",
     "intendedModules": [

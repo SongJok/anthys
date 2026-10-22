@@ -1,0 +1,108 @@
+import '../support/isolation.js';
+import {randomUUID,randomBytes} from 'node:crypto';
+import pg from 'pg';
+import {Database} from '../../packages/storage/src/database.js';
+import {config,secret} from '../../packages/config/src/index.js';
+import {TaskStore} from '../../packages/tasks/src/store.js';
+import {PermissionAdministration} from '../../packages/gateway/src/permission-administration.js';
+import {createServer} from '../../apps/api/src/server.js';
+
+const root=new pg.Pool({connectionString:secret('MIGRATION_DATABASE_URL')!});
+const db=new Database(secret('RUNTIME_DATABASE_URL')!,8),appDb=new Database(secret('DATABASE_URL')!,8);
+const apis:Awaited<ReturnType<typeof createServer>>[]=[];
+afterAll(async()=>{for(const api of apis)await api.app.close();await db.close();await appDb.close();await root.end();});
+type Role='TENANT_ADMIN'|'ACTION_APPROVER'|'SECURITY_OPERATOR';
+type Scope='TENANT'|'CAPABILITY'|'CONNECTOR'|'RESOURCE'|'TASK'|'USER';
+type AssignInput={targetUserId:string;roleName:Role;scopeKind:Scope;scopeId:string;expiresAt:string;reviewReference:string};
+async function fresh(){
+ const tenant=randomUUID(),admin={tenantId:tenant,actorId:randomUUID()},employee={tenantId:tenant,actorId:randomUUID()},other={tenantId:tenant,actorId:randomUUID()};
+ await root.query("INSERT INTO tenants(tenant_id,id,corp_id,name,status) VALUES($1,$1,$2,'synthetic role administration','ACTIVE')",[tenant,'synthetic-role-'+tenant]);
+ for(const person of [admin,employee,other])await root.query("INSERT INTO users(tenant_id,id,external_user_id,display_name,status) VALUES($1,$2,$3,'synthetic actor','ACTIVE')",[tenant,person.actorId,'synthetic-'+person.actorId]);
+ const roleIds={TENANT_ADMIN:randomUUID(),ACTION_APPROVER:randomUUID(),SECURITY_OPERATOR:randomUUID()};
+ for(const [name,id] of Object.entries(roleIds))await root.query('INSERT INTO roles(tenant_id,id,name) VALUES($1,$2,$3)',[tenant,id,name]);
+ const authorityId=randomUUID();
+ await root.query("INSERT INTO role_bindings(tenant_id,id,role_id,subject_id,scope_kind,scope_id,managed_review_hash,managed_by) VALUES($1,$2,$3,$4,'TENANT',$1::uuid::text,$5,$4)",[tenant,authorityId,roleIds.TENANT_ADMIN,admin.actorId,'a'.repeat(64)]);
+ await root.query("INSERT INTO capability_bindings(tenant_id,id,logical_id,semantic_version,provider_binding,schema_hash,risk,state) VALUES($1,$2,'synthetic.scope.capability','1.0.0','{}',$3,'READ','READY')",[tenant,randomUUID(),'a'.repeat(64)]);
+ const task=await new TaskStore(appDb).create(employee,'synthetic role administration task',randomUUID());
+ const api=await createServer({config:config(),db:appDb,sessionSecret:randomBytes(32).toString('hex')});apis.push(api);
+ const login=async(person:typeof admin)=>{const token=await api.sessions.create(person);return {p:(await api.sessions.authenticate(token.cookie))!,cookie:'oa_session='+token.cookie,csrf:token.csrf};};
+ const a=await login(admin),e=await login(employee),o=await login(other),administration=new PermissionAdministration(appDb);
+ const future=(hours=1)=>new Date(Date.now()+hours*3600000).toISOString();
+ const assignInput=(overrides:Partial<AssignInput>={}):AssignInput=>({targetUserId:employee.actorId,roleName:'ACTION_APPROVER',scopeKind:'CAPABILITY',scopeId:'synthetic.scope.capability',expiresAt:future(),reviewReference:'synthetic-role-review',...overrides});
+ const assign=(requestId=randomUUID(),input=assignInput())=>administration.assignRole(a.p,input,requestId);
+ const renew=(id:string,version:number,expiresAt=future(2),requestId=randomUUID())=>administration.renewRole(a.p,id,{targetUserId:employee.actorId,version,expiresAt,reviewReference:'synthetic-role-renew'},requestId);
+ const revoke=(id:string,version:number,requestId=randomUUID())=>administration.revokeRole(a.p,id,{targetUserId:employee.actorId,version,reviewReference:'synthetic-role-revoke'},requestId);
+ return {tenant,admin,employee,other,roleIds,authorityId,task,api,a,e,o,administration,assignInput,assign,renew,revoke,future};
+}
+const authEpoch=async(tenant:string,actor:string)=>(await root.query('SELECT auth_epoch FROM users WHERE tenant_id=$1 AND id=$2',[tenant,actor])).rows[0].auth_epoch as string;
+
+it('role assignment, renewal and revocation keep exact versions, idempotent receipts and a chained audit trail',async()=>{
+ const f=await fresh(),before=await authEpoch(f.tenant,f.employee.actorId),key=randomUUID(),input=f.assignInput();
+ const created=await f.assign(key,input);
+ expect(created).toMatchObject({roleName:'ACTION_APPROVER',scopeKind:'CAPABILITY',scopeId:'synthetic.scope.capability',state:'ACTIVE',version:1,replayed:false,platformPermissionsVerified:false,reauthenticationRequired:false});
+ expect(await authEpoch(f.tenant,f.employee.actorId)).toBe(String(Number(before)+1));
+ expect(await f.api.sessions.authenticate(f.e.cookie.slice(11))).toBeNull();
+ expect((await f.assign(key,input)).replayed).toBe(true);
+ await expect(f.assign()).rejects.toMatchObject({code:'PERMISSION_ROLE_BINDING_EXISTS',status:409});
+ const renewKey=randomUUID(),expires=f.future(2),renewed=await f.renew(created.id,1,expires,renewKey);expect(renewed).toMatchObject({state:'ACTIVE',version:2,replayed:false});
+ expect((await f.renew(created.id,1,expires,renewKey)).replayed).toBe(true);
+ const revoked=await f.revoke(created.id,2);expect(revoked).toMatchObject({state:'REVOKED',version:3});
+ await expect(f.renew(created.id,3)).rejects.toMatchObject({code:'PERMISSION_ROLE_REVIEW_REQUIRED',status:403});
+ const regranted=await f.assign();expect(regranted).toMatchObject({state:'ACTIVE',version:1});
+ expect(regranted.id).not.toBe(created.id);
+ const list=(await f.administration.roleBindings(f.a.p,{targetUserId:f.employee.actorId})).items;
+ expect(new Map(list.map(i=>[i.id,[i.state,i.version]]))).toEqual(new Map([[created.id,['REVOKED',3]],[regranted.id,['ACTIVE',1]]]));
+ expect(list.every(i=>i.managed)).toBe(true);
+ const events=(await root.query('SELECT kind,previous_hash,hash FROM permission_events WHERE tenant_id=$1 AND owner_id=$2 ORDER BY seq',[f.tenant,f.employee.actorId])).rows;
+ expect(events.map(e=>e.kind)).toEqual(['ROLE_ASSIGNED','ROLE_RENEWED','ROLE_WITHDRAWN','ROLE_ASSIGNED']);
+ for(let i=1;i<events.length;i++)expect(events[i].previous_hash).toBe(events[i-1].hash);
+ expect((await root.query('SELECT request_id FROM role_admin_requests WHERE tenant_id=$1',[f.tenant])).rowCount).toBe(4);
+});
+it('role administration enforces tenant administrator admission, scope ownership, expiry bounds and the last administrator guard',async()=>{
+ const f=await fresh();
+ await expect(f.administration.assignRole(f.e.p,f.assignInput(),randomUUID())).rejects.toMatchObject({code:'PERMISSION_ADMIN_DENIED',status:403});
+ const second=await fresh();
+ await expect(f.administration.assignRole(f.a.p,{...f.assignInput(),targetUserId:second.employee.actorId},randomUUID())).rejects.toMatchObject({code:'PERMISSION_NOT_FOUND',status:404});
+ await expect(f.assign(randomUUID(),f.assignInput({scopeId:'synthetic.missing.capability'}))).rejects.toMatchObject({code:'PERMISSION_ROLE_SCOPE_INVALID',status:400});
+ await expect(f.assign(randomUUID(),f.assignInput({roleName:'TENANT_ADMIN'}))).rejects.toMatchObject({code:'PERMISSION_ROLE_SCOPE_INVALID',status:400});
+ await expect(f.assign(randomUUID(),f.assignInput({expiresAt:new Date(Date.now()+400*86400000).toISOString()}))).rejects.toMatchObject({code:'PERMISSION_ROLE_EXPIRY_INVALID',status:400});
+ await expect(f.assign(randomUUID(),f.assignInput({expiresAt:'2020-01-01T00:00:00Z'}))).rejects.toMatchObject({code:'PERMISSION_ROLE_EXPIRY_INVALID',status:400});
+ await expect(f.administration.assignRole(f.a.p,{...f.assignInput(),roleName:'GROUP_ADMIN'},randomUUID())).rejects.toBeInstanceOf(Error);
+ const own=(await f.administration.roleBindings(f.a.p,{targetUserId:f.admin.actorId})).items.find(i=>i.id===f.authorityId)!;
+ await expect(f.administration.revokeRole(f.a.p,f.authorityId,{targetUserId:f.admin.actorId,version:own.version,reviewReference:'synthetic-last-admin'},randomUUID())).rejects.toMatchObject({code:'PERMISSION_ROLE_LAST_ADMIN',status:409});
+ expect((await root.query('SELECT revoked_at FROM role_bindings WHERE id=$1',[f.authorityId])).rows[0].revoked_at).toBeNull();
+ expect((await root.query('SELECT id FROM role_bindings WHERE tenant_id=$1 AND subject_id=$2 AND id<>$3',[f.tenant,f.employee.actorId,f.authorityId])).rowCount).toBe(0);
+});
+it('task and user scopes must reference active local records while opaque resource and connector scopes stay bounded',async()=>{
+ const f=await fresh(),input=f.assignInput();
+ expect((await f.assign(randomUUID(),{...input,roleName:'SECURITY_OPERATOR',scopeKind:'TASK',scopeId:f.task.taskId})).state).toBe('ACTIVE');
+ expect((await f.assign(randomUUID(),{...input,roleName:'ACTION_APPROVER',scopeKind:'USER',scopeId:f.other.actorId})).state).toBe('ACTIVE');
+ expect((await f.assign(randomUUID(),{...input,scopeKind:'RESOURCE',scopeId:'fixture:'+randomUUID()})).state).toBe('ACTIVE');
+ expect((await f.assign(randomUUID(),{...input,roleName:'TENANT_ADMIN',scopeKind:'TENANT',scopeId:f.tenant})).state).toBe('ACTIVE');
+ await expect(f.assign(randomUUID(),{...input,roleName:'SECURITY_OPERATOR',scopeKind:'TASK',scopeId:randomUUID()})).rejects.toMatchObject({code:'PERMISSION_ROLE_SCOPE_INVALID',status:400});
+ await expect(f.assign(randomUUID(),{...input,scopeKind:'USER',scopeId:'not-a-uuid'})).rejects.toMatchObject({code:'PERMISSION_ROLE_SCOPE_INVALID',status:400});
+ await expect(f.assign(randomUUID(),{...input,scopeKind:'USER',scopeId:f.other.actorId})).rejects.toMatchObject({code:'PERMISSION_ROLE_BINDING_EXISTS'});
+});
+it('HTTP administration enforces login, CSRF, strict inputs, metadata-only listing and self-session clearing',async()=>{
+ const f=await fresh(),path='/api/v1/permissions/admin/roles',headers={cookie:f.a.cookie,origin:config().APP_ORIGIN,'x-csrf-token':f.a.csrf,'idempotency-key':randomUUID()},body=f.assignInput();
+ expect((await f.api.app.inject(path)).statusCode).toBe(401);
+ expect((await f.api.app.inject({url:path,method:'POST',headers:{cookie:f.a.cookie},payload:body})).statusCode).toBe(403);
+ expect((await f.api.app.inject({url:path,method:'POST',headers,payload:{...body,roles:['TENANT_ADMIN']}})).statusCode).toBe(400);
+ expect((await f.api.app.inject({url:path,method:'POST',headers,payload:{...body,scopeKind:'GROUP'}})).statusCode).toBe(400);
+ const saved=await f.api.app.inject({url:path,method:'POST',headers,payload:body});expect(saved.statusCode).toBe(200);expect(saved.json().data).toMatchObject({roleName:'ACTION_APPROVER',state:'ACTIVE',version:1});
+ const list=await f.api.app.inject({url:path+'?targetUserId='+f.employee.actorId,headers});expect(list.headers['cache-control']).toBe('private, no-store');
+ expect(list.json().data).toMatchObject({scope:'TENANT_ROLE_METADATA_ONLY',platformPermissionsVerified:false});expect(list.json().data.items).toHaveLength(1);
+ expect(list.payload).not.toContain('provider_binding');expect((await f.api.app.inject({url:path,headers:{cookie:f.o.cookie}})).statusCode).toBe(403);
+ const id=saved.json().data.id as string;
+ const renew=await f.api.app.inject({url:path+'/'+id+'/renew',method:'POST',headers:{...headers,'idempotency-key':randomUUID()},payload:{targetUserId:f.employee.actorId,version:1,expiresAt:f.future(3),reviewReference:'synthetic-http-role-renew'}});
+ expect(renew.statusCode).toBe(200);expect(renew.json().data.version).toBe(2);
+ const revoke=await f.api.app.inject({url:path+'/'+id+'/revoke',method:'POST',headers:{...headers,'idempotency-key':randomUUID()},payload:{targetUserId:f.employee.actorId,version:2,reviewReference:'synthetic-http-role-revoke'}});
+ expect(revoke.statusCode).toBe(200);expect(revoke.json().data).toMatchObject({state:'REVOKED',version:3});
+ const self=await f.api.app.inject({url:path,method:'POST',headers:{...headers,'idempotency-key':randomUUID()},payload:{...body,roleName:'SECURITY_OPERATOR',scopeKind:'TENANT',scopeId:f.tenant,targetUserId:f.admin.actorId}});
+ expect(self.statusCode).toBe(200);expect(self.json().data.reauthenticationRequired).toBe(true);expect(self.headers['set-cookie']).toContain('oa_session=;');
+});
+it('direct application writes and runtime execution remain prohibited',async()=>{
+ for(const role of ['oa_app','oa_runtime'])for(const table of ['role_bindings','role_admin_requests'])for(const privilege of ['INSERT','UPDATE','DELETE'])expect((await root.query('SELECT has_table_privilege($1,$2,$3) allowed',[role,table,privilege])).rows[0].allowed).toBe(false);
+ expect((await root.query("SELECT has_function_privilege('oa_runtime','public.oa_permission_admin_role_mutate(text,uuid,uuid,bigint,jsonb,uuid,uuid)','EXECUTE') allowed")).rows[0].allowed).toBe(false);
+ expect((await root.query("SELECT has_function_privilege('oa_runtime','public.oa_permission_admin_role_bindings(uuid,uuid,uuid,uuid)','EXECUTE') allowed")).rows[0].allowed).toBe(false);
+});

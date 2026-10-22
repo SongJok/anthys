@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "compatibility": "EXACT_SET",
-  "lastMigration": "114_sandbox_artifact_retention.sql",
-  "contractHash": "7f3b8f8df0d1bc8088f015b3d1826571475d7b0f4efccf7ab5817502962a6a65",
+  "lastMigration": "115_role_binding_administration.sql",
+  "contractHash": "9f87e17993fa046c33a9ee7f5200b9134b1506d9a1a5c387f2ac83238f6da876",
   "migrations": [
     {
       "name": "001_identity.sql",
@@ -459,6 +459,10 @@
     {
       "name": "114_sandbox_artifact_retention.sql",
       "hash": "bbe7fee8ffb3c7aeda6a5f329fe037644b8728e2799792e9e09ea2ade74104a9"
+    },
+    {
+      "name": "115_role_binding_administration.sql",
+      "hash": "9110764945294c90937d4f67f3d16f299361fd8cadbfb6ecbb5ecb95a3cbf3c1"
     }
   ]
 }

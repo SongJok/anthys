@@ -7,8 +7,15 @@ const item=()=>({id,targetUserId:target,capabilityId:'synthetic.read',capability
 const list=()=>({items:[item()],nextCursor:null,scope:'TENANT_POLICY_METADATA_ONLY',platformPermissionsVerified:false});
 const receipt=(key:string,operation='renew')=>({id,targetUserId:target,version:4,state:operation==='renew'?'ACTIVE':'REVOKED',replayed:false,reauthenticationRequired:false,platformPermissionsVerified:false,requestId:key,currentVersion:4,currentState:operation==='renew'?'ACTIVE':'REVOKED'});
 const own=(admin=true)=>({roles:{items:admin?[{id:manifest,name:'TENANT_ADMIN',scope_kind:'TENANT',scope_id:manifest,state:'ACTIVE',version:1,expires_at:null}]:[],nextCursor:null},grants:{items:[{id:second,capability_id:'synthetic.own',display_name:'本人合成功能',resource_ref:'own-synthetic-resource',audience_kind:'PRIVATE_USER',classification_ceiling:'INTERNAL',state:'ACTIVE',version:1,expires_at:'2098-01-01T00:00:00Z',versions:['1.0.0']}],nextCursor:null}});
+const roleId='50000000-0000-4000-8000-000000000001';
+const roleItem=()=>({id:roleId,targetUserId:target,roleName:'ACTION_APPROVER',scopeKind:'CAPABILITY',scopeId:'synthetic.capability',scopeTruncated:false,expiresAt:'2027-01-01T00:00:00Z',version:2,managed:true,state:'ACTIVE'});
+const roleList=()=>({items:[roleItem()],nextCursor:null,scope:'TENANT_ROLE_METADATA_ONLY',platformPermissionsVerified:false});
+function roleReceiptFor(key:string,path:string,body:Record<string,unknown>){
+ const operation=path.endsWith('/renew')?'renew':path.endsWith('/revoke')?'revoke':'assign',version=operation==='assign'?1:Number(body['version'])+1;
+ return {id:roleId,targetUserId:body['targetUserId'],roleName:operation==='assign'?body['roleName']:'ACTION_APPROVER',scopeKind:operation==='assign'?body['scopeKind']:'CAPABILITY',scopeId:operation==='assign'?body['scopeId']:'synthetic.capability',version,state:operation==='revoke'?'REVOKED':'ACTIVE',expiresAt:body['expiresAt']??'2027-06-01T00:00:00.000Z',replayed:false,reauthenticationRequired:false,platformPermissionsVerified:false,requestId:key,currentVersion:version,currentState:operation==='revoke'?'REVOKED':'ACTIVE'};
+}
 type Call={path:string;method:string;body:unknown;key:string|undefined;csrf:string|undefined;origin:string|undefined};
-type Scenario={metadata?:unknown;listStatus?:number;status?:number;abort?:boolean;hold?:Promise<void>;noAdmin?:boolean;pages?:boolean;override?:(value:ReturnType<typeof receipt>)=>unknown};
+type Scenario={metadata?:unknown;listStatus?:number;status?:number;abort?:boolean;hold?:Promise<void>;noAdmin?:boolean;pages?:boolean;override?:(value:ReturnType<typeof receipt>)=>unknown;roleMetadata?:unknown;roleListStatus?:number;roleStatus?:number;roleOverride?:(value:ReturnType<typeof roleReceiptFor>)=>unknown};
 async function mount(page:Page,scenario:Scenario={}){
  const calls:Call[]=[],unexpected:string[]=[];let admin=!scenario.noAdmin;
  const bundle=await readFile(process.env['PERMISSION_ADMIN_BUNDLE']!,'utf8');
@@ -18,6 +25,12 @@ async function mount(page:Page,scenario:Scenario={}){
   if(path==='/permission-admin')return route.fulfill({contentType:'text/html',body:'<!doctype html><html lang="zh"><meta charset="utf-8"><div id="root"></div><script src="/fixture.js"></script></html>'});
   if(path==='/fixture.js')return route.fulfill({contentType:'text/javascript',body:bundle});
   if(path==='/api/v1/permissions')return route.fulfill({json:{data:own(admin)}});
+  if(path==='/api/v1/permissions/admin/roles'&&req.method()==='GET')return route.fulfill({status:scenario.roleListStatus??200,json:scenario.roleListStatus?{error:{code:'PERMISSION_ADMIN_DENIED',correlationId:secret}}:{data:scenario.roleMetadata??roleList()}});
+  if(path==='/api/v1/permissions/admin/roles'||path.startsWith('/api/v1/permissions/admin/roles/')){
+   const body=req.postDataJSON() as Record<string,unknown>,key=req.headers()['idempotency-key']!,value=roleReceiptFor(key,path,body);
+   calls.push({path,method:req.method(),body,key,csrf:req.headers()['x-csrf-token'],origin:req.headers()['origin']});
+   return route.fulfill({status:scenario.roleStatus??200,json:scenario.roleStatus?{error:{code:'PERMISSION_ROLE_BINDING_EXISTS',correlationId:secret}}:{data:scenario.roleOverride?scenario.roleOverride(value):value,private:secret}});
+  }
   calls.push({path:path+url.search,method:req.method(),body:req.method()==='POST'?req.postDataJSON():undefined,key:req.headers()['idempotency-key'],csrf:req.headers()['x-csrf-token'],origin:req.headers()['origin']});
   if(path==='/api/v1/permissions/admin/resources'){
    let data=scenario.metadata??list();if(scenario.pages)data=url.searchParams.has('cursor')?{...list(),items:[{...item(),id:second}],nextCursor:null}:{...list(),nextCursor:second};
@@ -93,5 +106,36 @@ for(const lifecycle of ['csrf','role','unmount'] as const){
   else await page.evaluate(()=>Reflect.get(window,'unmountPermissions')());
   release();if(lifecycle==='csrf'){await expect(center(page).getByRole('article')).toHaveCount(1);await expect(center(page).getByRole('complementary',{name:'策略变更回执'})).toHaveCount(0);await expect(center(page).getByRole('complementary',{name:'确认管理变更'})).toHaveCount(0);}else await expect(center(page)).toHaveCount(0);
   expect(fixture.calls.filter(c=>c.method==='POST')).toHaveLength(1);await safe(page);
+ });
+}
+
+const roleArea=(page:Page)=>page.getByRole('region',{name:'管理员角色分配',exact:true});
+const roleForm=(page:Page,name:string)=>roleArea(page).getByRole('form',{name,exact:true});
+
+test('role administration lists managed bindings with scope metadata and no platform claim',async({page})=>{
+ const {unexpected}=await mount(page);const area=roleArea(page);await expect(area.getByRole('article',{name:'角色记录 '+roleId})).toBeVisible();await expect(area).toContainText('动作审批 · 范围：能力');await expect(area).toContainText('范围对象：synthetic.capability');await expect(area).toContainText('平台权限尚未核实');await expect(area.getByRole('button',{name:'选择此角色记录',exact:true})).toBeVisible();expect(unexpected).toEqual([]);await safe(page);
+});
+
+test('role assignment binds exact target, scope and one key without automatic resend',async({page})=>{
+ const {calls}=await mount(page);const area=roleArea(page),form=roleForm(page,'分配角色');
+ await form.getByLabel('目标用户 UUID',{exact:true}).fill(target);await form.getByLabel('可分配角色',{exact:true}).selectOption('SECURITY_OPERATOR');await form.getByLabel('范围类型',{exact:true}).selectOption('TASK');await form.getByLabel('范围对象',{exact:true}).fill(second);await form.getByLabel('到期时间',{exact:true}).fill('2027-06-01T12:00');await form.getByLabel('审核引用',{exact:true}).fill('role-review-1');await area.getByRole('button',{name:'核对分配',exact:true}).click();await expect(area.getByRole('complementary',{name:'确认角色变更'})).toContainText('角色：安全处理 · 范围：任务');
+ await area.getByRole('button',{name:'确认分配',exact:true}).evaluate(b=>{(b as HTMLButtonElement).click();(b as HTMLButtonElement).click();});await expect.poll(()=>calls.filter(c=>c.method==='POST').length).toBe(1);await expect(area.getByRole('complementary',{name:'角色变更回执'})).toContainText('逻辑回执：有效 · 版本 1');
+ const post=calls.find(c=>c.method==='POST')!;expect(post.path).toBe('/api/v1/permissions/admin/roles');expect(post.csrf).toBe('synthetic-csrf');expect(post.origin).toBe('http://127.0.0.1:64702');expect(post.key).toMatch(/^[a-f0-9-]{36}$/);expect(post.body).toEqual({targetUserId:target,roleName:'SECURITY_OPERATOR',scopeKind:'TASK',scopeId:second,expiresAt:'2027-06-01T12:00:00.000Z',reviewReference:'role-review-1'});await safe(page);
+});
+
+test('role renewal binds the exact record version and cannot be replayed by a second click',async({page})=>{
+ const {calls}=await mount(page);const area=roleArea(page);await area.getByRole('button',{name:'选择此角色记录',exact:true}).click();const form=roleForm(page,'管理所选角色');await form.getByLabel('角色操作',{exact:true}).selectOption('renew');await form.getByLabel('新到期时间',{exact:true}).fill('2027-06-01T12:00');await form.getByLabel('审核引用',{exact:true}).fill('role-renew-1');await area.getByRole('button',{name:'核对变更',exact:true}).click();await expect(area.getByRole('complementary',{name:'确认角色变更'})).toContainText('预期记录版本：2');
+ await area.getByRole('button',{name:'确认续期',exact:true}).evaluate(b=>{(b as HTMLButtonElement).click();(b as HTMLButtonElement).click();});await expect.poll(()=>calls.filter(c=>c.method==='POST').length).toBe(1);await expect(area.getByRole('complementary',{name:'角色变更回执'})).toContainText('逻辑回执：有效 · 版本 3');
+ const post=calls.find(c=>c.method==='POST')!;expect(post.path).toBe(`/api/v1/permissions/admin/roles/${roleId}/renew`);expect(post.body).toEqual({targetUserId:target,version:2,expiresAt:'2027-06-01T12:00:00.000Z',reviewReference:'role-renew-1'});await safe(page);
+});
+
+test('role revocation submits the selected version and shows both receipt and current state',async({page})=>{
+ const {calls}=await mount(page);const area=roleArea(page);await area.getByRole('button',{name:'选择此角色记录',exact:true}).click();const form=roleForm(page,'管理所选角色');await form.getByLabel('角色操作',{exact:true}).selectOption('revoke');await form.getByLabel('审核引用',{exact:true}).fill('role-revoke-1');await area.getByRole('button',{name:'核对变更',exact:true}).click();await area.getByRole('button',{name:'确认撤销角色',exact:true}).click();await expect(area.getByRole('complementary',{name:'角色变更回执'})).toContainText('逻辑回执：已撤销 · 版本 3');
+ const post=calls.find(c=>c.method==='POST')!;expect(post.path).toBe(`/api/v1/permissions/admin/roles/${roleId}/revoke`);expect(post.body).toEqual({targetUserId:target,version:2,reviewReference:'role-revoke-1'});await safe(page);
+});
+
+for(const [name,scenario] of [['conflict',{roleStatus:409}],['wrong target',{roleOverride:(v:ReturnType<typeof roleReceiptFor>)=>({...v,targetUserId:manifest})}],['malformed',{roleOverride:(v:ReturnType<typeof roleReceiptFor>)=>({...v,platformPermissionsVerified:true})}]] as const){
+ test(`role ${name}: no success, no private server text and no automatic retry`,async({page})=>{
+  const {calls}=await mount(page,scenario);const area=roleArea(page);await area.getByRole('button',{name:'选择此角色记录',exact:true}).click();const form=roleForm(page,'管理所选角色');await form.getByLabel('角色操作',{exact:true}).selectOption('renew');await form.getByLabel('新到期时间',{exact:true}).fill('2027-06-01T12:00');await form.getByLabel('审核引用',{exact:true}).fill('role-renew-1');await area.getByRole('button',{name:'核对变更',exact:true}).click();await area.getByRole('button',{name:'确认续期',exact:true}).click();await expect(area.getByRole('status')).toContainText(/冲突|未能核实/);await expect(area.getByRole('complementary',{name:'角色变更回执'})).toHaveCount(0);await expect(area.getByRole('complementary',{name:'确认角色变更'})).toHaveCount(0);expect(calls.filter(c=>c.method==='POST')).toHaveLength(1);await safe(page);
  });
 }

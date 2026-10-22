@@ -1,0 +1,118 @@
+{
+  "status": "PASS",
+  "scope": "LOCAL_SYNTHETIC_ROLE_BINDING_ADMINISTRATION",
+  "live": false,
+  "generatedAt": "2026-10-22T04:25:31Z",
+  "source": {
+    "baseCommit": "ba22a58b8bec744c0aa43da9c36bafbfa214c9f9",
+    "workingTree": true,
+    "files": {
+      "db/migrations/115_role_binding_administration.sql": "9110764945294c90937d4f67f3d16f299361fd8cadbfb6ecbb5ecb95a3cbf3c1",
+      "packages/gateway/src/permission-administration.ts": "475136bbf8e331d5df37c9330b6a80b66d4b7d7acf98dd54c8426cc9becc6e46",
+      "apps/web/src/role-admin-flow.ts": "23465a93dd968b0cb12b00bf54128facdd24c1a34bc630313555ded820e82472",
+      "apps/web/src/role-admin.tsx": "52e88a97ff59e8d86734ffca09f09f52c0b497df74e342e5f4ab0ed8abaa4ccc",
+      "tests/integration/role-administration.test.ts": "50077b2e84c51fd102044eb1c011f914c401db982e1ab971b15aafa296844bf3",
+      "tests/offline/role-admin.test.ts": "fa834b8176677b0a3e3abd3d8418c9938d8d672cdf5dfc54a5f1452a5a972139",
+      "tests/e2e/permission-admin.spec.ts": "b410fe386d8a84a146b199d9fba155338e5bb22a439c490077a6d0175deaa4eb",
+      "packages/storage/src/required-migrations.json": "6a5b1aeec2e1e1f9b25955958c39831965d414ffb8f6951632c389c478896774"
+    },
+    "migrationContract": {
+      "migrations": 115,
+      "lastMigration": "115_role_binding_administration.sql",
+      "contractHash": "9f87e17993fa046c33a9ee7f5200b9134b1506d9a1a5c387f2ac83238f6da876"
+    }
+  },
+  "database": {
+    "target": "loopback:64711/anthys_test",
+    "composeProject": "anthys-test",
+    "realDevelopmentDatabaseTouched": false,
+    "migrationDrift": false,
+    "migrationsApplied": 115
+  },
+  "behavior": {
+    "assignableRoles": [
+      "TENANT_ADMIN",
+      "ACTION_APPROVER",
+      "SECURITY_OPERATOR"
+    ],
+    "managedScopes": [
+      "TENANT",
+      "CAPABILITY",
+      "CONNECTOR",
+      "RESOURCE",
+      "TASK",
+      "USER"
+    ],
+    "groupScope": "GROUP remains outside this interface and requires a separately certified group contract and audience",
+    "expiry": "mandatory, not elapsed, at most 366 days",
+    "concurrency": "actor/target advisory locks plus exact version CAS",
+    "idempotency": "immutable tenant/admin/request receipt bound to args_hash and review_hash",
+    "audit": "permission_events hash chain appended in the same transaction",
+    "guards": [
+      "active TENANT_ADMIN admission for the same tenant",
+      "tenant and scope ownership validation",
+      "CAPABILITY must exist READY; TASK and USER must resolve to active local records",
+      "renew and revoke only managed bindings",
+      "last tenant administrator cannot be revoked",
+      "self-action invalidates the acting session and clears the cookie without auto-retry"
+    ],
+    "privilegeChecks": [
+      "oa_app and oa_runtime denied INSERT/UPDATE/DELETE on role_bindings and role_admin_requests",
+      "oa_runtime denied EXECUTE on oa_permission_admin_role_mutate and oa_permission_admin_role_bindings"
+    ]
+  },
+  "tests": {
+    "commands": [
+      "node scripts/update-schema-contract.mjs --check",
+      "node --import tsx scripts/capability-output-contracts.ts --check",
+      "node scripts/run-tests.mjs vitest run tests/integration/role-administration.test.ts",
+      "node scripts/run-tests.mjs vitest run tests/integration/role-administration.test.ts tests/integration/permission-administration.test.ts tests/integration/permission-center.test.ts",
+      "node --import ./scripts/test-network-guard.mjs scripts/test-permission-admin.mjs",
+      "node <typescript>/bin/tsc --noEmit",
+      "node <eslint>/bin/eslint.js <changed files>"
+    ],
+    "roleAdministrationIntegration": {
+      "passed": 5,
+      "failed": 0,
+      "skipped": 0
+    },
+    "permissionRegressionIntegration": {
+      "files": 3,
+      "passed": 75,
+      "failed": 0,
+      "breakdown": {
+        "role-administration": 5,
+        "permission-administration": 44,
+        "permission-center": 26
+      }
+    },
+    "offlineFlow": {
+      "passed": 18,
+      "failed": 0,
+      "skipped": 0
+    },
+    "componentBrowser": {
+      "passed": 37,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "backendOrDatabaseStarted": false,
+      "realProviderCalls": 0
+    },
+    "typecheck": "PASS",
+    "lint": "PASS",
+    "schemaContractCheck": "PASS",
+    "capabilityOutputContractCheck": "PASS"
+  },
+  "notProven": [
+    "live GLM, DingTalk, DWS or company MCP acceptance",
+    "any change to the real development database on port 64710",
+    "delegation issuance and rotation, permission reconciliation, GROUP governance or platform role synchronization",
+    "enterprise provider permission or tenant integration acceptance"
+  ],
+  "statusUnchanged": {
+    "R08": "IN_PROGRESS",
+    "T-cases": "NOT_RUN",
+    "liveAcceptance": "BLOCKED_EXTERNAL"
+  }
+}

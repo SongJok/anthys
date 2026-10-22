@@ -25,7 +25,7 @@ pnpm permissions:install TENANT_UUID /absolute/path/reviewed-manifest.json
 
 `localState=MATCHED` 仅表示这些本地条件匹配；平台始终 `UNKNOWN / NO_CERTIFIED_PROBE / live=false`，`executionAuthority=false`。本地拒绝不意味着已探测平台。缺少实际注册、未审核绑定、错用户/企业、失效委托或资源均保持阻塞。格式不符、伪造执行权或越界缓存结果拒绝返回。
 
-本人撤销仅减少自己的权限：精确 id/version CAS、串行化并发请求、同事务追加脱敏 hash 链审计、清缓存并递增 authEpoch。全部旧本人会话和旧执行租约失效，页面清除已显示资料并要求重新登录；其他用户不受影响。它不是定向任务取消功能，也不会撤销平台端凭据。重新登录后重复撤销不重复记审计。后续已增加租户管理员的 PRIVATE_USER 本地资源授权 API 组件，见下文；管理员角色分配、委托签发/轮换、完整生命周期和平台端撤销尚未完成。
+本人撤销仅减少自己的权限：精确 id/version CAS、串行化并发请求、同事务追加脱敏 hash 链审计、清缓存并递增 authEpoch。全部旧本人会话和旧执行租约失效，页面清除已显示资料并要求重新登录；其他用户不受影响。它不是定向任务取消功能，也不会撤销平台端凭据。重新登录后重复撤销不重复记审计。后续已增加租户管理员的 PRIVATE_USER 本地资源授权 API 组件和 115 本地角色分配组件，见下文；委托签发/轮换、恢复窗口内重派、完整生命周期和平台端撤销尚未完成。
 
 ## 实际验证与限制
 
@@ -35,13 +35,15 @@ pnpm permissions:install TENANT_UUID /absolute/path/reviewed-manifest.json
 
 角色审批作用域采用持久 Action 上下文：RESOURCE 匹配资源、TASK 匹配所属任务、USER 匹配请求者、GROUP 匹配真实执行/操作群；存在另一个群时拒绝单群角色审批。CAPABILITY/CONNECTOR/TENANT 继续按各自命名空间匹配。审批可见性、合格审批人、请求、预览、决定、Gateway 消费和派发前复核、UNKNOWN 控制台及核对都使用相同数据库函数。旧无类型上下文函数不推断 TASK/USER/GROUP。
 
-067 的成功角色 INSERT 使接收人 auth_epoch 递增，旧会话/任务租约失效；ON CONFLICT DO NOTHING 不递增。移动角色同时使原接收人和新接收人失效，保留绑定 version 递增。该底层规则不提供角色分配管理界面、企业委托审批或真实平台授权；P04 完整生命周期仍待交付。
+067 的成功角色 INSERT 使接收人 auth_epoch 递增，旧会话/任务租约失效；ON CONFLICT DO NOTHING 不递增。移动角色同时使原接收人和新接收人失效，保留绑定 version 递增。115 在此之上提供受限角色分配、续期与撤销；仍不提供企业委托签发/轮换、GROUP 治理、平台角色同步或真实平台授权，P04 完整生命周期仍待交付。
 
 ## 后续已实现组件与剩余对账边界
 
-074–076仅增加本地诊断缓存边界、共享限速及运行角色的元数据维护，不扩大执行授权。077–083增加 `/api/v1/permissions/admin/resources` 的新授、续期、撤销及显式重授：当前数据库租户管理员会话、精确目标、版本CAS、完整Descriptor/独立manifest/认证模式绑定、不可变幂等回执与本人审计。旧reader不能读取managed授权；试验/正式profile或对应持久记录不能借此取得租户管理权限。该组件不包含GROUP治理、角色分配、委托或管理UI，也不授予供应商授权、模型出域或写审批。
+074–076仅增加本地诊断缓存边界、共享限速及运行角色的元数据维护，不扩大执行授权。077–083增加 `/api/v1/permissions/admin/resources` 的新授、续期、撤销及显式重授：当前数据库租户管理员会话、精确目标、版本CAS、完整Descriptor/独立manifest/认证模式绑定、不可变幂等回执与本人审计。旧reader不能读取managed授权；试验/正式profile或对应持久记录不能借此取得租户管理权限。资源组件本身不包含GROUP治理、角色分配或委托；角色分配由115独立组件提供。两者都不授予供应商授权、模型出域或写审批。
 
-这些组件的准确实现及证据见 `reports/permission-administration-20261018` 和 `reports/self-dm-closure-20261018/permission-{cache-bounds,rate-limit,cache-maintenance}.json`。c7d042f对应CI的1286项、受控单聊2项和管理策略分支95%已确认通过；完整需求仍FAIL126，依赖审计跳过，不构成整体P04/R08验收或真实操作批准。后续源码增量另行绑定验证。
+115 增加本地角色绑定管理（2026-10-22）：`/api/v1/permissions/admin/roles` 的列表、分配、续期与撤销仅服务当前数据库 `TENANT_ADMIN/TENANT` 会话。可分配角色限于 `TENANT_ADMIN`、`ACTION_APPROVER`、`SECURITY_OPERATOR`；范围限于 `TENANT/CAPABILITY/CONNECTOR/RESOURCE/TASK/USER`，`GROUP` 仍由群合同流程治理。分配与续期必须提供不超过 366 天的到期时间；TASK/USER/CAPABILITY 范围核对当前本地记录，资源/连接器范围使用有界标识。续期/撤销要求受管绑定、精确 version CAS 和审核引用；撤销拒绝移除最后一个有效企业管理员。每次成功写入追加同一员工 hash 链事件并保存不可改的幂等回执；本人操作按既有规则递增 auth_epoch、清诊断缓存并使当前会话需要重新登录，回执重放另列 currentVersion/currentState，不把历史回执当当前状态。页面仅展示元数据，平台权限始终标为尚未核实；系统不签发/轮换企业委托、不同步平台角色、不治理群成员，也不恢复任务或执行动作。
+
+这些组件的准确实现及证据见 `reports/permission-administration-20261018`、`reports/permission-role-administration-20261022.json` 和 `reports/self-dm-closure-20261018/permission-{cache-bounds,rate-limit,cache-maintenance}.json`。c7d042f对应CI的1286项、受控单聊2项和管理策略分支95%已确认通过；完整需求仍FAIL126，依赖审计跳过，不构成整体P04/R08验收或真实操作批准。后续源码增量另行绑定验证。
 
 目前 `ControlPlane.beginReconciliation/attestReconciliation` 仍只有当前安全角色及会话绑定的人工声明：APPLIED最多成为APPLIED_UNVERIFIED，人工NOT_APPLIED继续保持UNKNOWN，所有结果均 `retryAllowed=false`。已有 `Capability.verify` 仅用于写入返回OK后的验证，不能当成UNKNOWN无回执时的未执行证明。认证只读对账必须独立审核并绑定能力/参数/资源/身份/权限及当前版本，经过真实读取取得证明；缺失、异常或不完整读取保持INCONCLUSIVE，不能据空结果或人工文字解锁重试。
 
