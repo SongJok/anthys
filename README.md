@@ -65,7 +65,7 @@ pnpm verify:release --profile ENTERPRISE_DWS # 缺任何必需证据都拒绝发
 
 `.env.example` 是变量索引。生产凭据必须通过受控 secret mount 提供；开发栈可把未提交的 `.env` 交给 `setup-dev-secrets.mjs` 导入。不要粘贴凭据进代码、测试报告或聊天。企业测试资源、审批、外部写入和清理按文档 04 执行。生产部署、全部办公能力和最终验收仍在后续阶段，开发镜像不能据此视为生产就绪；沙箱 broker 与生产者客户端已可部署并通过本地隔离执行验证，但业务能力接线和真实 T097/T098 验收仍未完成。
 
-现有 `.env` 可使用 `DINGTALK_APP_KEY/SECRET` 和 `AIDER_AI_DEFAULT_BASE_URL/API_KEY/MODEL`，项目会映射到规范名称；显式规范变量优先，secret mount 优先于明文变量。开发栈中的 `DINGTALK_APP_SECRET` 与 `AIDER_AI_DEFAULT_API_KEY` 也会由 `setup-dev-secrets.mjs` 识别并导入；模型/机器人标识等非秘密别名由应用直接读取 `.env`。默认模型仍严格限定为 `glm-5.3-flash`。凭据存在仅表示已配置；真实验证和企业测试资产仍单独核验。
+现有 `.env` 可使用 `DINGTALK_APP_KEY/SECRET` 和 `AIDER_AI_DEFAULT_BASE_URL/API_KEY/MODEL`，项目会映射到规范名称；显式规范变量优先，secret mount 优先于明文变量。开发栈中的 `DINGTALK_APP_SECRET` 与 `AIDER_AI_DEFAULT_API_KEY` 也会由 `setup-dev-secrets.mjs` 识别并导入；模型/机器人标识等非秘密别名由应用直接读取 `.env`。`*_FILE` 引用优先于明文值，引用文件缺失时失败关闭而不会回退明文，因此不要保留指向不存在文件的旧引用。默认模型仍严格限定为 `glm-5.3-flash`。凭据存在仅表示已配置；真实验证和企业测试资产仍单独核验。
 
 自动化测试只使用 `.data/test-environment/` 下独立生成的测试配置和专用临时 PG 实例，不加载仓库 `.env`，不继承企业 provider 凭据。测试入口默认拦截未声明网络目标，只允许测试数据库 64711、浏览器测试服务 64702 和合成 sandbox-broker 服务 64712 的回环连接；这是 Node 进程保护。真实分析作业由 broker 以 `--network none` 启动，与测试守卫相互独立。浏览器使用本机 Chrome；OAuth 导航在测试内拦截，合成 OAuth 通过不计为企业联调。
 

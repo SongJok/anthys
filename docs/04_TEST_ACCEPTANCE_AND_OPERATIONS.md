@@ -1365,3 +1365,19 @@ Docker开发栈检查：postgres、api、worker与sandbox-broker容器均为运�
 验证使用临时 `.env` 与临时引用文件（合成标记，随后删除并确认仓库无残留）：直接值、别名、`*_FILE` 三种形式均精确导入且权限为0600；引用不存在的文件以 `ENV_CREDENTIAL_INVALID:GLM_API_KEY` 失败；无 `.env` 时重新生成的两个 secret 为0字节，模型与钉钉保持 `BLOCKED_EXTERNAL`。脚本 ESLint 通过。README 与 `.env.example` 已补充上述流程、`/run/company-mcp/<name>.json` 容器路径以及 DWS 需独立固定runner的限制。
 
 同时发现 Compose 以 compose 文件目录为项目目录，不会自动读取仓库根 `.env`；`deploy/dev-up.sh` 现仅在根 `.env` 存在时显式追加 `--env-file .env`，README 的手动命令也要求显式加载。用合成 `DINGTALK_CORP_ID` 标记验证：默认 `compose config` 插值为空，带 `--env-file .env` 时渲染出该标记；临时替身 `docker` 证明脚本在有/无 `.env` 两种情况下分别传入/省略该参数。未使用任何真实凭据，未重启容器，也不改变 T/R 状态。
+
+### 2026-10-22 全量集成套件复跑（本地隔离，非真实验收）
+
+在隔离 PostgreSQL 64711 与网络守卫下执行全部 `tests/integration`：119个文件、1582项测试，1581项通过、1项失败，退出码1，耗时2870.36秒。唯一失败为 `tests/integration/group-reminder-denials.test.ts` 在夹具初始化阶段抛出 `DwsError: DWS_PROCESS_TIMEOUT`（`packages/dws/src/runner.ts` 的进程超时），尚未进入该用例的拒绝断言；失败点在 `groupRuntimeFixture` 构造身份工作区时。随后单独重跑该文件：7项全部通过，耗时72.55秒，包含授权/名册/合约/来源/所有者停止变更后的二次校验与物理发送否决。结论：满负载套件中的一次DWS子进程超时抖动，未观察到产品逻辑失败；仍需在每次发布前以最新代码重跑全量，不把“单文件重跑通过”当作全量通过。
+
+该结果仅限本地合成夹具与真实隔离数据库，不是真实 GLM/DingTalk/DWS/公司 MCP 验收；130项T与36项R状态不因此变更。
+
+同轮本地门禁：`tests/contract` 8个文件、74项测试全部通过（23.84秒）；`tests/security` 5个文件、27项测试全部通过（117.74秒）。两者均使用隔离数据库与网络守卫，退出码0。
+
+### 2026-10-22 `.env` 实配导入、`.env.example` 脱敏对齐与开发栈重启
+
+操作者把真实钉钉、GLM 与上游 MCP 配置写入未跟踪的根 `.env`。入口进程（api/worker/ingress/notifier/scheduler/maintenance）均调用 `loadEnvFile()`，因此主机侧以 `.env` 为主；Docker 侧由 `deploy/dev-up.sh` 或手动 `--env-file .env` 注入非秘密变量，并由 `deploy/setup-dev-secrets.mjs` 将 GLM/钉钉密钥导入 `.secrets/docker` 的0600文件，容器只读取 `/run/secrets/*`。
+
+导入时发现 `.env` 同时保留了原始密钥与指向不存在文件的 `GLM_API_KEY_FILE=.secrets/llm/glm/api_key`、`DINGTALK_CLIENT_SECRET_FILE=.secrets/dingtalk/client_secret`。按 `packages/config` 的 `*_FILE` 优先规则，这会以 `ENV_CREDENTIAL_INVALID:GLM_API_KEY` 失败关闭。处理方式是把这两行注释保留（路径仍可见）并改用 `.env` 中的原始值；未删除或改写任何密钥。固定 Node 24.21 重新导入后，`.secrets/docker/glm_api_key` 与 `dingtalk_client_secret` 均为非空0600文件。使用 `docker compose --env-file .env -f deploy/compose/compose.dev.yml --profile sandbox up -d --wait` 重建开发栈：postgres、api、worker、sandbox-broker 均健康，`/api/v1/health/live` 与 `/api/v1/health/ready` 均返回200，worker 日志为 `Worker running; model configured, live verification required`。该日志只表示配置已加载，不表示做过真实模型调用。
+
+`.env.example` 已同步 `.env` 的全部键：新增 `ANTHYS_AI_DD_MCP`、`ANTHYS_AI_DD_CHAT_MCP`、`ANTHYS_AI_DD_MCP_TOKEN`（标注为上游企业AI底座自有运行时使用，anthys 仅通过已审核的 `COMPANY_*_MCP_CONFIG_FILE` 合约访问）与 `DINGTALK_ROBOT_NAME`（外部运维工具可选显示名，运行时按 `DINGTALK_ROBOT_CODE` 发送）。四者均为空值；自动核对确认 `.env` 中所有敏感值（GLM、钉钉、上游令牌等）均未出现在 `.env.example`，示例中的敏感键全部为空。仓库密钥扫描（1182个Git对象）无命中。未执行任何真实 GLM/DingTalk/DWS/公司 MCP 调用，也不改变 T/R 状态。

@@ -4,6 +4,9 @@ try{process.loadEnvFile('.env');}catch(e){if(e.code!=='ENOENT')throw e;}
 const secrets=new Set();
 for(const [key,value] of Object.entries(process.env)){
  if(!value)continue;
+ // A directory/URL-valued variable can contain SECRET in its name without its
+ // value being a secret. _FILE stays included: its contents are read below.
+ if(/_(?:DIR|PATH|URL|HOST|ORIGIN|ENDPOINT)$/.test(key))continue;
  if(/SECRET|TOKEN|PASSWORD|(?:API|MASTER)_KEY/.test(key)) {const text=key.endsWith('_FILE')?await readFile(value,'utf8'):value;if(text.trim().length>=12)secrets.add(text.trim());}
  try{const u=new URL(value);if(u.password.length>=12)secrets.add(decodeURIComponent(u.password));for(const [k,v] of u.searchParams)if(/secret|token|password|key/i.test(k)&&v.length>=12)secrets.add(v);}catch{}
 }
