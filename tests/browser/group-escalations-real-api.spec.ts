@@ -11,7 +11,7 @@ type ActualBody={data:{kind:string;code?:string;receipt?:{caseId:string;caseVers
 // 30s per-test limit, zero retries and every authority observation.
 test.describe.serial('selected real case uses actual API and PostgreSQL for administrator escalation',()=>{
  let f:Fixture,item:{id:string;version:number};
- async function login(page:Page,cookie:string,title:string){const area=page.getByRole('region',{name:'群事务登记',exact:true});await page.context().addCookies([{name:'oa_session',value:cookie,url:'http://localhost:64702'}]);await page.goto('/groups');await expect(page.getByText('工作台已就绪',{exact:true})).toBeVisible();await area.getByLabel('管理员提供的群标识',{exact:true}).fill(f.group);await area.getByRole('button',{name:'读取今日登记事项',exact:true}).click();await expect(area.getByRole('article',{name:'群事项 '+title,exact:true})).toBeVisible();}
+ async function login(page:Page,cookie:string,title:string){const area=page.getByRole('region',{name:'群事务登记',exact:true});await page.context().addCookies([{name:'oa_session',value:cookie,url:'http://localhost:64702'}]);await page.goto('/groups');await expect(page.getByText('工作台已就绪',{exact:true})).toBeVisible();await area.getByLabel('管理员提供的群标识',{exact:true}).fill(f.group);await area.getByRole('button',{name:'读取今日登记事项',exact:true}).click();await expect(area.getByRole('article',{name:'群事项 '+title,exact:true})).toBeVisible({timeout:15000});}
  test('owner is denied for the actual persisted open case',async({page,request},info)=>{
   f=JSON.parse(await readFile('.data/test-environment/browser-group-cases.json','utf8'))[info.project.name] as Fixture;
   const base='/api/v1/groups/'+encodeURIComponent(f.group),title='SYNTHETIC single case escalation '+info.project.name;

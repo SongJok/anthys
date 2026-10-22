@@ -1380,4 +1380,26 @@ Docker开发栈检查：postgres、api、worker与sandbox-broker容器均为运�
 
 导入时发现 `.env` 同时保留了原始密钥与指向不存在文件的 `GLM_API_KEY_FILE=.secrets/llm/glm/api_key`、`DINGTALK_CLIENT_SECRET_FILE=.secrets/dingtalk/client_secret`。按 `packages/config` 的 `*_FILE` 优先规则，这会以 `ENV_CREDENTIAL_INVALID:GLM_API_KEY` 失败关闭。处理方式是把这两行注释保留（路径仍可见）并改用 `.env` 中的原始值；未删除或改写任何密钥。固定 Node 24.21 重新导入后，`.secrets/docker/glm_api_key` 与 `dingtalk_client_secret` 均为非空0600文件。使用 `docker compose --env-file .env -f deploy/compose/compose.dev.yml --profile sandbox up -d --wait` 重建开发栈：postgres、api、worker、sandbox-broker 均健康，`/api/v1/health/live` 与 `/api/v1/health/ready` 均返回200，worker 日志为 `Worker running; model configured, live verification required`。该日志只表示配置已加载，不表示做过真实模型调用。
 
-`.env.example` 已同步 `.env` 的全部键：新增 `ANTHYS_AI_DD_MCP`、`ANTHYS_AI_DD_CHAT_MCP`、`ANTHYS_AI_DD_MCP_TOKEN`（标注为上游企业AI底座自有运行时使用，anthys 仅通过已审核的 `COMPANY_*_MCP_CONFIG_FILE` 合约访问）与 `DINGTALK_ROBOT_NAME`（外部运维工具可选显示名，运行时按 `DINGTALK_ROBOT_CODE` 发送）。四者均为空值；自动核对确认 `.env` 中所有敏感值（GLM、钉钉、上游令牌等）均未出现在 `.env.example`，示例中的敏感键全部为空。仓库密钥扫描（1182个Git对象）无命中。未执行任何真实 GLM/DingTalk/DWS/公司 MCP 调用，也不改变 T/R 状态。
+`.env.example` 已同步 `.env` 的全部键：新增 `ANTHYS_AI_DD_MCP`、`ANTHYS_AI_DD_CHAT_MCP`、`ANTHYS_AI_DD_MCP_TOKEN`（标注为上游企业AI底座自有运行时使用，anthys 仅通过已审核的 `COMPANY_*_MCP_CONFIG_FILE` 合约访问）与 `DINGTALK_ROBOT_NAME`（外部运维工具可选显示名，运行时按 `DINGTALK_ROBOT_CODE` 发送）。四者均为空值；自动核对确认 `.env` 中所有敏感值（GLM、钉钉、上游令牌等）均未出现在 `.env.example`，示例中的敏感键全部为空。未执行任何真实 GLM/DingTalk/DWS/公司 MCP 调用，也不改变 T/R 状态。
+
+### 2026-10-22 密钥扫描路径变量误报修正
+
+`.env` 填入真实配置后，`scripts/scan-secrets.mjs` 把键名含 SECRET 的目录变量 `ANTHYS_SANDBOX_SECRETS_DIR` 的**路径值**当作密钥，导致 `.env.example`、README、`deploy/compose/compose.dev.yml` 与 `deploy/setup-sandbox-broker.mjs` 被误报。现跳过以 `_DIR`/`_PATH`/`_URL`/`_HOST`/`_ORIGIN`/`_ENDPOINT` 结尾的路径或地址变量；`*_FILE` 仍读取文件内容作为密钥。修正后扫描1182个Git对象与当前跟踪树：识别5个真实配置密钥、0命中，退出码0；`tsc --noEmit` 与 ESLint 通过。该扫描仍是精确值匹配，不替代完整熵/模式检测。
+
+### 2026-10-22 全量E2E与启动器运行时修正
+
+首次本地全量E2E因 Playwright `webServer` 通过 PATH 解析到 Node 25.8.0 而失败：`tests/e2e/self-dm-fixtures.ts` 按设计断言运行时必须是 24.21.0，服务未能启动。修正 `playwright.config.ts`，让 webServer 使用启动 Playwright 的同一 `process.execPath`（固定 Node 24.21.0），不再依赖 PATH 中的 Node 版本。
+
+修正后重跑全量E2E（桌面1280×800与移动390×844，串行）：238项中58项通过、180项跳过、0失败、0 flaky，耗时159.7秒，退出码0。180项跳过全部来自 `control-readback.spec.ts`、`permission-admin.spec.ts`、`group-contract-admin.spec.ts`——它们要求专用离线组件 bundle，缺省跳过文本明确标注“跳过不算验证”。这些套件由 `scripts/test-self-dm.mjs` 的专用 runner 提供 bundle 后单独执行，结果见后续记录；在专用 runner 完成前，不得把这180项视为已通过。
+
+同一缺陷还存在于 `tests/e2e/persona-explanation.config.ts`、`tests/e2e/self-dm.config.ts`、`tests/browser/artifacts.config.ts`、`tests/browser/company-agent.config.ts`、`tests/browser/group-cases.config.ts`、`tests/browser/group-reminders.config.ts`、`tests/browser/schedules.config.ts` 的 `webServer`。这7个配置已统一改用启动 Playwright 的同一 `process.execPath`，避免专用 runner 内再次回退到 PATH 中的 Node 版本。
+
+### 2026-10-22 群事项回执断言与真实夹具时延
+
+`test-self-dm` 的群事项桌面阶段曾出现一次 T108/T109 失败：提交共享卡片后5秒内未出现“群事项逻辑回执”。Playwright trace 显示 `POST /api/v1/groups/.../cases` 确实发出并返回201，但服务端等待约4.76秒；同次列表 GET 等待约2.39秒，两者都与签名名册/授权夹具的同步读取成本一致。失败快照停留在提交中状态：`GroupCasesFlow.write` 按隐私设计在写入期间清空 `snapshot`，所以页面暂时只保留读取表单，并非焦点/恢复事件误清除，也不是未提交。回执渲染时间与 Playwright 默认5秒断言形成竞态。
+
+处理只调整测试等待：三处“群事项逻辑回执”断言改为15秒，与界面请求窗及服务端12秒语句预算同一量级；不改产品超时、不跳过断言、不把“请求已发出”当作成功。重跑 `tests/browser/group-cases.config.ts` 16项全部通过（3.5分钟，桌面与移动各8项）。
+
+同一轮全链重跑又在升级桌面阶段暴露相同模式：`group-escalations-real-api.spec.ts` 的登录辅助在点击“读取今日登记事项”后，默认5秒内未等到真实列表返回的事项卡片（此前独立运行时通过）。该等待同样绑定真实API/名册读取，而不是服务端响应后的5秒渲染检查。已将 `group-cases.spec.ts` 的读取表单等待与 `group-escalations-real-api.spec.ts` 的初始事项等待也改为15秒；POST响应后的5秒渲染断言、升级请求15秒生命周期、30秒用例上限和零重试均保持不变。再次重跑该配置16项全部通过（3.6分钟）。
+
+随后以固定 Node 24.21.0 重新执行完整 `scripts/test-self-dm.mjs` 链：19个阶段全部通过，退出码0，共304项通过、0失败、0跳过；日志中无失败标记。各阶段计数为：群升级离线20、群升级UI 6、原生成果UI 2、单聊E2E 2、人设说明E2E 2、控制台离线7/浏览器19、权限管理离线9/浏览器30、群合同管理离线12/浏览器41、群事项离线17/浏览器16、升级见证11、群催办离线17/浏览器6、日程离线19/浏览器4、成果离线38/浏览器6、企业进度离线18/浏览器2。该链覆盖真实隔离PostgreSQL、本地API、真实Chrome桌面/移动页面以及显式的提供方替身；控制台/权限/群合同三个专用离线bundle阶段按设计使用路由替身并明确标注，不冒充真实API，真实API路径由其余端到端阶段覆盖；企业提供方仍是合成替身。它不是真实 GLM/DingTalk/DWS/公司 MCP 或企业数据验收，也不改变T/R状态。
