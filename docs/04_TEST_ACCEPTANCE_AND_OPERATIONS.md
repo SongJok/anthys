@@ -1409,3 +1409,13 @@ Docker开发栈检查：postgres、api、worker与sandbox-broker容器均为运�
 `tests/integration/data-template-lifecycle.test.ts` 在隔离 PostgreSQL 64711 上5项全部通过，覆盖：发布/列表/幂等重放、重复版本与request_id参数冲突、非管理员拒绝、不可变回执；跨1.0.0/1.1.0回滚、revision CAS、未知版本、直接SQL篡改摘要拒绝及semantic version排序；拒绝未认证、无本地oracle、被篡改或缺失金标的模板；HTTP路由的CSRF、额外字段、管理员会话与员工403；发布1.1.0后原1.0.0 scope执行被本地拒绝且不产生新的上游调用或审计行。相关公司数据、角色管理、权限管理、能力描述符与单元回归套件79项全部通过；`tsc --noEmit`、仓库ESLint和116份迁移的schema contract检查通过。
 
 这些证据仅证明本地合成模板、文件金标和真实隔离数据库上的发布/回滚/执行门禁，不调用真实公司数据MCP，也不证明企业数据部门oracle、更多模板、模板目录或现场发布流程。T093在测试目录中仍为NOT_RUN，R20/R28仍为IN_PROGRESS，真实公司数据验收保持BLOCKED_EXTERNAL；准确源码摘要与执行记录见 `reports/company-data-template-lifecycle-20261022.json`。
+
+### 2026-10-22 公司数据模板管理视图组件证据（T093仍为NOT_RUN）
+
+新增 `apps/web/src/data-template-admin-flow.ts`（纯前端流程）与 `apps/web/src/data-template-admin.tsx`（视图），在 `apps/web/src/permissions.tsx` 中仅对活动 TENANT_ADMIN/TENANT 绑定的管理员渲染，复用既有 GET 列表与 POST publish/rollback 接口。流程严格解析登记摘要（模板 key/version、64位哈希、认证引用、UTC时间戳、active 与 activeVersion 一致性、`platformCertification:'LOCAL_GOLDEN_ONLY'`、`liveVerified:false`、唯一记录不超过200条），回退只能建立在“已登记、非当前生效且存在当前生效记录”的版本上并携带列表读到的精确 revision；每次确认只发一个 UUID 幂等键请求，双击不产生第二个请求，也不自动重发；回执必须与意图逐项一致且回退回执 revision 必须等于 expectedRevision+1，重放回执必须携带不早于回执的当前生效版本与记录版本；4xx/5xx与网络异常只给出面向管理员的中文说明，不回显服务端文本、不显示成功、不保留旧登记，401清空全部资料并触发既有会话失效回调；页面不可见或卸载时清除旧登记、未完成确认与迟到回执；非管理员既不渲染也不发起登记请求。该视图不访问上游数据、不携带 SQL/行范围/凭据，也不声称平台认证。
+
+离线证据：`tests/offline/data-template-admin.test.ts` 9项全部通过（畸形/超范围/自相矛盾的登记列表、被拒绝的回执族、发布与回退的精确请求绑定、取消不发送、双击只提交一次、401 与 clear 的迟到回执丢弃）；`tests/e2e/permission-admin.spec.ts` 新增9项路由替身浏览器用例（登记列表与回退绑定、发布绑定、409/错误版本/谎称平台认证/网络未知四类失败、会话失效、重放区分逻辑回执与当前生效版本、卸载丢弃迟到回执）。专用 runner `scripts/test-permission-admin.mjs` 现为离线流程27项、浏览器46项，全部通过且无跳过、无 flaky；其中浏览器阶段只使用真实 Permissions 组件bundle与路由替身，不启动后端或数据库，也不发起任何真实提供方调用。
+
+回归与门禁：公司数据、模板生命周期、角色管理、权限管理与能力描述符共8个文件84项全部通过；`tsc --noEmit`、仓库ESLint、116份迁移的schema contract检查、能力输出契约检查与需求基线完整性检查通过。完整需求校验仍有89项既有失败项，来自尚未完成的阶段（R项 implementation incomplete 与后段T项缺少实现），本次切片未新增缺失模块或占位实现错误。
+
+这些证据只证明本地合成模板登记在真实组件下的前端契约与隔离数据库下的后端生命周期，不调用真实公司数据MCP，也不证明企业金标、企业模板审批、现场发布流程或工作台数据结果视图已验收。T093在测试目录中仍为NOT_RUN，R20/R28仍为IN_PROGRESS，P09仍为IN_PROGRESS，真实公司数据验收保持BLOCKED_EXTERNAL；准确源码摘要与执行记录见 `reports/company-data-template-admin-ui-20261022.json`。

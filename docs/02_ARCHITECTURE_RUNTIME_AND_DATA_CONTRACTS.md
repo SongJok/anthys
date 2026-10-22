@@ -1166,3 +1166,15 @@ STOP先在一事务提交永久veto，再用独立事务复用原task取消；�
 `oa_company_data_template_admin` 仅由 API 的模板管理服务调用，要求当前活动的 TENANT_ADMIN/TENANT 绑定与租户 advisory lock；PUBLISH 只接受注册表中已审核的 key/version 并要求 template hash、认证引用和金标 hash，ROLLBACK 还要求精确 expected revision 与已存三项摘要一致，否则拒绝。参数摘要保证同一 request_id 幂等重放，不同参数复用同一 request_id 返回冲突。API 仅提供 GET 列表与 POST publish/rollback，幂等键为 UUID，CSRF/权限沿用原会话机制；只在 DEFAULT 模式接线，不接受任意模板正文、行范围、凭据或上游工具名。
 
 本地模板注册表从 `config/data-templates` 读取，金标从 `config/data-goldens` 读取；当前仅有 `payments.success_rate_daily@1.0.0` 的本地合成金标 oracle，其他模板发布以 `DATA_TEMPLATE_GOLDEN_UNAVAILABLE` 失败关闭。金标文件必须匹配模板 key/version/hash、仅含 synthetic 租户事件、覆盖去重/边界/空集/范围/渠道等必需方面，并由本地聚合 oracle 重算一致。该实现不调用上游数据 MCP，也不证明企业金标、真实数据部门 oracle、更多模板、模板目录或现场发布流程已验收；T093 仍为 NOT_RUN，R20/R28 仍为 IN_PROGRESS，真实公司数据验收保持 BLOCKED_EXTERNAL。
+
+## 2026-10-22 企业数据模板管理视图（前端局部实现）
+
+`apps/web/src/data-template-admin-flow.ts` 是纯前端流程，不含任何模板正文、SQL、行范围或凭据。解析 `GET /api/v1/data/templates` 的登记摘要时逐项校验：模板 key/version 形态、64位十六进制 template hash、认证引用长度与字符集、UTC 时间戳、`active` 与 `activeVersion` 的一致性（声称生效但没有生效版本、或非生效版本却指向自身都会被拒绝），并要求载荷声明 `platformCertification:'LOCAL_GOLDEN_ONLY'`、`liveVerified:false`、`truncated` 为布尔且记录唯一且不超过 200 条；任何不一致都只给出面向管理员的中文说明，旧资料立即清除。
+
+回退意图只能建立在“已登记、非当前生效、且存在当前生效记录”的版本上，并携带列表中读到的精确 revision 作为 `expectedRevision`（CAS）。发布意图只接受注册表形态的 key/version 与至少 8 位的审核引用，并拒绝已在企业登记中的同一版本，以免把“发布”变成静默覆盖。
+
+确认阶段为每个意图生成一个 UUID 幂等键，publish/rollback 各只发送一次请求：双击或重复确认不会产生第二个请求，也不会自动重发。回执必须与意图逐项一致（模板、版本、操作、requestId、activeVersion、activeRevision、platformCertification、liveVerified），回退回执的 `activeRevision` 必须等于 `expectedRevision+1`；重放回执必须同时携带 `currentActiveVersion` 与 `currentActiveRevision` 且不早于回执 revision，否则按“无法核实”处理并清除本次确认。4xx/5xx 与网络异常都不回显服务端私有文本、不显示成功、不保留旧登记；401 会清空全部旧资料并触发既有会话失效回调。
+
+`apps/web/src/data-template-admin.tsx` 只在会话中存在活动的 TENANT_ADMIN/TENANT 绑定时随 `/permissions` 页面渲染：列出已登记版本及其当前生效版本与记录版本，提供发布与回退表单、显式确认与回执区。页面不可见或组件卸载时清除旧登记、未完成确认与迟到回执。非管理员既不渲染该视图，也不发起任何登记请求。
+
+该视图不访问上游数据工具、不证明企业金标、企业模板审批、现场发布流程或工作台数据结果视图已验收；T093 仍为 NOT_RUN，R20/R28 仍为 IN_PROGRESS，真实公司数据验收保持 BLOCKED_EXTERNAL。

@@ -1,0 +1,105 @@
+{
+  "status": "PASS",
+  "scope": "LOCAL_SYNTHETIC_COMPANY_DATA_TEMPLATE_ADMIN_UI",
+  "live": false,
+  "generatedAt": "2026-10-22T05:38:30Z",
+  "source": {
+    "baseCommit": "306aed7fa380fb59c0ecfa727657fc6ab235fb2e",
+    "workingTree": true,
+    "files": {
+      "apps/web/src/data-template-admin-flow.ts": "6278bfc958facb325982bcb818f66088516ac62407ac95a0fa2a026c1ddf6e78",
+      "apps/web/src/data-template-admin.tsx": "d55b09982c627b1424bf207d4914f9f00a9db916c1ac32bcde7668b0e6df1388",
+      "apps/web/src/permissions.tsx": "4fb9dd126de7ea9a57666710f420eb18c97e492717d43914da31f71c38bae895",
+      "tests/offline/data-template-admin.test.ts": "85c650bc702979a6bceef908bc111a6e9de9cdc83ef62876b57963cca1ca02ed",
+      "tests/e2e/permission-admin.spec.ts": "54fd337706c149a2b0919facdb6325a813da3a9997fdb109c7a2d7c4da29b5aa",
+      "scripts/test-permission-admin.mjs": "96953f5d565b87371046eefb815707e5bddf084c43379decc0ba2799f3ea08ef",
+      "config/requirements.json": "d68da2357554890081e2ecb2edba6312cefee26a0d87cc1169821a4ff256d4ae",
+      "config/stages.json": "972d1ce6b803511271fc63c756b3ad5e846fee384c4e64771245ad3f0520fd3b",
+      "config/test-catalog.json": "dad7fa5865617ef63b2bb767c4424df3f8a755586c782f1effca2c4fa1846f81"
+    }
+  },
+  "surface": {
+    "entry": "GET /api/v1/data/templates, POST /api/v1/data/templates/publish, POST /api/v1/data/templates/rollback",
+    "host": "apps/web/src/permissions.tsx renders the view only for an active TENANT_ADMIN binding with TENANT scope",
+    "transport": "same-origin fetch with cache no-store, x-csrf-token and one UUID idempotency-key per confirmation"
+  },
+  "behavior": {
+    "strictListParsing": "Each registry row must carry a well-formed template key/version, a 64-hex template hash, a bounded certification reference, a UTC timestamp and a consistent active/activeVersion pair. The list must declare platformCertification LOCAL_GOLDEN_ONLY, liveVerified false, a boolean truncated flag and at most 200 unique rows; anything else clears the view without showing data.",
+    "rollbackEligibility": "Only a registered, non-active version that has a current active record can be opened for rollback, and the confirmation carries the exact active revision read from the registry as expectedRevision.",
+    "publishGuards": "Publish accepts only registry-shaped key/version plus a review reference of at least 8 characters, and refuses a version already registered in the tenant so publishing can never silently overwrite.",
+    "singleSubmission": "Each confirmation generates one UUID idempotency key and sends exactly one request; a second click or a repeat confirmation is ignored and no request is resent automatically.",
+    "receiptBinding": "A receipt must match the intent item by item (template, version, operation, requestId, activeVersion, activeRevision, platformCertification, liveVerified). A rollback receipt must carry activeRevision equal to expectedRevision+1. A replayed receipt must carry currentActiveVersion and currentActiveRevision that are not older than the receipt revision; otherwise the result is treated as unverifiable and the confirmation is erased.",
+    "failureHandling": "4xx, 5xx and network failures produce administrator-facing Chinese notices only, never server text, never a success state and never a retained old registry; 401 clears all data and invokes the existing session-lost callback.",
+    "lifecycle": "Visibility change or unmount clears the registry, the pending confirmation and any late reply; a non-admin session neither renders the view nor issues any registry request.",
+    "noUpstreamAccess": "The view never reads or writes business data, carries no SQL, row scope, credential or upstream tool name, and never claims platform certification."
+  },
+  "tests": {
+    "commands": [
+      "node --import ./scripts/test-network-guard.mjs scripts/test-permission-admin.mjs",
+      "node scripts/run-tests.mjs vitest run tests/integration/data-template-lifecycle.test.ts tests/integration/company-data.test.ts tests/integration/role-administration.test.ts tests/integration/permission-administration.test.ts tests/unit/company-data-configuration.test.ts tests/unit/company-data-templates.test.ts tests/unit/company-data-contracts.test.ts tests/unit/capability-descriptor.test.ts",
+      "node scripts/update-schema-contract.mjs --check",
+      "node --import tsx scripts/capability-output-contracts.ts --check",
+      "node --import tsx scripts/verify-requirements.ts --baseline",
+      "node <typescript>/bin/tsc --noEmit",
+      "node <eslint>/bin/eslint.js apps/web/src/data-template-admin-flow.ts apps/web/src/data-template-admin.tsx apps/web/src/permissions.tsx tests/offline/data-template-admin.test.ts tests/e2e/permission-admin.spec.ts scripts/test-permission-admin.mjs"
+    ],
+    "offlineFlow": {
+      "files": 3,
+      "passed": 27,
+      "failed": 0,
+      "skipped": 0,
+      "newFile": {
+        "path": "tests/offline/data-template-admin.test.ts",
+        "passed": 9,
+        "failed": 0
+      }
+    },
+    "offlineBrowser": {
+      "passed": 46,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "newCases": 9,
+      "source": "real Permissions bundle with route mocks only; no backend or database started"
+    },
+    "regression": {
+      "files": 8,
+      "passed": 84,
+      "failed": 0,
+      "skipped": 0,
+      "breakdown": {
+        "company-data": 4,
+        "data-template-lifecycle": 5,
+        "role-administration": 5,
+        "permission-administration": 44,
+        "company-data-configuration": 7,
+        "company-data-templates": 6,
+        "company-data-contracts": 5,
+        "capability-descriptor": 8
+      }
+    },
+    "typecheck": "PASS",
+    "lint": "PASS",
+    "schemaContractCheck": "PASS",
+    "capabilityOutputContractCheck": "PASS",
+    "requirementsBaseline": "PASS",
+    "requirementsFull": "FAIL_PREEXISTING",
+    "requirementsFullNote": "89 errors remain from stages still in progress (implementation incomplete for R-items, missing implementations for later T-cases). No missing module or placeholder error involves this slice, and the baseline integrity mode passes.",
+    "liveProviderCalls": 0
+  },
+  "notProven": [
+    "live GLM, DingTalk, DWS or company MCP acceptance",
+    "enterprise certified templates, enterprise data-department oracle or golden files beyond the local synthetic payments.success_rate_daily@1.0.0 fixture",
+    "four-eyes enterprise approval, template catalog publication or a field release process",
+    "workbench data-result views for executed company data queries",
+    "real development database on port 64710 or any deployment",
+    "T093 full catalog acceptance, R20 completion or R28 completion"
+  ],
+  "statusUnchanged": {
+    "T093": "NOT_RUN",
+    "R20": "IN_PROGRESS",
+    "R28": "IN_PROGRESS",
+    "P09": "IN_PROGRESS",
+    "liveAcceptance": "BLOCKED_EXTERNAL"
+  }
+}

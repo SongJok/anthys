@@ -14,10 +14,17 @@ function roleReceiptFor(key:string,path:string,body:Record<string,unknown>){
  const operation=path.endsWith('/renew')?'renew':path.endsWith('/revoke')?'revoke':'assign',version=operation==='assign'?1:Number(body['version'])+1;
  return {id:roleId,targetUserId:body['targetUserId'],roleName:operation==='assign'?body['roleName']:'ACTION_APPROVER',scopeKind:operation==='assign'?body['scopeKind']:'CAPABILITY',scopeId:operation==='assign'?body['scopeId']:'synthetic.capability',version,state:operation==='revoke'?'REVOKED':'ACTIVE',expiresAt:body['expiresAt']??'2027-06-01T00:00:00.000Z',replayed:false,reauthenticationRequired:false,platformPermissionsVerified:false,requestId:key,currentVersion:version,currentState:operation==='revoke'?'REVOKED':'ACTIVE'};
 }
+const templateKey='payments.success_rate_daily';
+const templateItem=(version='1.0.0',active=false)=>({templateKey,templateVersion:version,templateHash:(version==='1.0.0'?'c':'d').repeat(64),certificationReference:'cert-review-2026-10',publishedAt:'2026-10-20T00:00:00.000Z',active,activeVersion:'1.1.0',activeRevision:4});
+const templateList=()=>({items:[templateItem('1.0.0',false),templateItem('1.1.0',true)],truncated:false,platformCertification:'LOCAL_GOLDEN_ONLY',liveVerified:false});
+function templateReceiptFor(key:string,path:string,body:Record<string,unknown>){
+ const version=String(body['templateVersion']),rollback=path.endsWith('/rollback');
+ return {templateKey:body['templateKey'],templateVersion:version,activeVersion:version,activeRevision:rollback?Number(body['expectedRevision'])+1:5,operation:rollback?'ROLLBACK':'PUBLISH',replayed:false,requestId:key,platformCertification:'LOCAL_GOLDEN_ONLY',liveVerified:false};
+}
 type Call={path:string;method:string;body:unknown;key:string|undefined;csrf:string|undefined;origin:string|undefined};
-type Scenario={metadata?:unknown;listStatus?:number;status?:number;abort?:boolean;hold?:Promise<void>;noAdmin?:boolean;pages?:boolean;override?:(value:ReturnType<typeof receipt>)=>unknown;roleMetadata?:unknown;roleListStatus?:number;roleStatus?:number;roleOverride?:(value:ReturnType<typeof roleReceiptFor>)=>unknown};
+type Scenario={metadata?:unknown;listStatus?:number;status?:number;abort?:boolean;hold?:Promise<void>;noAdmin?:boolean;pages?:boolean;override?:(value:ReturnType<typeof receipt>)=>unknown;roleMetadata?:unknown;roleListStatus?:number;roleStatus?:number;roleOverride?:(value:ReturnType<typeof roleReceiptFor>)=>unknown;templateMetadata?:unknown;templateListStatus?:number;templateStatus?:number;templateAbort?:boolean;templateHold?:Promise<void>;templateOverride?:(value:ReturnType<typeof templateReceiptFor>)=>unknown};
 async function mount(page:Page,scenario:Scenario={}){
- const calls:Call[]=[],unexpected:string[]=[];let admin=!scenario.noAdmin;
+ const calls:Call[]=[],templateCalls:Call[]=[],unexpected:string[]=[];let admin=!scenario.noAdmin;
  const bundle=await readFile(process.env['PERMISSION_ADMIN_BUNDLE']!,'utf8');
  await page.route('**/*',async route=>{
   const req=route.request(),url=new URL(req.url()),path=url.pathname;
@@ -30,6 +37,17 @@ async function mount(page:Page,scenario:Scenario={}){
    const body=req.postDataJSON() as Record<string,unknown>,key=req.headers()['idempotency-key']!,value=roleReceiptFor(key,path,body);
    calls.push({path,method:req.method(),body,key,csrf:req.headers()['x-csrf-token'],origin:req.headers()['origin']});
    return route.fulfill({status:scenario.roleStatus??200,json:scenario.roleStatus?{error:{code:'PERMISSION_ROLE_BINDING_EXISTS',correlationId:secret}}:{data:scenario.roleOverride?scenario.roleOverride(value):value,private:secret}});
+  }
+  if(path==='/api/v1/data/templates'&&req.method()==='GET'){
+   templateCalls.push({path,method:'GET',body:undefined,key:undefined,csrf:undefined,origin:req.headers()['origin']});
+   return route.fulfill({status:scenario.templateListStatus??200,json:scenario.templateListStatus?{error:{code:'PERMISSION_ADMIN_DENIED',correlationId:secret}}:{data:scenario.templateMetadata??templateList()}});
+  }
+  if(path==='/api/v1/data/templates/publish'||path==='/api/v1/data/templates/rollback'){
+   const body=req.postDataJSON() as Record<string,unknown>,key=req.headers()['idempotency-key']!,value=templateReceiptFor(key,path,body);
+   templateCalls.push({path,method:req.method(),body,key,csrf:req.headers()['x-csrf-token'],origin:req.headers()['origin']});
+   if(scenario.templateHold)await scenario.templateHold;
+   if(scenario.templateAbort)return route.abort('failed');
+   return route.fulfill({status:scenario.templateStatus??200,json:scenario.templateStatus?{error:{code:'COMPANY_DATA_TEMPLATE_VERSION_CONFLICT',correlationId:secret}}:{data:scenario.templateOverride?scenario.templateOverride(value):value,private:secret}});
   }
   calls.push({path:path+url.search,method:req.method(),body:req.method()==='POST'?req.postDataJSON():undefined,key:req.headers()['idempotency-key'],csrf:req.headers()['x-csrf-token'],origin:req.headers()['origin']});
   if(path==='/api/v1/permissions/admin/resources'){
@@ -45,7 +63,7 @@ async function mount(page:Page,scenario:Scenario={}){
   unexpected.push(path);return route.abort('blockedbyclient');
  });
  await page.goto('http://127.0.0.1:64702/permission-admin');
- return {calls,unexpected,revokeRole:()=>{admin=false;}};
+ return {calls,templateCalls,unexpected,revokeRole:()=>{admin=false;}};
 }
 const center=(page:Page)=>page.getByRole('region',{name:'管理员资源策略',exact:true});
 async function prepare(page:Page,operation:'renew'|'revoke'='renew'){
@@ -95,7 +113,7 @@ for(const [name,scenario] of [['legacy metadata',{metadata:{items:[item()]}}],['
 }
 
 test('non-admin retains own inspect and withdrawal without fetching admin metadata',async({page})=>{
- const {calls}=await mount(page,{noAdmin:true});await expect(page.getByText('本人合成功能 · 当前有效',{exact:true})).toBeVisible();await expect(center(page)).toHaveCount(0);expect(calls).toEqual([]);await page.getByRole('button',{name:'重新检查',exact:true}).click();await expect(page.getByRole('complementary',{name:'权限检查结果'})).toContainText('平台状态：尚未核实');await page.getByRole('button',{name:'撤销此资源授权',exact:true}).click();await page.getByRole('button',{name:'保留授权',exact:true}).click();expect(calls.filter(c=>c.path.endsWith('/withdraw'))).toHaveLength(0);await page.getByRole('button',{name:'撤销此资源授权',exact:true}).click();await page.getByRole('button',{name:'确认撤销并重新登录',exact:true}).click();await expect(page.getByText('需要重新登录',{exact:true})).toBeVisible();expect(calls.map(c=>c.path)).toEqual([`/api/v1/permissions/resources/${second}/diagnostic`,`/api/v1/permissions/resources/${second}/withdraw`]);await safe(page);
+ const {calls,templateCalls}=await mount(page,{noAdmin:true});await expect(page.getByText('本人合成功能 · 当前有效',{exact:true})).toBeVisible();await expect(center(page)).toHaveCount(0);await expect(templateArea(page)).toHaveCount(0);expect(calls).toEqual([]);expect(templateCalls).toEqual([]);await page.getByRole('button',{name:'重新检查',exact:true}).click();await expect(page.getByRole('complementary',{name:'权限检查结果'})).toContainText('平台状态：尚未核实');await page.getByRole('button',{name:'撤销此资源授权',exact:true}).click();await page.getByRole('button',{name:'保留授权',exact:true}).click();expect(calls.filter(c=>c.path.endsWith('/withdraw'))).toHaveLength(0);await page.getByRole('button',{name:'撤销此资源授权',exact:true}).click();await page.getByRole('button',{name:'确认撤销并重新登录',exact:true}).click();await expect(page.getByText('需要重新登录',{exact:true})).toBeVisible();expect(calls.map(c=>c.path)).toEqual([`/api/v1/permissions/resources/${second}/diagnostic`,`/api/v1/permissions/resources/${second}/withdraw`]);await safe(page);
 });
 
 for(const lifecycle of ['csrf','role','unmount'] as const){
@@ -139,3 +157,50 @@ for(const [name,scenario] of [['conflict',{roleStatus:409}],['wrong target',{rol
   const {calls}=await mount(page,scenario);const area=roleArea(page);await area.getByRole('button',{name:'选择此角色记录',exact:true}).click();const form=roleForm(page,'管理所选角色');await form.getByLabel('角色操作',{exact:true}).selectOption('renew');await form.getByLabel('新到期时间',{exact:true}).fill('2027-06-01T12:00');await form.getByLabel('审核引用',{exact:true}).fill('role-renew-1');await area.getByRole('button',{name:'核对变更',exact:true}).click();await area.getByRole('button',{name:'确认续期',exact:true}).click();await expect(area.getByRole('status')).toContainText(/冲突|未能核实/);await expect(area.getByRole('complementary',{name:'角色变更回执'})).toHaveCount(0);await expect(area.getByRole('complementary',{name:'确认角色变更'})).toHaveCount(0);expect(calls.filter(c=>c.method==='POST')).toHaveLength(1);await safe(page);
  });
 }
+
+const templateArea=(page:Page)=>page.getByRole('region',{name:'管理员数据模板',exact:true});
+const templateForm=(page:Page,name:string)=>templateArea(page).getByRole('form',{name,exact:true});
+
+test('data template registry shows local certification and rollback binds the exact active revision',async({page})=>{
+ const {templateCalls,unexpected}=await mount(page);const area=templateArea(page);
+ await expect(area.getByRole('article',{name:'模板版本 '+templateKey+'@1.0.0'})).toBeVisible();
+ await expect(area).toContainText('本地认证版本登记');
+ await expect(area).toContainText('平台认证与真实数据尚未核实');
+ await expect(area.getByRole('article',{name:'模板版本 '+templateKey+'@1.1.0'})).toContainText('当前生效 · 记录版本 4');
+ await area.getByRole('button',{name:'选择回退至此版本',exact:true}).click();
+ const form=templateForm(page,'回退数据模板');await expect(form).toContainText('当前生效：1.1.0 · 记录版本 4');await form.getByLabel('审核引用',{exact:true}).fill('template-rollback-1');await area.getByRole('button',{name:'核对回退',exact:true}).click();
+ await expect(area.getByRole('complementary',{name:'确认数据模板变更'})).toContainText('预期记录版本：4');await area.getByRole('button',{name:'取消变更',exact:true}).click();expect(templateCalls.filter(c=>c.method==='POST')).toHaveLength(0);
+ await area.getByRole('button',{name:'选择回退至此版本',exact:true}).click();await templateForm(page,'回退数据模板').getByLabel('审核引用',{exact:true}).fill('template-rollback-1');await area.getByRole('button',{name:'核对回退',exact:true}).click();await area.getByRole('button',{name:'确认回退',exact:true}).evaluate(b=>{(b as HTMLButtonElement).click();(b as HTMLButtonElement).click();});
+ await expect.poll(()=>templateCalls.filter(c=>c.method==='POST').length).toBe(1);await expect(area.getByRole('complementary',{name:'数据模板变更回执'})).toContainText('逻辑回执生效版本：1.0.0 · 记录版本 5');
+ const post=templateCalls.find(c=>c.method==='POST')!;expect(post.path).toBe('/api/v1/data/templates/rollback');expect(post.csrf).toBe('synthetic-csrf');expect(post.origin).toBe('http://127.0.0.1:64702');expect(post.key).toMatch(/^[a-f0-9-]{36}$/);expect(post.body).toEqual({templateKey,templateVersion:'1.0.0',expectedRevision:4,reviewReference:'template-rollback-1'});expect(unexpected).toEqual([]);await safe(page);
+});
+
+test('data template publish sends the reviewed key and version with one fixed idempotency key',async({page})=>{
+ const {templateCalls}=await mount(page);const area=templateArea(page),form=templateForm(page,'发布数据模板');
+ await form.getByLabel('模板标识',{exact:true}).fill(templateKey);await form.getByLabel('模板版本',{exact:true}).fill('1.2.0');await form.getByLabel('审核引用',{exact:true}).fill('template-publish-1');await area.getByRole('button',{name:'核对发布',exact:true}).click();
+ await expect(area.getByRole('complementary',{name:'确认数据模板变更'})).toContainText('模板：payments.success_rate_daily · 版本：1.2.0');await area.getByRole('button',{name:'确认发布',exact:true}).evaluate(b=>{(b as HTMLButtonElement).click();(b as HTMLButtonElement).click();});
+ await expect.poll(()=>templateCalls.filter(c=>c.method==='POST').length).toBe(1);await expect(area.getByRole('complementary',{name:'数据模板变更回执'})).toContainText('操作：发布');
+ const post=templateCalls.find(c=>c.method==='POST')!;expect(post.path).toBe('/api/v1/data/templates/publish');expect(post.csrf).toBe('synthetic-csrf');expect(post.origin).toBe('http://127.0.0.1:64702');expect(post.key).toMatch(/^[a-f0-9-]{36}$/);expect(post.body).toEqual({templateKey,templateVersion:'1.2.0',reviewReference:'template-publish-1'});await safe(page);
+});
+
+for(const [name,scenario] of [['conflict',{templateStatus:409}],['wrong version',{templateOverride:(v:ReturnType<typeof templateReceiptFor>)=>({...v,templateVersion:'1.0.1'})}],['uncertified claim',{templateOverride:(v:ReturnType<typeof templateReceiptFor>)=>({...v,platformCertification:'PLATFORM_CERTIFIED'})}],['network unknown',{templateAbort:true}]] as const){
+ test(`data template ${name}: no success, no private server text and no automatic retry`,async({page})=>{
+  const {templateCalls}=await mount(page,scenario);const area=templateArea(page);await area.getByRole('button',{name:'选择回退至此版本',exact:true}).click();await templateForm(page,'回退数据模板').getByLabel('审核引用',{exact:true}).fill('template-rollback-1');await area.getByRole('button',{name:'核对回退',exact:true}).click();await area.getByRole('button',{name:'确认回退',exact:true}).click();
+  await expect(area.getByRole('status')).toContainText(/冲突|未能核实/);await expect(area.getByRole('complementary',{name:'数据模板变更回执'})).toHaveCount(0);await expect(area.getByRole('complementary',{name:'确认数据模板变更'})).toHaveCount(0);await expect(area.getByRole('article')).toHaveCount(0);expect(templateCalls.filter(c=>c.method==='POST')).toHaveLength(1);await safe(page);
+ });
+}
+
+test('data template session loss clears the registry and invokes the original login callback',async({page})=>{
+ const {templateCalls}=await mount(page,{templateStatus:401});const area=templateArea(page);await area.getByRole('button',{name:'选择回退至此版本',exact:true}).click();await templateForm(page,'回退数据模板').getByLabel('审核引用',{exact:true}).fill('template-rollback-1');await area.getByRole('button',{name:'核对回退',exact:true}).click();await area.getByRole('button',{name:'确认回退',exact:true}).click();
+ await expect(page.getByText('需要重新登录',{exact:true})).toBeVisible();await expect(templateArea(page)).toHaveCount(0);await expect(page.getByText('本人合成功能 · 当前有效',{exact:true})).toHaveCount(0);expect(await page.evaluate(()=>Reflect.get(window,'sessionLosses'))).toBe(1);expect(templateCalls.filter(c=>c.method==='POST')).toHaveLength(1);await safe(page);
+});
+
+test('data template replay separates the logical receipt from a newer active version',async({page})=>{
+ await mount(page,{templateOverride:v=>({...v,replayed:true,currentActiveVersion:'1.1.0',currentActiveRevision:9})});const area=templateArea(page);await area.getByRole('button',{name:'选择回退至此版本',exact:true}).click();await templateForm(page,'回退数据模板').getByLabel('审核引用',{exact:true}).fill('template-rollback-1');await area.getByRole('button',{name:'核对回退',exact:true}).click();await area.getByRole('button',{name:'确认回退',exact:true}).click();
+ const receipt=area.getByRole('complementary',{name:'数据模板变更回执'});await expect(receipt).toContainText('逻辑回执生效版本：1.0.0 · 记录版本 5');await expect(receipt).toContainText('这是历史操作意图的重放回执，不能据此认定当前生效版本。');await expect(receipt).toContainText('当前生效版本：1.1.0 · 记录版本 9');await expect(receipt).toContainText('平台认证与真实数据尚未核实');await safe(page);
+});
+
+test('data template unmount discards a late mutation reply and old confirmation',async({page})=>{
+ let release!:()=>void;const hold=new Promise<void>(r=>{release=r;});const fixture=await mount(page,{templateHold:hold});const area=templateArea(page);await area.getByRole('button',{name:'选择回退至此版本',exact:true}).click();await templateForm(page,'回退数据模板').getByLabel('审核引用',{exact:true}).fill('template-rollback-1');await area.getByRole('button',{name:'核对回退',exact:true}).click();await area.getByRole('button',{name:'确认回退',exact:true}).click();
+ await expect.poll(()=>fixture.templateCalls.filter(c=>c.method==='POST').length).toBe(1);await page.evaluate(()=>Reflect.get(window,'unmountPermissions')());release();await expect(templateArea(page)).toHaveCount(0);expect(fixture.templateCalls.filter(c=>c.method==='POST')).toHaveLength(1);await safe(page);
+});
