@@ -15,7 +15,7 @@
       "packages/company/src/data.ts": "9ed502c00ccf287af193c61d674767067a81b5ac90b95d53c637de03aee79188",
       "config/data-templates/payments.success_rate_daily.json": "802b1d59c21c7318a3faa9de35c5c7a52fee45f2f4df49d2582641b1ed96aea3",
       "config/data-goldens/payments.success_rate_daily.1.0.0.json": "e7531ce2bba4f7acf693837798c23a015395d49453da21d3167c5c41ca77c136",
-      "tests/integration/data-template-lifecycle.test.ts": "1f463e9c8f078be77cdfae2e97a700055f55e43a8bed3ccd9c0e1f6e266da95a",
+      "tests/integration/data-template-lifecycle.test.ts": "7177995637739f04807ece1d3b9214b0be15c010cadd4571d4ccef93496e320b",
       "config/test-catalog.json": "f8156a721281a0a2c3396b909660c5b045e11fc4b1c2822f9d952f94dc42fc3f",
       "packages/storage/src/required-migrations.json": "de63414e52c8210d29df18a0e7c204e0b8e3971cc28cc8c908b94a5b66850bf9"
     }

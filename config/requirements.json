@@ -501,13 +501,17 @@
       "packages/company/src/data-templates.ts",
       "packages/company/src/data-numeric.ts",
       "packages/company/src/data-execution.ts",
-      "db/migrations/105_company_data_executions.sql"
+      "packages/company/src/data-template-administration.ts",
+      "apps/api/src/data-templates.ts",
+      "db/migrations/105_company_data_executions.sql",
+      "db/migrations/116_company_data_template_lifecycle.sql",
+      "tests/integration/data-template-lifecycle.test.ts"
     ],
     "status": "IN_PROGRESS",
     "intendedModules": [
       "packages/company"
     ],
-    "remaining": "One certified payments daily success-rate template executes end to end through a reviewed company MCP data tool with exact decimals, server-injected scope, queryId/watermark evidence and audited provenance. No live enterprise MCP acceptance (T096), additional certified templates, template publishing/rollback workflow, or workbench E2E data views exist yet; upstream SQL safety and certification remain owned by the company MCP."
+    "remaining": "One certified payments daily success-rate template executes end to end through a reviewed company MCP data tool with exact decimals, server-injected scope, queryId/watermark evidence and audited provenance. A local lifecycle now publishes or rolls back reviewed template versions with immutable version/request receipts, local golden-oracle validation and superseded-version execution denial. No live enterprise MCP acceptance (T096), additional certified templates/oracles, enterprise template approval or catalog publication, workbench E2E data views or full T093/T095/T096 catalog acceptance exist yet; upstream SQL safety and certification remain owned by the company MCP."
   },
   "R21": {
     "tests": [

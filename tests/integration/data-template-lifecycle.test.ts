@@ -49,7 +49,7 @@ async function fresh(){
  return {tenant,admin,employee,service,api,a:await login(admin),e:await login(employee)};
 }
 const publishInput={templateKey:'payments.success_rate_daily',templateVersion:'1.0.0',reviewReference:'synthetic-template-publish'};
-it('publishes one exact certified version with immutable receipts and rejects overwrite attempts',async()=>{
+it('T093 component: publishes one exact certified version with immutable receipts and rejects overwrite attempts',async()=>{
  const f=await fresh(),key=randomUUID(),result=await f.service.publish(f.a.p,publishInput,key);
  expect(result).toMatchObject({templateKey:'payments.success_rate_daily',templateVersion:'1.0.0',activeVersion:'1.0.0',activeRevision:1,operation:'PUBLISH',replayed:false,platformCertification:'LOCAL_GOLDEN_ONLY',liveVerified:false});
  const list=await f.service.list(f.a.p);expect(list).toMatchObject({truncated:false,platformCertification:'LOCAL_GOLDEN_ONLY',liveVerified:false});
