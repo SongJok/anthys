@@ -6,7 +6,7 @@
 
 版本：1.0.0　日期：2026-10-14　依赖：文档 01–03。
 
-**本文是必须实现和执行的测试规范，不是本项目已经运行测试的报告。本次只交付规范文档，没有连接企业钉钉、DWS、MCP、数据服务或 GLM 账户进行真实联调。**
+**本文是必须实现和执行的测试规范，不是本项目已经运行测试的报告。交付代码包含钉钉、DWS、MCP、数据与 GLM 适配器及合成测试，但没有连接企业钉钉、DWS、企业 MCP、企业数据或 GLM 账户进行真实联调；代码、日志、数据查询均经 MCP，不存在绕过 MCP 的直连数据路径。**
 
 ## 1. 测试目标和结果语义
 
@@ -228,6 +228,8 @@ MCP：initialize协商、tools列表变化、annotation错误、OAuth audience�
 | T082 | P1 | R18,R19 | LIVE | 真实测试仓库和日志最小只读查询 | 保存脱敏外部请求ID和核验位置；无凭据则BLOCKED_EXTERNAL |
 
 ### 4.8 统计模板、口径和数据权限
+
+**本组的数据查询必须经公司 MCP 的数据工具执行；不得以直连测试数据库、本地 fixture 计算或 HTTP 旁路替代。** 金标（3.2 节）和模板断言可在 UNIT 层用确定性 fixture 验证计算与口径，但 T083/T085/T091/T092/T096 的 INTEGRATION/SECURITY/CHAOS/LIVE 记录须证明请求实际到达审核配置的 MCP 工具（合成 MCP 或真实上游），并保存 queryId、模板版本、安全范围回显与截断/水位状态。未配置上游数据工具时状态为 `BLOCKED_EXTERNAL`，不得记为 PASS。
 
 | ID | 级别 | 需求 | 层 | 前置/操作 | 必须断言 |
 |---|---|---|---|---|---|
@@ -617,6 +619,9 @@ docker compose --env-file .env.production -f deploy/compose/compose.prod.yml con
 docker compose --env-file .env.production -f deploy/compose/compose.prod.yml run --rm migrate
 docker compose --env-file .env.production -f deploy/compose/compose.prod.yml up -d
 pnpm run doctor --profile ENTERPRISE_DWS
+```
+
+完整 Docker 开发栈以 README 的 `./deploy/dev-up.sh` 为准：它先生成本地secret，并在仓库根 `.env` 存在时自动加 `--env-file .env`。Compose 不会自动读取根目录 `.env`；手动执行上面的开发命令时，如需钉钉/GLM非秘密标识参与插值，也必须显式加该参数。开发 secret 由 `setup-dev-secrets.mjs` 导入，不要求把这些值写进 Compose 环境。
 pnpm verify:release --profile ENTERPRISE_DWS
 ```
 
@@ -1178,3 +1183,185 @@ R13/T107 管理界面复用既有合同状态 API，对当前有效 PAUSED 合�
 本批生产入口为 `apps/web/src/group-contract-admin.tsx` 与既有 `/api/v1/group-contracts/:id/state`。`tests/browser/group-contract-restore-real-api.spec.ts` 已加入正式 `group-cases.config.ts`，通过实际 API/隔离 PostgreSQL 检查取消、非管理员拒绝、双击单请求、版本/不变字段、幂等重放、冲突及撤销后拒绝。组件执行器同时保留原用例，新增实际 15 秒浏览器请求截止场景；未知响应不自动重发。执行结果及失败历史以 `reports/group-contract-restoration-20261021/` 和 `reports/checks/group-contract-restoration-*` 为准，不以源码存在代替验证通过。
 
 此补充不改变一期范围或需求状态。AUTHORIZED_HISTORY 的本机 DWS 结果类型仍需独立确认，纯参数规划不构成已实现历史读取；真实试点、数据库升级及外发仍需要具体批准。
+
+## 2026-10-21 条件监控持久化与办公扩展默认拒绝（局部实现）
+
+R12 新增迁移106与 `ConditionWatchStore`：所有者RLS下的检查计数、lease/fence、通知预留与结算、UNKNOWN核对/PENDING超时、暂停/恢复/取消均落库；纯策略仍负责CHECK/NOTIFY、静默窗、冷却、预算与值去重。隔离真实PG的6项测试通过（5次检查中仅值变化通知、预算/到期停止且状态可见、静默窗推迟、PENDING→UNKNOWN不重复发送、lease丢失与所有者隔离）。钉钉通知适配器、公司MCP观测绑定、worker周期与Web界面均已由后续切片补齐（见下文2026-10-22节）；仍不得据此宣称条件监控E2E或真实主动通知通过。
+
+R26 新增 `packages/office` 默认拒绝扩展注册表：未认证的连接器、过期认证、未知能力一律不派发；写操作必须使用一次性预览；审批决策、打卡、批量移除成员、公开分享等危险能力还需独立验证的逐次正式批准。合成连接器的5项测试通过，覆盖默认拒绝、参数/期限不匹配、重复使用预览及未认证能力零调用；真实审批/报告/会议/考勤连接器和API/网关接线不存在，企业认证未执行。
+
+同期修复安全投影的冻结执行：`ALLOW_CONNECTIONS=false` 改由同集群 `postgres` 维护连接执行（目标库当前连接会被PG拒绝），保留唯一目标后端与持久fence；3项恢复安全源测试通过。克隆迁移夹具不再维护104静态后缀，改为严格跟随 `required-migrations.json` 的完整文件集合。完整130项目录、真实企业MCP/DWS/GLM与部署验收仍未执行，状态不改写为PASS。
+
+### 2026-10-21 日历会议冲突复核与读回（局部实现）
+
+R24 新增 `packages/office/src/scheduling.ts` 连接器注入式协调器：从忙闲数据选出最早可用时段并生成一次性提案；确认时先对同一时段立即重查，若已冲突返回 `CONFLICT` 且零创建调用；创建后读回并核对事件ID、标题、起止与精确参与者集合，完全一致才报告成功，读回不一致标记效果 `UNKNOWN`。
+
+改期沿用同一拒绝式流程：提案前读取当前事件并查询目标时段忙闲，目标已占用返回 `CALENDAR_SLOT_BUSY`；确认时先重读当前事件，若标题、原起止或参与者已变化返回 `CALENDAR_PROPOSAL_STALE`，再重查目标时段，若已被占用返回 `CONFLICT` 且零更新；随后单次更新并读回核对事件ID、标题、新起止与参与者集合。更新失败为 `CALENDAR_UPDATE_OUTCOME_UNKNOWN`，读回不可用/不一致为 `VERIFICATION_FAILED`，提案重复确认拒绝。
+
+合成日历的9项单元测试通过（最早时段、时段变忙不盲提交、读回一致且提案单次消费、读回不一致、无连接器/过期提案拒绝；改期成功且单次消费、目标忙/未知事件/非法或abort拒绝、事件陈旧与确认时目标变忙零更新、更新失败与读回不可用/不一致）。真实 DWS/OpenAPI 日历连接器、待办同步、API/网关接线与 E2E 界面流程不存在，T113 不改写为通过。
+
+### 2026-10-21 分析沙箱真实Docker执行（局部实现）
+
+R21 新增 `packages/sandbox/src/executor.ts`：对已授权作业使用固定镜像ID启动一次性容器，强制 `--network none`、只读根、非root `10001`、cap-drop ALL、no-new-privileges、受审seccomp、单CPU、pids/nofile限制、内存/内存交换等于作业上限，仅挂载只读输入与可写输出；Node权限模型只允许读取输入/输出并写入输出与 `/tmp`。宿主不传入任何环境变量、不挂载Docker socket或其他路径；输出仅允许扁平普通文件、按作业允许扩展名和总量/数量校验，符号链接被创建API本身拒绝。
+
+隔离真实Docker镜像的6项测试通过：JS/TS执行与只读输入绑定、宿主secrets/socket/child_process/PG模块/网络均不可达、无限循环在墙钟上限被强删、堆内存耗尽不报告成功、100文件输出爆炸被限额终止、孤儿容器按所有者标签核对，且不支持的扩展名/嵌套目录被拒绝，所有场景后容器与工作目录均清空（含chmod 000目录）。执行器尚未接入broker HTTP服务/队列/真实artifact connector/预算；broker准入库见下节。输出目录仍是宿主轮询限额而非文件系统配额，Compose没有sandbox服务；T097/T098整体状态仍为NOT_RUN。
+
+### 2026-10-21 分析沙箱签名准入broker库（局部实现）
+
+R21 新增迁移108与 `packages/sandbox/src/broker.ts`：`SandboxBroker` 只接受签名的 `OA_ANALYSIS_JOB_V1` 信封，按固定 keyId/Ed25519公钥/镜像摘要验签并核对主体绑定与60秒时间窗；PG 持久化 `(tenant, nonce)` 与 `job_id` 唯一准入，重复nonce、重用jobId、篡改/超长报文和外部主体均在artifact解析与执行前拒绝。每次执行前由注入authorizer重查当前ACL；resolver只能按签名作业中的ID取内容，代码≤1 MiB、输入总量≤8 MiB并记录SHA-256。所有者级活跃/日配额在准入事务内计数，超限回滚且不消耗nonce；取消标记先持久化，运行中通过轮询触发executor abort。执行结果由broker再次核对终态、文件数/扩展名/总量、逐文件SHA-256、JSON可解析、HTML/PDF/OOXML工作簿条目签名，成功后经注入sink持久化；broker只保存有界元数据、日志字节数与sink引用，绝不把未验证输出报告成功。
+
+隔离真实 PostgreSQL 与合成executor的6项集成测试通过：合法签名作业解析只读代码/输入并单次执行、结果复核与sink引用落库；重放nonce/重用jobId、签名篡改、超长报文和外部主体零解析零执行；ACL拒绝与ACL不可用分别落`REJECTED`/`FAILED`；预留阶段取消不执行、运行中取消经持久标记中止；活跃/日配额超限回滚且释放后可重试；非法PDF/JSON/哈希/扩展名/空文件以及解析、代码、执行失败均落终态且零未验证输出持久化。`tsc --noEmit` 与改动文件 ESLint 无错误，迁移契约当时刷新为110项（后续111/112加入后现为112项）。仍未实现broker HTTP服务/独立进程、队列、真实artifact connector、CPU/内存加权预算、文件系统配额、重启前工作目录自动清扫、生产Compose sandbox服务、完整归档解析或真实T097/T098验收；T097/T098仍为NOT_RUN。
+
+### 2026-10-21 分析沙箱PostgreSQL实时ACL复核（局部实现）
+
+R21 新增 `packages/sandbox/src/authorizer.ts`：`PgSandboxAuthorizer` 在所有者 RLS 作用域内，对已验签作业重新读取实时状态，而不是信任签发时刻的快照。依次核对租户 `ACTIVE`、用户 `ACTIVE` 且当前 `auth_epoch` 与签名主体一致、任务归属于该请求者且状态为 `OPEN/ACTIVE`、未被取消、未过期、任务 `auth_epoch` 与主体一致、运行归属于同一所有者且绑定同一任务、运行处于非终态。任一条件不满足返回稳定的拒绝原因（`TENANT_INACTIVE`/`IDENTITY_INACTIVE`/`IDENTITY_EPOCH_STALE`/`TASK_NOT_FOUND`/`TASK_NOT_ACTIVE`/`TASK_CANCELLED`/`TASK_EXPIRED`/`TASK_EPOCH_STALE`/`RUN_NOT_FOUND`/`RUN_BINDING_MISMATCH`/`RUN_NOT_ACTIVE`），数据库不可用与中途 abort 分别抛出 `SANDBOX_BROKER_UNAVAILABLE`/`SANDBOX_BROKER_CANCELLED`，都不会放行执行。
+
+隔离真实 PostgreSQL 的4项测试通过：合法活跃上下文放行，租户停用、用户停用、用户 `auth_epoch` 变化与任务 `auth_epoch` 变化逐项拒绝；任务暂停/完成、取消标记、过期以及运行的取消/过期/失败/成功/部分成功均拒绝，运行改绑其他任务返回 `RUN_BINDING_MISMATCH`；跨所有者任务/运行与跨租户引用均被 RLS 隐藏且不泄露存在性，abort 与关闭后的数据库分别硬失败；broker 接线后活动运行单次解析/执行/持久化，运行已终止时在解析前落 `REJECTED/RUN_NOT_ACTIVE` 且零解析零执行。仍未实现授权撤销推送/缓存、broker HTTP服务、队列、真实artifact connector、CPU/内存加权预算、文件系统配额或真实T097/T098验收；T097/T098仍为NOT_RUN。
+
+### 2026-10-21 沙箱孤儿容器重启核对（局部实现）
+
+R21 为 `DockerAnalysisSandbox` 增加稳定所有者与作业标签：每个容器创建时写入 `anthys.sandbox.owner` 与 `anthys.sandbox.job`。新增 `reconcileOrphans(activeJobIds)` 只列出同一镜像、同一所有者标签的容器，保留仍在活跃集合中的作业（大小写不敏感），删除其余容器；所有者标识要求跨重启稳定且同一时刻只属于一个 broker 实例，避免误删另一副本的作业。删除失败落 `SANDBOX_CLEANUP_FAILED`，列举失败落 `SANDBOX_RUNTIME_UNAVAILABLE`。
+
+真实Docker测试通过：同一所有者下两个容器，活跃作业保留、孤儿删除、外部所有者不受影响；以空活跃集合再次执行时删除剩余自有容器，外部所有者仍保留，所有手工容器与工作目录清理完毕。仍未实现工作目录自动清扫、文件系统配额或真实T097/T098验收；T097/T098仍为NOT_RUN。
+
+### 2026-10-21 沙箱broker重启恢复（局部实现）
+
+R21 新增迁移109与broker所有权：`sandbox_broker_jobs.broker_id` 在准入时写入并要求符合稳定标识格式，`PgSandboxBrokerStore.recoverInterrupted(brokerId)` 委托 `SECURITY DEFINER` 函数跨租户把同一broker遗留的 `RESERVED`/`RUNNING` 记录结算为 `FAILED/SANDBOX_JOB_INTERRUPTED`，写入完成时间并递增版本；其他broker的记录和已终态记录不受影响，非法broker标识在执行前拒绝。调用方必须在接受新提交前使用与遗留记录相同的broker标识执行恢复，且同一标识同一时刻只能属于一个broker实例。
+
+隔离真实 PostgreSQL 新增1项集成测试（broker共7项、与authorizer合计11项通过）：同一所有者的两个活跃作业（一个`RESERVED`、一个`RUNNING`）被结算为`FAILED/SANDBOX_JOB_INTERRUPTED`，另一broker的`RESERVED`与已`SUCCEEDED`记录保持不变；再次恢复返回0，非法标识在准入和恢复两处均被拒绝。仍未实现broker HTTP服务/独立进程、队列、受信制品登记API、过期制品清扫、CPU/内存加权预算、文件系统配额、工作目录自动清扫、生产Compose sandbox服务或真实T097/T098验收；T097/T098仍为NOT_RUN。
+
+### 2026-10-21 沙箱制品加密连接器（局部实现）
+
+R21 新增迁移110与 `packages/sandbox/src/artifacts.ts`：`PgSandboxArtifactConnector` 同时实现broker的resolver与sink。代码与输入由受信生产者经 `put` 登记，单对象上限为代码1 MiB、输入8 MiB；字符集参数从MIME中归一化，文件名、MIME、过期时间与空内容在写入前校验。字节只写入 `EncryptedFileStore`，PostgreSQL 仅保存 tenant/owner/kind/state/job/name/MIME/SHA-256/大小/存储键/过期时间，RLS按所有者和租户隔离。每次解析都重查 `READY` 与未过期，并重新核对字节长度和SHA-256；他人、过期、未知、损坏或abort分别拒绝。执行输出仅在broker复核后经 sink 写入：逐文件核对哈希与大小、总输出不超作业上限，全部文件写成功后才把行置为 `READY`；任一步失败清理已写文件并把行置为 `FAILED`，绝不返回可解析引用。重复输出名由唯一索引阻止。
+
+隔离真实 PostgreSQL 与真实加密文件存储的3项集成测试通过：代码/输入登记与精确读回、字符集归一化、越权/未知/过期/abort/超限/非法名称或MIME/损坏密文均拒绝；签名作业经真实connector解析代码与输入、合成executor执行后写出2个`READY`输出，哈希/大小与文件内容一致，其他所有者不可解析，重放不产生重复输出；sink对哈希不符与总量超限拒绝且不留下`READY`行，空输出返回作业引用。该连接器尚未接入HTTP服务、队列、受信生产者进程、过期清扫或真实T097/T098验收；T097/T098仍为NOT_RUN。
+
+### 2026-10-21 条件监控显式作用域周期（局部实现）
+
+R12 新增 `packages/watches/src/cycle.ts`：按显式 `{tenantId,actorId}` 作用域领取到期检查，观测必须来自注入的受审来源适配器（预留公司 MCP 数据模板接入点），通知必须来自注入的投递适配器。来源异常或非法观测落库为 `UNAVAILABLE`，由纯策略抑制而不是伪造观测值；发送异常或非法回执保守结算为 `UNKNOWN` 且不清预算、不自动重发；关闭前尚未开始物理发送的预留结算为 `FAILED`，避免无谓等待超时；每个作用域先清扫超时 `PENDING`，单个所有者失败不影响其他所有者，abort 为硬停止。
+
+真实隔离 PG 新增1项周期测试（现共7项）：两个所有者的监听仅处理显式作用域，正常来源预留并单次 `CONFIRMED`，来源抛错被记录为 `UNAVAILABLE` 且不通知，投递抛错进入 `UNKNOWN` 且 `next_check_at=NULL`，未授权所有者零领取，abort 后检查计数不变。钉钉投递适配器与公司 MCP 观测绑定均已由后续切片补齐（见下文2026-10-22节）；仍未实现 worker 应用与 Compose 接线、群主动消息配额；不得据此宣称 T055/T058 或主动通知 E2E 通过。
+
+### 2026-10-22 条件监控钉钉通知适配器与提供方接受语义（局部实现）
+
+R12 新增迁移111与 `packages/dingtalk/src/watch-notifier.ts`。通知状态新增 `APPLIED_UNVERIFIED`：提供方已接受但无投递回执时结算为该终态，不再伪记 `CONFIRMED`，也不再以 `UNKNOWN` 永久阻塞后续检查；`UNKNOWN` 仍是唯一会暂停后续通知的未决状态。`ConditionWatchStore.settleNotification` 对已终态（含 `APPLIED_UNVERIFIED`）拒绝重复结算，非 `UNKNOWN` 结果恢复监听为 `IDLE` 并按策略安排下次检查。
+
+`DingTalkWatchNotifier` 不信任周期内已领取的上下文，而是在所有者 RLS 作用域内重新读取监听、通知预留、用户、租户与公司绑定：监听必须 `ACTIVE`、预留与监听通知状态均为 `PENDING`、策略哈希/观察值哈希与输入一致、用户与租户 `ACTIVE`、当前公司标识与适配器绑定一致、外部用户ID合法，否则以 `FAILED` 拒绝且零发送。文本仅由固定的条件/观察值/时间等确定性字段渲染，不调用模型或额外来源。真实发送器在获取 token 后通过 `beforePhysical` 再次执行同样复核（含外部用户ID未变），关闭该窗口；发送器抛错或未知回执保守映射为 `UNKNOWN`，明确的失败映射为 `FAILED`，提供方接受但无回执映射为 `APPLIED_UNVERIFIED`。
+
+隔离真实 PostgreSQL 的4项新增测试通过（与既有周期测试合计11项）：`APPLIED_UNVERIFIED` 单次确认后监听恢复 `IDLE` 并保留值去重、同结果幂等而 `CONFIRMED` 重复结算拒绝；`FAILED` 后允许下一次值变化，`UNKNOWN` 阻塞并由显式核对以 `APPLIED_UNVERIFIED` 恢复；策略/值/通知/监听标识错误、跨所有者、用户或租户停用、公司变化均零发送；发送前用户被停用、外部ID被改绑或公司不匹配时 `beforePhysical` 拒绝，恢复后单次成功发送。`tsc --noEmit`、改动文件 ESLint 与迁移契约111项检查通过。具体公司 MCP 观测绑定/适配器、worker 应用与 Compose 接线、群主动消息配额及真实 T055/T058 验收仍未完成，T055/T058 仍为 NOT_RUN。
+
+### 2026-10-22 条件监控公司MCP观测绑定（局部实现）
+
+R12 新增迁移112与 `packages/company/src/watch-observer.ts`。`condition_watch_sources` 在所有者RLS下把监听不可变地绑定到已认证的公司数据作用域、模板版本/哈希、工具schema、指标与窗口长度；不授予 UPDATE/DELETE，越权所有者不可见。绑定要求监听 `ACTIVE`、用户与租户 `ACTIVE`、作用域未撤销未过期、窗口被作用域覆盖、指标与谓词类型兼容（`attempts`/`successes` 需数值谓词；`successRate` 只允许 `EQ`/`NE` 字符串），重复绑定明确为 `WATCH_SOURCE_ALREADY_BOUND` 且不调用上游。
+
+`CompanyMcpWatchObserver` 在每次观测时重新读取所有者作用域内的监听、绑定、公司数据作用域、授权、用户与租户，按秒对齐固定查询窗口，先经已认证MCP工具执行 `CHECK`，再重读并规范化比较策略哈希、绑定、作用域版本/来源修订与查询参数；一致后才执行 `QUERY` 并落 `data_executions` 审计。观测仅接受 `COMPLETE` 结果：精确计数在安全整数范围内转数值，`successRate` 保持精确十进制字符串；非完整结果、空率或超界计数为 `UNKNOWN`，不伪装观测值。来源哈希由规范化回执与指标确定，供值去重使用。来源故障记录 `RETRYABLE_ERROR` 审计并抛错，由周期转为不通知的 `UNAVAILABLE`。
+
+隔离真实 PostgreSQL 的4项新增测试通过（与周期/通知测试合计15项）：绑定后连续两个周期经 `CHECK`+`QUERY` 观测到尝试数5→6并各通知一次，审计记录完整窗口与行数；跨所有者、重复、指标/谓词不匹配和越界窗口绑定全部拒绝且零MCP调用；作用域撤销、授权撤销、用户停用均转为 `UNAVAILABLE` 且零MCP调用零通知；作用域版本变化、策略哈希变化与 abort 分别以 `WATCH_SOURCE_SCOPE_CHANGED`/`WATCH_SOURCE_POLICY_CHANGED`/中止错误拒绝。认证API新增 `apps/api/src/watches.ts`：`GET/POST /api/v1/watches`、`GET /api/v1/watches/:id`、`POST /api/v1/watches/:id/{pause,resume,cancel}` 与 `POST /api/v1/watches/:id/source`，沿用既有会话、CSRF、所有者RLS与严格输入校验；跨所有者读取/变更返回404，重复绑定返回409，绑定错误返回400。api进程只创建/读取/转态/绑定，不执行周期或发送。
+
+`tsc --noEmit`、改动文件 ESLint、迁移契约112项与6文件27项定向测试通过，另有2项Playwright界面测试通过；配置单测同时断言只有精确审核绑定才暴露已认证的数据客户端。worker 已在非试用且具备发送器、公司标识与数据客户端时按显式所有者作用域每30秒执行一次监控周期（启动后立即执行一次，关闭时中止），Compose `app-env` 已提供 `COMPANY_DATA_MCP_CONFIG_FILE` 与只读私有MCP卷；Docker默认栈已实际启动并通过health（见下节），但在具备真实发送器与认证数据客户端的监控周期验收、群主动消息配额及真实 T055/T058 验收仍未完成，T055/T058 仍为 NOT_RUN。
+
+### 2026-10-22 条件监控Web界面与Docker开发栈启动（局部实现）
+
+Web端新增 `apps/web/src/watch-flow.ts` 与 `apps/web/src/watches.tsx`，在工作台“条件监控”路由提供所有者自助创建（比较条件、值类型、IANA时区、有效期、检查/通知预算、静默窗）、列表、详情、暂停/恢复/停止与绑定已认证数据来源；每个响应经严格校验，列表与详情披露检查/通知预算、停止原因和未知通知状态，未知时明确提示须先核对实际投递。服务端已将 `/watches` 加入SPA静态路由，工作台提供导航链接。Playwright 合成登录在桌面与移动视口各执行1项测试通过：未登录访问API为401、缺CSRF的创建为403、静默窗单边填写禁用提交；创建后刷新仍能读取并显示“检查中”，绑定已认证来源成功，暂停/恢复/停止均更新界面与服务端状态，停止后监听为`CANCELLED`且零检查、零通知预留。该测试使用本地隔离PostgreSQL与合成公司数据作用域，只证明本地UI/API/持久化接线。
+
+Docker开发栈以 `./deploy/dev-up.sh` 实际构建并启动：`anthys-dev-postgres-1` 健康并映射 `127.0.0.1:64710`，`app-init`/`migrate` 正常退出，`anthys-dev-api-1` 与 `anthys-dev-worker-1` 运行于 `64700` 且API为healthy；`/api/v1/health/live`与`/api/v1/health/ready`返回`ALIVE`/`READY`，`/watches`返回200。当前未提供真实GLM、钉钉、DWS与公司MCP凭据，worker日志为`Worker running; model BLOCKED_EXTERNAL`，因此只验证默认栈启动、迁移、健康与静态路由，不证明监控周期在Docker内实际执行、真实钉钉投递或企业现场验收。T055/T058仍为NOT_RUN。
+
+全量 Playwright 套件同轮执行结果为57项通过、180项跳过、1项失败：唯一失败是 `tests/e2e/source-choice.spec.ts` 移动视口在长套件末段的元素等待超时；该文件单独重跑桌面与移动两项全部通过，未修改产品或测试，判为负载下的时序抖动而非产品回归。跳过项均为需要真实凭据或显式开关的用例。即便全部本地套件通过，也不构成真实钉钉投递、真实worker周期或企业现场验收。
+
+### 2026-10-22 条件监控到期提前通知（局部实现）
+
+R12 新增迁移113与 `condition_watch_renewal_notices`：每个监听在所有者RLS下最多一条续期提示记录，状态为 `PENDING`/`CONFIRMED`/`APPLIED_UNVERIFIED`/`FAILED`/`UNKNOWN`，唯一键 `(tenant_id,watch_id)`，仅 `PENDING` 行可更新，不授予删除。`ConditionWatchStore.claimRenewals` 只为生命周期 `ACTIVE`、到期时间落在未来七天窗口内的监听预留一次；记录只创建一次，明确失败后须间隔一小时才重试，累计最多三次。`settleRenewalNotification` 拒绝终态重复结算；`sweepRenewals` 把超时未决记录转为 `UNKNOWN` 终态。续期提示不消耗检查或通知预算，不延长 `expires_at`，不自动续期。
+
+`DingTalkWatchNotifier` 同时实现 `WatchRenewalNotifier`：发送前在所有者作用域重新读取未决记录、`ACTIVE` 监听、策略哈希、原到期时间、用户/租户与公司绑定，并在获取 token 后经 `beforePhysical` 再次复核；文本确定性说明到期时间、停止检查和不会自动续期，提供方接受但无回执仍映射为 `APPLIED_UNVERIFIED`，未知结果映射为 `UNKNOWN` 且不重发。worker 在每轮检查周期后执行续期周期，逐作用域隔离失败并在关闭时中止。
+
+隔离真实 PostgreSQL 的3项新增测试通过（定向2文件共14项，`tsc --noEmit` 与迁移契约113项同时通过）：七天内每监听仅预留一次且其他所有者不可见、暂停不领取而恢复后领取、零检查/通知预算消耗、`UNKNOWN` 终态不再领取；明确失败仅在一小时后重试且最多三次，续期周期摘要精确、第二轮不重发、到期时间不变；通知适配器向在线所有者单次发送并保留守卫，监听仍 `ACTIVE`，结算后不再重发，发送前取消或获取token后取消均 `FAILED` 且零发送。群主动消息配额、Docker内真实发送器与认证数据客户端的周期验收、真实 T055/T058 验收仍未完成，T055/T058 仍为 NOT_RUN。
+
+### 2026-10-22 沙箱制品到期清理（局部实现）
+
+R21 新增迁移114与 `packages/sandbox/src/retention.ts`。`sandbox_artifacts` 增加 `retention_claimed_at` 与到期索引；两个 `SECURITY DEFINER` 函数把跨租户清理限制在明确边界内：`oa_sandbox_artifact_claim_expired` 只能领取 `expires_at` 已过且未被领取或超过重试窗口的记录，`oa_sandbox_artifact_finish_retention` 只能删除已领取且存储键匹配的行，未领取的制品无法经该函数删除。清理顺序为先删除加密文件存储中的字节，再删除元数据；字节删除失败时保留已领取行，避免“元数据已删但字节泄留”的无主文件，并在重试窗口后再次尝试。运行时角色只获得两个函数的执行权限，不获得跨租户表权限。
+
+worker 在非试用模式下与既有文件存储实例共享同一 `EncryptedFileStore`，启动时执行一次清理，此后每五分钟执行一次；失败只记录计数，不中止主循环或关闭服务。隔离真实 PostgreSQL 与真实加密文件存储的3项测试通过：两个不同所有者的过期制品在一次清理中均删除字节与元数据，未过期制品及其可读字节不受影响；首次字节删除被拒绝时行仍保留且立即重试受窗口抑制，回拨领取时间后可完成删除；未领取行经 finish 函数返回 false 且保持可读，越界 limit 被拒绝。`tsc --noEmit`、改动文件 ESLint 与迁移契约114项通过。随后以 `./deploy/dev-up.sh` 重建并启动 Docker 开发栈：`anthys-dev-migrate-1` 应用 `114_sandbox_artifact_retention.sql`，API 与 worker 均为 healthy，`/api/v1/health/live`/`ready` 返回 `ALIVE`/`READY`，`/watches` 返回200，数据库内两个保留函数存在，worker 启动日志仍为 `model BLOCKED_EXTERNAL` 且无保留清理失败记录。这只是启动与健康验证，未在容器内产生或清理真实沙箱制品。broker HTTP服务/独立进程、队列、可信生产者API、CPU/内存加权预算、文件系统配额卷、Compose沙箱服务、完整归档解析与真实 T097/T098 验收仍未实现，T097/T098/T099 仍为 NOT_RUN。
+
+### 2026-10-21 待办创建两步确认与读回（局部实现）
+
+R24 新增 `packages/office/src/todos.ts` 连接器注入式待办协调器，覆盖产品文档要求的查询、新建、更新、关闭：`read` 仅按 UUID 读取一条待办并严格校验字段；`propose`/`proposeUpdate`/`proposeClose` 只做参数校验和提案生成（默认300秒、上限1024条，单条淘汰最旧），零外部调用；`confirm` 在调用前先消费提案，重复确认不会二次创建/更新/关闭，然后各仅调用一次对应连接器，并读回核对待办ID、标题、到期时间、指派人及完成状态。创建/更新要求未完成，关闭要求已完成；读回不可用或不一致为 `VERIFICATION_FAILED` 且效果 `UNKNOWN`，写调用抛错按动作分别返回 `TODO_CREATE/UPDATE/CLOSE_OUTCOME_UNKNOWN`，绝不伪报成功。创建提案要求未来到期时间；更新允许纠正为过去到期时间。
+
+合成连接器的8项单元测试通过：提案零外部调用且读回一致、重复确认单次创建；查询成功/非法ID/abort/读失败；更新与关闭各单次消费、读回一致、重复确认拒绝；更新或关闭写失败、读回不可用/不一致不伪报成功；未知/过期提案、非法输入、过去到期与abort零外部变更。该切片本身不包含本地任务镜像/双向同步（镜像见下节）、真实 DWS/OpenAPI 连接器、API/网关接线或界面流程，T071 仍为 NOT_RUN。
+
+### 2026-10-21 文档版本冲突检测与有限合并（局部实现）
+
+R25 新增 `packages/office/src/documents.ts` 连接器注入式文档编辑器：读取单篇文档（≤12000字符）返回版本与文本哈希；编辑提案先读取当前版本并要求调用方给定 `expectedRevision`，锚点必须唯一且互不重叠，否则冲突且零写入；确认时重读当前版本，锚点所在整行块必须与提案基线一致，否则 `DOCUMENT_EDIT_CONFLICT` 且零更新；仅无关行发生变化时，把替换应用到当前文本（`MERGED`，保留他人修改），以当前版本做一次乐观并发更新，并读回节点、版本和新文本，完全一致才 `VERIFIED`。版本陈旧、锚点消失/歧义、同行并发修改均不整篇覆盖；更新失败 `UNKNOWN`，读回不可用/不一致 `VERIFICATION_FAILED`，提案单次消费。
+
+合成连接器的7项单元测试通过：直接编辑与单次消费、无关行合并保留外部修改、锚点消失/歧义/同行修改冲突零更新、陈旧版本与越界/重叠锚点拒绝、无连接器/非法/未知/过期/abort零写入、读/写/读回失败不伪报成功、单文档读取边界与非法响应。真实 DWS/OpenAPI 文档连接器、API/网关接线、表格与端到端界面仍未实现；T114 仍为 NOT_RUN。
+
+### 2026-10-21 本地任务与外部待办ID分离镜像（局部实现）
+
+R24 新增迁移107与 `packages/office/src/todo-mirror.ts` 所有者RLS镜像：本地待办使用自己的 UUID，外部待办ID是可空、可核对的独立列，另存外部版本与完整已验证快照。外部写入前先持久化一次性意图（UPDATE/CLOSE）及目标内容；只有读回的外部ID、标题、到期、指派人和完成状态与目标完全一致才结算为 `LINKED`；写调用结果不明或读回缺失/不一致保持 `UNKNOWN`，必须显式核对，绝不自动重发或伪装成功。核对发现远端内容与意图不同则进入 `CONFLICT` 且不覆盖既有快照；远端版本变化只更新外部快照，本地标题/到期/完成状态仅在调用方显式采纳后改变，指派人保持本地值，冲突不做自动合并。同一所有者不能把两个本地待办链接到同一外部ID，跨所有者读写被RLS拒绝。
+
+隔离真实 PostgreSQL 的5项测试通过：本地ID与外部ID分离、链接需已有读回且所有者隔离；写意图持久化、精确读回结算且本地字段不变；丢失写入进入 `UNKNOWN`、远端不同不视为成功；远端版本仅更新外部快照、显式采纳才改变本地字段；非法值、越权访问与非法状态转换零变更。迁移契约已刷新为107项；定向执行迁移步进（27）、试点就绪（12）、条件监控（7）与该镜像（5）共51项集成测试通过，未重跑完整集成套件。真实 DWS/OpenAPI 待办连接器、API/网关接线、双向同步调度、外部清理与现场验收仍不存在，T071 仍为 NOT_RUN。
+
+### 2026-10-21 全量单元套件结果与夹具维护
+
+在固定 Node 24.21.0、隔离 PostgreSQL 与网络守卫下执行全部 `tests/unit`：94个文件、1635项测试全部通过，`tsc --noEmit` 与本次改动文件的 ESLint 无错误。此前套件暴露的两处夹具漂移已修复，均非产品回归：
+
+- `tests/unit/group-reminder-database-safety.test.ts` 的合成迁移集合由固定95个改为严格跟随 `required-migrations.json` 的完整文件名集合（当前112个，未应用后缀为94之后共18项）；安装断言同步为完整未应用后缀、共享源账本保持94、重复/并发安装幂等且仅作用于自有非库。
+- `tests/support/backend-discovery-baseline.json` 登记12个既有新测试文件（分析沙箱、条件监控、搜索出口/代理、办公日历/待办/文档/扩展、待办镜像、沙箱准入broker、沙箱实时ACL、沙箱加密制品连接器），发现总数由208同步为220；后续通知、观测与监控API切片继续登记后现为133个新增、发现总数223。
+
+非项目固定运行时（例如本机其他 Node 版本）会按设计拒绝配置与可执行文件校验，因此上述结果只在固定运行时下成立；它仍不是真实 GLM/DWS/钉钉/企业 MCP 验收。
+
+### 2026-10-21 全量集成套件执行结果（本地隔离，非真实验收）
+
+在隔离 PostgreSQL 与网络守卫下执行全部 `tests/integration`：108个文件、1533项测试，1531项通过、2项失败，退出码1。两项失败均在本轮环境修复后单独重跑通过，不属于待发布代码回归：
+
+- `tests/integration/independent-cluster-restore.test.ts` 的 T124 在套件启动时因 `.data/test-environment/pg17-client.json` 尚不存在而失败；随后按固定源码重建官方 PostgreSQL 17.11 客户端与本机 Linux Node 运行时夹具，单独重跑通过（22秒级）。该测试真实执行销毁自有源库、生产备份/恢复 CLI 与独立合成密钥核对，但不证明真实企业恢复、KMS、WAL/PITR 或生产 RPO/RTO。
+- `tests/integration/trial-process-supervision.test.ts` 的“guardian near expiry + fallback DB stall”在满负载套件中仅退出码断言失败；单独重跑该文件16项全部通过，实际 CLI 以78退出、早于原截止时间且黑洞连接被观察，属负载下时序抖动，未修改产品或测试。
+
+结论仅限本地集成：真实 GLM/DingTalk/DWS/公司 MCP、企业认证、部署与完整130项验收仍未执行，不得据此宣称一期完成或把 T124 状态改为通过。
+
+### 2026-10-22 沙箱broker独立HTTP服务与Docker部署（局部实现）
+
+R21 新增 `apps/sandbox-broker` 独立进程：只使用 Node `http`，通过 HMAC-SHA256 服务密钥验证 `x-anthys-broker-subject/timestamp/signature`，主体从已认证请求头解析并绑定到作业，60秒时间窗，路径/方法/body哈希进入签名；提供存活/就绪、提交、读取、取消和制品登记接口，分别对未认证(401)、内容类型(415)、超限(413)、并发/配额(429)、线格式(400)、重放/状态/完整性(409)和不可用(503)返回稳定状态码。请求体上限为作业40 KiB、制品12 MiB、控制1 KiB；提交受最大并发闸门约束，关闭时先停止接受新请求、中止在途执行并等待活动请求退出。
+
+新增 `deploy/images/sandbox-broker.Dockerfile`（隔离的非root uid 10001，仅从摘要固定的 `docker:27-cli` 复制 Docker CLI，不携带任何业务凭据）、`deploy/setup-sandbox-broker.mjs`（生成0600 HMAC key、Ed25519 producer keypair 与按镜像 digest 固定的 config，绝不打印密钥）以及 dev/prod Compose `sandbox` profile：初始化命名卷属主，broker 只挂载 Docker socket、工作区卷、制品卷和只读 seccomp 目录，使用 `runtime_database_url`/`app_master_key` 与只读secret，API/worker 不挂载 socket。宿主 Docker socket 访问等价于 root，必须按文档保持broker独立、固定镜像、签名作业，禁止把钉钉/GLM/DWS/公司MCP凭据注入该容器。启动时先做中断作业恢复、同所有者孤儿容器核对和过期工作目录清扫，此后每5分钟清扫一次；工作目录仍由宿主轮询限额而非文件系统配额。
+
+验证结果：`tsc --noEmit` 通过；新增broker HTTP集成测试6项与工作目录清扫测试1项全部通过（真实隔离PostgreSQL、真实加密文件存储、真实HTTP监听64712、合成executor）；真实固定镜像测试6项全部通过。以 `docker compose --profile sandbox up` 启动开发栈后，broker 日志为 `SANDBOX_BROKER_READY`，`/health/live` 与 `/health/ready` 均返回200；在broker容器内经宿主 socket 真实执行JavaScript作业成功，输出SHA-256可核对，作业内 `uid=10001`、`network=BLOCKED`、Docker socket不可读，执行后容器与工作目录均清理。此验证使用合成作业和本地开发数据库，不是企业现场验收；应用侧生产者客户端已提供但业务能力/队列尚未接线，也没有授权撤销推送、CPU/内存加权预算、文件系统配额或完整归档解析，T097/T098/T099仍为NOT_RUN，真实GLM/DingTalk/DWS/公司MCP验收仍为BLOCKED_EXTERNAL。
+
+### 2026-10-22 沙箱broker类型化生产者客户端（局部实现）
+
+R21 新增 `packages/sandbox/src/client.ts` 的 `SandboxBrokerClient`：以 `SANDBOX_BROKER_AUTH_KEY_FILE` 对应的共享HMAC密钥签名制品登记、作业提交、状态读取与取消请求，主体进入已认证请求头；base URL只接受无userinfo、无query/hash、无路径前缀的http(s)源，默认30秒超时、提交130秒，禁止重定向与自动重试，响应上限1 MiB。制品上传在本地校验kind/MIME/name/expiresAt与非空字节上限，返回后重新核对kind、byteSize与SHA-256，避免把未被broker持久化的内容当作已登记；作业提交只接受有界wire字符串/字节，状态与结果响应逐字段验证。对结果不确定的提交不自动重发，重复判定由broker的nonce/作业唯一约束完成。
+
+在同一真实隔离PostgreSQL、真实加密文件存储和真实64712监听上新增3项集成测试：类型化客户端完成CODE/INPUT上传、签名作业提交、SUCCEEDED结果与输出哈希、所有者状态读取、终态取消409、跨所有者404与错误密钥401，并拒绝非法base URL/超时配置；注入fetch验证302重定向、超限响应、畸形状态响应和外部abort均映射为稳定客户端错误且不泄漏响应体；`SandboxProducer` 对非法主体、空输出类型和超限代码在零制品登记时拒绝，对合法作业完成代码/输入登记、单信封签名、单次提交并携带精确字节执行，预中止调用不产生新制品。定向测试文件7项全部通过（另修正一处末位base64url篡改可能未改变解码签名的抖动断言），`tsc --noEmit` 通过。尚无业务能力或队列调用该生产者，未执行真实企业作业，T097/T098/T099仍为NOT_RUN。
+
+### 2026-10-22 需求追踪验证器自检（T128局部实现）
+
+`verifyRequirements` 现接受显式根目录（CLI仍默认当前仓库），从而可在临时目录构造完整合成夹具而不改动真实配置。新增 `tests/unit/verify-requirements.test.ts`：36条R/130条T的合成配置在baseline与full模式下均通过；随后逐项注入缺陷，断言验证器精确报告缺少T130、目录行重复、实现映射为空、测试文件缺少稳定ID、R状态仍为IN_PROGRESS、模块文件缺失以及仅`return undefined`的占位函数。该测试证明验证器能发现缺失映射与占位实现，不代表真实仓库已完整：真实仓库full模式仍因各R未完成而失败，T128状态保持NOT_RUN。`tsc --noEmit`与ESLint通过，定向2项测试通过。
+
+### 2026-10-22 沙箱OOXML输出严格ZIP校验（局部实现）
+
+沙箱broker的xlsx/docx复核不再使用“ZIP魔数 + 文件内出现必需条目字符串”的浅检查（该检查可被仅嵌入`xl/workbook.xml`或`word/document.xml`文本的任意缓冲区欺骗）。现复用 `packages/artifacts/src/zip.ts` 的有界ZIP检查器：要求ZIP32结束记录、中央目录与本地头一致、条目名无路径穿越/反斜杠/重复、拒绝加密条目与非0/8压缩方法，限制512条目、64 MiB展开总量和1000倍压缩比，并对每个条目核对解压长度与CRC32。任一失败使作业以`FAILED/OUTPUT_INVALID`结束，不写制品。
+
+验证：真实隔离PostgreSQL上的 `tests/integration/sandbox-broker.test.ts` 7项通过，其中T098新增有效ExcelJS工作簿输出成功持久化、以及“仅含必需条目名的伪ZIP”被拒绝且无持久化两项断言；`tsc --noEmit`与ESLint通过。该检查只证明broker对OOXML输出做了有界结构复核，不替代真实Office打开测试、企业验收或T097/T098/T099的NOT_RUN状态；上传附件中的归档仍只隔离、不展开。
+
+### 2026-10-22 沙箱运行期授权复查（局部实现）
+
+`SandboxBroker` 新增 `authorizationRecheckMs`（默认5000ms，允许250–60000ms，越界拒绝配置）：执行期间在与取消轮询相同的定时器中按间隔重新调用注入的 `SandboxAuthorizer`。真实ACL撤销（任务取消/结束、用户或租户停用、authEpoch变化、run结束）会中止执行容器，并以 `REJECTED/AUTHORIZATION_REVOKED` 结束；复查本身失败则以 `FAILED/AUTHORIZATION_RECHECK_FAILED` 结束；两种情况都不写结果制品。取消检查失败仍保持原有 `CANCELLATION_CHECK_FAILED` 语义。
+
+新增1项真实隔离PostgreSQL集成测试，使用阻塞executor与序列化authorizer证明：首次授权通过、250ms后的复查拒绝使执行被中止、作业终态正确且sink零持久化；复查抛错同样中止并终止为失败；非法间隔在构造时拒绝。`tests/integration/sandbox-broker.test.ts` 现为8项，全部通过；`tsc --noEmit`与ESLint通过。这仍是轮询复查而非推送撤销/授权缓存，且未执行真实企业作业，T097/T098/T099保持NOT_RUN。
+
+### 2026-10-22 附件恶意归档隔离夹具（T099局部实现）
+
+T099 单元测试新增真实构造的ZIP：条目名包含`../escape.txt`与`/etc/passwd`、存在重复条目、并含一个解压后8 MiB全零的DEFLATE成员。`inspectFile` 在仅检查MIME魔数后即返回 `QUARANTINED/application/zip`，固定原因码中不含任何条目名或内容，未执行归档解析或解压；`tests/unit/attachments.test.ts` 6项全部通过。这证明输入侧对归档采取隔离而不展开，但完整企业验收、真实钉钉下载与应用内分析消费仍未执行，T099保持NOT_RUN。
+
+### 2026-10-22 全量单元与静态门禁复核
+
+新增 `tests/unit/verify-requirements.test.ts` 后，后端发现基线同步登记该文件（原有90文件与既有断言不变）；全量单元套件95个文件、1637项测试全部通过。`tsc --noEmit`、仓库ESLint与 `verify:requirements --baseline` 均通过。
+
+Docker开发栈检查：postgres、api、worker与sandbox-broker容器均为运行状态，api为healthy；`/api/v1/health/live` 返回`ALIVE`、`/api/v1/health/ready` 返回`READY`、`/watches` 返回200；worker日志为 `Worker running; model BLOCKED_EXTERNAL`，未出现保留清理或队列错误。该检查只证明本机开发栈启动与健康，不包含真实模型、钉钉、DWS或公司MCP验收；130项T状态与36项R状态均未因此变更。
+
+### 2026-10-22 开发栈凭据导入（`.env` → Compose secret）
+
+`deploy/setup-dev-secrets.mjs` 现在读取未提交的 `.env`，按与 `packages/config` 相同的优先级解析 `GLM_API_KEY`/`AIDER_AI_DEFAULT_API_KEY` 与 `DINGTALK_CLIENT_SECRET`/`DINGTALK_APP_SECRET`（先`*_FILE`，后直接值），并写入 `.secrets/docker/glm_api_key`、`.secrets/docker/dingtalk_client_secret`（0600）。Compose 仍只挂载 `/run/secrets/*`，非秘密钉钉标识由 `.env` 直接插值。生成目录不再作为输入回退，因此清空 `.env` 后重新运行会清空导入文件，避免残留旧凭据。
+
+验证使用临时 `.env` 与临时引用文件（合成标记，随后删除并确认仓库无残留）：直接值、别名、`*_FILE` 三种形式均精确导入且权限为0600；引用不存在的文件以 `ENV_CREDENTIAL_INVALID:GLM_API_KEY` 失败；无 `.env` 时重新生成的两个 secret 为0字节，模型与钉钉保持 `BLOCKED_EXTERNAL`。脚本 ESLint 通过。README 与 `.env.example` 已补充上述流程、`/run/company-mcp/<name>.json` 容器路径以及 DWS 需独立固定runner的限制。
+
+同时发现 Compose 以 compose 文件目录为项目目录，不会自动读取仓库根 `.env`；`deploy/dev-up.sh` 现仅在根 `.env` 存在时显式追加 `--env-file .env`，README 的手动命令也要求显式加载。用合成 `DINGTALK_CORP_ID` 标记验证：默认 `compose config` 插值为空，带 `--env-file .env` 时渲染出该标记；临时替身 `docker` 证明脚本在有/无 `.env` 两种情况下分别传入/省略该参数。未使用任何真实凭据，未重启容器，也不改变 T/R 状态。

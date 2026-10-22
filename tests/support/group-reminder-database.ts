@@ -3,8 +3,9 @@ import {randomUUID,createHash} from 'node:crypto';
 import {readFile,readdir} from 'node:fs/promises';
 import pg from 'pg';
 import {Database} from '../../packages/storage/src/database.js';
+import {requiredSchema} from '../../packages/storage/src/schema.js';
 
-const sourceName='anthys_test',migration95='095_group_reminder_authority.sql',migration96='096_group_reminder_execution.sql',migration97='097_task_result_artifacts.sql',migration98='098_company_agent_requests.sql',migration99='099_native_case_audiences.sql',migration100='100_formal_group_admission.sql',migration101='101_group_mention_contract_observer.sql',migration102='102_native_artifact_drafts.sql',migration103='103_group_case_escalations.sql',migration104='104_finite_private_pilots.sql';
+const sourceName='anthys_test';
 const roles=[['MIGRATION_DATABASE_URL','oa_migrator'],['RUNTIME_DATABASE_URL','oa_runtime'],['DATABASE_URL','oa_app']] as const;
 const image='postgres:17-bookworm@sha256:3645570cccdfa447589da9f57dd740faa29b30938e861289a5574b6ca6b03826';
 const maxBytes=64*1024*1024;
@@ -88,12 +89,15 @@ function schemaOnly(sql:string){
  check();
 }
 async function files(){
- const names=(await readdir('db/migrations')).filter(n=>/^\d{3}_[a-z0-9_]+\.sql$/.test(n)).sort().filter(n=>Number(n.slice(0,3))<=104);
- if(![95,96,97,98,99,100,101,102,103,104].includes(names.length)||names.some((n,i)=>Number(n.slice(0,3))!==i+1)||names[94]!==migration95||names.length>=96&&names[95]!==migration96||names.length>=97&&names[96]!==migration97||names.length>=98&&names[97]!==migration98||names.length>=99&&names[98]!==migration99||names.length>=100&&names[99]!==migration100||names.length>=101&&names[100]!==migration101||names.length>=102&&names[101]!==migration102||names.length>=103&&names[102]!==migration103||names.length===104&&names[103]!==migration104)fail('TEST_SCHEMA_FILES_REJECTED');
+ // The clone's base snapshot is fixed at 094. Every later source migration is
+ // applied by install(), so the file set must remain exactly the live contract
+ // rather than a hand-maintained suffix that silently stops at an older version.
+ const names=(await readdir('db/migrations')).filter(n=>/^\d{3}_[a-z0-9_]+\.sql$/.test(n)).sort();
+ if(names.length!==requiredSchema.migrations.length||names.some((n,i)=>n!==requiredSchema.migrations[i]!.name)||names.some((n,i)=>Number(n.slice(0,3))!==i+1))fail('TEST_SCHEMA_FILES_REJECTED');
  const result=[];for(const name of names){const sql=await readFile('db/migrations/'+name,'utf8');result.push({name,hash:digest(sql),sql});}return result;
 }
 function ledger(raw:unknown,expected:{name:string;hash:string}[]):Ledger{
- if(!Array.isArray(raw)||![94,95,96,97,98,99,100,101,102,103,104].includes(raw.length)||raw.length>expected.length)fail('TEST_SCHEMA_LEDGER_REJECTED');
+ if(!Array.isArray(raw)||raw.length<94||raw.length>expected.length)fail('TEST_SCHEMA_LEDGER_REJECTED');
  const parsed=raw as Ledger;
  if(parsed.some((r,i)=>!r||r.name!==expected[i]?.name||r.hash!==expected[i]?.hash)||new Set(parsed.map(r=>r.name)).size!==parsed.length)fail('TEST_SCHEMA_LEDGER_REJECTED');
  return parsed.map(r=>({name:r.name,hash:r.hash}));

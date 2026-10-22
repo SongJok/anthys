@@ -24,7 +24,7 @@
 | 钉钉管理员        | 测试企业、corpId、clientId/secret、robotCode、应用可见范围、卡片模板、H5 域名配置 | 可先实现 mock；真实验收必须提供                    |
 | DWS 管理员/试点用户 | CLI 开通、适用登录模式、用户/服务身份授权、允许的群与产品                           | 未提供时状态为 WAITING_AUTH/BLOCKED_EXTERNAL |
 | 公司 MCP 维护人   | 地址、transport、认证、协议版本、工具 schema、资源授权、脱敏规则、限流               | 不猜工具名，不尝试未登记内网扫描                      |
-| 数据部门         | 至少 3 个认证模板、数据接口/只读账号、金标数据与口径                              | 先用测试 fixture，不冒充真实统计                  |
+| 数据部门         | 至少 3 个认证模板、上游 MCP 的数据工具与金标口径（不向本项目下发数据库账号）             | 先用测试 fixture，不冒充真实统计                  |
 | 模型管理员        | 官方 API key、商业使用/数据出域授权、可用模型与并发配额                          | 没有 key 不做真实模型验收                       |
 | 运维/安全        | TLS 域名、secret 管理、备份位置、企业隐私/留存规则                           | 本地开发不阻塞，生产发布受阻                        |
 | 搜索服务         | 允许使用的搜索提供商、凭据、外网出口                                        | 无提供商时不能声称实时联网搜索                       |
@@ -374,7 +374,9 @@ provider 不可用时：普通请求显示依赖不可用；持久任务延期�
 
 ### 8.1 数据部门最小交付包
 
-每个模板提供：业务问题样例、指标中英文名、单位、分子/分母、粒度、去重键、状态枚举、时间边界、时区、延迟、数据水位、关联规则、空值策略、允许维度/筛选、角色与行范围、执行协议、超时/限流、金标输入输出、owner与版本。
+**执行通道：代码、日志、数据三类查询全部经公司 MCP（另一个项目的企业 AI 底座）执行。** 数据接入使用独立的 `COMPANY_DATA_MCP_CONFIG_FILE`，固定 server 名/版本、工具名与输入 schema hash、认证与逐调用身份；本项目不获取企业数据库账号、不直连数据源、不内置可绕过 MCP 的查询适配器。上游 MCP 的数据工具未登记或未审核时，能力保持 `UNCONFIGURED`/`BLOCKED_EXTERNAL`。
+
+每个模板提供：业务问题样例、指标中英文名、单位、分子/分母、粒度、去重键、状态枚举、时间边界、时区、延迟、数据水位、关联规则、空值策略、允许维度/筛选、角色与行范围、执行协议（MCP 工具名与 operation/模板键）、超时/限流、金标输入输出、owner与版本。
 
 首批建议选 3 个便于核验的内部模板：日指标趋势、按维度排名、异常率/成功率。名称仅是建议，实际用公司指标替换。每个至少 5 组金标案例，包括边界、空数据、权限过滤、截断和数据延迟。
 
@@ -422,6 +424,10 @@ GLM_API_KEY_FILE=/run/secrets/glm_api_key
 GLM_REASONING_EFFORT=high
 GLM_MAX_OUTPUT_TOKENS=8192
 
+COMPANY_MCP_CONFIG_FILE=/run/company-mcp/company-code.json
+COMPANY_LOGS_MCP_CONFIG_FILE=/run/company-mcp/company-logs.json
+COMPANY_DATA_MCP_CONFIG_FILE=/run/company-mcp/company-data.json
+
 DWS_ENABLED=false
 DWS_BINARY_PATH=/opt/dws/dws
 DWS_VERSION_LOCK_FILE=/app/config/dws-version-lock.json
@@ -433,7 +439,6 @@ SANDBOX_BROKER_URL=http://sandbox-broker:8092
 SANDBOX_BROKER_AUTH_KEY_FILE=/run/secrets/sandbox_broker_auth_key
 FILESTORE_DRIVER=local
 FILESTORE_ROOT=/var/lib/anthys/artifacts
-MCP_REGISTRY_FILE=/app/config/mcp-connections.json
 SEARCH_REGISTRY_FILE=/app/config/search-connections.json
 MOCK_PROVIDERS=false
 LIVE_TEST_ENABLED=false
@@ -497,7 +502,7 @@ pnpm run doctor
 | P06 DWS 原生    | P04         | 固定CLI、device flow、profile隔离、schema注册、读写/撤销/错误     | 双身份真实验证；核心办公资源读写与清理              |
 | P07 人设记忆与工作指导 | P03,P04     | 三级人设、scope记忆、纠错/删除、工作计划                           | 人设不扩权；群/个人记忆串漏为零                 |
 | P08 定时与条件任务   | P04,P07     | schedule/occurrence、TZ、misfire、持久监控、通知            | 双scheduler、DST、取消/离职/重启测试        |
-| P09 数据统计与成果   | P04,P05     | 模板发布、参数与口径、gateway、隔离分析、各格式输出                     | 金标统计/权限过滤/公式注入/沙箱测试              |
+| P09 数据统计与成果   | P04,P05     | 模板发布、参数与口径、MCP 数据工具、隔离分析、各格式输出                  | 金标统计/MCP 证据链/权限过滤/公式注入/沙箱测试        |
 | P10 群事务自主工作   | P06,P07,P08 | 群合同、模式、事务、催办、覆盖度、升级、撤销                            | mention-only与history分开验收；噪音/受众测试 |
 | P11 办公闭环与搜索   | P06,P09,P10 | 待办/日历/文档/表格完整体验、办公扩展、公网/企业搜索                      | 写前授权/写后验证；信息来源与新旧冲突测试            |
 | P12 管理与全链路 UI | P04–P11     | 所有后台页面、移动端卡片流程、任务/审计/预算体验                         | Playwright、无权限直接URL、卡片转发测试       |

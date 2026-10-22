@@ -2,33 +2,57 @@
 
 需求、架构、接入和验收以 `docs/` 的四份基线为准。项目正在逐阶段实施；这不是已通过企业验收的成品。机器状态见 `config/stages.json`，外部阻塞见 `config/external-blockers.json`。报告中的合成 provider 结果不能作为 live 通过证据。
 
-## 开发环境
+## 快速开始（全程 Docker）
 
-使用 Node **24.21.0**、pnpm **10.34.7**、Docker。版本漂移会被应用拒绝；不要使用本机默认 Node 25。所有秘密仅从忽略提交的 `.secrets/` 读取，生成的是随机本地测试秘密。
+应用、PostgreSQL、迁移和 worker 均通过 Docker Compose 运行，不要求宿主机安装 Node 或 PostgreSQL。开发栈使用 API `127.0.0.1:64700`、PostgreSQL `127.0.0.1:64710`（容器内始终是 `postgres:5432`）。数据库与会话密钥由 `setup-dev-secrets.mjs` 随机生成到忽略提交的 `.secrets/`（0600）；钉钉/GLM 凭据可写入未提交的 `.env` 或 `*_FILE` 引用，由该脚本导入为 Compose secret，容器只读取 `/run/secrets/*`，明文不会进入镜像。
+
+```sh
+./deploy/dev-up.sh   # 生成密钥；存在根目录 .env 时自动以 --env-file 加载
+curl http://127.0.0.1:64700/api/v1/health/live
+curl http://127.0.0.1:64700/api/v1/health/ready
+docker compose -f deploy/compose/compose.dev.yml logs -f api
+docker compose -f deploy/compose/compose.dev.yml down
+```
+
+也可以手动执行 `node deploy/setup-dev-secrets.mjs`，再运行 `docker compose --env-file .env -f deploy/compose/compose.dev.yml up -d --build --wait`。Compose 默认以 compose 文件所在目录为项目目录，不会自动读取仓库根 `.env`，因此手动命令必须显式加 `--env-file .env`（无 `.env` 时省略该参数）。
+
+默认启动 postgres、app-init、migrate、api 和 worker。没有模型、钉钉或 DWS 凭据时，相应能力真实保持 `BLOCKED_EXTERNAL`，API 与工作台仍可用；worker 不会伪造模型输出。可选 profile：`--profile dingtalk`（ingress + notifier，需真实机器人身份）、`--profile scoped`（scheduler + maintenance，需至少一条真实 worker scope）、`--profile dws`（离线签名的 DWS runner）、`--profile sandbox`（分析沙箱 broker）。生产使用 `deploy/compose/compose.prod.yml`，强制摘要固定的应用镜像、秘密目录和 HTTPS origin，不包含 build context；它尚未通过企业发布验收。
+
+### 钉钉与 GLM 凭据（开发栈）
+
+1. `cp .env.example .env`，填写 `DINGTALK_CORP_ID`、`DINGTALK_CLIENT_ID`、`DINGTALK_ROBOT_CODE` 等非秘密标识，以及 `GLM_API_KEY`、`DINGTALK_CLIENT_SECRET`。两个 secret 也接受 `*_FILE` 引用或别名 `AIDER_AI_DEFAULT_API_KEY`、`DINGTALK_APP_SECRET`。
+2. 运行 `node deploy/setup-dev-secrets.mjs`。脚本生成随机数据库/会话密钥，并把 GLM/钉钉 secret 以 0600 写入 `.secrets/docker/glm_api_key` 与 `.secrets/docker/dingtalk_client_secret`；清空来源后重新运行会把导入文件清空。
+3. 用 `./deploy/dev-up.sh`（或显式 `docker compose --env-file .env -f ...`）启动默认栈，需要长连接与卡片投递时追加 `--profile dingtalk`。容器只读取 `/run/secrets/*`；`DINGTALK_CORP_ID` 等非秘密值由 Compose 从根目录 `.env` 插值。
+
+`.env` 与 `.secrets/` 均被 git 忽略，禁止提交或粘贴到报告和聊天。凭据存在只表示已配置，真实模型、钉钉、DWS 与公司 MCP 联调仍须单独验收，不会使任何 T 用例自动通过。
+
+DWS 还需要单独预构建的固定 runner 和容器内可读的 0600 私有配置；仅填写 `.env` 凭据不会启用 DWS，缺失或不受支持的本地模式会以 `DWS_RUNNER_SERVICE_REQUIRED` 失败关闭。
+
+分析沙箱通过独立 broker 运行，API/worker 不挂载 Docker socket。首次启用 sandbox profile 前，在 Docker 宿主机生成密钥、配置和摘要固定的分析镜像：
+
+```sh
+node deploy/setup-sandbox-broker.mjs --build
+docker compose -f deploy/compose/compose.dev.yml --profile sandbox up -d --build --wait
+curl http://127.0.0.1:64700/api/v1/health/ready   # 应用健康；broker 只在内网 8092 提供鉴权接口
+```
+
+`setup-sandbox-broker.mjs` 在 `.secrets/sandbox-broker/` 写入 0600 的 HMAC key、Ed25519 producer keypair 和 config；只有 broker 容器挂载宿主 Docker socket（root 等价权限），且不持有钉钉/GLM/DWS/公司 MCP 凭据。类型化客户端 `SandboxBrokerClient` 已覆盖签名制品登记、提交、状态与取消，`SandboxProducer` 已覆盖上传前作业校验、制品登记、单信封签名与单次提交，xlsx/docx 输出经有界 ZIP 结构与 CRC 校验，broker 在运行期间按间隔复查实时授权并在撤销时中止且不写成果；但业务能力与队列尚未调用它们，因此该服务目前只能通过客户端/生产者、签名 HTTP 接口或测试直接验证，不能视为分析功能已对用户开放。
+
+代码查询、日志查询和数据查询全部调用上游企业 AI 底座 MCP，本项目不获取企业数据库账号、不直连数据源、不提供绕过 MCP 的查询适配器。审核后的私有配置放在 `.secrets/company-mcp/`（只读挂载到 `/run/company-mcp`），`.env` 中的 `COMPANY_MCP_CONFIG_FILE`、`COMPANY_LOGS_MCP_CONFIG_FILE`、`COMPANY_DATA_MCP_CONFIG_FILE` 必须写容器路径 `/run/company-mcp/<name>.json`；宿主机相对路径在容器内不存在。缺失时能力保持 `UNCONFIGURED`/`BLOCKED_EXTERNAL`。数据查询只执行已认证模板，结果保存 queryId、水位、完整性与版本证据；上游认证和 live 验收仍未完成。
+
+宿主机工具链仅用于源码检查与自动化测试，需 Node **24.21.0**、pnpm **10.34.7**（不要使用本机默认 Node 25）。测试使用独立的临时 PostgreSQL 64711 和明确替身，不读取 `.env`。
 
 ```sh
 pnpm install --frozen-lockfile
-pnpm setup:dev
-docker compose -f deploy/compose/compose.dev.yml up -d --wait postgres
-pnpm db:migrate
-pnpm db:seed:test
 pnpm lint
 pnpm typecheck
 pnpm build
-pnpm test:prepare # 专用临时测试数据库，端口 64711，不读取 .env
+pnpm test:prepare # macOS 上若 PG17 测试客户端无法构建，请使用已提供的隔离测试库
 pnpm test
 pnpm test:e2e
-pnpm dev
-# 前端独立开发预览需要把 API 的 APP_ORIGIN 配置为 http://localhost:64701
-# 另一个终端：前端开发预览，代理到 API
-pnpm dev:web
-# 另一个终端：持久队列/原生模型运行时
-pnpm start:worker
-# 已配置机器人身份与真实测试资产后，独立启动消息投递进程
-pnpm start:notifier
 ```
 
-API 使用 `127.0.0.1:64700`，数据库使用 `127.0.0.1:64710`；前端开发预览使用 `64701`。`/api/v1/health/live` 与 `/api/v1/health/ready` 分开检查。没有模型密钥时 worker 将真实记录 `WAITING_AUTH`，不会返回假模型回答。没有钉钉应用配置时 `start:ingress` 拒绝启动，不使用已有员工 CLI 登录替代机器人身份。已实现浏览器 OAuth、一次性 state、企业与目录身份匹配和任务工作台；真实 OAuth 仍需企业回调域名及已核验目录，已实现安全状态卡、750ms合并和会话确认的取消流程；真实模板与权限仍须验收。可先执行 pnpm tenant:register 建立本地租户命名空间，此操作不会创建用户、授予角色或验证平台授权。构建后的工作台由 API 在 64700 同源提供。
+`/api/v1/health/live` 与 `/api/v1/health/ready` 分开检查。没有钉钉应用配置时 ingress 拒绝启动，不使用已有员工 CLI 登录替代机器人身份。已实现浏览器 OAuth、一次性 state、企业与目录身份匹配和任务工作台；真实 OAuth 仍需企业回调域名及已核验目录。构建后的工作台由 API 在 64700 同源提供。
 
 `oa_app`、`oa_runtime`、`oa_queue` 分离；迁移身份仅用于一次性迁移/测试种子。RLS 按租户与所有者约束私人行。pg-boss 结构属于显式迁移，队列运行时不执行升级。迁移只允许追加，不修改已经执行过的文件；回滚采取兼容旧代码或新修正迁移。
 
@@ -39,11 +63,11 @@ pnpm run doctor --profile ENTERPRISE_DWS # 配置和真实数据库诊断；配�
 pnpm verify:release --profile ENTERPRISE_DWS # 缺任何必需证据都拒绝发布
 ```
 
-`.env.example` 是变量索引。真实凭据需通过受控 secret mount 提供；不要粘贴进代码、测试报告或聊天。企业测试资源、审批、外部写入和清理按文档 04 执行。生产部署、沙箱、全部办公能力和最终验收仍在后续阶段，开发镜像不能据此视为生产就绪。
+`.env.example` 是变量索引。生产凭据必须通过受控 secret mount 提供；开发栈可把未提交的 `.env` 交给 `setup-dev-secrets.mjs` 导入。不要粘贴凭据进代码、测试报告或聊天。企业测试资源、审批、外部写入和清理按文档 04 执行。生产部署、全部办公能力和最终验收仍在后续阶段，开发镜像不能据此视为生产就绪；沙箱 broker 与生产者客户端已可部署并通过本地隔离执行验证，但业务能力接线和真实 T097/T098 验收仍未完成。
 
-现有 `.env` 可使用 `DINGTALK_APP_KEY/SECRET` 和 `AIDER_AI_DEFAULT_BASE_URL/API_KEY/MODEL`，项目会映射到规范名称；显式规范变量优先，secret mount 优先于明文变量。默认模型仍严格限定为 `glm-5.3-flash`。凭据存在仅表示已配置；真实验证和企业测试资产仍单独核验。
+现有 `.env` 可使用 `DINGTALK_APP_KEY/SECRET` 和 `AIDER_AI_DEFAULT_BASE_URL/API_KEY/MODEL`，项目会映射到规范名称；显式规范变量优先，secret mount 优先于明文变量。开发栈中的 `DINGTALK_APP_SECRET` 与 `AIDER_AI_DEFAULT_API_KEY` 也会由 `setup-dev-secrets.mjs` 识别并导入；模型/机器人标识等非秘密别名由应用直接读取 `.env`。默认模型仍严格限定为 `glm-5.3-flash`。凭据存在仅表示已配置；真实验证和企业测试资产仍单独核验。
 
-自动化测试只使用 `.data/test-environment/` 下独立生成的测试配置和专用临时 PG 实例，不加载仓库 `.env`，不继承企业 provider 凭据。测试入口默认拦截未声明网络目标，只允许测试数据库 64711 和浏览器测试服务 64702 的回环连接；这是 Node 进程保护，生产沙箱的网络隔离仍属 P13。浏览器使用本机 Chrome；OAuth 导航在测试内拦截，合成 OAuth 通过不计为企业联调。
+自动化测试只使用 `.data/test-environment/` 下独立生成的测试配置和专用临时 PG 实例，不加载仓库 `.env`，不继承企业 provider 凭据。测试入口默认拦截未声明网络目标，只允许测试数据库 64711、浏览器测试服务 64702 和合成 sandbox-broker 服务 64712 的回环连接；这是 Node 进程保护。真实分析作业由 broker 以 `--network none` 启动，与测试守卫相互独立。浏览器使用本机 Chrome；OAuth 导航在测试内拦截，合成 OAuth 通过不计为企业联调。
 
 卡片配置通过 `DINGTALK_CARD_TEMPLATE_FILE` 指向受控 JSON，必需字段为 `templateId`、`statusKey`、`taskUrlKey`、`cancelTokenKey`，后三者对应企业已审核模板的变量名。模板取消回调传入 `cardPrivateData.params.action=cancel` 和该卡的 `token`；服务器只返回当前用户私有的 `actionUrl`，实际停止须在 H5 登录并确认。审批通过独立的会话审批流程处理，不接受取消回调充当批准。缺模板或明确权限拒绝时保留文本投递；未知卡片发送不会自动重做。`FINALIZED_UNVERIFIED` 只表示平台接受最终更新，不表示已核验送达。T007 已由原生 SSE 解析器的100个分片驱动安全进度、750ms卡片合并和最终更新的本地协议链路验证；模型和钉钉 HTTP 使用明确替身，真实模板/平台送达仍待企业联调。
 

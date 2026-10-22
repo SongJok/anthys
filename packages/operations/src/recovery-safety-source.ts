@@ -45,12 +45,29 @@ export async function freezeRecoverySafetySource(raw:RecoverySafetySourceInput){
  const input=p.data;let url:URL;
  try{url=new URL(input.connectionString);if(url.protocol!=='postgresql:'||url.hostname!=='127.0.0.1'||!['64710','64711'].includes(url.port)||url.username!=='oa_migrator'||!url.password||decodeURIComponent(url.pathname.slice(1))!==input.expectedDatabase||url.search||url.hash||['postgres','template0','template1'].includes(input.expectedDatabase))throw Error();}catch{throw new RecoverySafetySourceError('RECOVERY_SOURCE_INPUT_INVALID',false);}
  const started=performance.now(),deadline=started+input.timeoutMs,controller=new AbortController(),signal=AbortSignal.any([callerSignal,controller.signal]),timer=setTimeout(()=>controller.abort(),input.timeoutMs),socket=new Socket();
- let fenceAttempted=false,connected=false,transaction=false,committed=false,closed=false;
+ let fenceAttempted=false,connected=false,controlConnected=false,transaction=false,committed=false,closed=false;
  const socketClosed=new Promise<void>(resolve=>socket.once('close',()=>{closed=true;resolve();}));socket.on('error',()=>{});
  const c=new pg.Client({host:'127.0.0.1',port:Number(url.port),database:input.expectedDatabase,user:'oa_migrator',password:decodeURIComponent(url.password),ssl:false,client_encoding:'UTF8',options:'-c row_security=off',connectionTimeoutMillis:Math.min(3000,input.timeoutMs),query_timeout:input.timeoutMs,application_name:'anthys-fenced-safety-source',stream:()=>socket});
- c.on('error',()=>{});const stop=()=>socket.destroy();signal.addEventListener('abort',stop,{once:true});
+ c.on('error',()=>{});
+ // ALLOW_CONNECTIONS=false cannot be issued from a session inside the target
+ // database, so a second maintenance session applies the persistent fence.
+ const controlSocket=new Socket();
+ const controlSocketClosed=new Promise<void>(resolve=>controlSocket.once('close',resolve));controlSocket.on('error',()=>{});
+ const control=new pg.Client({host:'127.0.0.1',port:Number(url.port),database:'postgres',user:'oa_migrator',password:decodeURIComponent(url.password),ssl:false,client_encoding:'UTF8',options:'-c row_security=off',connectionTimeoutMillis:Math.min(3000,input.timeoutMs),query_timeout:input.timeoutMs,application_name:'anthys-fenced-safety-control',stream:()=>controlSocket});
+ control.on('error',()=>{});
+ const stop=()=>{socket.destroy();controlSocket.destroy();};signal.addEventListener('abort',stop,{once:true});
  const check=()=>{if(signal.aborted||performance.now()>=deadline)throw new RecoverySafetySourceError(callerSignal.aborted?'RECOVERY_SOURCE_CANCELLED':'RECOVERY_SOURCE_TIMEOUT',fenceAttempted);};
  const query=async<T extends pg.QueryResultRow=pg.QueryResultRow>(text:string,values?:unknown[])=>{check();const result=await c.query<T>(text,values);check();return result;};
+ const controlQuery=async<T extends pg.QueryResultRow=pg.QueryResultRow>(text:string,values?:unknown[])=>{check();const result=await control.query<T>(text,values);check();return result;};
+ let controlDone=false;
+ const closeControl=async()=>{
+  if(!controlConnected||controlDone)return;controlDone=true;
+  const ending=control.end().then(()=>true,()=>false);
+  let controlTimer:ReturnType<typeof setTimeout>|undefined;
+  await Promise.race([ending,new Promise<false>(resolve=>{controlTimer=setTimeout(()=>{controlSocket.destroy();resolve(false);},1000);})]);clearTimeout(controlTimer);
+  if(!controlSocket.destroyed)controlSocket.destroy();
+  await Promise.race([controlSocketClosed,new Promise<void>(resolve=>setTimeout(resolve,1000))]);
+ };
  try{
   check();await c.connect();connected=true;check();
   await query("SET search_path=pg_catalog; SET timezone='UTC'; SET DateStyle='ISO, YMD'; SET extra_float_digits=3; SET row_security=off");
@@ -61,9 +78,13 @@ export async function freezeRecoverySafetySource(raw:RecoverySafetySourceInput){
   if(ledger.length<73||ledger.length>requiredSchema.migrations.length||ledger.some((r,i)=>r.name!==requiredSchema.migrations[i]?.name||r.hash!==requiredSchema.migrations[i]?.hash)||digest(ledger.map(r=>r.name+'\0'+r.hash+'\0').join(''))!==input.expectedSchemaFingerprint||(await query('SELECT public.oa_schema_ledger_read_only() safe')).rows[0]?.safe!==true)throw new RecoverySafetySourceError('RECOVERY_SOURCE_SCHEMA_MISMATCH',false);
   const unsupported=(await query('SELECT EXISTS(SELECT 1 FROM pg_subscription) OR EXISTS(SELECT 1 FROM pg_foreign_table) OR EXISTS(SELECT 1 FROM pg_prepared_xacts WHERE database=current_database()) found')).rows[0]?.found;
   if(unsupported!==false)throw new RecoverySafetySourceError('RECOVERY_SOURCE_UNSUPPORTED_WRITERS',false);
+  check();await control.connect();controlConnected=true;check();
+  const controlIdentity=(await controlQuery("SELECT current_database() database,current_user role,(SELECT system_identifier::text FROM pg_control_system()) system,(SELECT rolsuper FROM pg_roles WHERE rolname=current_user) superuser,current_setting('server_version_num')::int version")).rows[0];
+  if(!controlIdentity||controlIdentity.database!=='postgres'||controlIdentity.role!=='oa_migrator'||controlIdentity.system!==input.expectedSystemIdentifier||controlIdentity.superuser!==true||controlIdentity.version<170000||controlIdentity.version>179999)throw new RecoverySafetySourceError('RECOVERY_SOURCE_IDENTITY_MISMATCH',false);
   // A failed acknowledgement may still have committed the persistent fence.
   // Never compensate by reopening; reconcile through the retained authority.
-  fenceAttempted=true;await query('ALTER DATABASE '+quote(input.expectedDatabase)+' ALLOW_CONNECTIONS false');
+  fenceAttempted=true;await controlQuery('ALTER DATABASE '+quote(input.expectedDatabase)+' ALLOW_CONNECTIONS false');
+  await closeControl();
   await query('SELECT pg_stat_clear_snapshot()');
   const others=(await query('SELECT pid FROM pg_stat_activity WHERE datid=$1::oid AND pid<>pg_backend_pid() ORDER BY pid',[input.expectedDatabaseOid])).rows;
   if(others.length>1000)throw new RecoverySafetySourceError('RECOVERY_SOURCE_TOO_MANY_BACKENDS',true);
@@ -91,8 +112,9 @@ export async function freezeRecoverySafetySource(raw:RecoverySafetySourceInput){
   if(error instanceof RecoverySafetySourceError)throw error;
   throw new RecoverySafetySourceError(signal.aborted?(callerSignal.aborted?'RECOVERY_SOURCE_CANCELLED':'RECOVERY_SOURCE_TIMEOUT'):'RECOVERY_SOURCE_CAPTURE_FAILED',fenceAttempted);
  }finally{
-  // The lifetime also includes normal end. Own only this socket, and bound the
+  // The lifetime also includes normal end. Own only these sockets, and bound the
   // observation of cleanup; never retry ALTER DATABASE or undo an unknown fence.
+  await closeControl();
   const ending=c.end().then(()=>true,()=>false);let cleanupTimer:ReturnType<typeof setTimeout>|undefined;
   const ended=await Promise.race([ending,new Promise<false>(resolve=>{cleanupTimer=setTimeout(()=>{socket.destroy();resolve(false);},1000);})]);clearTimeout(cleanupTimer);
   if(!socket.destroyed)socket.destroy();if(connected&&!closed)await Promise.race([socketClosed,new Promise<void>(resolve=>setTimeout(resolve,1000))]);

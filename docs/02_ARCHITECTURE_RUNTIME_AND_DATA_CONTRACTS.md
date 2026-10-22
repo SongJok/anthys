@@ -81,7 +81,7 @@ anthys/
     dingtalk/               # Stream 标准化、OpenAPI、卡片、身份映射
     dws/                    # 发现、版本锁、binding、profile、错误归一化
     mcp/                    # transport、tool discovery、公司语义映射
-    data/                   # 模板验证、gateway adapter、结果口径验证
+    data/                   # 模板验证、MCP 数据适配、结果口径验证
     search/                 # 公网与企业检索、引用、SSRF 防护
     sandbox/                # 作业协议、配额、artifact scan
     storage/                # SQL repositories、FileStore、加密
@@ -379,7 +379,8 @@ runtime_context = tenant + conversation + topic/task + requester + audienceHash 
 | group_cases | conversation_id, source_refs, owner_id, due_at, state | 近似候选可合并，不能只凭标题唯一 |
 | schedules | owner_id, rule, timezone, next_due_at, misfire, state | state+next_due_at 部分索引 |
 | schedule_occurrences | schedule_id, revision, scheduled_at, task_id | tenant+schedule_id+revision+scheduled_at 唯一 |
-| watches | schedule_id, predicate_version, last_value, last_notified_hash | 条件与通知状态原子更新 |
+| watches | schedule_id, predicate_version, last_value, last_notified_hash | 条件与通知状态原子更新；通知终态含 CONFIRMED/APPLIED_UNVERIFIED/FAILED/UNKNOWN，仅 UNKNOWN 阻塞后续 |
+| condition_watch_sources | watch_id, scope_id/version, template/metric/window | 所有者RLS不可变绑定；绑定后只读，scope版本或来源修订变化即失效 |
 | data_templates | key, semantic_version, status, definition, signature | tenant+key+version 唯一，不覆盖旧版本 |
 | data_executions | template_id, params_hash, query_id, watermark, status | 可追踪执行，明细另存受保护文件 |
 | artifacts | owner, task_id, storage_key, mime, hash, acl_ref, expires_at | 文件与 ACL 同步、下载再鉴权 |
@@ -529,7 +530,7 @@ scheduler 每 5 秒按到期索引获取记录，以行锁/SKIP LOCKED 领取。
     }
   },
   "execution": {
-    "kind": "DATA_GATEWAY",
+    "kind": "MCP_DATA_TOOL",
     "bindingRef": "payments-analytics",
     "operation": "success-rate",
     "timeoutMs": 30000,
@@ -557,9 +558,11 @@ scheduler 每 5 秒按到期索引获取记录，以行锁/SKIP LOCKED 领取。
 
 ### 10.2 查询执行
 
-支持数据部门 HTTP Gateway、认证 MCP 数据工具、可选只读数据库适配器。只读 DB 必须只接统计从库/专门账号；SQL 来源是审核模板，值采用绑定参数，动态标识符使用白名单映射。`SELECT` 字符串前缀检查不足以保证安全；必须按方言验证 AST、函数白名单、只读事务、超时、成本/扫描阈值和只读数据库权限。
+数据查询统一经公司 MCP 的认证数据工具执行，与企业代码、日志查询同属 MCP 接入面，但使用独立审核配置：`COMPANY_DATA_MCP_CONFIG_FILE`、固定 server 名与版本、固定工具名、输入 schema hash、token 文件权限 0600、有限超时/响应大小和逐调用身份。本项目不直连企业业务数据库，不内置 HTTP Gateway 或只读数据库适配器作为旁路；平台 PostgreSQL 只保存任务、模板、执行审计与证据元数据。
 
-未知方言没有可靠 parser 时，不开放模型自由 SQL；改用服务器预注册 operation。模板中断言用受限表达式解释器，不用 eval。
+模板的 SQL/operation 由数据部门在上游维护并经审核；本项目只发送白名单参数（时间窗、维度枚举等），不发送用户提供的 tenantId/deptId 或原始 SQL，安全行范围由上游按身份注入并在响应中回显。上游若以 SQL 模板执行，其 AST/只读/函数白名单/成本与超时控制属于上游数据服务的责任边界，本项目在合同中要求并核验其回执，不能凭本项目字符串检查宣称 SQL 安全。
+
+未知上游 operation 或模板版本不匹配时拒绝执行，不开放模型自由 SQL。模板中断言用受限表达式解释器，不用 eval。
 
 返回：queryId、templateVersion、columns（含类型/单位）、rows 或 artifactRef、rowCount、truncated、watermark、elapsedMs、grain、appliedScope摘要。只把必要聚合结果送模型；数字超过 JS 安全整数时保留字符串/Decimal。
 
@@ -589,6 +592,8 @@ interface SandboxJob {
 默认 1 CPU、512 MiB、60 秒 wall time、20 MiB 输出、只读依赖包、非 root、只读根目录、tmpfs 工作目录、cap_drop ALL、no-new-privileges、seccomp/AppArmor、无网络。高负载需管理员提高配额。
 
 Broker 是独立受限服务：只接受固定镜像 digest 与结构化 Job，签名请求，禁止任意镜像/挂载/设备/宿主路径。主应用不挂 Docker socket。生产可用独立 rootless runtime 或受管理隔离执行集群；即便 broker 拥有容器管理权，也不能与业务 API 共进程共凭据。
+
+当前仓库同时提供可复用 broker 库和独立 HTTP 服务 `apps/sandbox-broker`：签名/主体/镜像/时间窗校验、PG持久nonce与一次性状态、artifact resolver、所有者配额、持久取消和输出哈希/扩展名/MIME复核；xlsx/docx 不再按文件内字符串判定，而是经有界 ZIP 检查（条目数、展开字节与压缩比上限，拒绝路径穿越/重复/加密条目，核对本地头与 CRC）。ACL通过可注入接口复核，并已提供 `PgSandboxAuthorizer`：在所有者RLS作用域内重查租户/用户状态、用户与任务双authEpoch、任务归属/状态/取消/过期、运行归属/任务绑定/非终态。独立服务只使用 Node `http`，通过HMAC-SHA256服务密钥认证，主体来自已认证请求头而不是签名作业内容；提供 `POST /v1/sandbox/jobs`、作业读取/取消和制品登记接口，未认证、重放、过期、越权或超限请求在执行前拒绝。服务通过 Compose 的 `sandbox` profile 部署（dev/prod），配置与Ed25519公钥以只读secret挂载，工作区与制品使用独立命名卷；只有broker容器挂载宿主Docker socket，API/worker不挂载，且broker不持有DingTalk/GLM/DWS/公司MCP凭据。镜像由 `deploy/setup-sandbox-broker.mjs` 生成并按digest固定；宿主可改用独立rootless runtime或受管理隔离执行集群，但不能与业务API共进程共凭据。执行容器写入稳定所有者/作业标签，重启时可按活跃作业集合清理同一所有者的孤儿容器而不影响其他broker或活跃作业。准入记录持久化broker所有者；启动恢复通过SECURITY DEFINER函数仅把同一broker遗留的RESERVED/RUNNING结算为FAILED/SANDBOX_JOB_INTERRUPTED，其他broker及终态记录不受影响，且必须在接受新提交前调用；孤儿工作目录在启动和每5分钟按所有者前缀清扫。另提供 `PgSandboxArtifactConnector`：代码/输入/输出字节存放于加密文件存储，PostgreSQL 只保存所有者范围元数据与 SHA-256；每次解析重新核对长度与哈希，输出仅在broker复核后写入，其他所有者被RLS隐藏。应用侧提供 `SandboxBrokerClient`：以共享服务密钥签名制品上传、作业提交、状态查询与取消，拒绝重定向、超限或畸形响应，并在返回制品登记前核对byteSize/SHA-256；不对结果不确定的提交自动重试，去重由broker的nonce/作业唯一约束决定。`SandboxProducer` 在登记任何字节前验证主体与完整封闭作业（限额、输出类型、代码大小），随后上传代码/输入、以默认30秒且不超过60秒的有效期签名一个信封并仅提交一次；提交结果不明时同样不自动重发。broker在执行期间按可配置的有界间隔重查实时授权，撤销或复查失败会中止执行并以REJECTED/AUTHORIZATION_REVOKED或FAILED/AUTHORIZATION_RECHECK_FAILED结束、不持久化输出；尚未实现调用该生产者的业务能力与作业队列、推送式授权撤销或授权缓存、受信代码/输入登记API、CPU/内存加权预算及文件系统配额；输出目录仍由宿主轮询限额。上传附件中的归档文件只隔离、不展开，因此不存在解压写出路径；T097/T098仍为NOT_RUN。
 
 DWS Runner 与分析沙箱分开：前者需要受控出网和身份凭据，后者绝不获得 DWS/MCP/模型密钥。任意生成代码不能调用 credential broker。
 

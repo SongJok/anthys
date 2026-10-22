@@ -1,0 +1,30 @@
+{
+  "contract": {
+    "id": "anthys.company.data.query",
+    "version": 1,
+    "operations": [
+      "CHECK",
+      "QUERY"
+    ],
+    "authorization": "UPSTREAM_RESOURCE_ENFORCED",
+    "sideEffects": "NONE",
+    "templates": "CERTIFIED_REGISTRY",
+    "aggregates": "SERVER_COMPUTED"
+  },
+  "contractHash": "4f158b2f18ae10bdf96771adb1dbf0133ddfda4607dce6756a6b3efb604818ca",
+  "sdk": "@modelcontextprotocol/sdk@1.32.1",
+  "selectedUpstreamTool": "chat",
+  "server": {
+    "name": "anthys-company-data-proxy",
+    "version": "1.0.0"
+  },
+  "inputSchemaHash": "1c1e0badb6c44c8d56199ff1e8a4364c4fd427700bafca2320ae240c78505e8f",
+  "templateRegistryHash": "8ecc28714413ea48f8ffda4cda9bd7dd5a3adba626a0cabd5092ebbad0507fc3",
+  "templateFiles": [
+    {
+      "key": "payments.success_rate_daily",
+      "version": "1.0.0",
+      "hash": "970e2f6ead6741b0609c0d19e13e40a489bc5bfba7a7cb390bca052233bbd344"
+    }
+  ]
+}

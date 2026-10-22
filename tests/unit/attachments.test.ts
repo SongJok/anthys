@@ -6,7 +6,7 @@ import {EventEmitter} from 'node:events';
 import {Readable} from 'node:stream';
 import type {RequestOptions} from 'node:https';
 import type {IncomingMessage,ClientRequest} from 'node:http';
-import {gzipSync} from 'node:zlib';
+import {deflateRawSync,gzipSync} from 'node:zlib';
 import {RestrictedDownloader,DingTalkAttachmentSource,publicAddress} from '../../packages/attachments/src/download.js';
 import {inspectFile,safeFileName} from '../../packages/attachments/src/inspect.js';
 import {EncryptedFileStore} from '../../packages/storage/src/files.js';
@@ -15,6 +15,18 @@ import {messageInput} from '../../packages/dingtalk/src/message-input.js';
 function response(status=200,headers:Record<string,string>={},chunks:Buffer[]=[Buffer.from('safe text')]):IncomingMessage{return Object.assign(Readable.from(chunks),{statusCode:status,headers}) as IncomingMessage;}
 function client(responses:IncomingMessage[],seen:{url:string;options:RequestOptions}[]=[]){return (url:URL,options:RequestOptions,callback:(res:IncomingMessage)=>void)=>{seen.push({url:url.toString(),options});const request=new EventEmitter() as EventEmitter&{setTimeout:()=>unknown;end:()=>void};request.setTimeout=()=>request;request.end=()=>{const res=responses.shift();if(res)callback(res);else request.emit('error',Error('synthetic network failure'));};return request as unknown as ClientRequest;};}
 const hosts=new Set(['files.example','next.example']);const resolve=async()=>[{address:'8.8.8.8',family:4}];
+function crc32(data:Buffer){let crc=0xffffffff;for(const byte of data){crc^=byte;for(let bit=0;bit<8;bit++)crc=(crc>>>1)^((crc&1)?0xedb88320:0);}return (crc^0xffffffff)>>>0;}
+function zipEntries(entries:readonly {name:string;data:Buffer;deflate?:boolean}[]){
+ const locals:Buffer[]=[],centrals:Buffer[]=[];let offset=0;
+ for(const entry of entries){
+  const name=Buffer.from(entry.name,'utf8'),method=entry.deflate?8:0,payload=entry.deflate?deflateRawSync(entry.data):entry.data,checksum=crc32(entry.data);
+  const local=Buffer.alloc(30);local.writeUInt32LE(0x04034b50,0);local.writeUInt16LE(20,4);local.writeUInt16LE(0x800,6);local.writeUInt16LE(method,8);local.writeUInt32LE(checksum,14);local.writeUInt32LE(payload.length,18);local.writeUInt32LE(entry.data.length,22);local.writeUInt16LE(name.length,26);
+  const central=Buffer.alloc(46);central.writeUInt32LE(0x02014b50,0);central.writeUInt16LE(20,4);central.writeUInt16LE(20,6);central.writeUInt16LE(0x800,8);central.writeUInt16LE(method,10);central.writeUInt32LE(checksum,16);central.writeUInt32LE(payload.length,20);central.writeUInt32LE(entry.data.length,24);central.writeUInt16LE(name.length,28);central.writeUInt32LE(offset,42);
+  locals.push(local,name,payload);centrals.push(central,name);offset+=local.length+name.length+payload.length;
+ }
+ const directory=Buffer.concat(centrals),end=Buffer.alloc(22);end.writeUInt32LE(0x06054b50,0);end.writeUInt16LE(entries.length,8);end.writeUInt16LE(entries.length,10);end.writeUInt32LE(directory.length,12);end.writeUInt32LE(offset,16);
+ return Buffer.concat([...locals,directory,end]);
+}
 it('T103 blocks literal IPs, unapproved hosts, private/mixed DNS, IPv6 aliases and redirect rebinding before network',async()=>{
  for(const ip of ['127.0.0.1','10.0.0.1','100.64.0.1','169.254.169.254','172.16.1.1','192.168.1.1','192.0.2.1','198.18.0.1','198.51.100.1','203.0.113.1','224.0.0.1','::1','::ffff:127.0.0.1','2001:0db8::1','2001:2::1','2002:7f00:1::','3fff::1','not-ip'])expect(publicAddress(ip)).toBe(false);for(const ip of ['8.8.8.8','1.1.1.1','2001:4860:4860::8888'])expect(publicAddress(ip)).toBe(true);
  const seen:{url:string;options:RequestOptions}[]=[];for(const url of ['http://files.example/a','https://127.0.0.1/a','https://[::1]/a','https://unapproved.example/a','https://files.example:8443/a','https://user:secret@files.example/a','https://files.example/a#fragment'])await expect(new RestrictedDownloader({hosts,resolve,request:client([],seen)}).download(url,new AbortController().signal,async()=>{})).rejects.toThrow('DOWNLOAD_DESTINATION_DENIED');expect(seen).toHaveLength(0);
@@ -40,6 +52,10 @@ it('T099 input validation rejects paths/MIME spoofing and quarantines archives, 
  expect(inspectFile(Buffer.from('中文 safe'),'safe.txt','text/plain').state).toBe('READY');expect(inspectFile(Buffer.from('{"value":1}'),'safe.json','application/json').mime).toBe('application/json');expect(inspectFile(Buffer.from('a,b\n1,2'),'safe.csv','text/csv').state).toBe('READY');
  expect(()=>inspectFile(Buffer.from('not-json'),'safe.json','application/json')).toThrow('ATTACHMENT_INVALID_JSON');expect(()=>inspectFile(Buffer.from('safe'),'safe.txt','image/png')).toThrow('ATTACHMENT_MIME_MISMATCH');expect(()=>inspectFile(Buffer.from([0xff]),'safe.txt','text/plain')).toThrow('ATTACHMENT_UNKNOWN_BINARY');expect(()=>inspectFile(Buffer.from('a\0b'),'safe.txt','text/plain')).toThrow('ATTACHMENT_BINARY_CONTROLS');
  for(const [bytes,name] of [[Buffer.from('504b0304','hex'),'archive.zip'],[gzipSync(Buffer.alloc(1000000)),'bomb.gz'],[Buffer.from('4d5a','hex'),'file.txt'],[Buffer.from('89504e470d0a1a0a','hex'),'picture'],[Buffer.from('%PDF-1.7'),'file.pdf'],[Buffer.from('<svg><script>evil</script></svg>'),'file.svg'],[Buffer.from('API_KEY=synthetic-secret'),'file.txt'],[Buffer.from('#!/bin/sh\necho evil'),'file.txt'],[Buffer.from('text'),'file.docx']] as const)expect(inspectFile(bytes,name,'application/octet-stream').state).toBe('QUARANTINED');
+ const hostile=zipEntries([{name:'../escape.txt',data:Buffer.from('escape')},{name:'/etc/passwd',data:Buffer.from('root')},{name:'duplicate.txt',data:Buffer.from('one')},{name:'duplicate.txt',data:Buffer.from('two')},{name:'bomb.txt',data:Buffer.alloc(8*1024*1024),deflate:true}]);
+ const quarantined=inspectFile(hostile,'hostile.zip','application/zip');
+ expect(quarantined).toEqual({state:'QUARANTINED',mime:'application/zip',method:'MAGIC_SIGNATURE_QUARANTINE_NO_DECOMPRESSION',reason:'BINARY_INSPECTOR_OR_VERIFIED_MODALITY_REQUIRED'});
+ expect(JSON.stringify(quarantined)).not.toMatch(/escape|passwd|duplicate|bomb/);
 });
 it('inbound file/picture/rich-text fields follow observed contracts and never treat arbitrary URLs as downloads',()=>{
  expect(messageInput({msgtype:'file',content:JSON.stringify({downloadCode:'synthetic',fileName:'safe.txt'})}).attachments[0]).toMatchObject({kind:'FILE',fileName:'safe.txt'});expect(messageInput({msgtype:'picture',content:{downloadCode:'synthetic'}}).attachments[0]?.kind).toBe('PICTURE');

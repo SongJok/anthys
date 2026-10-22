@@ -905,8 +905,17 @@
     "layer": "E2E",
     "precondition": "每5分钟检查异常，连续5次条件保持相同",
     "oracle": "仅首次/合法重复规则通知；条件状态持久化",
-    "implementation": null,
-    "status": "NOT_RUN"
+    "implementation": "tests/integration/condition-watches.test.ts",
+    "status": "NOT_RUN",
+    "supplementaryImplementations": [
+      "tests/unit/watch-predicate.test.ts",
+      "tests/unit/watch-schedule-policy.test.ts",
+      "tests/integration/condition-watch-notifier.test.ts",
+      "tests/integration/condition-watch-observer.test.ts",
+      "tests/integration/watch-api.test.ts",
+      "tests/e2e/watch.spec.ts"
+    ],
+    "coverageNote": "Durable owner-scoped store evaluated with a real isolated PG: five persisted checks with only value changes notifying, notification budget visibility, value-hash dedupe and stored observation state. A supplementary cycle test proves explicit-scope claiming, injected observation, single settlement, source-fault suppression and cross-owner isolation. A concrete DingTalk notifier test proves owner/tenant/policy/value/notification rechecks before dispatch, a second recheck after token acquisition, deterministic text, provider acceptance mapped to APPLIED_UNVERIFIED and no send on abort. The company MCP observer test binds a certified template/window/metric under owner RLS, rejects cross-owner, duplicate, incompatible and out-of-window bindings without calling MCP, observes a real synthetic aggregate through CHECK then QUERY twice, turns revoked scope/grant/identity into suppressed UNAVAILABLE observations without MCP calls, and invalidates on scope-version or policy changes. A real HTTP/PG API test proves authenticated create/list/read/bind/pause/resume/cancel, CSRF rejection, schema rejection, cross-owner 404 and duplicate/incompatible source rejection. A Playwright test with synthetic login covers desktop and mobile: create from the watch UI, reload and read persisted state, bind a certified source, pause/resume/cancel, 401 without a session and 403 without CSRF, ending in a persisted CANCELLED watch with no reservations. No running worker/Compose acceptance, real DingTalk delivery or enterprise/live E2E acceptance."
   },
   {
     "id": "T056",
@@ -918,8 +927,13 @@
     "layer": "INTEGRATION",
     "precondition": "条件任务耗尽预算或到期",
     "oracle": "停止后续调用，状态可见；不隐形无限运行",
-    "implementation": null,
-    "status": "NOT_RUN"
+    "implementation": "tests/integration/condition-watches.test.ts",
+    "status": "NOT_RUN",
+    "supplementaryImplementations": [
+      "tests/unit/watch-schedule-policy.test.ts",
+      "tests/integration/condition-watch-notifier.test.ts"
+    ],
+    "coverageNote": "Real isolated PG asserts CHECK_LIMIT_REACHED and EXPIRED stop reasons persist with null next_check_at, resume cannot revive an exhausted budget, and no further claims schedule work. A durable advance-expiry renewal notice is reserved at most once per ACTIVE watch inside the seven-day horizon, remains owner-scoped, consumes zero check/notification budget, becomes UNKNOWN terminally on an indeterminate send, retries a definite FAILED delivery only after one hour for at most three attempts, and never extends expiry or auto-renews; the guarded DingTalk notifier refuses a watch cancelled before dispatch. No live scheduler/worker wiring."
   },
   {
     "id": "T057",
@@ -931,8 +945,12 @@
     "layer": "E2E",
     "precondition": "静默时间发生普通变化，多项同时触发",
     "oracle": "推迟/聚合；不得越过群主动消息限额",
-    "implementation": null,
-    "status": "NOT_RUN"
+    "implementation": "tests/integration/condition-watches.test.ts",
+    "status": "NOT_RUN",
+    "supplementaryImplementations": [
+      "tests/unit/watch-schedule-policy.test.ts"
+    ],
+    "coverageNote": "Quiet-window DEFER, cooldown aggregation and no early notification reservation are stored and observable in isolated PG. Group proactive-message quota integration and real delivery are absent, so E2E acceptance is not claimed."
   },
   {
     "id": "T058",
@@ -944,8 +962,13 @@
     "layer": "CHAOS",
     "precondition": "已更新监控状态但通知发送超时",
     "oracle": "投递UNKNOWN核对；不能无限重复提醒",
-    "implementation": null,
-    "status": "NOT_RUN"
+    "implementation": "tests/integration/condition-watches.test.ts",
+    "status": "NOT_RUN",
+    "supplementaryImplementations": [
+      "tests/integration/condition-watch-notifier.test.ts",
+      "tests/integration/condition-watch-observer.test.ts"
+    ],
+    "coverageNote": "Isolated PG sweep converts a stale PENDING reservation to UNKNOWN, blocks rescheduling, avoids duplicate sweeps and repeated notifications, supports explicit reconciliation and keeps value dedupe. The cycle test also proves a throwing sender becomes UNKNOWN and a throwing observer becomes a suppressed UNAVAILABLE observation. The concrete DingTalk notifier test proves a definite FAILED stays distinct, a lost provider response stays UNKNOWN and blocks, and explicit reconciliation may accept APPLIED_UNVERIFIED without claiming delivery. The company MCP observer test proves unavailable-source states (revoked scope/grant, suspended identity) never send a notification, aborted observation rejects, and an upstream scope-version or policy change surfaces as a typed source error rather than a stale-value notification. No real sender timeout or enterprise verification; chaos acceptance not run."
   },
   {
     "id": "T059",
@@ -1126,8 +1149,11 @@
     "oracle": "各自返回外部ID并读后核对；测试资料可清理",
     "implementation": null,
     "status": "NOT_RUN",
-    "coverageNote": "Release gate negative tests referencing this ID do not implement its business oracle.",
-    "supplementaryImplementations": []
+    "coverageNote": "Synthetic todo coordinator coverage (tests/unit/office-todos.test.ts): bounded single-todo query, and explicit one-shot proposals for create, update and close each consumed before one external call; success requires exact id/title/due/assignee/completion read-back and mismatch or unavailable read-back is UNKNOWN. Real isolated-PostgreSQL mirror coverage (tests/integration/office-todo-mirror.test.ts, 5 tests) keeps the local UUID separate from the nullable external todo id, links only from a supplied read-back, isolates owners through RLS, persists a one-shot write intent before the external call, settles only on exact content read-back, keeps lost or mismatched writes UNKNOWN until explicit reconciliation, refuses to treat a differing remote as success, applies remote revisions to the external snapshot only and requires explicit adoption for local title/due/completion. No real DWS/OpenAPI test todo/calendar/document/sheet writes, external cleanup or live acceptance exist, so this case remains NOT_RUN.",
+    "supplementaryImplementations": [
+      "tests/unit/office-todos.test.ts",
+      "tests/integration/office-todo-mirror.test.ts"
+    ]
   },
   {
     "id": "T072",
@@ -1310,8 +1336,9 @@
     "layer": "INTEGRATION",
     "precondition": "执行3.2节固定金标全部范围",
     "oracle": "attempts=5，success=3，rate=0.6且来源/版本完整",
-    "implementation": null,
-    "status": "NOT_RUN"
+    "implementation": "tests/integration/company-data.test.ts",
+    "status": "NOT_RUN",
+    "coverageNote": "MCP data component: certified template executed through a reviewed MCP data tool fixture; unit golden oracle in tests/unit/company-data-templates.test.ts. Raw upstream tool unavailable in CI, so live T096 remains NOT_RUN."
   },
   {
     "id": "T084",
@@ -1322,8 +1349,9 @@
     "layer": "UNIT",
     "precondition": "a1重复行、a4右边界、a5左边界外",
     "oracle": "a1只计1次；a4/a5均不计；UTC换算正确",
-    "implementation": null,
-    "status": "NOT_RUN"
+    "implementation": "tests/unit/company-data-templates.test.ts",
+    "status": "NOT_RUN",
+    "coverageNote": "Right-open UTC window, duplicate attempt dedupe and server row scope are covered by the deterministic template oracle; no live upstream result is claimed."
   },
   {
     "id": "T085",
@@ -1335,8 +1363,9 @@
     "layer": "SECURITY",
     "precondition": "用户提交tenantId/部门参数覆盖服务端范围",
     "oracle": "a7/a8不可出现；安全范围不能被用户覆盖",
-    "implementation": null,
-    "status": "NOT_RUN"
+    "implementation": "tests/unit/company-data-contracts.test.ts",
+    "status": "NOT_RUN",
+    "coverageNote": "Server-side tenant/actor/scope/template/row-scope/window substitutions are rejected; integration test proves a revoked local scope makes no upstream call. Enterprise a7/a8 data is unavailable, so the negative oracle uses reviewed fixture rows."
   },
   {
     "id": "T086",
@@ -1347,8 +1376,9 @@
     "layer": "UNIT",
     "precondition": "汇总app=2/3、web=1/2",
     "oracle": "总计3/5；不平均比例",
-    "implementation": null,
-    "status": "NOT_RUN"
+    "implementation": "tests/unit/company-data-templates.test.ts",
+    "status": "NOT_RUN",
+    "coverageNote": "Aggregates deduped attempts across channels; does not average per-channel rates."
   },
   {
     "id": "T087",
@@ -1359,8 +1389,9 @@
     "layer": "UNIT",
     "precondition": "NULL、分母0、大整数、Decimal金额",
     "oracle": "NULL不改0；无NaN；整数/金额保持精度",
-    "implementation": null,
-    "status": "NOT_RUN"
+    "implementation": "tests/unit/company-data-templates.test.ts",
+    "status": "NOT_RUN",
+    "coverageNote": "NULL with zero denominator stays NULL; bigint and exact decimal strings are preserved."
   },
   {
     "id": "T088",
@@ -1371,8 +1402,9 @@
     "layer": "SECURITY",
     "precondition": "模板参数注入SQL或动态表名",
     "oracle": "绑定值/白名单阻止；不能直接拼SQL",
-    "implementation": null,
-    "status": "NOT_RUN"
+    "implementation": "tests/unit/company-data-templates.test.ts",
+    "status": "NOT_RUN",
+    "coverageNote": "Template schema rejects raw SQL parameter names and unknown fields; execution only accepts the fixed operation/params, so user input never becomes SQL. Upstream SQL safety remains owned by the company MCP."
   },
   {
     "id": "T089",
@@ -1407,8 +1439,9 @@
     "layer": "E2E",
     "precondition": "查询结果truncated或水位落后24h",
     "oracle": "不能输出总体确定结论；展示范围/新鲜度",
-    "implementation": null,
-    "status": "NOT_RUN"
+    "implementation": "tests/unit/company-data-contracts.test.ts",
+    "status": "NOT_RUN",
+    "coverageNote": "Component contract maps TRUNCATED/SAMPLED and rejects missing watermark; full workbench E2E display is not implemented."
   },
   {
     "id": "T092",
@@ -1485,8 +1518,15 @@
     "layer": "SECURITY",
     "precondition": "生成JS读取环境密钥/访问PG/MCP/宿主socket",
     "oracle": "访问失败；环境不存在业务秘密；没有socket挂载",
-    "implementation": null,
-    "status": "NOT_RUN"
+    "implementation": "tests/integration/analysis-sandbox.test.ts",
+    "status": "NOT_RUN",
+    "coverageNote": "Real pinned Docker image and executor: a host secret present in the broker process is absent inside the job, reads outside the allowed mounts are ERR_ACCESS_DENIED, no Docker socket is mounted, child_process and the pg module are denied, and fetch is blocked by network_mode none. A real-PostgreSQL broker additionally rejects signature tampering, oversized wire, a foreign subject, nonce/job replay and denied or unavailable authorization before artifact resolution or execution; its authorizer, artifact resolver, quota and result sink remain injectable. A standalone HTTP service now authenticates an HMAC-signed subject header, rejects unsigned/tampered/stale/replayed requests and oversized or wrong-content-type bodies, exposes only owner-scoped reads and cancellation, aborts active execution on shutdown, and is covered against real PostgreSQL, the real encrypted artifact connector and a real listener. The dev Compose sandbox profile was started and a real JavaScript job executed through the broker container with uid 10001, network BLOCKED and the Docker socket unreadable. A typed producer client now signs artifact upload, submission, status and cancellation calls, refuses redirects, oversized/malformed responses and invalid caller bytes, and verifies the returned artifact size/SHA-256 against the uploaded bytes in the same real-PostgreSQL/listener test. A producer orchestration validates subject, limits and output types before any upload, then registers code/inputs, signs one bounded-lifetime envelope and submits once; tests prove an invalid subject, empty output types or oversized code leave zero artifact rows, and an aborted caller leaves zero new artifacts. No application capability or job queue invokes that producer, and no trusted producer registration API or live enterprise run exists, so T097 remains NOT_RUN. A concrete PgSandboxAuthorizer additionally rechecks live tenant/user status, both auth epochs, task ownership/status/cancel/expiry and run owner/task/non-terminal state under owner RLS against real PostgreSQL before any artifact resolution or execution. A concrete PgSandboxArtifactConnector keeps code/input/output bytes in the encrypted file store, verifies byte size and SHA-256 on every resolve, persists only broker-verified outputs and hides other owners behind RLS against real PostgreSQL.",
+    "supplementaryImplementations": [
+      "tests/integration/sandbox-broker.test.ts",
+      "tests/integration/sandbox-broker-service.test.ts",
+      "tests/integration/sandbox-authorizer.test.ts",
+      "tests/integration/sandbox-artifacts.test.ts"
+    ]
   },
   {
     "id": "T098",
@@ -1497,8 +1537,16 @@
     "layer": "SECURITY",
     "precondition": "无限循环、内存分配、fork/文件爆量",
     "oracle": "CPU/内存/PID/时间/输出限制生效，进程与文件清理",
-    "implementation": null,
-    "status": "NOT_RUN"
+    "implementation": "tests/integration/analysis-sandbox.test.ts",
+    "status": "NOT_RUN",
+    "coverageNote": "Real Docker: an infinite loop is force-removed at the wall limit, heap exhaustion fails without success, 100-file output explosion is stopped at the output cap, disallowed extensions/nested directories are rejected, and every case leaves no container or job workspace, including a chmod-000 directory. The broker adds owner-scoped active/daily quota admission, durable cancel-before-run and cancel-while-running abort, re-verification of output count/size/hash, JSON, HTML and PDF signatures plus strict bounded ZIP inspection of xlsx/docx (entry/expanded-size/ratio caps, CRC, local-header agreement and path/duplicate/encryption rejection) before sink persistence, and periodic live-authorization rechecks that abort a running executor on revocation or ACL failure and persist no outputs; a synthetic buffer that merely embeds the required OOXML entry name is rejected. A Docker-free sweep test proves only old directories with this broker's owner prefix are removed, with active/foreign/plain files retained and the limit honored; the deployed broker runs that sweep at startup and every five minutes. No independent CPU-throttling or PID-limit exhaustion measurement, filesystem-quota-backed output volume or live broker queue run exists, so T098 remains NOT_RUN. The real-Docker executor also labels each container with a stable broker owner and job ID and can remove owned orphans absent from an active-job set without touching a foreign owner or an active job. Admission rows persist a broker owner, and startup recovery settles only that broker's RESERVED/RUNNING rows as FAILED/SANDBOX_JOB_INTERRUPTED without touching other brokers or terminal rows. A concrete owner-scoped encrypted artifact connector verifies byte size and SHA-256 on every resolve and persists only broker-verified outputs.",
+    "supplementaryImplementations": [
+      "tests/integration/sandbox-broker.test.ts",
+      "tests/integration/sandbox-broker-service.test.ts",
+      "tests/integration/sandbox-executor-sweep.test.ts",
+      "tests/integration/sandbox-authorizer.test.ts",
+      "tests/integration/sandbox-artifacts.test.ts"
+    ]
   },
   {
     "id": "T099",
@@ -1510,13 +1558,12 @@
     "layer": "SECURITY",
     "precondition": "恶意归档路径穿越/压缩炸弹/伪MIME",
     "oracle": "接收前拒绝或隔离；不写出允许目录",
-    "implementation": null,
+    "implementation": "tests/unit/attachments.test.ts",
     "status": "NOT_RUN",
     "supplementaryImplementations": [
-      "tests/integration/attachments.test.ts",
-      "tests/unit/attachments.test.ts"
+      "tests/integration/attachments.test.ts"
     ],
-    "coverageNote": "Partial local oracle coverage with real dedicated PostgreSQL/encrypted files and synthetic provider transports; full baseline and live acceptance remain NOT_RUN."
+    "coverageNote": "A real hostile ZIP (parent-directory and absolute entry names, duplicate names and a deflated 8 MiB zero-filled member) is quarantined by MIME magic before any archive parsing or decompression; inspection returns only a fixed reason code with no member names or contents. Path/control-character filenames, MIME spoofing, executables, gzip, active content and credentials are also rejected or quarantined, and the integration path persists only the sealed original bytes under a real dedicated PostgreSQL and encrypted store with synthetic provider transports. Full baseline and live acceptance remain NOT_RUN."
   },
   {
     "id": "T100",
@@ -1571,8 +1618,12 @@
     "layer": "SECURITY",
     "precondition": "公网fetch指向127.0.0.1/元数据/私网DNS重绑定",
     "oracle": "每跳校验与出口阻断；不泄漏内部响应",
-    "implementation": null,
-    "status": "NOT_RUN"
+    "implementation": "tests/security/search-egress.test.ts",
+    "status": "NOT_RUN",
+    "supplementaryImplementations": [
+      "tests/unit/attachments.test.ts"
+    ],
+    "coverageNote": "Public-search fetcher enforces per-hop DNS checks, address pinning, HTTPS/port/credential rules and redirect limits with synthetic transports. Attachment download has independent host-allowlisted coverage. No live public fetch is claimed."
   },
   {
     "id": "T104",
@@ -1583,8 +1634,9 @@
     "layer": "E2E",
     "precondition": "搜索命中旧资料/新资料/无结果/超时",
     "oracle": "引用真实来源和检索时间，冲突/无结果明确",
-    "implementation": null,
-    "status": "NOT_RUN"
+    "implementation": "tests/unit/search-broker.test.ts",
+    "status": "NOT_RUN",
+    "coverageNote": "Controlled provider fixture verifies retrieval timestamps, per-source freshness, mixed old/new evidence, explicit EMPTY/TIMEOUT/UNAVAILABLE states and citation dedupe. No live search provider or browser E2E is claimed."
   },
   {
     "id": "T105",
@@ -1596,8 +1648,9 @@
     "layer": "SECURITY",
     "precondition": "内部日志关键词含客户ID和secret需公网搜索",
     "oracle": "出域策略拦截或使用经批准脱敏查询；不直接外发",
-    "implementation": null,
-    "status": "NOT_RUN"
+    "implementation": "tests/security/search-egress.test.ts",
+    "status": "NOT_RUN",
+    "coverageNote": "Outbound DLP denies credentials, connection strings, internal hosts, e-mail, long numeric and customer/tenant identifiers unless the caller explicitly marks the query PUBLIC; denial happens before the provider is invoked."
   },
   {
     "id": "T106",
@@ -1609,8 +1662,9 @@
     "layer": "E2E",
     "precondition": "附件包含忽略规则、删除资料等文字",
     "oracle": "可总结该文字，但不把其当作用户授权指令",
-    "implementation": null,
-    "status": "NOT_RUN"
+    "implementation": "tests/unit/search-broker.test.ts",
+    "status": "NOT_RUN",
+    "coverageNote": "External snippets are control/bidi-sanitized, length-bounded and labelled UNTRUSTED_EXTERNAL_CONTENT; embedded instructions remain inert data. Full attachment-to-model E2E remains NOT_RUN."
   },
   {
     "id": "T107",
@@ -1754,8 +1808,9 @@
     "layer": "E2E",
     "precondition": "根据忙闲安排会议，随后候选时间冲突",
     "oracle": "重新查询/提示冲突，不盲提交；创建后核对参与者与时间",
-    "implementation": null,
-    "status": "NOT_RUN"
+    "implementation": "tests/unit/office-calendar.test.ts",
+    "status": "NOT_RUN",
+    "coverageNote": "Synthetic calendar connector only: the earliest free slot is proposed from busy data, an immediate re-query detects a slot that became busy and returns CONFLICT without any create call, and success is reported only after read-back matches event id, title, time and exact participant set. Reschedule re-reads the current event, reports a stale event or busy target without updating, consumes one proposal, and verifies the moved event by read-back; failed update/read-back is UNKNOWN. Real DWS/OpenAPI calendar connector, E2E UI flow and live acceptance remain unverified."
   },
   {
     "id": "T114",
@@ -1766,8 +1821,9 @@
     "layer": "CONTRACT",
     "precondition": "编辑文档期间外部版本被他人修改",
     "oracle": "冲突检测与有限合并，不整篇覆盖他人修改",
-    "implementation": null,
-    "status": "NOT_RUN"
+    "implementation": "tests/unit/office-documents.test.ts",
+    "status": "NOT_RUN",
+    "coverageNote": "Synthetic document connector only (7 tests): a proposal reads the exact revision without writing; confirm re-reads and applies the edit once with read-back; an unrelated external line change is preserved as MERGED; a missing/ambiguous anchor, a changed anchor line block or a stale expected revision returns CONFLICT with zero updates; invalid/no-op/overlapping anchors, unknown/expired/aborted proposals and unavailable reads never write; failed update is UNKNOWN and unavailable/mismatched read-back is VERIFICATION_FAILED; single-document read is bounded. No real DWS/OpenAPI document connector, API/gateway wiring or live conflict scenario, so T114 remains NOT_RUN."
   },
   {
     "id": "T115",
@@ -1779,8 +1835,9 @@
     "layer": "SECURITY",
     "precondition": "请求自动审批同意、打卡、批量删人、公开分享",
     "oracle": "默认拒绝或要求正式批准的专用能力，不自动执行",
-    "implementation": null,
-    "status": "NOT_RUN"
+    "implementation": "tests/unit/office-extensions.test.ts",
+    "status": "NOT_RUN",
+    "coverageNote": "Synthetic certified connectors only: approval decision, clock-in, bulk member removal and public sharing return NEEDS_APPROVAL without dispatch; write extensions require a single-use preview; mismatched/expired/unverifiable formal approvals and uncertified or unknown capabilities never reach a connector. No real DWS/OpenAPI connector, gateway/API wiring or enterprise certification."
   },
   {
     "id": "T116",
@@ -1964,8 +2021,9 @@
     "layer": "INTEGRATION",
     "precondition": "R编号缺测试/代码映射，关键模块存在TODO占位",
     "oracle": "verify:requirements失败；报告指出缺失项",
-    "implementation": null,
-    "status": "NOT_RUN"
+    "implementation": "tests/unit/verify-requirements.test.ts",
+    "status": "NOT_RUN",
+    "coverageNote": "A synthetic 36-requirement/130-test fixture passes both baseline and full modes, then each mutation is detected by its exact error: a removed baseline ID and duplicated catalog row, an absent implementation mapping, a test file missing its stable ID, an IN_PROGRESS requirement in full mode, a missing module, and an undefined-only function. This proves the verifier reports missing mappings/placeholders, not that the real repository is complete; the real repository still fails full mode until every R is implemented, and no enterprise/live baseline is implied."
   },
   {
     "id": "T129",

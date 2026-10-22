@@ -90,8 +90,8 @@
     "status": "BLOCKED_EXTERNAL",
     "requires": [
       "three approved company metric templates",
-      "gateway or read-only source registration",
-      "data steward goldens and output audience grants"
+      "reviewed COMPANY_DATA_MCP_CONFIG_FILE with upstream data tool name, schema hash, transport, auth and per-actor scope binding",
+      "data steward goldens, upstream queryId/watermark evidence and output audience grants"
     ],
     "blocks": [
       "P09 live",

@@ -261,11 +261,31 @@
       "T057",
       "T058"
     ],
-    "modules": [],
-    "status": "NOT_STARTED",
+    "modules": [
+      "packages/watches/src/schedule-policy.ts",
+      "packages/watches/src/store.ts",
+      "packages/watches/src/index.ts",
+      "packages/watches/src/cycle.ts",
+      "db/migrations/106_condition_watches.sql",
+      "packages/dingtalk/src/watch-notifier.ts",
+      "db/migrations/111_condition_watch_provider_acceptance.sql",
+      "packages/company/src/watch-observer.ts",
+      "db/migrations/112_condition_watch_sources.sql",
+      "db/migrations/113_condition_watch_renewal_notices.sql",
+      "apps/api/src/watches.ts",
+      "apps/web/src/watch-flow.ts",
+      "apps/web/src/watches.tsx",
+      "tests/integration/condition-watches.test.ts",
+      "tests/integration/condition-watch-notifier.test.ts",
+      "tests/integration/condition-watch-observer.test.ts",
+      "tests/integration/watch-api.test.ts",
+      "tests/e2e/watch.spec.ts"
+    ],
+    "status": "IN_PROGRESS",
     "intendedModules": [
       "packages/watches"
-    ]
+    ],
+    "remaining": "Durable owner-scoped watches persist checks, scheduling counters, notification reservations/settlement, UNKNOWN reconciliation and pause/resume/cancel under leases and fences. The explicit-scope cycle claims due checks, obtains observations from an injected reviewed source adapter, persists an unavailable observation on adapter fault, settles each reservation once (CONFIRMED/APPLIED_UNVERIFIED/FAILED/UNKNOWN), sweeps stale PENDING reservations and isolates per-owner failures under abort. A concrete DingTalk notifier reruns the owner-scoped notification/policy/value/user/tenant/corporation checks before dispatch and again after token acquisition, sends deterministic text only, maps provider acceptance to APPLIED_UNVERIFIED (never CONFIRMED) and leaves lost responses UNKNOWN. The company MCP observer binds an immutable owner-scoped template/window/metric to a watch, revalidates the live scope, grant, source revision, tool schema and policy before and after CHECK, queries the certified company data tool and maps the exact aggregate metric to a bounded observation. An advance-expiry renewal notice is reserved once per ACTIVE watch inside a seven-day horizon under owner RLS, revalidates the owner and binding at dispatch, retries a definite FAILED delivery at most three times with a one-hour backoff, becomes UNKNOWN on indeterminate results, never auto-renews and consumes no check or notification budget. The authenticated API exposes owner-scoped create/list/read/bind/pause/resume/cancel under normal CSRF/session rules, the web UI exposes the same owner-scoped lifecycle with visible budgets and unknown-notification warnings, and the worker runs the explicit-scope cycle plus renewal cycle every 30 seconds when a sender, corporation and certified data client are configured; Compose already supplies the private data configuration. The Docker development stack (PostgreSQL on 64710, API and worker on 64700) starts healthy, but a live watch cycle under Docker with a real sender and certified data client, group proactive quota integration and enterprise/live acceptance remain incomplete."
   },
   "R13": {
     "tests": [
@@ -395,8 +415,13 @@
       "T105",
       "T106"
     ],
-    "modules": [],
-    "status": "NOT_STARTED",
+    "modules": [
+      "packages/search/src/egress.ts",
+      "packages/search/src/query-policy.ts",
+      "packages/search/src/report.ts",
+      "packages/search/src/broker.ts"
+    ],
+    "status": "IN_PROGRESS",
     "intendedModules": [
       "packages/search"
     ]
@@ -463,11 +488,22 @@
       "T095",
       "T096"
     ],
-    "modules": [],
-    "status": "NOT_STARTED",
+    "modules": [
+      "packages/company/src/data.ts",
+      "packages/company/src/data-client.ts",
+      "packages/company/src/data-configuration.ts",
+      "packages/company/src/data-contracts.ts",
+      "packages/company/src/data-result-contract.ts",
+      "packages/company/src/data-templates.ts",
+      "packages/company/src/data-numeric.ts",
+      "packages/company/src/data-execution.ts",
+      "db/migrations/105_company_data_executions.sql"
+    ],
+    "status": "IN_PROGRESS",
     "intendedModules": [
-      "packages/data"
-    ]
+      "packages/company"
+    ],
+    "remaining": "One certified payments daily success-rate template executes end to end through a reviewed company MCP data tool with exact decimals, server-injected scope, queryId/watermark evidence and audited provenance. No live enterprise MCP acceptance (T096), additional certified templates, template publishing/rollback workflow, or workbench E2E data views exist yet; upstream SQL safety and certification remain owned by the company MCP."
   },
   "R21": {
     "tests": [
@@ -475,11 +511,38 @@
       "T098",
       "T099"
     ],
-    "modules": [],
-    "status": "NOT_STARTED",
+    "modules": [
+      "packages/sandbox/src/executor.ts",
+      "packages/sandbox/src/index.ts",
+      "tests/integration/analysis-sandbox.test.ts",
+      "packages/sandbox/src/broker.ts",
+      "packages/artifacts/src/zip.ts",
+      "db/migrations/108_sandbox_broker_jobs.sql",
+      "tests/integration/sandbox-broker.test.ts",
+      "packages/sandbox/src/authorizer.ts",
+      "tests/integration/sandbox-authorizer.test.ts",
+      "db/migrations/109_sandbox_broker_ownership.sql",
+      "packages/sandbox/src/artifacts.ts",
+      "db/migrations/110_sandbox_artifacts.sql",
+      "db/migrations/114_sandbox_artifact_retention.sql",
+      "packages/sandbox/src/retention.ts",
+      "tests/integration/sandbox-artifacts.test.ts",
+      "tests/integration/sandbox-artifact-retention.test.ts",
+      "packages/sandbox/src/service-auth.ts",
+      "packages/sandbox/src/client.ts",
+      "packages/sandbox/src/producer.ts",
+      "apps/sandbox-broker/src/main.ts",
+      "apps/sandbox-broker/src/service.ts",
+      "deploy/images/sandbox-broker.Dockerfile",
+      "deploy/setup-sandbox-broker.mjs",
+      "tests/integration/sandbox-broker-service.test.ts",
+      "tests/integration/sandbox-executor-sweep.test.ts"
+    ],
+    "status": "IN_PROGRESS",
     "intendedModules": [
       "packages/sandbox"
-    ]
+    ],
+    "remaining": "A Docker executor runs one closed analysis job in the pinned networkless non-root image with Node permission scoping, no host secrets/socket, fixed CPU/PID/file limits, wall/memory/output enforcement, flat output validation and guaranteed container/workspace cleanup. A PG-backed broker verifies the signed OA_ANALYSIS_JOB_V1 envelope, rejects wire tampering, foreign subjects, nonce/job replay and quota excess before resolution or execution, rechecks ACL through a concrete PostgreSQL authorizer that revalidates live tenant/user status, user and task auth epoch, task ownership/status/expiry/cancel and run owner/task binding/non-terminal state under owner RLS (the interface remains injectable), resolves only signed artifact IDs with byte/hash evidence, persists a durable cancellation flag that aborts the executor, and re-verifies output hashes/extensions/MIME signatures; OOXML outputs additionally pass the bounded ZIP inspector (entry count, expanded bytes and compression-ratio caps, traversal/duplicate/encrypted-entry rejection, local-header agreement and CRC verification) instead of a substring match. A concrete owner-scoped PostgreSQL artifact connector keeps code/input/output bytes in the encrypted file store, verifies length and SHA-256 on every read, writes outputs only after broker verification, and hides other owners behind RLS; the resolver/sink interfaces remain injectable. Admission records carry a durable broker owner, and startup recovery through a SECURITY DEFINER function settles only that broker's RESERVED/RUNNING rows as FAILED/SANDBOX_JOB_INTERRUPTED before new submissions while leaving other brokers and terminal rows untouched. Expired artifacts are claimed across owner scopes only after their stored expiry, removed from the encrypted file store and then deleted from metadata; a failed byte removal retains the claimed row for a bounded retry window, and the finish function cannot delete an unclaimed row. The worker runs retention at startup and every five minutes. A standalone HTTP service authenticates an HMAC-signed subject header (never inferred from the job wire), exposes health/submit/get/cancel/artifact endpoints with bounded bodies and deterministic status mapping, and runs under the dev/prod Compose sandbox profile with a digest-pinned runtime image, read-only config/public-key secrets, named workspace/artifact volumes and the Docker socket mounted only into the broker; startup performs interrupted-job recovery, owned-container reconciliation and an expired-workspace sweep, and a five-minute sweep continues afterward. A typed producer client signs artifact upload, submission, status and cancellation calls with the shared service key, refuses redirects, oversized or malformed responses and caller-invalid bytes, and verifies returned artifact size/SHA-256 before reporting a registration; it deliberately does not retry ambiguous submissions because the broker's nonce/job uniqueness is the authority. A producer orchestration validates the complete closed job before registering any bytes, uploads code and inputs, signs exactly one envelope with a bounded lifetime and submits once. No application capability or job queue invokes that producer yet, and no trusted producer registration API, push-based revocation or response cache, CPU/memory-weighted budget, filesystem-quota output volume or live T097/T098 acceptance exists; the broker does re-run the live authorizer during execution at a configurable bounded interval, aborts the executor on denial or recheck failure and records REJECTED/AUTHORIZATION_REVOKED or FAILED/AUTHORIZATION_RECHECK_FAILED without persisting outputs; the output bind directory remains host-polled. Uploaded archives are quarantined without expansion, so no archive-extraction path exists; OOXML outputs are structurally bounded rather than trusted by filename. Containers carry a stable broker owner and job label, and a restart reconciler removes owned containers absent from the active set without touching another broker or active job."
   },
   "R22": {
     "tests": [
@@ -497,6 +560,11 @@
       "packages/artifacts/src/native-capability.ts",
       "packages/artifacts/src/native-host.ts",
       "packages/artifacts/src/runtime.ts",
+      "packages/attachments/src/inspect.ts",
+      "packages/attachments/src/service.ts",
+      "packages/attachments/src/download.ts",
+      "tests/unit/attachments.test.ts",
+      "tests/integration/attachments.test.ts",
       "apps/web/src/artifacts.tsx",
       "db/migrations/102_native_artifact_drafts.sql"
     ],
@@ -535,11 +603,19 @@
       "T071",
       "T113"
     ],
-    "modules": [],
-    "status": "NOT_STARTED",
+    "modules": [
+      "packages/office/src/scheduling.ts",
+      "packages/office/src/extensions.ts",
+      "packages/office/src/todos.ts",
+      "packages/office/src/todo-mirror.ts",
+      "packages/office/src/index.ts",
+      "db/migrations/107_office_todo_mirror.sql"
+    ],
+    "status": "IN_PROGRESS",
     "intendedModules": [
       "packages/office"
-    ]
+    ],
+    "remaining": "Connector-injected calendar and todo coordinators now request external effects in two steps: calendar proposes the earliest free slot from busy/free data, re-queries it immediately before create, refuses a new conflict, and verifies event id, title, time and exact participants by read-back; reschedule reads the current event, rejects an unchanged-looking but stale event or busy target, updates once and verifies the moved event by read-back; todo create, update and close each require an explicit one-shot proposal consumed before a single external call, query is bounded to one todo, and success requires exact read-back of id, title, due time, assignee and completion state. Failures or mismatches are UNKNOWN rather than success. A durable owner-RLS todo mirror now keeps the local UUID separate from the nullable external todo id, persists a write intent before the external call, settles LINKED only after exact content read-back, keeps lost writes UNKNOWN until explicit reconciliation, preserves the previous external snapshot on mismatches, applies remote revisions only to the external snapshot and copies them to local title/due/completion only by explicit adoption (assignee remains local). Remote/local conflicts are never auto-merged. Real DWS/OpenAPI calendar and todo connectors, API/gateway wiring, concrete bidirectional scheduling and live acceptance do not exist yet."
   },
   "R25": {
     "tests": [
@@ -549,22 +625,28 @@
     "modules": [
       "packages/dws/src/document-capability.ts",
       "packages/dws/src/document-contract.ts",
+      "packages/office/src/documents.ts",
       "db/migrations/034_dws_document_scopes.sql"
     ],
     "status": "IN_PROGRESS",
     "intendedModules": [
       "packages/office"
-    ]
+    ],
+    "remaining": "A connector-injected document editor now reads one bounded document, requires an expected revision and unique non-overlapping anchors for a one-shot edit proposal, re-reads before writing, rejects a stale revision or an anchor whose line block changed, preserves unrelated external edits by applying anchors to the current text, writes once with the observed revision and verifies node/version/text by read-back; failed writes are UNKNOWN and failed or mismatched read-backs are VERIFICATION_FAILED. No real DWS/OpenAPI document connector, API/gateway wiring, sheet conflict handling, whole-document search/create flow or live acceptance exists yet."
   },
   "R26": {
     "tests": [
       "T115"
     ],
-    "modules": [],
-    "status": "NOT_STARTED",
+    "modules": [
+      "packages/office/src/extensions.ts",
+      "packages/office/src/index.ts"
+    ],
+    "status": "IN_PROGRESS",
     "intendedModules": [
       "packages/office"
-    ]
+    ],
+    "remaining": "A default-deny extension registry now requires an unexpired certification (capability/version/schema hash) before any connector dispatch, a single-use preview for every write, and an independently verified formal per-use approval for dangerous actions such as approval decisions, clock-in, bulk member removal and public sharing. No real DWS/OpenAPI approval, report, meeting or attendance connector, API/gateway wiring or enterprise certification exists yet."
   },
   "R27": {
     "tests": [
@@ -775,7 +857,8 @@
     ],
     "modules": [
       "config/stages.json",
-      "scripts/verify-requirements.ts"
+      "scripts/verify-requirements.ts",
+      "tests/unit/verify-requirements.test.ts"
     ],
     "status": "IN_PROGRESS",
     "intendedModules": [

@@ -1,0 +1,112 @@
+{
+  "schemaVersion": 1,
+  "defaultPolicy": "DENY",
+  "description": "Destination allowlist for anthys runtime egress. The application containers, not the offline analysis sandbox, are the only workloads allowed outbound connections. Enforcement is at the host firewall / enterprise egress gateway; this file is the reviewed source of truth and contains no credentials.",
+  "appliesTo": [
+    "api",
+    "worker",
+    "ingress",
+    "notifier",
+    "scheduler",
+    "maintenance"
+  ],
+  "excluded": [
+    "analysis-sandbox (network_mode: none)"
+  ],
+  "dns": {
+    "policy": "RESOLVER_ONLY",
+    "allowedResolvers": ["host-configured resolver"],
+    "note": "Block direct UDP/TCP 53 to any other destination; do not allow DNS-over-HTTPS to unlisted hosts."
+  },
+  "allowedDestinations": [
+    {
+      "id": "dingtalk-api",
+      "host": "api.dingtalk.com",
+      "port": 443,
+      "protocol": "https",
+      "purpose": "robot messages, cards, attachment download URL exchange, OAuth user token exchange",
+      "credentials": "dingtalk_client_secret"
+    },
+    {
+      "id": "dingtalk-oapi",
+      "host": "oapi.dingtalk.com",
+      "port": 443,
+      "protocol": "https",
+      "purpose": "legacy robot reply addresses already accepted by the sender",
+      "credentials": "dingtalk_client_secret"
+    },
+    {
+      "id": "dingtalk-login",
+      "host": "login.dingtalk.com",
+      "port": 443,
+      "protocol": "https",
+      "purpose": "browser OAuth authorization redirect",
+      "credentials": "none (browser flow)"
+    },
+    {
+      "id": "glm-api",
+      "host": "open.bigmodel.cn",
+      "port": 443,
+      "protocol": "https",
+      "purpose": "model chat completions via GLM_BASE_URL",
+      "credentials": "glm_api_key"
+    },
+    {
+      "id": "company-mcp",
+      "host": null,
+      "port": 443,
+      "protocol": "https",
+      "status": "UNCONFIGURED",
+      "purpose": "reviewed read-only company MCP endpoint; exact origin comes from COMPANY_MCP_CONFIG_FILE",
+      "configuredVia": "COMPANY_MCP_CONFIG_FILE",
+      "note": "Add the reviewed endpoint host here before enabling. Generic chat credentials never authorize this destination."
+    },
+    {
+      "id": "company-logs-mcp",
+      "host": null,
+      "port": 443,
+      "protocol": "https",
+      "status": "UNCONFIGURED",
+      "purpose": "reviewed read-only company log proxy",
+      "configuredVia": "COMPANY_LOGS_MCP_CONFIG_FILE",
+      "note": "Separate endpoint and scope from company-mcp; disabled while unset."
+    },
+    {
+      "id": "attachment-cdn",
+      "host": null,
+      "port": 443,
+      "protocol": "https",
+      "status": "UNCONFIGURED",
+      "purpose": "exact enterprise-reviewed attachment CDN hostnames",
+      "configuredVia": "ATTACHMENT_DOWNLOAD_HOSTS",
+      "note": "Empty disables remote attachment fetching. Wildcards are not allowed."
+    },
+    {
+      "id": "search-provider",
+      "host": null,
+      "port": 443,
+      "protocol": "https",
+      "status": "BLOCKED_EXTERNAL",
+      "purpose": "search provider selected and approved by the enterprise",
+      "configuredVia": "not implemented; see config/external-blockers.json (SEARCH)",
+      "note": "No search host is approved or configured. Keep denied until a reviewed provider and data-egress approval exist."
+    }
+  ],
+  "deniedDestinations": [
+    "0.0.0.0/0 except the entries above",
+    "::/0 except the entries above",
+    "169.254.0.0/16 (link-local, cloud metadata)",
+    "127.0.0.0/8, ::1 (loopback; only the local health check may use it)",
+    "10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16 (private networks not explicitly reviewed)",
+    "100.64.0.0/10 (carrier-grade NAT)",
+    "fc00::/7, fe80::/10",
+    "224.0.0.0/4, ff00::/8 (multicast)",
+    "*.invalid and unlisted hostnames"
+  ],
+  "rules": [
+    "Deny by default; allow only exact hostnames and ports listed above.",
+    "Re-resolve each outbound request and reject redirects to unlisted hosts.",
+    "Do not permit inbound connections to worker/scheduler/maintenance; only api:64700 is published, on loopback behind the TLS reverse proxy.",
+    "The analysis sandbox has no network namespace and must never be granted egress."
+  ]
+}

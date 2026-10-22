@@ -1,6 +1,6 @@
 # Structured analysis job contract
 
-This package currently supplies a **broker-reusable contract**, not a sandbox executor or completion of R21/P09. It performs no filesystem access, process creation, networking, credential access or artifact loading.
+This package supplies the **broker-reusable contract**; the Docker execution boundary now lives in `packages/sandbox`. This package itself performs no filesystem access, process creation, networking, credential access or artifact loading.
 
 `src/job-contract.ts` exports `analysisJobSchema`, `AnalysisJob`, `AnalysisJobSubject`, `AnalysisJobPayload`, `AnalysisSignedJob`, `AnalysisJobSigningOptions`, `AnalysisJobVerificationOptions`, `AnalysisJobError`, `analysisDefaultLimits`, `analysisJobWireLimit`, `analysisJobMaxLifetimeMs`, `signAnalysisJob`, and `verifyAnalysisJob`.
 
@@ -37,4 +37,4 @@ A signature authenticates a caller assertion. It does **not** prove artifact own
 
 The executor still needs the documented fixed image, non-root user, read-only dependency/root filesystem, private tmpfs, no network or business secrets, no host/Docker socket, no devices or arbitrary mounts, capability removal, no-new-privileges, seccomp/AppArmor, CPU/memory/wall/output limits, and explicit bounded PID/file quotas. The documents do not specify numeric PID/file-count defaults; this contract does not invent or claim enforcement of them. Runtime cancellation, process-tree termination, cleanup on failure/restart, output MIME/content/archive checks, artifact ACL/storage/downloads and task/tool registration are outside this module.
 
-Pure contract tests cannot establish T097/T098 isolation, infinite-loop termination, memory/fork/file containment or cleanup. Those require an actual isolated executor and its integration/security acceptance. No execution service, startup hook, DB migration or formal test discovery registration is added here.
+`tests/integration/analysis-sandbox.test.ts` now exercises `packages/sandbox` against the real pinned image for secret/socket/PG/network/child-process denial, wall timeout, heap exhaustion, file explosion and cleanup. That executor still has no broker service, API, queue, artifact resolver, signature/nonce persistence, budget reservation, output MIME verification or deployment wiring; T097/T098 remain NOT_RUN as overall requirements.

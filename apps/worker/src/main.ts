@@ -5,6 +5,7 @@ import {configureCompanyAgent} from '../../../packages/company/src/agent-configu
 import {registerGroupCaseRead} from '../../../packages/groups/src/read-capability.js';
 import {GroupCases} from '../../../packages/groups/src/cases.js';
 import {configureCompanyLogs} from '../../../packages/company/src/log-configuration.js';
+import {configureCompanyData} from '../../../packages/company/src/data-configuration.js';
 import {initializeLifecycle,assertLifecycleScopes,assertLifecycleBinding} from '../../../packages/config/src/lifecycle.js';
 import {RunPersonas} from '../../../packages/personas/src/runtime.js';
 import {GroupAudience} from '../../../packages/groups/src/audience.js';
@@ -23,9 +24,13 @@ import {publishWorkerCycle} from '../../../packages/runtime/src/worker-cycle.js'
 import {assertOwnedTrialService} from '../../../packages/runtime/src/trial-supervision.js';
 import {AgentRuntime,registerTaskCapability} from '../../../packages/runtime/src/loop.js';
 import {RunQueue} from '../../../packages/tasks/src/queue.js';
+import {ConditionWatchStore,runWatchCycle,runWatchRenewalCycle} from '../../../packages/watches/src/index.js';
+import {CompanyMcpWatchObserver} from '../../../packages/company/src/watch-observer.js';
+import {DingTalkWatchNotifier} from '../../../packages/dingtalk/src/watch-notifier.js';
 import {Gateway} from '../../../packages/gateway/src/index.js';
 import {GlmProvider,ProviderError,glmRequestBody,type ModelProvider} from '../../../packages/provider-glm/src/client.js';
 import {EncryptedFileStore} from '../../../packages/storage/src/files.js';
+import {SandboxArtifactRetentionSweeper} from '../../../packages/sandbox/src/retention.js';
 import {AttachmentService} from '../../../packages/attachments/src/service.js';
 import {registerAttachmentCapabilities} from '../../../packages/attachments/src/capabilities.js';
 import {DingTalkAttachmentSource,RestrictedDownloader} from '../../../packages/attachments/src/download.js';
@@ -40,11 +45,14 @@ assertLifecycleBinding(lifecycle,corpId,robotCode);
 if(lifecycle.mode==='DEFAULT'&&robotCode){store.configureGroupCases(new GroupCases(db,vault,robotCode));}
 const sender=!trial&&clientId&&clientSecret&&robotCode?new DingTalkSender({clientId,clientSecret,robotCode}):undefined;
 const attachmentSource=sender&&robotCode&&hosts.size?new DingTalkAttachmentSource({robotCode,token:signal=>sender.token(signal),downloader:new RestrictedDownloader({hosts})}):undefined;
-if(!trial)registerAttachmentCapabilities(gateway,new AttachmentService(db,vault,new EncryptedFileStore(process.env['FILE_STORE_ROOT']??'.data/files',vault),attachmentSource,{corpId:corpId??'UNCONFIGURED',robotCode:robotCode??'UNCONFIGURED'}));
-if(lifecycle.mode==='DEFAULT')registerNativeArtifacts(gateway,vault,new EncryptedFileStore(process.env['FILE_STORE_ROOT']??'.data/files',vault),await configureArtifactFonts(process.env),lifecycle.mode);
+const fileStore=new EncryptedFileStore(process.env['FILE_STORE_ROOT']??'.data/files',vault);
+if(!trial)registerAttachmentCapabilities(gateway,new AttachmentService(db,vault,fileStore,attachmentSource,{corpId:corpId??'UNCONFIGURED',robotCode:robotCode??'UNCONFIGURED'}));
+if(lifecycle.mode==='DEFAULT')registerNativeArtifacts(gateway,vault,fileStore,await configureArtifactFonts(process.env),lifecycle.mode);
 const company=lifecycle.mode==='DEFAULT'||lifecycle.mode==='FORMAL'&&lifecycle.profile.capabilities.some(c=>c.id.startsWith('company.'))?await configureCompanyCode(gateway,process.env,fetch,lifecycle.mode==='FORMAL'?lifecycle.profile.capabilities:undefined):undefined;
 const companyLogs=lifecycle.mode==='DEFAULT'||lifecycle.mode==='FORMAL'&&lifecycle.profile.capabilities.some(c=>c.id.startsWith('company.'))?await configureCompanyLogs(gateway,process.env,fetch,lifecycle.mode==='FORMAL'?lifecycle.profile.capabilities:undefined):undefined;
-if(lifecycle.mode==='DEFAULT'||lifecycle.mode==='FORMAL'&&lifecycle.profile.capabilities.some(c=>c.id.startsWith('dws.'))){const dws=await configureDws(db,vault);store.configureGroupAudience(new GroupAudience(db,vault,dws,required('DINGTALK_ROBOT_CODE')));if(lifecycle.mode==='DEFAULT'&&dws.runner?.readNativeCaseRoster)store.configureNativeCaseAudience(new NativeCaseAudience(db,vault,dws,required('DINGTALK_ROBOT_CODE')));registerDwsCapabilities(gateway,dws);if(lifecycle.mode==='DEFAULT')registerGroupCaseRead(gateway);}
+const companyData=lifecycle.mode==='DEFAULT'||lifecycle.mode==='FORMAL'&&lifecycle.profile.capabilities.some(c=>c.id.startsWith('company.'))?await configureCompanyData(gateway,process.env,fetch,lifecycle.mode==='FORMAL'?lifecycle.profile.capabilities:undefined):undefined;
+const watchNotifier=!trial&&sender&&corpId&&companyData?.client?new DingTalkWatchNotifier(db,sender,{corpId}):undefined,watches=watchNotifier&&companyData?.client?{store:new ConditionWatchStore(db),observer:new CompanyMcpWatchObserver(db,companyData.client),notifier:watchNotifier,renewalNotifier:watchNotifier}:undefined;
+if(lifecycle.mode==='DEFAULT'||lifecycle.mode==='FORMAL'&&lifecycle.profile.capabilities.some(c=>c.id.startsWith('dws.'))){const dws=await configureDws(db,vault);registerDwsCapabilities(gateway,dws);if(robotCode){store.configureGroupAudience(new GroupAudience(db,vault,dws,robotCode));if(lifecycle.mode==='DEFAULT'&&dws.runner?.readNativeCaseRoster)store.configureNativeCaseAudience(new NativeCaseAudience(db,vault,dws,robotCode));if(lifecycle.mode==='DEFAULT')registerGroupCaseRead(gateway);}}
 const companyAgent=!trial?configureCompanyAgent(gateway,vault,process.env,fetch,lifecycle.mode==='FORMAL'?lifecycle.profile.capabilities:undefined,lifecycle.mode==='FORMAL'?lifecycle.profile:undefined):undefined;
 if(companyAgent&&!scopes.some(s=>s.tenantId===companyAgent.scope.tenantId&&s.actorId===companyAgent.scope.actorId))throw Error('ENTERPRISE_WORKER_SUBJECT_NOT_REGISTERED');
 const apiKey=secret('GLM_API_KEY');
@@ -56,7 +64,10 @@ if(!trial){
  await queue.workSourceReplies(async job=>{if(!scopes.some(s=>s.tenantId===job.tenantId&&s.actorId===job.actorId))throw Error('UNREGISTERED_WORKER_SUBJECT');await gateway.processSourceReply({tenantId:job.tenantId,actorId:job.actorId},job.replyId,job.generation,shutdown.signal);});
 }
 await queue.work(async job=>{if(!scopes.some(s=>s.tenantId===job.tenantId&&s.actorId===job.actorId))throw Error('UNREGISTERED_WORKER_SUBJECT');await runtime.advance({tenantId:job.tenantId,actorId:job.actorId},job.runId,undefined,shutdown.signal,job.generation);});
+const sandboxRetention=!trial?new SandboxArtifactRetentionSweeper(db,fileStore):undefined;
 let publishing=false;const publish=async()=>{if(publishing||shutdown.signal.aborted)return;publishing=true;try{await publishWorkerCycle(db,scopes,{store,budgetRecovery,retryDispatcher,queue});await companyAgent?.poll();}catch{console.error('OUTBOX_PUBLISH_FAILED');}finally{publishing=false;}};
-await publish();const timer=setInterval(()=>{void publish();},1000);
-for(const signal of ['SIGTERM','SIGINT'] as const) process.once(signal,()=>{shutdown.abort(new Error('SERVICE_SHUTDOWN'));clearInterval(timer);void queue.stop().then(()=>Promise.allSettled([company?.close(),companyLogs?.close(),companyAgent?.close()])).then(()=>Promise.allSettled([store.groupAudiences?.close(),store.nativeCaseAudiences?.close()])).then(()=>db.close());});
+let watching=false;const watch=async()=>{if(!watches||watching||shutdown.signal.aborted)return;watching=true;try{const summary=await runWatchCycle(scopes,watches.store,{observer:watches.observer,notifier:watches.notifier},shutdown.signal),renewal=await runWatchRenewalCycle(scopes,watches.store,{notifier:watches.renewalNotifier},shutdown.signal);if(summary.failedScopes||renewal.failedScopes)console.error('WATCH_CYCLE_SCOPE_FAILURES:'+(summary.failedScopes+renewal.failedScopes));}catch{if(!shutdown.signal.aborted)console.error('WATCH_CYCLE_FAILED');}finally{watching=false;}};
+let retaining=false;const retain=async()=>{if(!sandboxRetention||retaining||shutdown.signal.aborted)return;retaining=true;try{const summary=await sandboxRetention.sweep();if(summary.failed)console.error('SANDBOX_ARTIFACT_RETENTION_FAILURES:'+summary.failed);}catch{if(!shutdown.signal.aborted)console.error('SANDBOX_ARTIFACT_RETENTION_FAILED');}finally{retaining=false;}};
+await publish();const timer=setInterval(()=>{void publish();},1000);await watch();const watchTimer=setInterval(()=>{void watch();},30_000);await retain();const retentionTimer=setInterval(()=>{void retain();},300_000);
+for(const signal of ['SIGTERM','SIGINT'] as const) process.once(signal,()=>{shutdown.abort(new Error('SERVICE_SHUTDOWN'));clearInterval(timer);clearInterval(watchTimer);clearInterval(retentionTimer);void queue.stop().then(()=>Promise.allSettled([company?.close(),companyLogs?.close(),companyData?.close(),companyAgent?.close()])).then(()=>Promise.allSettled([store.groupAudiences?.close(),store.nativeCaseAudiences?.close()])).then(()=>db.close());});
 console.log('Worker running; model '+(apiKey?'configured, live verification required':'BLOCKED_EXTERNAL'));

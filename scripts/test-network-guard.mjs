@@ -6,7 +6,8 @@ import {syncBuiltinESMExports} from 'node:module';
 import {lstatSync,realpathSync} from 'node:fs';
 import {dirname,basename,join} from 'node:path';
 import {tmpdir} from 'node:os';
-const allowedPorts=new Set([64711,64702]);
+// 64712 is reserved for the synthetic sandbox-broker HTTP service under test.
+const allowedPorts=new Set([64711,64702,64712]);
 export function permitted(host,port){return ['127.0.0.1','::1','localhost'].includes(host)&&allowedPorts.has(Number(port));}
 // One local synthetic RPC socket namespace only; no Docker/keychain/personal
 // sockets. The fixture directory and socket must already exist and be private.

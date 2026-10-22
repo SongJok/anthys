@@ -26,6 +26,7 @@
     "test:security": "node scripts/run-tests.mjs vitest run tests/security",
     "test:chaos": "node scripts/run-tests.mjs vitest run tests/chaos",
     "test:e2e": "node scripts/run-tests.mjs playwright test",
+    "test:e2e:persona-explanation": "node scripts/run-tests.mjs playwright test --config=tests/e2e/persona-explanation.config.ts",
     "test:live": "node --import tsx scripts/live.ts",
     "test:coverage": "node scripts/run-tests.mjs vitest run --coverage",
     "snapshot:sources": "node scripts/snapshot-sources.mjs",
@@ -45,6 +46,8 @@
     "db:migrate:test-existing": "node --import tsx scripts/migrate-isolated-test.ts",
     "test:self-dm": "node scripts/test-self-dm.mjs",
     "start:scheduler": "node --import tsx apps/scheduler/src/main.ts",
+    "start:sandbox-broker": "node --import tsx apps/sandbox-broker/src/main.ts",
+    "sandbox:setup": "node deploy/setup-sandbox-broker.mjs",
     "operations:backup": "node --import tsx scripts/project-backup.ts",
     "operations:restore": "node --import tsx scripts/project-restore.ts",
     "operations:verify-restore": "node --import tsx scripts/restore-verification.ts"

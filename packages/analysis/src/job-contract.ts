@@ -79,6 +79,7 @@ export const analysisJobSchema=jsonData.pipe(jobShape);
 export type AnalysisJob=z.infer<typeof analysisJobSchema>;
 const subjectShape=z.object({tenantId:z.uuid(),actorId:z.uuid(),authEpoch:z.number().int().positive().safe(),taskId:z.uuid(),runId:z.uuid(),jobId:z.uuid()}).strict();
 const subjectSchema=jsonData.pipe(subjectShape);
+export const analysisJobSubjectSchema=subjectSchema;
 export type AnalysisJobSubject=z.infer<typeof subjectSchema>;
 const payloadShape=z.object({
   protocol:z.literal('OA_ANALYSIS_JOB_V1'),subject:subjectShape,job:jobShape,jobHash:digest,imageDigest:imageDigestSchema,

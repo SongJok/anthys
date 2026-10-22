@@ -1325,12 +1325,17 @@
     "releaseStatus": "NOT_RUN",
     "commit": null,
     "evidence": [
-      "reports/private-schedules-20261018/HANDOFF.md"
+      "reports/private-schedules-20261018/HANDOFF.md",
+      "tests/unit/company-data-templates.test.ts",
+      "tests/unit/company-data-contracts.test.ts",
+      "tests/unit/company-data-configuration.test.ts",
+      "tests/integration/company-data.test.ts",
+      "db/migrations/105_company_data_executions.sql"
     ],
-    "updatedAt": "2026-10-14T10:55:06.968142+00:00",
+    "updatedAt": "2026-10-21T02:42:00.000000+00:00",
     "codeCommit": null,
     "stateBasis": "Implementation and real automated evidence only; no live provider PASS is inferred.",
-    "note": "Private deterministic reminder rule/API/PG/scheduler/native/UI slice under validation. Persistent monitoring, report-window coalescing, enterprise calendar/provider and approved notification acceptance remain incomplete. No live deployment or original gate reduction."
+    "note": "Private deterministic reminder rule/API/PG/scheduler/native/UI slice under validation. Company data queries now execute only through a reviewed upstream MCP data tool with a certified payments template, exact decimals, server-injected scope, queryId/watermark evidence and tenant-RLS audit rows; unconfigured or unapproved data MCP stays BLOCKED_EXTERNAL. Live enterprise data acceptance, additional templates, template publishing/rollback, search provider, file adapters, persistent monitoring, report-window coalescing, enterprise calendar/provider and approved notification acceptance remain incomplete. No live deployment or original gate reduction."
   },
   {
     "id": "P09",

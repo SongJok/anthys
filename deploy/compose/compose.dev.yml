@@ -1,21 +1,494 @@
+# anthys development stack (Compose project name: anthys-dev)
+#
+# Bootstrap once (writes 0600 files under .secrets/, never committed):
+#   node deploy/setup-dev-secrets.mjs
+# Run:
+#   docker compose -f deploy/compose/compose.dev.yml up -d --build --wait
+# Check:
+#   curl http://127.0.0.1:64700/api/v1/health/live
+#   curl http://127.0.0.1:64700/api/v1/health/ready
+# Stop (volumes are removed only if you ask for it):
+#   docker compose -f deploy/compose/compose.dev.yml down
+#
+# Default profile: postgres, app-init, migrate, api and worker. It boots
+# without DingTalk/model/DWS credentials; those capabilities stay
+# BLOCKED_EXTERNAL, the worker idles and the API still serves the health routes
+# and the login-disabled workbench. The worker only runs the condition-watch
+# cycle when a sender, corporation and certified data client are configured.
+# Optional profiles:
+#   --profile dingtalk  ingress + notifier (real DingTalk app identity required)
+#   --profile scoped    scheduler + maintenance (WORKER_SCOPE_FILE needs >=1 real scope)
+#   --profile dws       offline signed DWS runner (prebuilt image + private 0600 files)
+#   --profile sandbox   analysis sandbox broker (mounted Docker socket; run
+#                       deploy/setup-sandbox-broker.mjs --build first)
+#
+# Ports: API on 127.0.0.1:64700; Postgres on 127.0.0.1:64710 for host tooling.
+# Containers always use postgres:5432 via the generated *_database_url secrets.
+# No plaintext credentials and no host networking. The Docker socket is mounted
+# only into the isolated sandbox broker, never into the API or worker.
+
 name: anthys-dev
+
+x-app-image: &app-image ${ANTHYS_APP_IMAGE:-anthys-app:dev}
+
+# Reviewed private company MCP configuration and its 0600 token files live
+# outside the image. Point the COMPANY_*_MCP_CONFIG_FILE variables at
+# /run/company-mcp/<name>.json when this directory is populated; an empty
+# directory keeps those capabilities BLOCKED_EXTERNAL.
+x-private-mcp: &private-mcp
+  type: bind
+  source: ${ANTHYS_PRIVATE_MCP_DIR:-../../.secrets/company-mcp}
+  target: /run/company-mcp
+  read_only: true
+
+# Shared application environment. *_FILE variables are the only credential
+# path; the files are Compose secrets mounted under /run/secrets.
+x-app-env: &app-env
+  APP_ENV: development
+  APP_ORIGIN: ${APP_ORIGIN:-http://localhost:64700}
+  HOST: 0.0.0.0
+  PORT: "64700"
+  RELEASE_PROFILE: ENTERPRISE_DWS
+  MOCK_PROVIDERS: ${MOCK_PROVIDERS:-false}
+  DINGTALK_REPLY_ONLY: ${DINGTALK_REPLY_ONLY:-false}
+  DATABASE_URL_FILE: /run/secrets/database_url
+  QUEUE_DATABASE_URL_FILE: /run/secrets/queue_database_url
+  RUNTIME_DATABASE_URL_FILE: /run/secrets/runtime_database_url
+  APP_MASTER_KEY_FILE: /run/secrets/app_master_key
+  SESSION_SECRET_FILE: /run/secrets/session_secret
+  GLM_API_KEY_FILE: /run/secrets/glm_api_key
+  GLM_BASE_URL: ${GLM_BASE_URL:-https://open.bigmodel.cn/api/paas/v4}
+  GLM_MODEL: glm-5.3-flash
+  DINGTALK_TENANT_ID: ${DINGTALK_TENANT_ID:-}
+  DINGTALK_CORP_ID: ${DINGTALK_CORP_ID:-}
+  DINGTALK_CLIENT_ID: ${DINGTALK_CLIENT_ID:-}
+  DINGTALK_CLIENT_SECRET_FILE: /run/secrets/dingtalk_client_secret
+  DINGTALK_ROBOT_CODE: ${DINGTALK_ROBOT_CODE:-}
+  DINGTALK_CARD_TEMPLATE_ID: ${DINGTALK_CARD_TEMPLATE_ID:-}
+  DINGTALK_CARD_TEMPLATE_FILE: /data/card-template.json
+  FILE_STORE_ROOT: /data/files
+  TENANT_BINDINGS_FILE: /data/tenant-bindings.json
+  WORKER_SCOPE_FILE: /data/worker-scopes.json
+  ATTACHMENT_DOWNLOAD_HOSTS: ${ATTACHMENT_DOWNLOAD_HOSTS:-}
+  COMPANY_MCP_CONFIG_FILE: ${COMPANY_MCP_CONFIG_FILE:-}
+  COMPANY_LOGS_MCP_CONFIG_FILE: ${COMPANY_LOGS_MCP_CONFIG_FILE:-}
+  COMPANY_DATA_MCP_CONFIG_FILE: ${COMPANY_DATA_MCP_CONFIG_FILE:-}
+  BUDGET_POLICY_FILE: ${BUDGET_POLICY_FILE:-}
+  PRIVATE_MEMORY_MODEL_POLICY_FILE: ${PRIVATE_MEMORY_MODEL_POLICY_FILE:-}
+  DWS_ENABLED: ${DWS_ENABLED:-false}
+  DWS_RUNNER_URL: ${DWS_RUNNER_URL:-}
+  DWS_RUNNER_AUTH_KEY_FILE: ${DWS_RUNNER_AUTH_KEY_FILE:-}
+  DWS_RUNNER_CONFIG_FILE: ${DWS_RUNNER_CONFIG_FILE:-}
+  SANDBOX_ENABLED: ${SANDBOX_ENABLED:-false}
+  LIVE_TEST_ENABLED: "false"
+  HOME: /tmp
+
+# Every config() caller in production validates DATABASE_URL, QUEUE_DATABASE_URL,
+# APP_MASTER_KEY and SESSION_SECRET, so these are mounted for all app processes.
+x-app-secrets: &app-secrets
+  - database_url
+  - queue_database_url
+  - runtime_database_url
+  - app_master_key
+  - session_secret
+  - glm_api_key
+  - dingtalk_client_secret
+
+x-app-hardening: &app-hardening
+  read_only: true
+  tmpfs:
+    - /tmp
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  init: true
+  user: "10001:10001"
+
 services:
   postgres:
     image: postgres:17-bookworm@sha256:3645570cccdfa447589da9f57dd740faa29b30938e861289a5574b6ca6b03826
+    restart: unless-stopped
     environment:
       POSTGRES_USER: oa_migrator
       POSTGRES_DB: anthys
       POSTGRES_PASSWORD_FILE: /run/secrets/pg_admin_password
-    secrets: [pg_admin_password]
-    ports: ["127.0.0.1:64710:5432"]
-    volumes: [pg_data:/var/lib/postgresql/data]
+      POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256
+    secrets:
+      - pg_admin_password
+    ports:
+      - "127.0.0.1:64710:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    # The official entrypoint starts as root and drops to postgres, so keep
+    # only the capabilities it needs. The data directory is the sole writable
+    # filesystem outside tmpfs.
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /var/run/postgresql
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
+    security_opt:
+      - no-new-privileges:true
+    shm_size: 256mb
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U oa_migrator -d anthys"]
       interval: 2s
       timeout: 3s
-      retries: 20
-secrets:
-  pg_admin_password:
-    file: ../../.secrets/pg_admin_password
+      retries: 30
+      start_period: 10s
+    networks:
+      - backend
+
+  # One-shot volume provisioning. Runs as root only to chown the named volume
+  # to uid 10001 and to seed an empty scope list so the default worker can boot
+  # without a tenant. Replace /data/worker-scopes.json with real reviewed scopes
+  # before enabling the "scoped" profile.
+  app-init:
+    image: *app-image
+    restart: "no"
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        mkdir -p /data/files
+        chown 10001:10001 /data /data/files
+        chmod 700 /data/files
+        if [ ! -e /data/worker-scopes.json ]; then
+          printf '[]\n' > /data/worker-scopes.json
+        fi
+        chown 10001:10001 /data/worker-scopes.json
+        chmod 600 /data/worker-scopes.json
+    volumes:
+      - app_data:/data
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+    security_opt:
+      - no-new-privileges:true
+    network_mode: none
+
+  migrate:
+    image: *app-image
+    restart: "no"
+    command: ["node", "dist/scripts/migrate.js"]
+    environment:
+      APP_ENV: development
+      MIGRATION_DATABASE_URL_FILE: /run/secrets/migration_database_url
+      HOME: /tmp
+    secrets:
+      - migration_database_url
+      # migrate.ts reads role passwords from .secrets/<name> relative to /app.
+      - source: pg_app_password
+        target: /app/.secrets/pg_app_password
+      - source: pg_queue_password
+        target: /app/.secrets/pg_queue_password
+      - source: pg_runtime_password
+        target: /app/.secrets/pg_runtime_password
+    depends_on:
+      postgres:
+        condition: service_healthy
+    <<: *app-hardening
+    networks:
+      - backend
+
+  api:
+    image: *app-image
+    build:
+      context: ../..
+      dockerfile: deploy/images/app.Dockerfile
+    command: ["node", "dist/apps/api/src/main.js"]
+    restart: unless-stopped
+    stop_grace_period: 20s
+    environment:
+      <<: *app-env
+    secrets: *app-secrets
+    volumes:
+      - app_data:/data
+      - *private-mcp
+    ports:
+      - "127.0.0.1:64700:64700"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      app-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          node -e "fetch('http://127.0.0.1:64700/api/v1/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 5s
+      timeout: 3s
+      retries: 24
+      start_period: 20s
+    <<: *app-hardening
+    networks:
+      - backend
+
+  # The worker runs by default. Without a robot identity it skips group-audience
+  # wiring; without a GLM key it records BLOCKED_EXTERNAL instead of fabricating
+  # model output. An empty scope list keeps it idle.
+  worker:
+    image: *app-image
+    command: ["node", "dist/apps/worker/src/main.js"]
+    restart: unless-stopped
+    stop_grace_period: 20s
+    environment:
+      <<: *app-env
+    secrets: *app-secrets
+    volumes:
+      - app_data:/data
+      - *private-mcp
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      app-init:
+        condition: service_completed_successfully
+    <<: *app-hardening
+    networks:
+      - backend
+
+  # DingTalk long-connection ingress refuses to start without a real app
+  # identity, so it is opt-in rather than crash-looping the default stack.
+  ingress:
+    image: *app-image
+    command: ["node", "dist/apps/ingress/src/main.js"]
+    restart: unless-stopped
+    stop_grace_period: 20s
+    profiles: ["dingtalk"]
+    environment:
+      <<: *app-env
+    secrets: *app-secrets
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    <<: *app-hardening
+    networks:
+      - backend
+
+  notifier:
+    image: *app-image
+    command: ["node", "dist/apps/notifier/src/main.js"]
+    restart: unless-stopped
+    stop_grace_period: 30s
+    profiles: ["dingtalk"]
+    environment:
+      <<: *app-env
+    secrets: *app-secrets
+    volumes:
+      - app_data:/data
+      - *private-mcp
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      app-init:
+        condition: service_completed_successfully
+    <<: *app-hardening
+    networks:
+      - backend
+
+  # scheduler/maintenance validate WORKER_SCOPE_FILE with at least one scope.
+  # Enable after tenant registration and directory import have produced real
+  # scopes; a synthetic or empty file is rejected on purpose.
+  scheduler:
+    image: *app-image
+    command: ["node", "dist/apps/scheduler/src/main.js"]
+    restart: on-failure
+    stop_grace_period: 20s
+    profiles: ["scoped"]
+    environment:
+      <<: *app-env
+    secrets: *app-secrets
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      app-init:
+        condition: service_completed_successfully
+    <<: *app-hardening
+    networks:
+      - backend
+
+  maintenance:
+    image: *app-image
+    command: ["node", "dist/apps/maintenance/src/main.js"]
+    restart: on-failure
+    stop_grace_period: 30s
+    profiles: ["scoped"]
+    environment:
+      <<: *app-env
+    secrets: *app-secrets
+    volumes:
+      - app_data:/data
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      app-init:
+        condition: service_completed_successfully
+    <<: *app-hardening
+    networks:
+      - backend
+
+  # Offline signed DWS runner (Unix socket only, no HTTP, no network namespace).
+  # It is not buildable from a plain checkout because dws-runner.Dockerfile needs
+  # a prepared release context. Build it first:
+  #   docker build --build-context dws_release=/abs/prepared/linux-arm64 \
+  #     -f deploy/images/dws-runner.Dockerfile -t anthys-dws-runner:dev .
+  # Then place a reviewed config.json plus key files in ANTHYS_DWS_PRIVATE_DIR
+  # (0700 directory, 0600 files owned by uid 10001; Compose secrets are 0444 and
+  # are therefore rejected by the runner's privateFile() check).
+  dws-runner:
+    image: ${ANTHYS_DWS_RUNNER_IMAGE:-anthys-dws-runner:dev}
+    profiles: ["dws"]
+    restart: on-failure
+    user: "10001:10001"
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    network_mode: none
+    volumes:
+      - ${ANTHYS_DWS_PRIVATE_DIR:-../../.data/dws-private}:/run/dws:rw
+    command: ["/run/dws/config.json"]
+
+  # One-shot ownership for the two sandbox volumes. The broker runs as uid
+  # 10001, so a root helper chowns each named volume before it starts.
+  sandbox-broker-init:
+    image: *app-image
+    profiles: ["sandbox"]
+    restart: "no"
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        mkdir -p /workspaces /artifacts
+        chown 10001:10001 /workspaces /artifacts
+        chmod 700 /workspaces /artifacts
+    volumes:
+      - sandbox_workspaces:/workspaces
+      - sandbox_artifacts:/artifacts
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+    security_opt:
+      - no-new-privileges:true
+    network_mode: none
+
+  # The only process with the host Docker socket. It accepts signed job
+  # envelopes only, launches the digest-pinned analysis image with network none,
+  # and has no DingTalk/GLM/DWS/company-MCP credentials. Config and the producer
+  # public key are mounted as read-only Compose secrets.
+  #
+  # Docker socket access is root-equivalent; keep this profile off until the
+  # analysis feature is enabled, and never add app credentials to this service.
+  sandbox-broker:
+    image: ${ANTHYS_SANDBOX_BROKER_IMAGE:-anthys-sandbox-broker:dev}
+    build:
+      context: ../..
+      dockerfile: deploy/images/sandbox-broker.Dockerfile
+    profiles: ["sandbox"]
+    restart: unless-stopped
+    stop_grace_period: 30s
+    environment:
+      APP_ENV: development
+      SANDBOX_BROKER_AUTH_KEY_FILE: /run/secrets/sandbox_broker_auth_key
+      DATABASE_URL_FILE: /run/secrets/runtime_database_url
+      APP_MASTER_KEY_FILE: /run/secrets/app_master_key
+      HOME: /tmp
+    secrets:
+      - runtime_database_url
+      - app_master_key
+      - sandbox_broker_auth_key
+      - sandbox_broker_config
+      - sandbox_broker_public_key
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - sandbox_workspaces:/var/lib/anthys-sandbox
+      - sandbox_artifacts:/data/artifacts
+      - ../../deploy/policies:/run/anthys-policies:ro
+    # The socket is root:root 0660 on Docker Desktop and often root:docker on
+    # Linux. Set ANTHYS_DOCKER_SOCKET_GID to the host socket's numeric gid.
+    group_add:
+      - "${ANTHYS_DOCKER_SOCKET_GID:-0}"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      sandbox-broker-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          node -e "fetch('http://127.0.0.1:8092/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    <<: *app-hardening
+    networks:
+      - backend
+
+networks:
+  backend: {}
+
 volumes:
   pg_data: {}
+  app_data: {}
+  sandbox_workspaces: {}
+  sandbox_artifacts: {}
+
+secrets:
+  pg_admin_password:
+    file: ${ANTHYS_SECRETS_DIR:-../../.secrets/docker}/pg_admin_password
+  pg_app_password:
+    file: ${ANTHYS_SECRETS_DIR:-../../.secrets/docker}/pg_app_password
+  pg_queue_password:
+    file: ${ANTHYS_SECRETS_DIR:-../../.secrets/docker}/pg_queue_password
+  pg_runtime_password:
+    file: ${ANTHYS_SECRETS_DIR:-../../.secrets/docker}/pg_runtime_password
+  database_url:
+    file: ${ANTHYS_SECRETS_DIR:-../../.secrets/docker}/database_url
+  migration_database_url:
+    file: ${ANTHYS_SECRETS_DIR:-../../.secrets/docker}/migration_database_url
+  queue_database_url:
+    file: ${ANTHYS_SECRETS_DIR:-../../.secrets/docker}/queue_database_url
+  runtime_database_url:
+    file: ${ANTHYS_SECRETS_DIR:-../../.secrets/docker}/runtime_database_url
+  app_master_key:
+    file: ${ANTHYS_SECRETS_DIR:-../../.secrets/docker}/app_master_key
+  session_secret:
+    file: ${ANTHYS_SECRETS_DIR:-../../.secrets/docker}/session_secret
+  glm_api_key:
+    file: ${ANTHYS_SECRETS_DIR:-../../.secrets/docker}/glm_api_key
+  dingtalk_client_secret:
+    file: ${ANTHYS_SECRETS_DIR:-../../.secrets/docker}/dingtalk_client_secret
+  sandbox_broker_auth_key:
+    file: ${ANTHYS_SANDBOX_SECRETS_DIR:-../../.secrets/sandbox-broker}/auth_key
+  sandbox_broker_config:
+    file: ${ANTHYS_SANDBOX_SECRETS_DIR:-../../.secrets/sandbox-broker}/config.json
+  sandbox_broker_public_key:
+    file: ${ANTHYS_SANDBOX_SECRETS_DIR:-../../.secrets/sandbox-broker}/producer-public.pem

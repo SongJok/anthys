@@ -3,6 +3,7 @@ import {groupReminderRoutes} from './group-reminders.js';
 import type {GroupReminders} from '../../../packages/groups/src/reminders.js';
 import {GroupReminderError} from '../../../packages/groups/src/reminder-model.js';
 import {scheduleRoutes} from './schedules.js';
+import {watchRoutes,type WatchApi,type WatchSourceBindingApi} from './watches.js';
 import type {Schedules} from '../../../packages/schedules/src/service.js';
 import {ScheduleError} from '../../../packages/schedules/src/model.js';
 import {groupContractRoutes} from './group-contracts.js';
@@ -43,7 +44,7 @@ import {artifactRoutes} from './artifacts.js';
 import {companyAgentRoutes} from './company-agent.js';
 import type {CompanyAgentRequests} from '../../../packages/company/src/agent-requests.js';
 declare module 'fastify' {interface FastifyRequest {principal:Principal|null}}
-export async function createServer(deps:{config:Config;db:Database;sessionSecret:string;formalSubject?:{tenantId:string;actorId:string};login?:{tenantId:string;corpId:string;provider:LoginIdentityProvider;clientId?:string};webRoot?:string;attachments?:AttachmentService;artifacts?:TaskResultArtifacts;companyRequests?:Pick<CompanyAgentRequests,'list'>;controls?:ControlPlane;finalReader?:Gateway;dws?:DwsIdentities;personas?:Personas;memories?:PrivatePreferences;groupContracts?:GroupContracts;groupCases?:Pick<GroupCases,'list'|'create'|'update'>;schedules?:Schedules;groupReminders?:Pick<GroupReminders,'list'|'preview'|'create'|'mutate'>;groupEscalations?:GroupEscalationApi}) {
+export async function createServer(deps:{config:Config;db:Database;sessionSecret:string;formalSubject?:{tenantId:string;actorId:string};login?:{tenantId:string;corpId:string;provider:LoginIdentityProvider;clientId?:string};webRoot?:string;attachments?:AttachmentService;artifacts?:TaskResultArtifacts;companyRequests?:Pick<CompanyAgentRequests,'list'>;controls?:ControlPlane;finalReader?:Gateway;dws?:DwsIdentities;personas?:Personas;memories?:PrivatePreferences;groupContracts?:GroupContracts;groupCases?:Pick<GroupCases,'list'|'create'|'update'>;schedules?:Schedules;watches?:WatchApi;watchSources?:WatchSourceBindingApi;groupReminders?:Pick<GroupReminders,'list'|'preview'|'create'|'mutate'>;groupEscalations?:GroupEscalationApi}) {
  const app=Fastify({logger:false,bodyLimit:1048576,genReqId:()=>randomUUID()});
  const sessions=new Sessions(deps.db,deps.sessionSecret);
  const tasks=new TaskStore(deps.db);
@@ -91,7 +92,7 @@ export async function createServer(deps:{config:Config;db:Database;sessionSecret
  personaRoutes(app,deps.personas);
  memoryRoutes(app,deps.memories);
  groupContractRoutes(app,deps.groupContracts);
- groupCaseRoutes(app,deps.groupCases);groupEscalationRoutes(app,deps.groupEscalations);groupReminderRoutes(app,deps.groupReminders);scheduleRoutes(app,deps.schedules);
+ groupCaseRoutes(app,deps.groupCases);groupEscalationRoutes(app,deps.groupEscalations);groupReminderRoutes(app,deps.groupReminders);scheduleRoutes(app,deps.schedules);watchRoutes(app,deps.watches,deps.watchSources);
  const capabilityMetadata=(id:string,version:string)=>deps.finalReader?.describeCapability(id,version)??null;
  const permissionCenter=new PermissionCenter(deps.db,capabilityMetadata);permissionRoutes(app,permissionCenter,new PermissionAdministration(deps.db,capabilityMetadata));
  app.get<{Params:{token:string}}>('/api/v1/cards/actions/:token',async(req,reply)=>{reply.header('cache-control','no-store');const action=await cardActions.preview(req.principal!,req.params.token);return action?{data:action}:reply.code(404).send({error:{code:'NOT_FOUND',correlationId:req.id}});});
@@ -128,7 +129,7 @@ export async function createServer(deps:{config:Config;db:Database;sessionSecret
  artifactRoutes(app,deps.artifacts);
  companyAgentRoutes(app,deps.companyRequests);
  app.post<{Params:{id:string}}>('/api/v1/tasks/:id/cancel',async(req,reply)=>{const task=await tasks.cancel(req.principal!,z.uuid().parse(req.params.id));return task?{data:task}:reply.code(404).send({error:{code:'NOT_FOUND',correlationId:req.id}});});
- if(deps.webRoot){await app.register(staticFiles,{root:join(deps.webRoot,'assets'),prefix:'/assets/',decorateReply:false});for(const path of ['/','/tasks','/personal','/auth/callback','/card-action','/controls','/permissions','/groups','/schedules'])app.get(path,async(req,reply)=>{reply.header('cache-control','no-store');if(path==='/permissions'){const principal=await sessions.authenticate(req.cookies['oa_session']);if(!principal)return reply.code(401).send({error:{code:'UNAUTHENTICATED'}});await permissionCenter.overview(principal);}if(path==='/controls'){const principal=await sessions.authenticate(req.cookies['oa_session']);if(!principal)return reply.code(401).send({error:{code:'UNAUTHENTICATED'}});await controls().overview(principal);}return reply.type('text/html').send(await readFile(join(deps.webRoot!,'index.html'),'utf8'));});}
+ if(deps.webRoot){await app.register(staticFiles,{root:join(deps.webRoot,'assets'),prefix:'/assets/',decorateReply:false});for(const path of ['/','/tasks','/personal','/auth/callback','/card-action','/controls','/permissions','/groups','/schedules','/watches'])app.get(path,async(req,reply)=>{reply.header('cache-control','no-store');if(path==='/permissions'){const principal=await sessions.authenticate(req.cookies['oa_session']);if(!principal)return reply.code(401).send({error:{code:'UNAUTHENTICATED'}});await permissionCenter.overview(principal);}if(path==='/controls'){const principal=await sessions.authenticate(req.cookies['oa_session']);if(!principal)return reply.code(401).send({error:{code:'UNAUTHENTICATED'}});await controls().overview(principal);}return reply.type('text/html').send(await readFile(join(deps.webRoot!,'index.html'),'utf8'));});}
  app.setNotFoundHandler((req,reply)=>reply.code(404).send({error:{code:'NOT_FOUND',message:'未找到',correlationId:req.id}}));
  return {app,sessions};
 }

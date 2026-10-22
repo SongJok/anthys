@@ -1,0 +1,66 @@
+{
+  "schemaVersion": "1.0",
+  "key": "payments.success_rate_daily",
+  "version": "1.0.0",
+  "status": "CERTIFIED",
+  "ownerRole": "DATA_STEWARD",
+  "metric": {
+    "name": "支付成功率",
+    "grain": ["business_date", "channel"],
+    "numerator": "去重后成功的支付尝试数",
+    "denominator": "去重后全部有效支付尝试数",
+    "dedupKey": ["payment_attempt_id"],
+    "dedupScope": "WITHIN_AUTHORIZED_TIME_WINDOW",
+    "validRecordRule": {"field": "is_valid", "operator": "eq", "value": true},
+    "dedupOrder": [
+      {"field": "event_time", "direction": "DESC"},
+      {"field": "event_id", "direction": "DESC"}
+    ],
+    "processingOrder": [
+      "server_authorized_scope", "time_window", "validity",
+      "dedup", "channel_filter", "aggregate"
+    ],
+    "nullPolicy": "missing_status_is_unknown_not_success",
+    "zeroDenominator": "NULL",
+    "timezone": "Asia/Shanghai",
+    "timeField": "event_time",
+    "interval": "[start,end)",
+    "watermarkRequired": true
+  },
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["start", "end"],
+    "properties": {
+      "start": {"type": "string", "format": "date-time"},
+      "end": {"type": "string", "format": "date-time"},
+      "channel": {"type": "string", "enum": ["app", "web"]}
+    }
+  },
+  "execution": {
+    "kind": "MCP_DATA_TOOL",
+    "bindingRef": "payments-analytics",
+    "operation": "success-rate",
+    "timeoutMs": 30000,
+    "maxRows": 10000,
+    "maxBytes": 10485760,
+    "maxWindowDays": 31
+  },
+  "authorization": {
+    "allowedRoles": ["PAYMENTS_ANALYST"],
+    "rowScope": "SERVER_INJECTED",
+    "outputClassification": "CONFIDENTIAL",
+    "groupSharing": "EXPLICIT_RESOURCE_GRANT"
+  },
+  "quality": {
+    "assertions": ["numerator <= denominator", "0 <= rate <= 1"],
+    "freshnessMaxMinutes": 60,
+    "goldenCasesRef": "testkit/payments-success-rate"
+  },
+  "certification": {
+    "reference": "LOCAL_TEMPLATE_CERTIFICATION_20261013",
+    "certifiedAt": "2026-10-13T00:00:00.000Z",
+    "oracleRef": "docs/04_TEST_ACCEPTANCE_AND_OPERATIONS.md#3.2",
+    "liveStatus": "UNVERIFIED"
+  }
+}

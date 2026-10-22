@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "compatibility": "EXACT_SET",
-  "lastMigration": "104_finite_private_pilots.sql",
-  "contractHash": "3bf5aa1d01b1ccf60ba529a4e8e22d0835c8ae891742c5690abae0295663b2ca",
+  "lastMigration": "114_sandbox_artifact_retention.sql",
+  "contractHash": "7f3b8f8df0d1bc8088f015b3d1826571475d7b0f4efccf7ab5817502962a6a65",
   "migrations": [
     {
       "name": "001_identity.sql",
@@ -419,6 +419,46 @@
     {
       "name": "104_finite_private_pilots.sql",
       "hash": "dca7e52fc67da1ac895ea8f85f9aad7ad6c1a87d2cf364c77b065f8d6508108b"
+    },
+    {
+      "name": "105_company_data_executions.sql",
+      "hash": "753f0bae16ea2481a18fce8c771ae0be24ba05e6439da42285be7e44a199d8b7"
+    },
+    {
+      "name": "106_condition_watches.sql",
+      "hash": "c61f72a669cdd1721b2443d359a2d6c90059c20f1aaa61f92382a010259f721b"
+    },
+    {
+      "name": "107_office_todo_mirror.sql",
+      "hash": "4abe5d3176c1dfec7cda3ec9183ab5b45c63ff0159f1bb7fe09a09a878778bdd"
+    },
+    {
+      "name": "108_sandbox_broker_jobs.sql",
+      "hash": "20e13cc3f05c33d4def94316a2c94ecae952b4527f4f201bea8f0f7d49d674a4"
+    },
+    {
+      "name": "109_sandbox_broker_ownership.sql",
+      "hash": "5efe8908e0937529d96a7b3975aab5f46c3901c59a7c50878159ba0342687dd9"
+    },
+    {
+      "name": "110_sandbox_artifacts.sql",
+      "hash": "4c556d1bace575bea98c5326aa3ff1ebf84436b2da904a6bfcfc658597c80e11"
+    },
+    {
+      "name": "111_condition_watch_provider_acceptance.sql",
+      "hash": "dd57736e3f0509022c1d7f567a9b18b64c70ac81937d9b0778307942e3de69e7"
+    },
+    {
+      "name": "112_condition_watch_sources.sql",
+      "hash": "13ca47c8255c9ad7fb618f549c491784f26937f3be965f4dd04e787428ebd783"
+    },
+    {
+      "name": "113_condition_watch_renewal_notices.sql",
+      "hash": "9a49400bea1c0132c65dbf5f6915eb01a061650fd5fb1da6d62bfdc0c4ea976b"
+    },
+    {
+      "name": "114_sandbox_artifact_retention.sql",
+      "hash": "bbe7fee8ffb3c7aeda6a5f329fe037644b8728e2799792e9e09ea2ade74104a9"
     }
   ]
 }
