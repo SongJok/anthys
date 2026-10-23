@@ -357,8 +357,9 @@
     "layer": "E2E",
     "precondition": "用户要求收件人存在实质歧义的群发送",
     "oracle": "先澄清唯一受众；不能猜测后发送",
-    "implementation": null,
-    "status": "NOT_RUN"
+    "implementation": "tests/integration/ambiguous-group-recipient.test.ts",
+    "status": "NOT_RUN",
+    "coverageNote": "Local E2E oracle: an ambiguous private group-send request is admitted only as a reviewed clarification that pauses the task and is delivered solely to the requester own DM; the private task is offered no send capability, and a claimed guessed send is rejected and remains undelivered. Live DingTalk send and recipient-directory resolution stay BLOCKED_EXTERNAL."
   },
   {
     "id": "T022",

@@ -1606,3 +1606,16 @@ T118「外部支持幂等键，同一action重复请求」/「只产生一次外
 为证明用例不是空断言，做了一次变异检查：把 `packages/gateway/src/index.ts` 中动作键里的稳定参数哈希替换为每次调用新生成的随机 UUID 后重跑，两条用例立即失败（重放不再命中已批准动作，全部退化为 `NEEDS_APPROVAL`）。生产文件随后被按字节还原，`git diff` 确认无残留改动。
 
 以上证据只证明本地合成 provider 契约下的幂等键稳定性、回执复用与审批隔离，不涉及任何真实上游系统是否支持幂等键、真实请求头或现场重复请求验收。T118 在测试目录中仍为 NOT_RUN，R31 未因本切片宣告完成，真实企业验收保持 BLOCKED_EXTERNAL。
+
+### 2026-10-23 群发送收件人歧义用例证据（T021仍为NOT_RUN）
+
+本切片为 R05 与 R28 的「群发送收件人实质歧义」用例补齐可追溯实现文件与本地断言：新增 `tests/integration/ambiguous-group-recipient.test.ts`，在隔离 PostgreSQL 64711 上用一个真实钉钉单聊事件、真实运行时循环、真实投递网关和合成 GLM SSE 提供方驱动。用户目标是「把这份周报发到项目群，群名你看着办就行」，即用户主动要求代猜收件人。
+
+T021「用户要求收件人存在实质歧义的群发送」/「先澄清唯一受众；不能猜测后发送」由两条断言构成：
+
+- **歧义请求只得到澄清并暂停**：模型只能提交 CLARIFICATION 计划；独立的无工具叙述复核判定该问题可受理后，运行进入 `WAITING_USER` / `CLARIFICATION_REQUESTED`，任务保持 ACTIVE。唯一投递是发给发起人本人的单聊会话（目标为 `PRIVATE_USER` 且等于当前 actor），正文要求确认唯一目标群，并明确「在确认前我不会发送任何消息」；物理发送走发起人自己的钉钉 sessionWebhook，不打开群或主动通道。该私有任务可用的工具只有 `tasks.get@1.0.0`，不存在任何接受群名或收件人参数的发送能力；`tool_actions`、`approvals`、非 RUN `outbox` 均为空。用户回答只指定「项目群 A」（group-a）时，系统只把任务重新排队，仍不产生任何群投递或写账本。
+- **猜测后声称已发送被拒绝**：续跑后模型提交「已发送到项目群 A，周报已经发出」的自由 CONVERSATION 文本。终结器的无依据动作叙述守卫在任何投递之前连续拒绝三次（`UNBACKED_ACTION_PROSE`），运行以 PARTIAL 结束、结果为空；仍只有此前那条澄清问题，零群投递、零工具动作、零外部事件，且 `finalResultAllowed` 为 false。
+
+为证明用例不是空断言，做了一次变异检查：把 `packages/runtime/src/narrative-review.ts` 的 `admitsNarrative` 中 CLARIFICATION 分支短路为 false 后重跑，第一条用例立即失败（问题无法被受理，运行连续生成与复核三次而不是暂停等待）。生产文件随后被按字节还原（SHA-256 `5aaae5cc59cd2e8b030e582b4be804a730ab1cfdfa68f73f5dc0a76d70c9398b`），`git diff` 确认无残留改动。
+
+以上证据只证明本地合成环境下澄清暂停、投递受众绑定与猜测发送拒绝的强制行为，不证明真实 GLM 在真实输入下一定选择澄清，也未调用真实钉钉群目录或任何真实发送通道。T021 在测试目录中仍为 NOT_RUN，R05 与 R28 未因本切片宣告完成，真实企业验收保持 BLOCKED_EXTERNAL。

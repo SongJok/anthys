@@ -1,0 +1,105 @@
+{
+  "schemaVersion": 1,
+  "case": "T021",
+  "date": "2026-10-23",
+  "status": "PASS",
+  "scope": "LOCAL_SYNTHETIC_PROVIDER_RECIPIENT_CLARIFICATION",
+  "live": false,
+  "baseCommit": "d9b7d0e560a5d4db33c1e43627a1d4ddd7e1187e",
+  "files": {
+    "tests/integration/ambiguous-group-recipient.test.ts": "204a56fd6c3676dcd3b7b37b2f876641c62aa44830363c68d54215741be16329",
+    "config/test-catalog.json": "e75db5381c5b59553085ae2692ff4dc6bf442191591007a42ad0a3f54d97fdc1",
+    "tests/support/backend-discovery-baseline.json": "e79674b35a7e5cd301b0937cf15b1735cf535d45e466e336b065117833d53035",
+    "docs/04_TEST_ACCEPTANCE_AND_OPERATIONS.md": "12c99e2b6da95986980e3bdc9da0c384a8e162a888c97ba5b7338f43582c4818",
+    "packages/runtime/src/narrative-review.ts": "5aaae5cc59cd2e8b030e582b4be804a730ab1cfdfa68f73f5dc0a76d70c9398b"
+  },
+  "surface": {
+    "entry": "AgentRuntime.advance on an isolated PostgreSQL 64711 cluster with a real DingTalk private callback event",
+    "audience": "PRIVATE_USER bound to the requesting actor; no group target exists on the task",
+    "capabilitiesOffered": "The reviewed read-only tasks.get@1.0.0 only; no send capability accepts a group name or recipient",
+    "delivery": "DeliveryGateway with the requester's own sessionWebhook; sendProactive is forced to fail"
+  },
+  "behavior": {
+    "ambiguousRequest": "The goal asks to send a weekly report to a group and explicitly invites guessing. The only admitted outcome is a reviewed CLARIFICATION question that pauses the task.",
+    "clarification": "The run ends WAITING_USER/CLARIFICATION_REQUESTED with task ACTIVE; the question asks for one verified group identity and states nothing has been sent.",
+    "delivery": "Exactly one delivery exists, targeted at PRIVATE_USER (the requester), physically sent through the requester's own DM session webhook; no group or proactive channel is opened.",
+    "noSideEffects": "Zero tool actions, zero approvals, zero non-RUN outbox events and zero group deliveries exist before and after naming a candidate group in the answer.",
+    "guessedSend": "A resumed draft claiming the report was sent to the named group is rejected three times as UNBACKED_ACTION_PROSE; the run ends PARTIAL with no result and no new delivery."
+  },
+  "tests": {
+    "target": {
+      "file": "tests/integration/ambiguous-group-recipient.test.ts",
+      "tests": 2,
+      "passed": 2,
+      "cases": [
+        "an ambiguous group-send request pauses for one audience and sends nothing",
+        "a guessed send after the answer is rejected and stays undelivered"
+      ]
+    },
+    "regression": {
+      "files": [
+        "tests/integration/narrative-review.test.ts",
+        "tests/integration/finalization.test.ts",
+        "tests/unit/final-plan.test.ts",
+        "tests/unit/clarification-command.test.ts"
+      ],
+      "tests": 49,
+      "passed": 49,
+      "note": "Combined invocation reported 51 passed including the 2 target tests."
+    },
+    "isolation": {
+      "file": "tests/unit/test-isolation.test.ts",
+      "tests": 8,
+      "passed": 8,
+      "note": "Original 90 project files plus approved added files; the new T021 file is listed in approvedAddedFiles."
+    }
+  },
+  "mutationCheck": [
+    {
+      "mutation": "packages/runtime/src/narrative-review.ts: short-circuit the CLARIFICATION branch of admitsNarrative to false",
+      "observed": "The first test fails immediately: the run generates and reviews three times instead of pausing with an admitted question (expected 1 generation/1 review, received 3/3).",
+      "restored": true,
+      "restoredFileHash": "5aaae5cc59cd2e8b030e582b4be804a730ab1cfdfa68f73f5dc0a76d70c9398b"
+    }
+  ],
+  "gates": {
+    "typecheck": "PASS",
+    "lint": "PASS",
+    "build": "PASS",
+    "schemaContract": {
+      "status": "PASS",
+      "migrations": 116,
+      "contractHash": "473b7415afaae98c2e384fa32e0da1dfe6d82b2ea24996c31f466f184d8efc94"
+    },
+    "capabilityOutputContracts": {
+      "status": "PASS",
+      "capabilities": 13
+    },
+    "secretScan": {
+      "status": "PASS",
+      "findings": []
+    },
+    "requirementsBaseline": "PASS",
+    "requirementsFull": {
+      "status": "FAIL_PREEXISTING",
+      "errors": 48,
+      "note": "36 R items remain IN_PROGRESS and 12 catalog cases remain NOT_RUN; T021 is no longer among the errors (previously 49)."
+    }
+  },
+  "catalog": {
+    "implementation": "tests/integration/ambiguous-group-recipient.test.ts",
+    "status": "NOT_RUN"
+  },
+  "notProven": [
+    "The clarification wording and the claimed guessed send are produced by a scripted synthetic provider; this does not prove that a live GLM model always chooses clarification for ambiguous recipients.",
+    "No real DingTalk group directory lookup, group send or GLM/DWS/company-MCP request was made.",
+    "The test proves the runtime offers no send capability to this private task, not that every future group-send capability will resolve recipients safely.",
+    "T021 remains NOT_RUN, R05 and R28 remain IN_PROGRESS, and live acceptance remains BLOCKED_EXTERNAL."
+  ],
+  "statusUnchanged": {
+    "T021": "NOT_RUN",
+    "R05": "IN_PROGRESS",
+    "R28": "IN_PROGRESS",
+    "liveAcceptance": "BLOCKED_EXTERNAL"
+  }
+}
