@@ -1,0 +1,92 @@
+{
+  "schemaVersion": 1,
+  "case": "LOCAL_DOCKER_DEPLOYMENT_READINESS",
+  "date": "2026-10-23",
+  "status": "PASS",
+  "scope": "LOCAL_DOCKER_DEV_STACK_64700_64710_8092",
+  "live": false,
+  "liveProviderCalls": 0,
+  "baseCommit": "d85b08b28cbeac341670f7a7695ff91af984112d",
+  "node": "v24.21.0",
+  "docker": "29.2.1",
+  "compose": {
+    "project": "anthys-dev",
+    "file": "deploy/compose/compose.dev.yml",
+    "fileSha256": "0347d7196003a2063b40f71472df54133a771b58ef237087b8c9f90babc041ec",
+    "devUpSha256": "274d1c3793b00c38f57d996b0a702291ddd1139215246a5228e5c880e229f997",
+    "envExampleSha256": "d42ae1b24844d8aaa4c0c9d94ab3a385802ee06f9af94140e5c6c531e058b103"
+  },
+  "images": {
+    "anthys-app:dev": "sha256:db6c0416a37af865b859b16604e7b374eee9f34a2edfc4eac7b394d9b5f6bca0",
+    "anthys-sandbox-broker:dev": "sha256:d81a5a2bfeedab4949fa770460433e5f65c0e1c3b33d24d444833d2bb7e2cda3",
+    "postgres:17-bookworm": "sha256:3645570cccdfa447589da9f57dd740faa29b30938e861289a5574b6ca6b03826"
+  },
+  "services": {
+    "api": {
+      "state": "running",
+      "health": "healthy",
+      "uid": 10001,
+      "node": "v24.21.0",
+      "live": {"endpoint": "http://127.0.0.1:64700/api/v1/health/live", "status": 200, "body": {"data": {"status": "ALIVE"}}},
+      "ready": {"endpoint": "http://127.0.0.1:64700/api/v1/health/ready", "status": 200, "body": {"data": {"status": "READY"}}},
+      "secretsMounted": ["app_master_key", "database_url", "dingtalk_client_secret", "glm_api_key", "queue_database_url", "runtime_database_url", "session_secret"],
+      "providerEnvNamesPresent": ["COMPANY_DATA_MCP_CONFIG_FILE", "COMPANY_LOGS_MCP_CONFIG_FILE", "COMPANY_MCP_CONFIG_FILE", "DINGTALK_CARD_TEMPLATE_FILE", "DINGTALK_CARD_TEMPLATE_ID", "DINGTALK_CLIENT_ID", "DINGTALK_CLIENT_SECRET_FILE", "DINGTALK_CORP_ID", "DINGTALK_REPLY_ONLY", "DINGTALK_ROBOT_CODE", "DINGTALK_TENANT_ID", "DWS_ENABLED", "DWS_RUNNER_AUTH_KEY_FILE", "DWS_RUNNER_CONFIG_FILE", "DWS_RUNNER_URL", "GLM_API_KEY_FILE", "GLM_BASE_URL", "GLM_MODEL", "RELEASE_PROFILE"],
+      "note": "Names only; no secret value was printed. Presence of configuration is not live acceptance."
+    },
+    "worker": {
+      "state": "running",
+      "healthcheckDeclared": false,
+      "uid": 10001,
+      "node": "v24.21.0",
+      "lastLog": "Worker running; model configured, live verification required",
+      "note": "The Compose file declares no worker healthcheck; process liveness was checked from the container state and startup log only."
+    },
+    "postgres": {
+      "state": "running",
+      "health": "healthy",
+      "port": "127.0.0.1:64710",
+      "migrations": 116,
+      "queueVersion": 46,
+      "publicTables": 133,
+      "check": "docker compose exec -T postgres psql -U oa_migrator -d anthys"
+    },
+    "sandbox-broker": {
+      "state": "running",
+      "health": "healthy",
+      "uid": 10001,
+      "node": "v24.21.0",
+      "ready": {"endpoint": "http://127.0.0.1:8092/health/ready (in-container)", "status": 200, "body": {"status": "READY"}},
+      "requiredMigrations": 116,
+      "lastRequiredMigration": "116_company_data_template_lifecycle.sql",
+      "secretsMounted": ["app_master_key", "runtime_database_url", "sandbox_broker_auth_key", "sandbox_broker_config", "sandbox_broker_public_key"],
+      "providerCredentialsMounted": false
+    }
+  },
+  "checks": {
+    "schemaExactSet": {"result": "PASS", "detail": "The database has 116 migrations and every readiness authority observation returned true."},
+    "queueSchema": {"result": "PASS", "detail": "oa_queue.version = 46."},
+    "dockerSocketIsolation": {"result": "PASS", "detail": "Only sandbox-broker mounts /var/run/docker.sock. api, worker and postgres have no socket mount."},
+    "brokerCredentialIsolation": {"result": "PASS", "detail": "The broker receives only its runtime database URL, master key and broker auth/config/public key. No DingTalk, GLM, DWS or company-MCP credential is mounted into it."},
+    "nonRootRuntime": {"result": "PASS", "detail": "api, worker and sandbox-broker run as uid 10001."},
+    "toolchainPin": {"result": "PASS", "detail": "All three application containers run Node v24.21.0."},
+    "externalCalls": {"result": "PASS", "detail": "Every probe was loopback HTTP, in-container HTTP or PostgreSQL. No DingTalk, DWS, GLM or upstream company-MCP call was made."}
+  },
+  "defectsFoundAndFixed": [
+    {
+      "defect": "The sandbox-broker container was running a stale image whose compiled required-migrations contract contained 114 entries, while the database had 116. Its readiness endpoint therefore returned 503 NOT_READY while the API stayed healthy.",
+      "fix": "Rebuilt anthys-sandbox-broker:dev from the current tree and recreated the container. The rebuilt image reports 116 required migrations and /health/ready returns 200 READY.",
+      "verification": "image required-migrations.json = 116, last = 116_company_data_template_lifecycle.sql; container health = healthy; in-container /health/ready = 200."
+    },
+    {
+      "defect": "ANTHYS_SANDBOX_SECRETS_DIR=.secrets/sandbox-broker in .env and .env.example was resolved by Compose against deploy/compose, so recreating the broker failed with a missing producer-public.pem bind source. The previous container only worked because it predated the setting.",
+      "fix": "Corrected the value to ../../.secrets/sandbox-broker in .env and .env.example and documented that the value is Compose-project-relative.",
+      "verification": "docker compose --env-file .env -f deploy/compose/compose.dev.yml --profile sandbox up -d --no-deps --force-recreate sandbox-broker recreated the container successfully and it became healthy."
+    }
+  ],
+  "limitations": {
+    "workerHealthcheck": "No Compose healthcheck is declared for worker; readiness is not asserted beyond process state and its startup log.",
+    "ingress": "The DingTalk long-connection ingress service is opt-in and was not started; it requires a live app identity.",
+    "liveAcceptance": "Live GLM, DingTalk, DWS and upstream company-MCP acceptance remains BLOCKED_EXTERNAL. This report proves local deployment integrity only; affected T-cases remain NOT_RUN and R items remain IN_PROGRESS.",
+    "secretHandling": "No secret value is reproduced in this report. Only mount names and environment-variable names are listed."
+  }
+}
