@@ -1690,3 +1690,13 @@ T126「连接器故障、UNKNOWN写入、备份失败、队列积压」/「对�
 - `dm-diagnostic-guard.test.ts` 单独分组，显式预加载 `tests/support/dm-diagnostics-offline-guard.mjs`；其它文件仍预加载通用网络守卫。两组分别在独立进程中运行，任何一组都不会放宽另一组的限制。
 - 证据：固定 Node 24.21.0 下执行 `node scripts/run-tests.mjs offline $(ls tests/offline/*.test.ts)`，退出码 0；通用组 460 项通过、DM 组 3 项通过，共 463 项，0 失败、0 跳过。其中 `signed-group-boundaries` 30 项、`signed-group-reader` 31 项、`signed-document-reader` 50 项全部通过；三者在修复前分别因守卫拒绝、环境断言缺失和文件级守卫缺失而失败。
 - 边界：这些 oracle 使用显式合成身份、密钥与 CLI 替身，不连接真实钉钉、DWS 或企业 MCP，不证明真实群成员、文档或凭据读取；不改变任何 T 用例的 `NOT_RUN` 或 R 项的 `IN_PROGRESS` 状态。
+
+### 2026-10-23 依赖清单、许可证与审计证据（交付物补齐，不改变 T/R 状态）
+
+docs/02 与 `config/stages.json` 要求主分支保留 SBOM、许可证与依赖审计证据，但仓库此前没有 `reports/sbom.cdx.json`、`reports/licenses.json` 或 `reports/dependency-audit.json`。本切片把 `pnpm sbom` 接到已有的 `scripts/sbom.mjs`，并生成三份真实产物：
+
+- `reports/sbom.cdx.json`：CycloneDX 1.6，应用 `anthys@0.1.0`，629 个已安装组件版本，`pnpm-lock-sha256` 为 `1609a8f486e04f5311639f14a4f9d8204a36d2f7ce0020dfda88288be6900d4e`（与当前锁文件一致）。
+- `reports/licenses.json`：`pnpm licenses list --json` 的实际输出，按许可证分组。
+- `reports/dependency-audit.json`：`pnpm audit --json` 于 2026-10-23T03:23Z 查询注册表的结果，674 个依赖，info/low/moderate/high/critical 均为 0。
+
+边界：这三份产物只反映本机 node_modules 与当次注册表 advisory 快照；SBOM 不包含操作系统包、容器基础镜像或全局工具，制品镜像未被扫描；注册表审计不保证覆盖所有已披露或未披露漏洞，不能替代企业漏洞管理流程与镜像 CVE 扫描。该证据不改变任何 T 用例的 `NOT_RUN` 或 R 项的 `IN_PROGRESS` 状态。

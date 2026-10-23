@@ -30,7 +30,7 @@
     "test:live": "node --import tsx scripts/live.ts",
     "test:coverage": "node scripts/run-tests.mjs vitest run --coverage",
     "snapshot:sources": "node scripts/snapshot-sources.mjs",
-    "sbom": "pnpm licenses list --json > reports/licenses.json",
+    "sbom": "node scripts/sbom.mjs && pnpm licenses list --json > reports/licenses.json",
     "start:worker": "node --import tsx apps/worker/src/main.ts",
     "start:ingress": "node --import tsx apps/ingress/src/main.ts",
     "start:notifier": "node --import tsx apps/notifier/src/main.ts",
