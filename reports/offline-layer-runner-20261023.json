@@ -1,0 +1,105 @@
+{
+  "status": "PASS",
+  "scope": "LOCAL_OFFLINE_TEST_RUNNER_FIX",
+  "live": false,
+  "generatedAt": "2026-10-23T03:22:16Z",
+  "source": {
+    "baseCommit": "d535e9618b6d02be9cbca52cc2943a23d6cfb82b",
+    "workingTree": true,
+    "files": {
+      "scripts/run-tests.mjs": "8100fe17d9a7e8e6ae8a663b4a3507d30dab766514775bc24077bd2628b58576",
+      "tests/offline/signed-group-boundaries.test.ts": "4ef123f63be4cb25c11564256e69757830a78a6f174f9088ee3fa771aadc6949",
+      "tests/offline/signed-group-reader.test.ts": "45825b94dc5643d6dc26c7723671a12e3922f44cbc2f55f7b7a9525a645eded9",
+      "tests/offline/signed-document-reader.test.ts": "9726bd384c1defe271ccbf0ff7be363f5aaa5f0151a884de109b25c190a97c5f",
+      "tests/offline/dm-diagnostic-guard.test.ts": "6724b319a464776a044ba4dfea4caea955755f64e29b18d110efe1c6397f7da8",
+      "tests/support/dm-diagnostics-offline-guard.mjs": "92db1fe6d8efab1a369fae493707e0ab6c1309a3fe947eda5e0cdfe4f3223dc8",
+      "docs/04_TEST_ACCEPTANCE_AND_OPERATIONS.md": "02454b896ee6ca67d50f62e98d81a12eabb387a8d65a44d53f74fa11bed7bb63"
+    }
+  },
+  "problem": [
+    {
+      "file": "tests/offline/signed-group-reader.test.ts",
+      "failure": "AssertionError: actual undefined, expected 'test' at the import-time environment assertion",
+      "cause": "The offline runner gave the child only baseEnv; APP_ENV=test and OA_TEST_ISOLATED=true were absent."
+    },
+    {
+      "file": "tests/offline/signed-document-reader.test.ts",
+      "failure": "Same import-time environment assertion (identical line).",
+      "cause": "Same missing offline runner environment."
+    },
+    {
+      "file": "tests/offline/signed-group-boundaries.test.ts",
+      "failure": "TEST_NETWORK_UNDECLARED_DESTINATION from scripts/test-network-guard.mjs while opening its private Unix socket",
+      "cause": "The fixture created its socket under an oa-sg-* temp directory; the guard only permits oa-dws-rpc-*/runner.sock. Running the file directly without the guard passed 30/30, showing the oracle itself was sound."
+    },
+    {
+      "file": "tests/offline/dm-diagnostic-guard.test.ts",
+      "failure": "AssertionError: explicit offline preload is required (anthys.dmDiagnosticsOfflineGuard was undefined)",
+      "cause": "The file requires tests/support/dm-diagnostics-offline-guard.mjs, whose unconditional listen denial conflicts with the private sockets other offline oracles need; no runner referenced this guard."
+    }
+  ],
+  "fix": [
+    "scripts/run-tests.mjs injects only APP_ENV=test and OA_TEST_ISOLATED=true into the offline child environment on top of the existing baseEnv allowlist; it still inherits no database URL, secret path or provider credential.",
+    "tests/offline/signed-group-boundaries.test.ts now creates its 0700 temp directory with the guard-permitted oa-dws-rpc- prefix.",
+    "scripts/run-tests.mjs partitions offline files into two sequential child processes: general files preload scripts/test-network-guard.mjs, while dm-diagnostic-guard.test.ts preloads tests/support/dm-diagnostics-offline-guard.mjs. Neither group relaxes the other's restrictions."
+  ],
+  "measurements": {
+    "environment": {
+      "platform": "darwin",
+      "arch": "arm64",
+      "node": "v24.21.0",
+      "database": "none",
+      "network": "only the guard-permitted private Unix sockets",
+      "modelCalls": 0,
+      "liveProviderCalls": 0
+    },
+    "command": "node scripts/run-tests.mjs offline $(ls tests/offline/*.test.ts)",
+    "exitCode": 0,
+    "groups": [
+      {
+        "guard": "scripts/test-network-guard.mjs",
+        "tests": 460,
+        "passed": 460,
+        "failed": 0,
+        "skipped": 0,
+        "durationMs": 26087
+      },
+      {
+        "guard": "tests/support/dm-diagnostics-offline-guard.mjs",
+        "tests": 3,
+        "passed": 3,
+        "failed": 0,
+        "skipped": 0,
+        "durationMs": 231
+      }
+    ],
+    "total": {
+      "tests": 463,
+      "passed": 463,
+      "failed": 0,
+      "skipped": 0
+    },
+    "previouslyFailingFiles": {
+      "tests/offline/signed-group-boundaries.test.ts": 30,
+      "tests/offline/signed-group-reader.test.ts": 31,
+      "tests/offline/signed-document-reader.test.ts": 50,
+      "tests/offline/dm-diagnostic-guard.test.ts": 3
+    }
+  },
+  "gates": {
+    "typecheck": "PASS (pnpm typecheck, exit 0)",
+    "eslintChangedFiles": "PASS (scripts/run-tests.mjs, tests/offline/signed-group-boundaries.test.ts, exit 0)",
+    "vitest": "NOT_RERUN_IN_THIS_SLICE (offline test layer and runner only; no production source changed)",
+    "coverage": "SEPARATE_RUN_IN_PROGRESS_AT_REPORT_TIME"
+  },
+  "notProven": [
+    "These offline oracles use synthetic identities, synthetic keys and a synthetic DWS CLI; no real DingTalk, DWS, enterprise MCP or company data was contacted.",
+    "Passing offline tests does not prove real signed group or document reads, real credential rotation, or real platform authorization.",
+    "The runner fix does not add coverage of any acceptance case; it only makes the existing offline layer runnable through the standard entry."
+  ],
+  "statusUnchanged": {
+    "testCatalog": "No T-case status changed; these offline oracles are not catalog acceptance IDs.",
+    "requirements": "All R items remain IN_PROGRESS.",
+    "liveAcceptance": "BLOCKED_EXTERNAL."
+  }
+}

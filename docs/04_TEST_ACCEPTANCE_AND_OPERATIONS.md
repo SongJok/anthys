@@ -1679,3 +1679,14 @@ T126「连接器故障、UNKNOWN写入、备份失败、队列积压」/「对�
 为证明用例不是空断言，做了一次变异检查：把 `packages/observability/src/alerts.ts` 的 `reconcileAlerts` 中恢复项从 `previous.filter(alert=>!current.has(alert.key))` 改为恒空数组后重跑，用例立即在「仅修复投递后关闭对应告警」断言处失败（期望 `['DELIVERY_FAILURES']`，实际 `[]`）。生产文件随后被按字节还原（SHA-256 `8d8c2b5be7d0bdf6a54878f7ca63b4d99bd835341ea0d91982d905087046452c`），`git diff` 确认无残留改动。
 
 以上证据只证明本地隔离环境下的告警触发、定位、去重、脱敏和恢复关闭，不证明真实连接器故障、真实 DWS 授权失效、真实备份存储或恢复演练、通知通道、值班升级或试点调优阈值。采集脚本使用可跨租户读取的迁移/超级用户角色；生产只读监控角色的授权与部署未经验证。T126 在测试目录中仍为 NOT_RUN，R34 未因本切片宣告完成，真实企业告警验收保持 BLOCKED_EXTERNAL。13.3 要求的真实通知、负责人值班与阈值试点仍属未完成的外部事项。
+
+### 2026-10-23 离线层 runner 修复与签名读取用例证据（不改变 T/R 状态）
+
+离线 `tests/offline` 层此前没有被标准入口完整跑通：`signed-group-reader.test.ts` 与 `signed-document-reader.test.ts` 在导入时断言运行环境必须显式声明 `APP_ENV=test`/`OA_TEST_ISOLATED=true`，但 `scripts/run-tests.mjs offline` 的子进程只继承基础进程设置；`signed-group-boundaries.test.ts` 使用 `oa-sg-*` 临时目录创建私有 Unix socket，而网络守卫只允许 `oa-dws-rpc-*/runner.sock`；`dm-diagnostic-guard.test.ts` 需要其专用全 IO 拒绝守卫，该守卫无条件拒绝 `listen`，与其它离线 oracle 的私有 socket 冲突。
+
+本切片修正标准入口而不放松隔离：
+
+- `scripts/run-tests.mjs` 的 offline 子进程只额外注入 `APP_ENV=test` 与 `OA_TEST_ISOLATED=true`，不继承数据库 URL、密钥路径或提供方凭据；`signed-group-boundaries` 的临时目录前缀改为守卫已允许的 `oa-dws-rpc-`。
+- `dm-diagnostic-guard.test.ts` 单独分组，显式预加载 `tests/support/dm-diagnostics-offline-guard.mjs`；其它文件仍预加载通用网络守卫。两组分别在独立进程中运行，任何一组都不会放宽另一组的限制。
+- 证据：固定 Node 24.21.0 下执行 `node scripts/run-tests.mjs offline $(ls tests/offline/*.test.ts)`，退出码 0；通用组 460 项通过、DM 组 3 项通过，共 463 项，0 失败、0 跳过。其中 `signed-group-boundaries` 30 项、`signed-group-reader` 31 项、`signed-document-reader` 50 项全部通过；三者在修复前分别因守卫拒绝、环境断言缺失和文件级守卫缺失而失败。
+- 边界：这些 oracle 使用显式合成身份、密钥与 CLI 替身，不连接真实钉钉、DWS 或企业 MCP，不证明真实群成员、文档或凭据读取；不改变任何 T 用例的 `NOT_RUN` 或 R 项的 `IN_PROGRESS` 状态。

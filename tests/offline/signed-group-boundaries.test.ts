@@ -94,7 +94,7 @@ function state(subject: DwsSubject): DwsState {
 }
 type StubRunner = Pick<DwsRunner, 'config' | 'verify' | 'readSelf' | 'readGroupAudience'>;
 async function fixture(options: {enabled?: boolean; listen?: boolean; scopeChange?: (s: DwsGroupScope) => void; maxReplayEntries?: number} = {}) {
-  const root = await mkdtemp(join(await realpath(tmpdir()), 'oa-sg-')); await chmod(root, 0o700);
+  const root = await mkdtemp(join(await realpath(tmpdir()), 'oa-dws-rpc-')); await chmod(root, 0o700);
   const socketPath = join(root, 'runner.sock'); sockets.add(socketPath);
   const caller = generateKeyPairSync('ed25519'), signer = generateKeyPairSync('ed25519'), ownerId = randomUUID();
   const delegation: DwsGroupDelegation = {tenantId: randomUUID(), ownerId, identityId: randomUUID(), taskId: randomUUID(), runId: randomUUID(),

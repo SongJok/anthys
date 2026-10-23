@@ -18,4 +18,12 @@ if(kind==='offline'&&(!args.length||args.some(a=>!/^tests\/offline\/[A-Za-z0-9._
 if(kind!=='probe') {const backup=await preserveTestArtifacts();console.log(`Preserved ${backup.files} existing report files: ${backup.manifest}`);}
 // Standalone flow tests inherit neither database configuration nor secret paths.
 // Preload the guard explicitly so NODE_OPTIONS itself need not be inherited.
-const child=spawn(process.execPath,kind==='offline'?['--import',resolve('scripts/test-network-guard.mjs'),'--import','tsx','--test',...args]:[binary,...args],{env:kind==='offline'?baseEnv:env,stdio:'inherit'});child.on('exit',code=>{process.exitCode=code??1;});
+// The DM diagnostics oracle installs its own all-IO-denying guard, which also
+// denies the private RPC sockets the other offline oracles need, so it runs in
+// a separate process with that guard instead of the general network guard.
+const dmFile='tests/offline/dm-diagnostic-guard.test.ts',guard=resolve('scripts/test-network-guard.mjs'),dmGuard=resolve('tests/support/dm-diagnostics-offline-guard.mjs');
+const offlineEnv={...baseEnv,APP_ENV:'test',OA_TEST_ISOLATED:'true'};
+if(kind==='offline'){
+ const groups=[...args.some(f=>f!==dmFile)?[{files:args.filter(f=>f!==dmFile),pre:guard}]:[],...args.includes(dmFile)?[{files:[dmFile],pre:dmGuard}]:[]];
+ for(const group of groups){const code=await new Promise(resolve=>{const child=spawn(process.execPath,['--import',group.pre,'--import','tsx','--test',...group.files],{env:offlineEnv,stdio:'inherit'});child.on('exit',code=>resolve(code??1));});if(code!==0){process.exitCode=code;break;}}
+}else{const child=spawn(process.execPath,[binary,...args],{env,stdio:'inherit'});child.on('exit',code=>{process.exitCode=code??1;});}
