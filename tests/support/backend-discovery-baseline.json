@@ -353,6 +353,7 @@
     "tests/unit/project-backup-profile.test.ts",
     "tests/unit/project-backup-toolchain.test.ts",
     "tests/unit/recovery-safety-comparison.test.ts",
+    "tests/unit/sandbox-producer.test.ts",
     "tests/unit/schedule-commands.test.ts",
     "tests/unit/schedule-model.test.ts",
     "tests/unit/schedule-rules.test.ts",

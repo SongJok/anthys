@@ -8,6 +8,7 @@ import type {SandboxBrokerOutcome} from './broker.js';
 
 const codeLimit=1024*1024,inputLimit=8*1024*1024,defaultLifetimeMs=30_000,minLifetimeMs=1000,maxLifetimeMs=60_000;
 const keyIdPattern=/^[A-Za-z0-9_-]{1,64}$/,imageDigestPattern=/^sha256:[a-f0-9]{64}$/,namePattern=/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+const noncePattern=/^(?:[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$/i;
 
 export type SandboxProducerErrorCode='SANDBOX_PRODUCER_CONFIGURATION_INVALID'|'SANDBOX_PRODUCER_INPUT_INVALID';
 export class SandboxProducerError extends Error {
@@ -62,8 +63,8 @@ function artifactInputs(value:unknown):readonly {name?:string;mime:string;bytes:
  * Trusted application-side orchestration around one broker job. The complete
  * closed job is validated before any bytes are registered, so a bad limit,
  * output type or subject cannot leave orphan artifacts. Workflow:
- * validate -> upload code/inputs -> build the final job -> sign one envelope ->
- * submit once. It never retries a submission, because an ambiguous timeout is
+ * validate -> reserve and validate one nonce and signing clock -> upload
+ * code/inputs -> sign one envelope -> submit once. It never retries a submission, because an ambiguous timeout is
  * resolved by the broker's durable nonce/job uniqueness, not by the client.
  * Inputs and code are owner-scoped and expire if the producer stops early.
  */
@@ -94,11 +95,14 @@ export class SandboxProducer {
    });
   }catch{throw new SandboxProducerError('SANDBOX_PRODUCER_INPUT_INVALID');}
   if(input.signal?.aborted)throw new SandboxBrokerClientError('SANDBOX_BROKER_CLIENT_ABORTED');
+  let nonce:string,issuedAt:number;
+  try{nonce=this.nonce();issuedAt=this.now();}catch{throw new SandboxProducerError('SANDBOX_PRODUCER_CONFIGURATION_INVALID');}
+  if(typeof nonce!=='string'||!noncePattern.test(nonce)||!Number.isSafeInteger(issuedAt)||issuedAt<0||!Number.isSafeInteger(issuedAt+this.lifetimeMs))throw new SandboxProducerError('SANDBOX_PRODUCER_CONFIGURATION_INVALID');
   const codeRef=await this.client.putArtifact(subject,{kind:'CODE',mime:job.language==='typescript'?'text/typescript':'text/javascript',bytes:code},input.signal);
   const inputRefs:SandboxArtifactRef[]=[];
   for(const item of inputs)inputRefs.push(await this.client.putArtifact(subject,{kind:'INPUT',mime:item.mime,bytes:item.bytes,...(item.name===undefined?{}:{name:item.name})},input.signal));
   const finalJob=analysisJobSchema.parse({...job,codeArtifactId:codeRef.id,inputArtifactIds:inputRefs.map(ref=>ref.id)});
-  const issuedAt=this.now(),envelope=signAnalysisJob(finalJob,{subject,imageDigest:this.imageDigest,keyId:this.keyId,privateKey:this.privateKey,nonce:this.nonce(),issuedAt,expiresAt:issuedAt+this.lifetimeMs,now:issuedAt});
+  const envelope=signAnalysisJob(finalJob,{subject,imageDigest:this.imageDigest,keyId:this.keyId,privateKey:this.privateKey,nonce,issuedAt,expiresAt:issuedAt+this.lifetimeMs,now:issuedAt});
   const outcome=await this.client.submit(subject,JSON.stringify(envelope),input.signal);
   if(outcome.jobId!==subject.jobId)throw new SandboxBrokerClientError('SANDBOX_BROKER_CLIENT_RESPONSE_INVALID',200);
   return Object.freeze({outcome,job:finalJob,code:codeRef,inputs:Object.freeze(inputRefs)});

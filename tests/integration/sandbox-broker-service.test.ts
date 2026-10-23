@@ -192,6 +192,24 @@ it('producer rejects a closed-invalid job before upload, registers artifacts, si
  expect(()=>new SandboxProducer({client,keyId,privateKey:keys.privateKey,imageDigest,lifetimeMs:60_001})).toThrow('SANDBOX_PRODUCER_CONFIGURATION_INVALID');
 });
 
+it('producer rejects unusable nonce or clock before uploading any artifact',async()=>{
+ const w=await world();executions=0;
+ const count=async()=>Number((await root.query('SELECT count(*) n FROM sandbox_artifacts WHERE tenant_id=$1',[w.tenantId])).rows[0].n);
+ const cases=[
+  {nonce:()=>{throw new Error('PRIVATE_NONCE_GENERATOR');}},
+  {nonce:()=> 'not-a-nonce'},
+  {nonce:()=> '123e4567-e89b-02d3-a456-426614174000'},
+  {now:()=> -1},
+  {now:()=> Number.MAX_SAFE_INTEGER},
+ ];
+ for(const overrides of cases){
+  const producer=new SandboxProducer({client,keyId,privateKey:keys.privateKey,imageDigest,...overrides});
+  await expect(producer.execute({subject:w.subject,language:'javascript',code:'void 0',allowedOutputTypes:['json']})).rejects.toMatchObject({code:'SANDBOX_PRODUCER_CONFIGURATION_INVALID'});
+ }
+ expect(executions).toBe(0);
+ expect(await count()).toBe(0);
+});
+
 it('client rejects redirects, oversized or malformed responses and aborted requests',async()=>{
  const never=async()=>{throw new Error('fetch must not run');};
  const invalid=new SandboxBrokerClient({baseUrl:'http://sandbox-broker.invalid',authKey,fetch:never as typeof fetch});
