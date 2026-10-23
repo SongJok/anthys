@@ -252,6 +252,7 @@ services:
     stop_grace_period: 20s
     environment:
       <<: *app-env
+      WORKER_HEARTBEAT_FILE: /data/worker-heartbeat
     secrets: *app-secrets
     volumes:
       - app_data:/data
@@ -261,6 +262,15 @@ services:
         condition: service_completed_successfully
       app-init:
         condition: service_completed_successfully
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          node -e "const s=require('node:fs').statSync('/data/worker-heartbeat');process.exit(Date.now()-s.mtimeMs<=30000?0:1)"
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     <<: *app-hardening
     networks:
       - backend

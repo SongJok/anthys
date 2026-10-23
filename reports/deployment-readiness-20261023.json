@@ -12,12 +12,14 @@
   "compose": {
     "project": "anthys-dev",
     "file": "deploy/compose/compose.dev.yml",
-    "fileSha256": "0347d7196003a2063b40f71472df54133a771b58ef237087b8c9f90babc041ec",
+    "fileSha256": "3dbc6f085eb669627c15daac66cde604bb190f41673c83d97d911f2772ff0c5f",
+    "prodFileSha256": "456a6ef36b41cf1ae03b6117b43539a08101018b858014d9341690a4a888cae2",
+    "workerMainSha256": "891e12189e6e5fed499168e7bebc95a3589be09204938e27db7216eee1ea2c5d",
     "devUpSha256": "274d1c3793b00c38f57d996b0a702291ddd1139215246a5228e5c880e229f997",
     "envExampleSha256": "d42ae1b24844d8aaa4c0c9d94ab3a385802ee06f9af94140e5c6c531e058b103"
   },
   "images": {
-    "anthys-app:dev": "sha256:db6c0416a37af865b859b16604e7b374eee9f34a2edfc4eac7b394d9b5f6bca0",
+    "anthys-app:dev": "sha256:380efb5f9b626bc0e0a61081bcbc56c1aae556efba031c148c81b97ba6547dff",
     "anthys-sandbox-broker:dev": "sha256:d81a5a2bfeedab4949fa770460433e5f65c0e1c3b33d24d444833d2bb7e2cda3",
     "postgres:17-bookworm": "sha256:3645570cccdfa447589da9f57dd740faa29b30938e861289a5574b6ca6b03826"
   },
@@ -35,11 +37,17 @@
     },
     "worker": {
       "state": "running",
-      "healthcheckDeclared": false,
+      "health": "healthy",
+      "healthcheckDeclared": true,
       "uid": 10001,
       "node": "v24.21.0",
       "lastLog": "Worker running; model configured, live verification required",
-      "note": "The Compose file declares no worker healthcheck; process liveness was checked from the container state and startup log only."
+      "heartbeat": {
+        "path": "/data/worker-heartbeat",
+        "writtenAfter": "each successful publish cycle, throttled to at most one write per 5 seconds",
+        "maxAgeMs": 30000,
+        "probe": "statSync mtime age <= 30000 ms"
+      }
     },
     "postgres": {
       "state": "running",
@@ -67,6 +75,7 @@
     "queueSchema": {"result": "PASS", "detail": "oa_queue.version = 46."},
     "dockerSocketIsolation": {"result": "PASS", "detail": "Only sandbox-broker mounts /var/run/docker.sock. api, worker and postgres have no socket mount."},
     "brokerCredentialIsolation": {"result": "PASS", "detail": "The broker receives only its runtime database URL, master key and broker auth/config/public key. No DingTalk, GLM, DWS or company-MCP credential is mounted into it."},
+    "workerHeartbeat": {"result": "PASS", "detail": "The worker writes /data/worker-heartbeat after each successful publish cycle. Docker reports healthy with a fresh file; the same predicate exits 1 for a two-minute-old file and for a missing file, and exits 0 for the live file."},
     "nonRootRuntime": {"result": "PASS", "detail": "api, worker and sandbox-broker run as uid 10001."},
     "toolchainPin": {"result": "PASS", "detail": "All three application containers run Node v24.21.0."},
     "externalCalls": {"result": "PASS", "detail": "Every probe was loopback HTTP, in-container HTTP or PostgreSQL. No DingTalk, DWS, GLM or upstream company-MCP call was made."}
@@ -81,10 +90,26 @@
       "defect": "ANTHYS_SANDBOX_SECRETS_DIR=.secrets/sandbox-broker in .env and .env.example was resolved by Compose against deploy/compose, so recreating the broker failed with a missing producer-public.pem bind source. The previous container only worked because it predated the setting.",
       "fix": "Corrected the value to ../../.secrets/sandbox-broker in .env and .env.example and documented that the value is Compose-project-relative.",
       "verification": "docker compose --env-file .env -f deploy/compose/compose.dev.yml --profile sandbox up -d --no-deps --force-recreate sandbox-broker recreated the container successfully and it became healthy."
+    },
+    {
+      "defect": "The worker had no declared healthcheck, so a wedged publish loop would still appear as a running container.",
+      "fix": "The worker now writes /data/worker-heartbeat after each successful publish cycle, throttled to one write per 5 seconds. Dev and production Compose declare a 30-second freshness healthcheck.",
+      "verification": "The rebuilt worker reports healthy with a fresh heartbeat. The same predicate exits 1 for a two-minute-old heartbeat and for a missing heartbeat, and exits 0 for the live file."
     }
   ],
+  "testEvidence": {
+    "typecheck": {"command": "tsc --noEmit", "exitCode": 0},
+    "lint": {"command": "eslint apps/worker/src/main.ts", "exitCode": 0},
+    "targeted": {
+      "command": "node scripts/run-tests.mjs vitest run tests/integration/one-shot-startup.test.ts tests/integration/trial-process-supervision.test.ts",
+      "finalRun": {"files": 2, "passed": 20, "failed": 0},
+      "singleFileRun": {"file": "tests/integration/trial-process-supervision.test.ts", "passed": 16, "failed": 0}
+    },
+    "flakinessNote": "The same two-file combination failed intermittently under load (one run with 9 failures and a later run with 1 failure) before passing twice in a row, including one run on the pre-change tree. The failing assertions are the deadline-sensitive guardian and trial-authority harness in trial-process-supervision.test.ts. The worker heartbeat path is inert in these tests because WORKER_HEARTBEAT_FILE is never set there, so the flake is not attributable to this change.",
+    "fullSuite": "The full vitest suite (3391 tests) was last executed green at the previous commit and was not repeated in this slice. The committed reports/vitest-latest.json still holds that full-suite result and was restored after the targeted runs overwrote it with a 20-test subset."
+  },
   "limitations": {
-    "workerHealthcheck": "No Compose healthcheck is declared for worker; readiness is not asserted beyond process state and its startup log.",
+    "workerHeartbeatSemantics": "The worker healthcheck proves that the publish cycle keeps completing; it does not execute a queued model run and is not a substitute for live provider acceptance.",
     "ingress": "The DingTalk long-connection ingress service is opt-in and was not started; it requires a live app identity.",
     "liveAcceptance": "Live GLM, DingTalk, DWS and upstream company-MCP acceptance remains BLOCKED_EXTERNAL. This report proves local deployment integrity only; affected T-cases remain NOT_RUN and R items remain IN_PROGRESS.",
     "secretHandling": "No secret value is reproduced in this report. Only mount names and environment-variable names are listed."

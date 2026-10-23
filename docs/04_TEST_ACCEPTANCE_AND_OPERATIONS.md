@@ -1711,6 +1711,16 @@ docs/02 与 `config/stages.json` 要求主分支保留 SBOM、许可证与依赖
 
 项目约束是不使用 GitHub Actions、测试在本地执行。仓库中仍保留随基线导入的 `.github/workflows/ci.yml`，其 `on: [push, pull_request]` 会在每次推送时触发 Actions，与本约束冲突，并会重复执行耗时的 coverage 与 self-dm 链。本切片删除该工作流，并从 `config/stages.json` 的 P00 模块清单移除该路径；本地验证入口（lint、typecheck、build、vitest、offline、E2E 与 self-dm）保持不变。删除工作流不改变任何验收结论、T 用例状态或 R 项状态。
 
+### 2026-10-23 沙箱 broker 与 worker 部署就绪性证据（不改变 T/R 状态）
+
+复核本机 Docker 开发栈时发现并修复两处真实部署缺陷。其一，sandbox-broker 容器仍运行旧镜像，内置必需迁移契约 114 项而数据库已有 116 项，`/health/ready` 因此持续返回 503；按当前代码重建 `anthys-sandbox-broker:dev` 后，镜像契约变为 116 项（末项 `116_company_data_template_lifecycle.sql`），容器恢复 healthy 且容器内 `/health/ready` 返回 200。其二，`.env` 的 `ANTHYS_SANDBOX_SECRETS_DIR=.secrets/sandbox-broker` 会被 Compose 按 `deploy/compose` 解析，重建时找不到 `producer-public.pem`；已改为 `../../.secrets/sandbox-broker` 并同步 `.env.example`，`docker compose config --quiet` 通过。
+
+同时补齐 worker 存活信号：worker 在每次成功完成发布周期后写入 `/data/worker-heartbeat`（最多每 5 秒一次），开发与生产 Compose 均声明 30 秒新鲜度健康检查。实测重建后 api、postgres、worker、sandbox-broker 全部 healthy，worker 心跳文件存在且新鲜；同一判定对 2 分钟前的心跳和缺失文件均退出 1，对在线心跳退出 0。数据库为 116 项迁移、`oa_queue.version=46`、public 表 133 个；只有 sandbox-broker 挂载 `/var/run/docker.sock`，且它不持有钉钉、GLM、DWS 或公司 MCP 凭据。所有探针均为回环 HTTP、容器内 HTTP 或 PostgreSQL 查询，没有调用任何外部服务。
+
+这仍是本地部署完整性证据，不替代企业现场验收：钉钉 ingress 未启动，worker 心跳只证明发布周期在推进，不证明真实模型任务执行；GLM、钉钉、DWS 与公司 MCP 的 live 验收继续为 `BLOCKED_EXTERNAL`，130 项 T 用例与 36 项 R 项状态未因此改变。证据见 `reports/deployment-readiness-20261023.json`。
+
+代码侧验证为 `tsc --noEmit` 与 `eslint apps/worker/src/main.ts` 退出码 0，并定向执行 `one-shot-startup` 与 `trial-process-supervision` 两个集成文件（最终 20/20 通过，trial 文件单独执行 16/16 通过）。同一文件组合在负载下曾出现间歇失败（一次 9 项、一次 1 项），失败点位于 guardian 与试用权威的截止期敏感断言；这些用例不设置 `WORKER_HEARTBEAT_FILE`，心跳分支在测试中不执行，故该抖动与本次改动无因果关系，已在报告中如实记录。完整 vitest 套件（3391 项）在上一提交已全绿，本次切片未重复执行，`reports/vitest-latest.json` 仍保留该全量结果。
+
 ### 2026-10-23 全量本地验收审计（结论 NOT_COMPLETE，不改变 T/R 状态）
 
 本次对当前主分支做完整本地复核，使用固定 Node v24.21.0 与隔离 PostgreSQL 64711；全部为本地或受控 provider，没有任何 live 凭据、真实企业资源或外部消息。逐项证据见 `reports/completion-audit-20261023.json`。

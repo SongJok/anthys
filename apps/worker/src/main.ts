@@ -12,7 +12,7 @@ import {GroupAudience} from '../../../packages/groups/src/audience.js';
 import {configureDws} from '../../../packages/dws/src/configuration.js';
 import {registerDwsCapabilities} from '../../../packages/dws/src/capabilities.js';
 import {configureCompanyCode} from '../../../packages/company/src/configuration.js';
-import {readFile} from 'node:fs/promises';
+import {readFile,writeFile} from 'node:fs/promises';
 import {z} from 'zod';
 import {loadEnvFile,config,secret} from '../../../packages/config/src/index.js';
 import {Database} from '../../../packages/storage/src/database.js';
@@ -65,7 +65,9 @@ if(!trial){
 }
 await queue.work(async job=>{if(!scopes.some(s=>s.tenantId===job.tenantId&&s.actorId===job.actorId))throw Error('UNREGISTERED_WORKER_SUBJECT');await runtime.advance({tenantId:job.tenantId,actorId:job.actorId},job.runId,undefined,shutdown.signal,job.generation);});
 const sandboxRetention=!trial?new SandboxArtifactRetentionSweeper(db,fileStore):undefined;
-let publishing=false;const publish=async()=>{if(publishing||shutdown.signal.aborted)return;publishing=true;try{await publishWorkerCycle(db,scopes,{store,budgetRecovery,retryDispatcher,queue});await companyAgent?.poll();}catch{console.error('OUTBOX_PUBLISH_FAILED');}finally{publishing=false;}};
+const heartbeatFile=process.env['WORKER_HEARTBEAT_FILE'];let heartbeatAt=0;
+const markAlive=async()=>{if(!heartbeatFile||Date.now()-heartbeatAt<5000)return;const now=Date.now();await writeFile(heartbeatFile,String(now),{mode:0o600});heartbeatAt=now;};
+let publishing=false;const publish=async()=>{if(publishing||shutdown.signal.aborted)return;publishing=true;try{await publishWorkerCycle(db,scopes,{store,budgetRecovery,retryDispatcher,queue});await companyAgent?.poll();await markAlive();}catch{console.error('OUTBOX_PUBLISH_FAILED');}finally{publishing=false;}};
 let watching=false;const watch=async()=>{if(!watches||watching||shutdown.signal.aborted)return;watching=true;try{const summary=await runWatchCycle(scopes,watches.store,{observer:watches.observer,notifier:watches.notifier},shutdown.signal),renewal=await runWatchRenewalCycle(scopes,watches.store,{notifier:watches.renewalNotifier},shutdown.signal);if(summary.failedScopes||renewal.failedScopes)console.error('WATCH_CYCLE_SCOPE_FAILURES:'+(summary.failedScopes+renewal.failedScopes));}catch{if(!shutdown.signal.aborted)console.error('WATCH_CYCLE_FAILED');}finally{watching=false;}};
 let retaining=false;const retain=async()=>{if(!sandboxRetention||retaining||shutdown.signal.aborted)return;retaining=true;try{const summary=await sandboxRetention.sweep();if(summary.failed)console.error('SANDBOX_ARTIFACT_RETENTION_FAILURES:'+summary.failed);}catch{if(!shutdown.signal.aborted)console.error('SANDBOX_ARTIFACT_RETENTION_FAILED');}finally{retaining=false;}};
 await publish();const timer=setInterval(()=>{void publish();},1000);await watch();const watchTimer=setInterval(()=>{void watch();},30_000);await retain();const retentionTimer=setInterval(()=>{void retain();},300_000);
