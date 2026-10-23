@@ -1,0 +1,154 @@
+{
+  "status": "PASS",
+  "scope": "LOCAL_SYNTHETIC_LOAD_INGRESS_QUEUE_SCHEDULER",
+  "live": false,
+  "generatedAt": "2026-10-23T01:47:35Z",
+  "source": {
+    "baseCommit": "60319a6053eac67688268a685d8a28339bc4edd7",
+    "workingTree": true,
+    "files": {
+      "tests/integration/load-intake.test.ts": "eefb86ebdf1dd7989c1ea5b7dfe78b079a317521820cdc6d355e48e197ed874e",
+      "tests/support/backend-discovery-baseline.json": "c7282cf1964fa657ae49ee9d322f25de88cbb58abc2fc3853c2374fb1f5f3194",
+      "config/test-catalog.json": "7f40375be6f431a73d09f2b77aad26fc3e8405362cec750c07456022aaa18779",
+      "docs/04_TEST_ACCEPTANCE_AND_OPERATIONS.md": "fc100e0e06b922b256fa9f367f2c301fbda3f7dfaf6238695dd07fd26c853fe6",
+      "packages/dingtalk/src/ingress.ts": "23e5ae8963f18af4c7ed5112b9a80217c66abf4a913cdb859f4a305cdb2f6158",
+      "reports/vitest-latest.json": "47844d411ba4a94c009f4804d8151d01787dfd0432d4a0e408c16fec09751a43"
+    }
+  },
+  "surface": {
+    "entry": "tests/integration/load-intake.test.ts through the real DingTalkIngress.acceptTrustedCallback and attachDurableRobotCallback (maxPending=20), the real RunQueue over pg-boss, and the real ReminderScheduler, backed by a disposable PostgreSQL on 127.0.0.1:64711",
+    "loadShape": "20 s at 30 messages/s (3 per 100 ms), 30% duplicate msgIds, 10% of duplicates delayed 200 ms to create out-of-order delivery, then 100 extra messages delivered synchronously in one tick",
+    "redeliverySemantics": "A delivery refused at maxPending is not acknowledged, matching production; the harness redelivers the same logical msgId under a fresh protocol messageId, so ACK tracking is per logical message while latency is per protocol attempt",
+    "singleAuthority": "No production behavior changed. packages/dingtalk/src/ingress.ts is byte-identical to HEAD (sha256 23e5ae89...); the slice only adds the load test, its discovery-baseline entry, catalog metadata and this report",
+    "discoveryBaseline": "tests/support/backend-discovery-baseline.json gains tests/integration/load-intake.test.ts in approvedAddedFiles; originalCount stays 90"
+  },
+  "measurements": {
+    "environment": {
+      "platform": "darwin",
+      "arch": "arm64",
+      "cpus": 10,
+      "node": "v24.21.0",
+      "postgres": "127.0.0.1:64711",
+      "runner": "vitest single process through scripts/run-tests.mjs",
+      "modelCalls": 0,
+      "mockLatencyUsedAsModelSla": false
+    },
+    "load": {
+      "sustainedMs": 20000,
+      "ratePerSecond": 30,
+      "ticks": 200,
+      "dispatched": 797,
+      "uniqueMessages": 551,
+      "acceptedDuplicateDeliveries": 149,
+      "burst": 100,
+      "burstDeliveredInOneTick": true,
+      "backpressureRefusals": 97,
+      "redeliveryRounds": 2,
+      "redeliveredAttempts": 97
+    },
+    "ack": {
+      "samples": 700,
+      "p50Ms": 29.98,
+      "p95Ms": 127.83,
+      "p99Ms": 156.48,
+      "maxMs": 212.45,
+      "thresholdMs": 1000
+    },
+    "durability": {
+      "inboxEvents": 551,
+      "inboxRowsPerEvent": 1,
+      "uniqueTasks": 551,
+      "uniqueRuns": 551,
+      "runOutboxRows": 551,
+      "taskReceiptRows": 551
+    },
+    "queue": {
+      "unpublishedBefore": 551,
+      "published": 551,
+      "drainMs": 1033.23,
+      "drainSamples": [551, 501, 451, 401, 351, 301, 251, 201, 151, 101, 51, 1, 0],
+      "finalDepth": 0,
+      "pgBossJobs": 551,
+      "distinctRunIds": 551
+    },
+    "scheduler": {
+      "schedules": 12,
+      "claimed": 12,
+      "claimMs": 102.26,
+      "p95LagMs": 352,
+      "maxLagMs": 352,
+      "thresholdMs": 30000,
+      "extraClaimEmpty": true
+    },
+    "memory": {
+      "heapUsedBefore": 53593424,
+      "heapUsedAfter": 55011936,
+      "heapDelta": 1418512,
+      "rssDelta": 11583488,
+      "thresholdHeapDelta": 268435456,
+      "note": "short load window, not a 24-hour soak"
+    },
+    "disclosure": "This is a shortened local load run on one process and the isolated PostgreSQL, not the document section 9 8vCPU/16GiB 30-minute baseline or a 24-hour soak. No model or upstream was called, so no model or network SLA is claimed from these numbers."
+  },
+  "behavior": {
+    "ackPercentiles": "551 unique messages were acknowledged with p50 29.98 ms, p95 127.83 ms, p99 156.48 ms and max 212.45 ms, all under the 1000 ms local ACK threshold.",
+    "backpressureIsRefusedThenRedelivered": "97 deliveries hit the maxPending=20 cap and were left unacknowledged, matching production semantics. Redelivering each unacknowledged logical msgId under a fresh protocol messageId took 2 rounds; afterwards every unique message was acknowledged and there were zero INGRESS_NOT_ACKNOWLEDGED failures.",
+    "duplicateDeliveryIsIdempotent": "149 duplicate deliveries were accepted with duplicate:true. event_inbox held 551 rows with exactly one row per event_key, and tasks, runs, RUN outbox rows and TASK_RECEIPT rows were 551 each; RUN dedup keys were unique.",
+    "outboxDrainsToZero": "All 551 RUN outbox rows were unpublished before publishing. Repeated queue.publish drained them monotonically to zero in 1033.23 ms over 12 calls, published exactly 551, a further publish returned 0, and pg-boss held 551 jobs with 551 distinct runIds.",
+    "schedulerClaimsAllDue": "12 ONCE private reminders due about 2 s later were claimed 12 of 12 in three claimDue batches in 102.26 ms, produced 12 occurrences with p95 lag 352 ms, and an extra claimDue returned an empty array.",
+    "memoryStaysWithinTheAssertedBound": "Heap grew 1,418,512 bytes (about 1.35 MiB) against a 256 MiB assertion and RSS grew 11,583,488 bytes (about 11.05 MiB) over the short window.",
+    "oracleIsNotVacuous": "A mutation made the ingress backpressure branch still report BACKPRESSURE_NOT_ACKNOWLEDGED but also ACK the message before persisting it. The test then failed at the durability assertion with 463 persisted inbox rows for 543 unique deliveries. The production file was restored byte-for-byte (sha256 23e5ae89..., git diff contains no ingress change) and the suite passed again."
+  },
+  "tests": {
+    "commands": [
+      "pnpm typecheck",
+      "pnpm lint",
+      "pnpm build",
+      "node scripts/run-tests.mjs vitest run tests/integration/load-intake.test.ts",
+      "node --import tsx scripts/verify-requirements.ts --baseline",
+      "node --import tsx scripts/verify-requirements.ts",
+      "node scripts/scan-secrets.mjs"
+    ],
+    "vitest": {
+      "file": "tests/integration/load-intake.test.ts",
+      "tests": 1,
+      "passed": 1,
+      "failed": 0,
+      "durationMs": 24885,
+      "measurementFile": "reports/t121-load-intake-latest.json",
+      "measurementFileCommitted": false
+    },
+    "mutation": {
+      "file": "packages/dingtalk/src/ingress.ts",
+      "mutation": "On maxPending, keep onError('BACKPRESSURE_NOT_ACKNOWLEDGED') and additionally call socketCallBackResponse(SUCCESS) without persisting the event",
+      "expectedFailure": "AssertionError: expected [ Array(463) ] to have a length of 543 (event_inbox rows vs unique messages)",
+      "restoredSha256": "23e5ae8963f18af4c7ed5112b9a80217c66abf4a913cdb859f4a305cdb2f6158",
+      "restoredClean": true
+    },
+    "gates": {
+      "typecheck": "PASS",
+      "lint": "PASS",
+      "build": "PASS (116 migrations, contractHash 473b7415afaae98c2e384fa32e0da1dfe6d82b2ea24996c31f466f184d8efc94, databaseAccess false, vite built)",
+      "requirementsBaseline": "PASS (0 errors)",
+      "requirementsFull": "FAIL_PREEXISTING (46 errors: 36 R-items whose status stays IN_PROGRESS and 10 T-cases with no implementation file yet - T020 T069 T070 T082 T089 T090 T094 T096 T126 T129; T121 left this list in this slice)",
+      "secretScan": "PASS (0 findings over the configured objects, 5 configured secrets)"
+    }
+  },
+  "evidence": {
+    "committedReport": "reports/load-intake-20261023.json",
+    "measurementFile": "reports/t121-load-intake-latest.json (local-only, untracked by convention; sha256 0be57c0409944102a92c35a323e303a317f3ba8675ea4cafdaf2e09cb23771e3)",
+    "docs": "docs/04_TEST_ACCEPTANCE_AND_OPERATIONS.md gains the 2026-10-23 T121 section with the assertion groups, the recorded numbers, the mutation check and the BLOCKED_EXTERNAL boundary",
+    "catalog": "config/test-catalog.json T121 keeps status NOT_RUN and gains implementation tests/integration/load-intake.test.ts plus a coverageNote that disclaims the section 9 baseline and model SLA"
+  },
+  "notProven": [
+    "Not the document section 9 baseline: no 8vCPU/16GiB host, no 30-minute sustained window, no 24-hour soak, no 300 sessions, no 30 concurrent runs or 2000 tasks.",
+    "No real DingTalk long connection, real GLM/model call, real upstream MCP call or real network jitter; the measurements are local ACK, queue, scheduler and memory numbers only and are not a model or network SLA.",
+    "No multi-instance or horizontal-scaling behavior, PostgreSQL failover, or production volume growth was exercised.",
+    "The single-process heap reading over roughly 25 s does not prove long-run memory stability."
+  ],
+  "statusUnchanged": {
+    "catalogT121": "NOT_RUN",
+    "requirementsR30R34": "IN_PROGRESS",
+    "liveAcceptance": "BLOCKED_EXTERNAL"
+  }
+}

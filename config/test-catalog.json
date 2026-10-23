@@ -1996,8 +1996,9 @@
     "layer": "LOAD",
     "precondition": "按第9节基准持续负载并记录分位数",
     "oracle": "实际测量ACK/队列/调度/内存，不能把mock延迟当模型SLA",
-    "implementation": null,
-    "status": "NOT_RUN"
+    "implementation": "tests/integration/load-intake.test.ts",
+    "status": "NOT_RUN",
+    "coverageNote": "真实钉钉入口 + 隔离 PostgreSQL 的缩短本地负载：20 秒 30 条/秒、30% 重复、10% 延迟乱序、单 tick 100 条突发，拒绝投递按平台语义换协议消息号重投。断言 ACK p95<1s、事件/任务/运行/出箱/回执一一对应、RUN 出箱经 pg-boss 排空为零、12 条到期调度全部领取且 p95 滞后<30s、堆增量<256MiB。数字不冒充第 9 节 8vCPU/16GiB 30 分钟基准或 24 小时长稳，也不把 mock 延迟当模型 SLA。"
   },
   {
     "id": "T122",

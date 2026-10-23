@@ -33,6 +33,7 @@
     "tests/integration/identity.test.ts",
     "tests/integration/inactive-private-maintenance.test.ts",
     "tests/integration/ingress.test.ts",
+    "tests/integration/load-intake.test.ts",
     "tests/integration/login.test.ts",
     "tests/integration/maintenance-health.test.ts",
     "tests/integration/model-budget.test.ts",
