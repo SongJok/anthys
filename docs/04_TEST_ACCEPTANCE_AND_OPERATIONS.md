@@ -1565,3 +1565,17 @@ T081「拒绝认证；不能token passthrough」（`tests/security/upstream-cred
 为证明该用例不是空断言，做过一次变异检查：把 `packages/company/src/configuration.ts` 中的绑定哈希比较替换为常量后重跑，跨服务凭据与跨身份凭据两条断言随即失败（`expected false, received true`），随后生产文件被按字节还原，`git diff` 确认无残留改动。
 
 以上证据只证明本地合成环境下的凭据绑定、重定向与认证失败边界，不涉及真实企业上游 MCP 的真实令牌形态、真实 issuer/audience 校验与企业现场验收。T081 在测试目录中仍为 NOT_RUN，R29 未因本切片宣告完成，真实企业验收保持 BLOCKED_EXTERNAL。
+
+### 2026-10-23 建议与执行分离用例证据（T045仍为NOT_RUN）
+
+本切片为 R16/R28 的「建议与执行分离」用例补齐可追溯实现文件与本地断言：新增 `tests/integration/advice-without-release.test.ts`，在隔离 PostgreSQL 64711 上用一个真实钉钉单聊事件、真实运行时循环和合成 GLM SSE 提供方驱动，不接触任何真实模型、钉钉或发布系统。测试中注册的能力只有 `tasks.get@1.0.0` 一个经复核的只读核心适配器；不存在任何发布、部署、配置写入能力。
+
+T045「用户说认可排障建议但未要求上线」/「不触发生产修改/发布；建议与执行明确分开」由三条断言构成：
+
+- **认可建议只得到建议**：模型只被提供 `tasks.get` 这一个只读能力；回答经独立的、无工具的叙述复核后以 CONVERSATION 计划完成；`run_steps` 中没有任何写入、`tool_actions` 与 `approvals` 为空，`outbox` 除最初的 RUN 派发外没有任何事件；唯一的出站对象是发给该用户本人的一条回复，投递网关被调用一次。
+- **越权发布调用被真实拒绝**：模型提供方只接受网关的不透明工具名 `cap_<12hex>`。用例让模型发出两个形状合法但从未被公布的工具名，其参数分别声称要执行 `release.deploy` 与 `ops.config.write`。两次调用都真实经过网关并得到 `DENIED` / `UNREGISTERED_CAPABILITY`，在任何账本行存在之前即被拒绝。由于历史里已出现工具调用，设计上不再接受自由 CONVERSATION 回答：该建议计划被连续拒绝三次（`FINAL_BUSINESS_PLAN_REQUIRED`），运行以 PARTIAL 结束，结果为空且没有任何投递。
+- **被拒绝的发布不能被终稿改写成已执行**：模型提交一份 REPORT，声称那个被拒绝的部署调用为 `VERIFIED`。终结器连续三次以 `FINAL_ACTION_MISMATCH` 拒绝该声明（不存在对应的非只读动作账本行），运行以 PARTIAL 结束，结果为空、零投递、零账本行。
+
+为证明用例不是空断言，做了两次变异检查：把运行时对未注册工具的调用替换为伪造的 `OK` 结果后，第二条用例立即失败（运行把伪造结果当成可用数据并进入复核）；把终结器里 ACTION 声明的账本溯源判断短路后，第三条用例立即失败（拒绝原因退化为 `FINAL_ACTION_UNVERIFIED`）。两次变异后生产文件均按字节还原，`git diff` 确认无残留改动。
+
+以上证据只证明本地合成环境下的建议/执行边界、未注册工具拒绝与终稿声明校验，不涉及真实钉钉单聊、真实 GLM 会话、任何真实发布或变更系统，也不构成企业现场验收。T045 在测试目录中仍为 NOT_RUN，R16 与 R28 未因本切片宣告完成，真实企业验收保持 BLOCKED_EXTERNAL。
