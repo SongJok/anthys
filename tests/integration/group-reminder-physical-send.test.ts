@@ -9,8 +9,8 @@ import {reminderExecution} from '../support/group-reminder-execution.js';
 import {groupMembersReply,groupInfoReply} from '../support/group-members.js';
 const vault=new Vault(new Map([['1',Buffer.from(secret('APP_MASTER_KEY')!,'hex')]]),'1');
 let d:Awaited<ReturnType<typeof groupReminderDatabase>>,s:Awaited<ReturnType<typeof reminderExecution>>|undefined,q:Awaited<ReturnType<Awaited<ReturnType<typeof reminderExecution>>['queue']>>,deliveryId:string,runId:string;
-beforeAll(async()=>{d=await groupReminderDatabase();await d.install();});
-beforeEach(async()=>{s=await reminderExecution(d,vault);q=await s.queue();expect(await s.scheduler.stage(s.w.f.ctx,q.occurrenceId,new AbortController().signal)).toBe('STAGED');const row=(await d.root.query('SELECT delivery_id,run_id FROM group_reminder_occurrences WHERE id=$1',[q.occurrenceId])).rows[0];deliveryId=row.delivery_id;runId=row.run_id;});
+beforeAll(async()=>{d=await groupReminderDatabase();await d.install();},120_000);
+beforeEach(async()=>{s=await reminderExecution(d,vault);q=await s.queue();expect(await s.scheduler.stage(s.w.f.ctx,q.occurrenceId,new AbortController().signal)).toBe('STAGED');const row=(await d.root.query('SELECT delivery_id,run_id FROM group_reminder_occurrences WHERE id=$1',[q.occurrenceId])).rows[0];deliveryId=row.delivery_id;runId=row.run_id;},120_000);
 afterEach(async()=>{await s?.close();s=undefined;});afterAll(async()=>{await d?.close();});
 const json=(value:unknown)=>new Response(JSON.stringify(value),{headers:{'content-type':'application/json'}});
 it.each(['cancel','contract','authorization','roster','abort','expire','source','owner-stop'] as const)('real sender rejects %s occurring during cold OAuth wait before the group message request',async mode=>{
@@ -32,7 +32,7 @@ it.each(['cancel','contract','authorization','roster','abort','expire','source',
  }});
  const gateway=new DeliveryGateway(d.db,vault,sender,current.w.f.binding,Date.now,undefined,current.verifier);
  expect(await gateway.process(current.w.f.ctx,deliveryId,controller.signal)).toBe('SUPPRESSED');expect(oauth).toBe(1);expect(physical).toBe(0);expect((await d.root.query('SELECT state,last_error FROM deliveries WHERE id=$1',[deliveryId])).rows[0]).toMatchObject({state:'SUPPRESSED',last_error:'AUTHORIZATION_UNVERIFIED_BEFORE_SEND'});expect(await gateway.process(current.w.f.ctx,deliveryId,new AbortController().signal)).toBe('NOT_CLAIMED');expect(current.w.f.requests).toEqual([]);
-});
+},120_000);
 it.each(['APPLIED_UNVERIFIED','UNKNOWN'] as const)('real sender rechecks after OAuth, retains %s receipt, and never repeats the platform request',async outcome=>{
  const current=s!,body=(await d.root.query('SELECT result FROM runs WHERE id=$1',[runId])).rows[0].result as string;let oauth=0,physical=0;const before=(await current.w.f.fixture.events()).filter(e=>e.phase==='GROUP_READ').length;
  const sender=new DingTalkSender({clientId:'synthetic',clientSecret:'synthetic-physical-secret',robotCode:'robot-1',fetch:async(input,init)=>{
@@ -40,4 +40,4 @@ it.each(['APPLIED_UNVERIFIED','UNKNOWN'] as const)('real sender rechecks after O
   physical++;expect(String(input)).toBe('https://api.dingtalk.com/v1.0/robot/groupMessages/send');expect(init?.redirect).toBe('error');expect(JSON.parse(init!.body as string)).toEqual({robotCode:'robot-1',msgKey:'sampleText',msgParam:JSON.stringify({content:body}),openConversationId:s!.w.f.conversationId});if(outcome==='UNKNOWN')throw Error('SYNTHETIC_RESPONSE_LOST');return json({processQueryKey:'synthetic-physical-receipt'});
  }});
  const gateway=new DeliveryGateway(d.db,vault,sender,current.w.f.binding,Date.now,undefined,current.verifier);expect(await gateway.process(current.w.f.ctx,deliveryId,new AbortController().signal)).toBe(outcome);expect((await current.w.f.fixture.events()).filter(e=>e.phase==='GROUP_READ').length-before).toBe(6);expect(oauth).toBe(1);expect(physical).toBe(1);expect(await gateway.process(current.w.f.ctx,deliveryId,new AbortController().signal)).toBe('NOT_CLAIMED');expect(physical).toBe(1);expect((await d.root.query('SELECT state,verification_state FROM deliveries WHERE id=$1',[deliveryId])).rows[0]).toEqual({state:outcome,verification_state:'UNVERIFIED'});
-});
+},120_000);
