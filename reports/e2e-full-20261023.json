@@ -65,7 +65,7 @@
         "data-result.spec.ts": {
           "count": 18,
           "requires": "DATA_RESULT_BUNDLE",
-          "exercisedBy": "dedicated offline data-result bundle"
+          "exercisedBy": "scripts/test-data-result.mjs (guarded offline bundle)"
         },
         "group-contract-admin.spec.ts": {
           "count": 82,
@@ -93,6 +93,10 @@
         "sha256": "6825990eaa4350fb243a8d14e5f20fdb7da8a1f6cbb851cf4bd3006429729a51"
       }
     }
+  },
+  "bundleEvidence": {
+    "path": "reports/offline-browser-bundles-20261023.json",
+    "result": "All four guarded bundles passed: 115 browser tests and 55 flow tests, zero skips, zero failures, no backend or database started."
   },
   "stabilization": {
     "change": "playwright.config.ts now sets expect.timeout to 20_000 for the shared browser suite.",

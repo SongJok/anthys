@@ -1,0 +1,68 @@
+{
+  "schemaVersion": 1,
+  "case": "OFFLINE_BROWSER_BUNDLES",
+  "date": "2026-10-23",
+  "status": "PASS",
+  "scope": "LOCAL_GUARDED_OFFLINE_BROWSER_COMPONENT_BUNDLES",
+  "live": false,
+  "baseCommit": "632f44b57f73d30141d16c8fe553bb1d53a17004",
+  "node": "v24.21.0",
+  "runner": {
+    "pattern": "node --import ./scripts/test-network-guard.mjs scripts/test-<bundle>.mjs",
+    "backendOrDatabaseStarted": false,
+    "realProviderCalls": 0,
+    "note": "Each runner builds the real React component with esbuild, serves it to installed Chrome with all network routes intercepted, and also runs its offline flow tests under the network guard. Evidence directories are ephemeral temp directories and are not committed."
+  },
+  "bundles": {
+    "control-readback": {
+      "command": "node --import ./scripts/test-network-guard.mjs scripts/test-control-readback.mjs",
+      "flow": {"passed": 7, "failed": 0, "skipped": 0},
+      "browser": {"passed": 19, "failed": 0, "skipped": 0, "flaky": 0, "durationMs": 16846.188},
+      "source": "actual ControlConsole and route mocks",
+      "closesE2ESkips": {"spec": "tests/e2e/control-readback.spec.ts", "projectScopedSkips": 38}
+    },
+    "permission-admin": {
+      "command": "node --import ./scripts/test-network-guard.mjs scripts/test-permission-admin.mjs",
+      "flow": {"passed": 27, "failed": 0, "skipped": 0},
+      "browser": {"passed": 46, "failed": 0, "skipped": 0, "flaky": 0, "durationMs": 26283.819},
+      "source": "actual Permissions and route mocks",
+      "closesE2ESkips": {"spec": "tests/e2e/permission-admin.spec.ts", "projectScopedSkips": 92}
+    },
+    "group-contract-admin": {
+      "command": "node --import ./scripts/test-network-guard.mjs scripts/test-group-contract-admin.mjs",
+      "flow": {"passed": 12, "failed": 0, "skipped": 0},
+      "browser": {"passed": 41, "failed": 0, "skipped": 0, "flaky": 0, "durationMs": 40096.612},
+      "source": "actual Permissions group contract controls and route mocks",
+      "closesE2ESkips": {"spec": "tests/e2e/group-contract-admin.spec.ts", "projectScopedSkips": 82}
+    },
+    "data-result": {
+      "command": "node --import ./scripts/test-network-guard.mjs scripts/test-data-result.mjs",
+      "flow": {"passed": 9, "failed": 0, "skipped": 0},
+      "browser": {"passed": 9, "failed": 0, "skipped": 0, "flaky": 0, "durationMs": 4763.462},
+      "source": "actual DataResultView and route mocks",
+      "closesE2ESkips": {"spec": "tests/e2e/data-result.spec.ts", "projectScopedSkips": 18}
+    }
+  },
+  "totals": {
+    "flow": {"passed": 55, "failed": 0, "skipped": 0},
+    "browser": {"passed": 115, "failed": 0, "skipped": 0, "flaky": 0},
+    "tests": 170,
+    "projectScopedE2ESkipsExplained": 230,
+    "arithmetic": "Each bundle runs its browser file once; the default E2E matrix runs it for desktop and mobile, so 19+46+41+9 = 115 browser tests correspond to 38+92+82+18 = 230 project-scoped skips."
+  },
+  "files": {
+    "scripts/test-control-readback.mjs": "c4a5de897ca02617b0bce5e0c1f3c2b221c2d61bab39ab0d92c896e5203758e5",
+    "scripts/test-permission-admin.mjs": "96953f5d565b87371046eefb815707e5bddf084c43379decc0ba2799f3ea08ef",
+    "scripts/test-group-contract-admin.mjs": "339a4db857a39341791dcae2107ca53e0cf251a190143ba18c8415019f7250ca",
+    "scripts/test-data-result.mjs": "0578dcfc8e15c08f30dd744fe43f265f2a8e333354d0fc108577382059c3d28d",
+    "tests/e2e/control-readback.spec.ts": "b040f909afb90cab825703572e53bb01d47c404510429d1dcdb711e2cb39eb60",
+    "tests/e2e/permission-admin.spec.ts": "54fd337706c149a2b0919facdb6325a813da3a9997fdb109c7a2d7c4da29b5aa",
+    "tests/e2e/group-contract-admin.spec.ts": "4de633eac09dd3ef2aec315ddbdb6365519849ff9f31418e40560f3d8ab3a4e6",
+    "tests/e2e/data-result.spec.ts": "96556fe9fd40ff3e0bf804083ac208a83427c3e7308b64e2cb3157230842f536",
+    "tests/offline/control-readback.test.ts": "35216b646f16d9dc8a89135c6fd1b82c165af839b4f9cbaa261edaf1ed8e59a9",
+    "tests/offline/permission-admin.test.ts": "19c31763d07a3cdeb5cbe3512fcf8725a5b197ba70cfbb13b8bb0f89c9b13c9c",
+    "tests/offline/group-contract-admin.test.ts": "101a5e71eaee94a4398e3cbb8fbbd17f11439c746e6c7d9e2a0f7a9fc2551b15",
+    "tests/offline/data-result.test.ts": "207a6df5492b1094de8105b5a357d76a3663ae12af35614574e4e993aa4aae38"
+  },
+  "disclosure": "This is local component-level browser and flow evidence using the real React components, installed Chrome and route mocks, under the network guard. No backend, database, live DingTalk, DWS, GLM or upstream company-MCP call was made. It closes the execution gap for the four guarded E2E files but does not convert live acceptance: affected T-cases remain NOT_RUN and related R items remain IN_PROGRESS."
+}
