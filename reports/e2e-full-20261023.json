@@ -1,41 +1,107 @@
 {
+  "schemaVersion": 1,
+  "case": "BROWSER_E2E_FULL",
+  "date": "2026-10-23",
   "status": "PASS",
-  "recordedAt": "2026-10-23T04:08:56.640Z",
-  "command": "node scripts/run-tests.mjs playwright test",
-  "projects": [
-    "desktop",
-    "mobile"
-  ],
-  "expected": 58,
-  "skipped": 230,
-  "unexpected": 0,
-  "flaky": 0,
-  "durationMs": 137911.168,
-  "skipReasons": {
-    "control-readback.spec.ts": {
-      "count": 38,
-      "requires": "CONTROL_READBACK_BUNDLE",
-      "exercisedBy": "scripts/test-control-readback.mjs (self-dm stage 6)"
+  "scope": "LOCAL_ISOLATED_SYNTHETIC_BACKEND",
+  "live": false,
+  "baseCommit": "f447e3ffa37b51e6ee48ccb1d83d4829d91944f0",
+  "node": "v24.21.0",
+  "docker": {
+    "command": "docker compose --env-file .env -f deploy/compose/compose.dev.yml up -d --build --wait",
+    "project": "anthys-dev",
+    "api": "127.0.0.1:64700",
+    "postgres": "127.0.0.1:64710",
+    "sandboxBroker": "127.0.0.1:8092",
+    "health": {"live": "ALIVE", "ready": "READY"},
+    "note": "The rebuilt deployment was checked for health only; the browser suite runs against the isolated E2E server on 127.0.0.1:64702 with the synthetic OAuth provider and isolated PostgreSQL, and makes no live DingTalk, DWS, GLM or company-MCP call."
+  },
+  "suites": {
+    "main": {
+      "command": "node scripts/run-tests.mjs playwright test",
+      "config": "playwright.config.ts",
+      "specs": [
+        "company.spec.ts",
+        "control-readback.spec.ts",
+        "data-result.spec.ts",
+        "document.spec.ts",
+        "dws.spec.ts",
+        "finalization.spec.ts",
+        "group-contract-admin.spec.ts",
+        "group.spec.ts",
+        "memories.spec.ts",
+        "narrative.spec.ts",
+        "permission-admin.spec.ts",
+        "permissions.spec.ts",
+        "persona-privacy.spec.ts",
+        "persona-scope.spec.ts",
+        "personas.spec.ts",
+        "self-dm.spec.ts",
+        "source-choice.spec.ts",
+        "watch.spec.ts",
+        "workbench.spec.ts"
+      ],
+      "projects": ["desktop", "mobile"],
+      "expected": 58,
+      "unexpected": 0,
+      "flaky": 0,
+      "skipped": 230,
+      "durationMs": 178893.177,
+      "report": {
+        "path": "reports/playwright-latest.json",
+        "sha256": "742efdc279154734882263e486b1c989165d6432675bca723996d514a7b7cba1"
+      },
+      "skipAnnotations": {
+        "Run with the dedicated offline component bundle and no backend setup.": 38,
+        "Use the dedicated offline real-component bundle, with no backend setup.": 110,
+        "A dedicated offline real-component bundle is required; a skipped run is not validation.": 82
+      },
+      "skipReasons": {
+        "control-readback.spec.ts": {
+          "count": 38,
+          "requires": "CONTROL_READBACK_BUNDLE",
+          "exercisedBy": "scripts/test-control-readback.mjs (self-dm stage 6)"
+        },
+        "data-result.spec.ts": {
+          "count": 18,
+          "requires": "DATA_RESULT_BUNDLE",
+          "exercisedBy": "dedicated offline data-result bundle"
+        },
+        "group-contract-admin.spec.ts": {
+          "count": 82,
+          "requires": "GROUP_CONTRACT_ADMIN_BUNDLE",
+          "exercisedBy": "scripts/test-group-contract-admin.mjs (self-dm stage 8)"
+        },
+        "permission-admin.spec.ts": {
+          "count": 92,
+          "requires": "PERMISSION_ADMIN_BUNDLE",
+          "exercisedBy": "scripts/test-permission-admin.mjs (self-dm stage 7)"
+        }
+      }
     },
-    "data-result.spec.ts": {
-      "count": 18,
-      "requires": "DATA_RESULT_BUNDLE",
-      "exercisedBy": "dedicated offline data-result bundle"
-    },
-    "group-contract-admin.spec.ts": {
-      "count": 82,
-      "requires": "GROUP_CONTRACT_ADMIN_BUNDLE",
-      "exercisedBy": "scripts/test-group-contract-admin.mjs (self-dm stage 8)"
-    },
-    "permission-admin.spec.ts": {
-      "count": 92,
-      "requires": "PERMISSION_ADMIN_BUNDLE",
-      "exercisedBy": "scripts/test-permission-admin.mjs (self-dm stage 7)"
+    "personaExplanation": {
+      "command": "node scripts/run-tests.mjs playwright test --config=tests/e2e/persona-explanation.config.ts",
+      "config": "tests/e2e/persona-explanation.config.ts",
+      "projects": ["desktop", "mobile"],
+      "expected": 2,
+      "unexpected": 0,
+      "flaky": 0,
+      "skipped": 0,
+      "durationMs": 6146.653,
+      "report": {
+        "path": "reports/persona-explanation-e2e-latest.json",
+        "sha256": "6825990eaa4350fb243a8d14e5f20fdb7da8a1f6cbb851cf4bd3006429729a51"
+      }
     }
   },
-  "notes": [
-    "Skips are explicit test-level guards for live/external or environment-gated scenarios; they are not passes.",
-    "This E2E run exercises controlled local providers and the isolated PostgreSQL, not live DingTalk/DWS/GLM/company MCP."
-  ],
-  "coverageNote": "The 230 skips are explicit test.skip guards at file scope, not silent omissions. They require dedicated offline component bundles and are exercised outside the default Playwright config; a skipped run alone is not validation."
+  "stabilization": {
+    "change": "playwright.config.ts now sets expect.timeout to 20_000 for the shared browser suite.",
+    "rationale": "Two consecutive full runs each failed one different mobile test at the Playwright default 5s assertion budget (source-choice result rendering; workbench synthetic-OAuth task heading), while standalone reruns of each passed. The suite is serial and performs real Docker-backed task, approval, cancellation and polling work, and the source-choice fixture deliberately holds the persisted PENDING state for 1.8s before production verification resumes.",
+    "verified": "Two consecutive full runs after the change finished with expected 58, unexpected 0, flaky 0, skipped 230 (178.9s and 152.6s); the committed-tree run is the one recorded above. tests/e2e/source-choice.spec.ts itself is unmodified from the base commit."
+  },
+  "files": {
+    "playwright.config.ts": "59ae263719a29cbfb6d5d9118e2b10c4c4133625a41c9070d8a989cb4e6fdb3f",
+    "tests/e2e/source-choice.spec.ts": "86a544e77e14a3bcd3574bf8baf6c0f0cc8931b309a9acb3501cb3522149e094"
+  },
+  "disclosure": "This is local browser evidence on the isolated synthetic backend. The 230 skipped entries are guarded offline-bundle cases; they are not counted as browser validation and are separately exercised by the offline layer. Live DingTalk, DWS, GLM and upstream company-MCP acceptance remains BLOCKED_EXTERNAL, the affected T-cases remain NOT_RUN and the related R items remain IN_PROGRESS. No real credential, budget, deployment, database or enterprise message was used."
 }
