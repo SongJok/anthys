@@ -1,0 +1,210 @@
+{
+  "status": "PASS",
+  "scope": "LOCAL_ISOLATED_OPERATIONAL_ALERTS",
+  "live": false,
+  "generatedAt": "2026-10-23T03:11:00Z",
+  "source": {
+    "baseCommit": "f56aa83c38c3e478fcd9765a9d94db6657ef07f0",
+    "workingTree": true,
+    "files": {
+      "packages/observability/src/alerts.ts": "8d8c2b5be7d0bdf6a54878f7ca63b4d99bd835341ea0d91982d905087046452c",
+      "packages/observability/src/index.ts": "da260e5a6a8bec56f58ba20a15f384ba9edc73f98472f80ec97f1c0d56b3ab0f",
+      "scripts/check-alerts.ts": "e9cbd3cefbb66204fd488d8b83de74bb13a1a870c00f774e4a726286e0aeb310",
+      "tests/integration/alerting.test.ts": "e9a2dd67d0eab9f901561fd6ec8b7121bbee747450e93b97c7e4f2dacc29c92c",
+      "tests/support/backend-discovery-baseline.json": "9f13dc87077c0170540e9531b2a7701a19d3bbe4bac2b044c7524eee5fc951a3",
+      "config/test-catalog.json": "6215694b90a2de4778f359176933f29142595b41209e6ca696b5f68dfd2d8b80",
+      "docs/04_TEST_ACCEPTANCE_AND_OPERATIONS.md": "bcc0061a92e810083be52572196252ae235bef44b6350858e78ab05f0fc42b06",
+      "reports/vitest-latest.json": "0553de4ca5a780a827a4eb3dd9475f949e6cee62a3dee03103a90d0b512da170"
+    }
+  },
+  "surface": {
+    "entry": "tests/integration/alerting.test.ts using real SQL and real file reads against a disposable PostgreSQL on 127.0.0.1:64711",
+    "collector": "scripts/check-alerts.ts reads only aggregate state and identifiers, reconciles a 0600 state file, writes reports/alerts-latest.json, exits 1 while a P0 alert is active",
+    "signals": {
+      "PERSISTENT_UNKNOWN_WRITES": "tool_actions.state='UNKNOWN' older than the configured threshold, grouped by tenant (P0)",
+      "BACKUP_UNRECOVERABLE": "monitored backup-set receipt missing, unreadable, invalid, or older than the configured threshold (P0)",
+      "DELIVERY_FAILURES": "deliveries.state IN ('FAILED','UNKNOWN'), grouped by tenant with a state breakdown (P1)",
+      "QUEUE_BACKLOG": "outbox rows with published_at IS NULL older than the configured threshold, grouped by tenant (P1)"
+    },
+    "thresholdsInTest": {
+      "unknownWriteAgeMs": 300000,
+      "queueBacklogAgeMs": 300000,
+      "backupMaxAgeMs": 3600000,
+      "maxLocations": 10
+    },
+    "thresholdDisclosure": "These are explicit code defaults passed by the test. They were not tuned through a real pilot and are not production thresholds.",
+    "singleAuthority": "No production alert channel, connector, scheduler or delivery behavior changed. The slice adds the evaluator, collector CLI, test and metadata."
+  },
+  "measurements": {
+    "environment": {
+      "platform": "darwin",
+      "arch": "arm64",
+      "cpus": 10,
+      "node": "v24.21.0",
+      "postgres": "127.0.0.1:64711",
+      "runner": "vitest single file through scripts/run-tests.mjs",
+      "modelCalls": 0,
+      "liveProviderCalls": 0
+    },
+    "triggered": {
+      "alerts": 4,
+      "P0": 2,
+      "P1": 2,
+      "backupReasonsObserved": [
+        "BACKUP_RECEIPT_MISSING",
+        "BACKUP_RECEIPT_INVALID",
+        "BACKUP_RECEIPT_STALE"
+      ],
+      "backupRecoveredByFreshReceipt": true,
+      "deliveryStates": {
+        "FAILED": 1,
+        "UNKNOWN": 1
+      },
+      "youngUnknownActionExcluded": true,
+      "youngUnpublishedOutboxExcluded": true,
+      "sentDeliveryExcluded": true,
+      "publishedOldOutboxExcluded": true
+    },
+    "deduplication": {
+      "firstCollectionOpened": 4,
+      "secondCollectionOpened": 0,
+      "secondCollectionOngoing": 4,
+      "firstObservedAtStable": true
+    },
+    "closure": {
+      "afterDeliveryRecoveryResolved": [
+        "DELIVERY_FAILURES"
+      ],
+      "afterDeliveryRecoveryOngoing": 3,
+      "afterToolOutboxBackupRecoveryFindings": 0,
+      "afterToolOutboxBackupRecoveryResolved": 3,
+      "totalClosed": 4
+    },
+    "sensitiveContent": {
+      "markerPlantedIn": [
+        "deliveries.target",
+        "deliveries.content_ref",
+        "deliveries.last_error",
+        "tool_actions.result",
+        "outbox.payload_ref",
+        "invalid backup receipt"
+      ],
+      "markerOccurrencesInSerializedAlerts": 0,
+      "fieldsRetained": [
+        "fixed reason code",
+        "tenant or backup-set id",
+        "surface",
+        "count",
+        "resource ids",
+        "threshold"
+      ]
+    },
+    "metadata": {
+      "everyAlertHasOwner": true,
+      "everyAlertHasEscalationMinutes": true,
+      "everyAlertHasRunbook": true,
+      "everyAlertHasCloseCondition": true,
+      "distinctRunbooks": 4
+    },
+    "cliSmoke": {
+      "database": "isolated test database with accumulated synthetic residue from other tests",
+      "firstRun": {
+        "status": "P0_ACTIVE",
+        "p0": 550,
+        "p1": 4978,
+        "opened": 5528,
+        "exitCode": 1
+      },
+      "secondRun": {
+        "status": "P0_ACTIVE",
+        "opened": 0,
+        "ongoing": 5528,
+        "resolved": 0,
+        "exitCode": 1
+      },
+      "stateFileMode": "0600",
+      "disclosure": "The 5528 alerts come from pre-existing synthetic rows in the shared test database, not from this test's fixture. This is a CLI smoke result, not a noise or volume measurement."
+    }
+  },
+  "behavior": {
+    "fourSignalsFireAndLocate": "The isolated test wrote two connector deliveries (FAILED and UNKNOWN), one UNKNOWN tool action older than the threshold, one aged unpublished outbox row, and a stale valid backup receipt. Collection returned exactly the four expected codes, each with the expected P0/P1 severity, tenant or backup-set subject, surface, reason, count, threshold and resource IDs. Delivery alerts also carried a FAILED/UNKNOWN breakdown.",
+    "youngAndResolvedRowsDoNotAlert": "A young UNKNOWN tool action, a young unpublished outbox row, a SENT delivery and an old but published outbox row were all excluded, proving the thresholds and state predicates are applied.",
+    "backupTransitionsCloseTheAlert": "Missing, invalid and two-hour-old receipts each produced BACKUP_UNRECOVERABLE with a distinct fixed reason. Writing a fresh receipt bound to the same backup set with sourceStable.status MATCH cleared it.",
+    "dedupeAndIndependentClosure": "Stable keys produced four opened alerts from empty history, then four ongoing and zero opened on re-collection with firstObservedAt unchanged. Fixing only the two deliveries resolved only DELIVERY_FAILURES and left three ongoing. Fixing the tool action, publishing the outbox row and writing the fresh receipt produced zero findings and resolved the remaining three. All four original alerts therefore closed on real state recovery.",
+    "alertsCarryNoSensitiveBody": "A unique marker planted in delivery target/content/error text, tool action result, outbox payload and the invalid receipt never appeared in serialized findings, reconciliation or state. Only fixed metadata and identifiers were retained.",
+    "oracleIsNotVacuous": "A mutation changed reconcileAlerts to return resolved:[] unconditionally. The test failed at the partial-recovery closure assertion with expected ['DELIVERY_FAILURES'] and actual []. The production file was restored byte-for-byte and the SHA-256 matched the pre-mutation value.",
+    "cliDeduplicatesAcrossProcesses": "The collector CLI ran twice against the shared isolated test database. The first run opened 5528 alerts from accumulated synthetic residue and exited 1 because P0s were active; the second run read the 0600 state file, reported zero opened and 5528 ongoing, and again exited 1. This proves cross-process dedupe and the P0 exit code, not production alert volume."
+  },
+  "tests": {
+    "commands": [
+      "pnpm typecheck",
+      "pnpm lint",
+      "pnpm build",
+      "node scripts/run-tests.mjs vitest run tests/integration/alerting.test.ts",
+      "node scripts/run-tests.mjs vitest run tests/unit/test-isolation.test.ts tests/integration/alerting.test.ts",
+      "node --import tsx scripts/verify-requirements.ts --baseline",
+      "node --import tsx scripts/verify-requirements.ts",
+      "node scripts/scan-secrets.mjs"
+    ],
+    "vitest": {
+      "file": "tests/integration/alerting.test.ts",
+      "tests": 1,
+      "passed": 1,
+      "failed": 0,
+      "durationMs": 118,
+      "fullSuite": {
+        "files": 245,
+        "testSuites": 280,
+        "tests": 3384,
+        "passed": 3384,
+        "failed": 0,
+        "durationMs": 3202510,
+        "startedAt": "2026-10-23T02:01:33.284Z",
+        "endedAt": "2026-10-23T02:54:55.794Z",
+        "alertingFileRanInFullSuite": true
+      }
+    },
+    "discoveryIsolation": {
+      "file": "tests/unit/test-isolation.test.ts",
+      "tests": 8,
+      "passed": 8,
+      "failed": 0,
+      "note": "The original 90-file snapshot now remains 90 after moving the previously misregistered load-intake test into approvedAddedFiles and adding alerting.test.ts there."
+    },
+    "mutation": {
+      "file": "packages/observability/src/alerts.ts",
+      "mutation": "reconcileAlerts resolved: previous.filter(alert=>!current.has(alert.key)) replaced with resolved: []",
+      "expectedFailure": "AssertionError: expected [] to deeply equal [ 'DELIVERY_FAILURES' ] at the partial-recovery closure assertion",
+      "restoredSha256": "8d8c2b5be7d0bdf6a54878f7ca63b4d99bd835341ea0d91982d905087046452c",
+      "restoredClean": true
+    },
+    "gates": {
+      "typecheck": "PASS",
+      "lint": "PASS",
+      "build": "PASS (116 migrations, contractHash 473b7415afaae98c2e384fa32e0da1dfe6d82b2ea24996c31f466f184d8efc94, capabilities 13, databaseAccess false, vite built)",
+      "requirementsBaseline": "PASS (0 errors)",
+      "requirementsFull": "FAIL_PREEXISTING (44 errors: 36 R-items whose status stays IN_PROGRESS and 8 T-cases with no implementation file yet - T020 T069 T070 T082 T089 T090 T094 T096; T126 left this list in this slice)",
+      "secretScan": "PASS (0 findings, 1366 objects, 5 configured secrets)"
+    }
+  },
+  "evidence": {
+    "committedReport": "reports/operational-alerts-20261023.json",
+    "docs": "docs/04_TEST_ACCEPTANCE_AND_OPERATIONS.md gains the 2026-10-23 T126 section with the four signals, locators, dedupe/closure sequence, sensitive-content check, CLI smoke note, mutation check and BLOCKED_EXTERNAL boundary",
+    "catalog": "config/test-catalog.json T126 keeps status NOT_RUN and gains implementation tests/integration/alerting.test.ts plus a coverageNote that disclaims pilot tuning, production monitoring roles, notification routing and real backup paths",
+    "baseline": "tests/support/backend-discovery-baseline.json registers alerting.test.ts and load-intake.test.ts in approvedAddedFiles; originalFiles is back to 90 and originalCount stays 90"
+  },
+  "notProven": [
+    "No real connector, DWS authorization failure, DingTalk delivery, network error or provider call was exercised; deliveries were synthetic PostgreSQL rows.",
+    "No real backup storage, backup job, restore drill or filesystem failure was exercised; the receipt file was a local synthetic file.",
+    "No notification channel, paging integration, on-call ownership or escalation acknowledgement was exercised; the alert is structured metadata plus a CLI exit code.",
+    "Thresholds are code defaults, not pilot-tuned production values; alert volume and noise are not measured (the CLI smoke saw accumulated test residue).",
+    "The collector CLI requires a cross-tenant read authority (the local migrator is superuser with BYPASSRLS). A production read-only monitoring role, its grants and deployment are not verified.",
+    "No multi-tenant scale, database unavailability, audit-chain anomaly, secret leak, cross-tenant read or unauthorized side-effect alert was exercised."
+  ],
+  "statusUnchanged": {
+    "catalogT126": "NOT_RUN",
+    "requirementsR34": "IN_PROGRESS",
+    "liveAcceptance": "BLOCKED_EXTERNAL",
+    "documentSection13_3": "Production alert delivery, ownership rotation and pilot tuning remain unfinished external work."
+  }
+}

@@ -1663,3 +1663,19 @@ T129「空环境按交付脚本安装、迁移、构建、启动」/「可重复
 - **清理**：脚本随后执行 `down -v --remove-orphans`、删除本次构建的临时镜像与临时目录。复查显示临时 Compose 项目不存在、64800/64810 已释放、临时镜像已删除，原 `anthys-dev` 栈的 64700/64710 与四个容器保持不变。
 
 以上证据只证明本机从已提交代码可重复完成空环境安装、构建、迁移与启动，并且不依赖开发机私有状态；Docker 层缓存与软件源可用性会影响耗时，因此 94 秒/36 秒不是固定性能承诺。它不证明生产发布、第二台物理主机、跨平台安装或任何真实 GLM、钉钉、DWS、企业 MCP 能力。T129 在测试目录中仍为 NOT_RUN，R35 与 R36 未因本切片宣告完成，真实企业交付验收保持 BLOCKED_EXTERNAL。
+
+### 2026-10-23 运维告警用例证据（T126仍为NOT_RUN）
+
+本切片为 R34 的「连接器故障、UNKNOWN写入、备份失败、队列积压」用例补齐可追溯实现与本地断言：新增 `packages/observability/src/alerts.ts`（固定告警码、严重级别、租户/表层/资源定位、负责人、升级时限、解除条件与稳定键对账）、`scripts/check-alerts.ts`（本地只读采集、状态文件去重、报告落盘）与 `tests/integration/alerting.test.ts`。测试在隔离 PostgreSQL 64711 上真实写入 `deliveries` 的 `FAILED`/`UNKNOWN` 行、超过阈值的 `tool_actions` `UNKNOWN` 行、未发布超龄 `outbox` 行，以及缺失、无效、过期和有效的备份回执文件；告警采集全部通过真实 SQL 与真实文件读取完成，没有使用 mock 数据源。
+
+T126「连接器故障、UNKNOWN写入、备份失败、队列积压」/「对应告警可触发、可定位；恢复可关闭告警」由以下断言构成：
+
+- **四类告警按严重级别触发并可定位**：稳定告警码为 `PERSISTENT_UNKNOWN_WRITES`（P0）、`BACKUP_UNRECOVERABLE`（P0）、`DELIVERY_FAILURES`（P1）与 `QUEUE_BACKLOG`（P1）。每条告警携带租户 ID（备份告警为 `null`，以备份集 ID 定位）、数据表层（`tool_actions`/`deliveries`/`outbox`/`backup`）、资源 ID 列表、数量、最早时间、触发原因与阈值；投递告警还给出 `FAILED`/`UNKNOWN` 的状态分解。测试断言告警列表精确等于这四类，且租户、资源 ID、原因与阈值逐项匹配。
+- **阈值只命中持续状态**：比阈值新的 `UNKNOWN` 工具动作与未发布 outbox 行、已 `SENT` 的投递、已发布的历史 outbox 行都不产生告警；缺失、无效与过期备份回执分别得到 `BACKUP_RECEIPT_MISSING`、`BACKUP_RECEIPT_INVALID`、`BACKUP_RECEIPT_STALE`，写入新鲜且绑定同一备份集的有效回执后告警消失。
+- **告警不含敏感正文**：测试把同一哨兵字符串植入投递目标、内容引用、错误文本、工具动作结果、outbox 载荷和无效备份回执；序列化后的告警、对账结果与状态均不含该哨兵，只保留固定原因码、UUID 与计数。每条告警都带负责人、升级分钟数、`RUNBOOK-*` 标识与解除条件。
+- **稳定键去重与独立关闭**：首次对账从空历史得到 4 条 `opened`；再次采集时得到 4 条 `ongoing`、0 条 `opened`，`firstObservedAt` 保持不变。仅修复投递后，只有 `DELIVERY_FAILURES` 变为 `resolved`，其余 3 条继续 `ongoing`；再修复工具动作与 outbox 并写入新鲜备份回执后，采集结果为空，剩余 3 条全部 `resolved`。原始 4 条告警因此全部由真实状态恢复关闭，而不是因为集合被整体清空。
+- **本地采集入口可运行**：`scripts/check-alerts.ts` 在隔离测试库上连续运行两次，状态文件权限为 0600；第一次因库中累积的既有合成告警产生 5528 条 `opened`，第二次得到 0 条 `opened`、5528 条 `ongoing`，证明状态文件能跨进程去重。存在 P0 时退出码为 1。该冒烟结果来自被其他测试残留污染的测试库，不作为告警数量或生产噪声的结论。
+
+为证明用例不是空断言，做了一次变异检查：把 `packages/observability/src/alerts.ts` 的 `reconcileAlerts` 中恢复项从 `previous.filter(alert=>!current.has(alert.key))` 改为恒空数组后重跑，用例立即在「仅修复投递后关闭对应告警」断言处失败（期望 `['DELIVERY_FAILURES']`，实际 `[]`）。生产文件随后被按字节还原（SHA-256 `8d8c2b5be7d0bdf6a54878f7ca63b4d99bd835341ea0d91982d905087046452c`），`git diff` 确认无残留改动。
+
+以上证据只证明本地隔离环境下的告警触发、定位、去重、脱敏和恢复关闭，不证明真实连接器故障、真实 DWS 授权失效、真实备份存储或恢复演练、通知通道、值班升级或试点调优阈值。采集脚本使用可跨租户读取的迁移/超级用户角色；生产只读监控角色的授权与部署未经验证。T126 在测试目录中仍为 NOT_RUN，R34 未因本切片宣告完成，真实企业告警验收保持 BLOCKED_EXTERNAL。13.3 要求的真实通知、负责人值班与阈值试点仍属未完成的外部事项。

@@ -2082,8 +2082,9 @@
     "layer": "E2E",
     "precondition": "连接器故障、UNKNOWN写入、备份失败、队列积压",
     "oracle": "对应告警可触发、可定位；恢复可关闭告警",
-    "implementation": null,
-    "status": "NOT_RUN"
+    "implementation": "tests/integration/alerting.test.ts",
+    "status": "NOT_RUN",
+    "coverageNote": "隔离 PostgreSQL 中真实写入 FAILED/UNKNOWN 投递、超过阈值的 UNKNOWN 工具动作、未发布超龄 outbox 与缺失/无效/过期/有效备份回执，验证四类告警按 P0/P1 触发并携带租户、表层、资源 ID、负责人、升级时限、解除条件与 runbook；以稳定键去重，单项恢复只关闭对应告警，全部恢复后告警关闭，且告警序列不含植入的敏感正文。阈值仅为代码默认值并经测试显式传入，未经过真实试点调优；本地收集脚本使用可跨租户读取的迁移角色，生产只读监控角色、通知通道、值班升级和真实备份路径仍为外部事项。"
   },
   {
     "id": "T127",
