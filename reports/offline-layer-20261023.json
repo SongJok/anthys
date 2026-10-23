@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "case": "OFFLINE-LAYER",
+  "date": "2026-10-23",
+  "status": "PASS",
+  "scope": "LOCAL_OFFLINE_NETWORK_DENIED",
+  "live": false,
+  "baseCommit": "b53bf41",
+  "node": "v24.21.0",
+  "files": {
+    "scripts/run-tests.mjs": "8100fe17d9a7e8e6ae8a663b4a3507d30dab766514775bc24077bd2628b58576",
+    "scripts/test-network-guard.mjs": "e7c480ef78ce4a6f21569bf2e6efe3fd737c42fa497d03ae032e46178677df98",
+    "tests/support/dm-diagnostics-offline-guard.mjs": "92db1fe6d8efab1a369fae493707e0ab6c1309a3fe947eda5e0cdfe4f3223dc8",
+    "scripts/preserve-test-artifacts.mjs": "37f73df6ef87f4fc36d485e96e8f80dd2859bb68966fe9b59b3f5c387a695bf2",
+    "tests/offline/*.test.ts": "17ab2ec418c0305dc76a5c30801fbdcd74a59fe05f94dea2180752f5e10c5679"
+  },
+  "behavior": {
+    "processIsolation": "Standalone offline specs inherit neither database configuration nor secret paths; the runner allowlists only PATH, HOME, TMPDIR, LANG, LC_ALL, CI, TERM and NO_COLOR, sets APP_ENV=test and OA_TEST_ISOLATED=true, and preloads the network guard explicitly.",
+    "networkDenial": "The general guard hard-denies TCP, HTTP, DNS, TLS, UDP, fetch and PostgreSQL IO before any real IO can occur; the DM diagnostics oracle runs in a separate process under its own all-IO-denying guard so it cannot be bypassed by the other specs.",
+    "coverage": "Nineteen offline spec files exercise standard-channel boundaries, group cases/escalations/reminders/contracts, schedules, permission and role administration, artifacts, budgets, data templates/results and signed DWS readers without live credentials."
+  },
+  "tests": {
+    "command": "node scripts/run-tests.mjs offline tests/offline/*.test.ts",
+    "files": 19,
+    "guarded": {"tests": 460, "passed": 460, "failed": 0, "durationSeconds": 25.63},
+    "dmGuard": {"tests": 3, "passed": 3, "failed": 0, "durationSeconds": 0.18},
+    "total": {"tests": 463, "passed": 463, "failed": 0}
+  },
+  "disclosure": "Local component oracles only, executed with all network IO denied and no inherited enterprise configuration. T-cases remain NOT_RUN and R items remain IN_PROGRESS; live GLM, DingTalk, DWS and upstream company-MCP acceptance remains BLOCKED_EXTERNAL. No live credential, enterprise message, real database or deployment was used."
+}
