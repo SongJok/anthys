@@ -1,0 +1,41 @@
+{
+  "status": "PASS",
+  "recordedAt": "2026-10-23T04:08:56.640Z",
+  "command": "node scripts/run-tests.mjs playwright test",
+  "projects": [
+    "desktop",
+    "mobile"
+  ],
+  "expected": 58,
+  "skipped": 230,
+  "unexpected": 0,
+  "flaky": 0,
+  "durationMs": 137911.168,
+  "skipReasons": {
+    "control-readback.spec.ts": {
+      "count": 38,
+      "requires": "CONTROL_READBACK_BUNDLE",
+      "exercisedBy": "scripts/test-control-readback.mjs (self-dm stage 6)"
+    },
+    "data-result.spec.ts": {
+      "count": 18,
+      "requires": "DATA_RESULT_BUNDLE",
+      "exercisedBy": "dedicated offline data-result bundle"
+    },
+    "group-contract-admin.spec.ts": {
+      "count": 82,
+      "requires": "GROUP_CONTRACT_ADMIN_BUNDLE",
+      "exercisedBy": "scripts/test-group-contract-admin.mjs (self-dm stage 8)"
+    },
+    "permission-admin.spec.ts": {
+      "count": 92,
+      "requires": "PERMISSION_ADMIN_BUNDLE",
+      "exercisedBy": "scripts/test-permission-admin.mjs (self-dm stage 7)"
+    }
+  },
+  "notes": [
+    "Skips are explicit test-level guards for live/external or environment-gated scenarios; they are not passes.",
+    "This E2E run exercises controlled local providers and the isolated PostgreSQL, not live DingTalk/DWS/GLM/company MCP."
+  ],
+  "coverageNote": "The 230 skips are explicit test.skip guards at file scope, not silent omissions. They require dedicated offline component bundles and are exercised outside the default Playwright config; a skipped run alone is not validation."
+}

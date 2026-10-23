@@ -1,0 +1,218 @@
+{
+  "auditDate": "2026-10-23",
+  "scope": "Local software verification across unit/integration/contract/security, offline, coverage, E2E, chaos, self-DM, supply chain and secret scan, compared with the four baseline documents and the corrected project constraints.",
+  "correctionsInForce": [
+    "Project name is anthys, not open_aider.",
+    "API port is 64700 and PostgreSQL port is 64710; Docker is used throughout.",
+    "Code, log and data queries use the upstream company MCP; standalone data-development work is paused.",
+    "Section 4.8 statistics templates, semantics and data permissions are deferred to phase two.",
+    "Tests run locally; GitHub Actions is not used."
+  ],
+  "verdict": "NOT_COMPLETE",
+  "verdictReasons": [
+    "All 130 acceptance cases remain NOT_RUN and all 36 requirements remain IN_PROGRESS.",
+    "P11 office closed loop/search, P12 full admin UI, P13 hardening/operations and P14 enterprise acceptance are NOT_STARTED in config/stages.json.",
+    "GLM, DingTalk, DWS and company MCP live acceptance remains BLOCKED_EXTERNAL; configured credentials and connectivity probes are not live acceptance.",
+    "The full requirements gate exits 1 and the release verifier fails closed with INVALID_OR_MISSING_VERIFICATION_REPORT.",
+    "270 of 531 evidence references in config/stages.json do not exist in this checkout; the P00/P01 TESTED statuses are stale and are not relied on by this audit."
+  ],
+  "gates": {
+    "lint": {
+      "status": "PASS",
+      "command": "pnpm lint",
+      "exitCode": 0
+    },
+    "typecheck": {
+      "status": "PASS",
+      "command": "pnpm typecheck",
+      "exitCode": 0
+    },
+    "build": {
+      "status": "PASS",
+      "command": "pnpm build",
+      "exitCode": 0,
+      "note": "Vite reports chunks over 500 kB; this is a warning, not a failure."
+    },
+    "unitIntegrationContractSecurity": {
+      "status": "PASS",
+      "command": "node scripts/run-tests.mjs vitest run --coverage",
+      "testFilesPassed": 245,
+      "testsPassed": 3384,
+      "testsFailed": 0,
+      "durationSeconds": 3113.29,
+      "coverage": {
+        "lines": 96.26,
+        "branches": 85.07,
+        "functions": 94.19,
+        "statements": 89.19
+      },
+      "thresholds": {
+        "lines": 85,
+        "branches": 80,
+        "functions": 85,
+        "statements": 85,
+        "criticalFilesBranches": 90
+      },
+      "thresholdsPassed": true,
+      "evidence": [
+        "reports/coverage-full-20261023.json",
+        "reports/coverage-summary-20261023.json"
+      ]
+    },
+    "offlineLayer": {
+      "status": "PASS",
+      "testsPassed": 463,
+      "testsFailed": 0,
+      "evidence": [
+        "reports/offline-layer-runner-20261023.json"
+      ]
+    },
+    "e2e": {
+      "status": "PASS",
+      "command": "pnpm test:e2e",
+      "projects": [
+        "desktop",
+        "mobile"
+      ],
+      "passed": 58,
+      "skipped": 230,
+      "unexpected": 0,
+      "flaky": 0,
+      "durationMs": 137911.168,
+      "skipNote": "The 230 skips are explicit file-scope test.skip guards for four dedicated offline bundles; they are not passes and are exercised by their own runners.",
+      "evidence": [
+        "reports/e2e-full-20261023.json"
+      ]
+    },
+    "chaos": {
+      "status": "PASS",
+      "command": "pnpm test:chaos",
+      "testFilesPassed": 18,
+      "testsPassed": 230,
+      "testsFailed": 0,
+      "durationSeconds": 176.57,
+      "note": "The gate now covers all 18 implementation files mapped from the 11 CHAOS catalog cases; the previous target covered 10.",
+      "evidence": [
+        "reports/chaos-expanded-20261023.json",
+        "reports/vitest-chaos-20261023.json"
+      ]
+    },
+    "selfDm": {
+      "status": "PASS",
+      "command": "pnpm test:self-dm",
+      "stages": 20,
+      "exitCode": 0,
+      "dedicatedBundles": [
+        "control-readback",
+        "permission-admin",
+        "group-contract-admin",
+        "data-result"
+      ],
+      "evidence": [
+        "reports/self-dm-chain-20261023.json"
+      ]
+    },
+    "secretScan": {
+      "status": "PASS",
+      "command": "node scripts/scan-secrets.mjs",
+      "objectsScanned": 1386,
+      "configuredSecretCount": 5,
+      "findings": 0,
+      "evidence": [
+        "reports/configured-secret-scan.json"
+      ]
+    },
+    "supplyChain": {
+      "status": "PASS",
+      "sbomComponents": 629,
+      "dependencyCount": 674,
+      "advisories": 0,
+      "evidence": [
+        "reports/sbom.cdx.json",
+        "reports/licenses.json",
+        "reports/dependency-audit.json"
+      ],
+      "limits": "No OS or container image scan is included; the SBOM is dependency-level and the audit is a registry query."
+    },
+    "requirementsBaseline": {
+      "status": "PASS",
+      "command": "pnpm verify:requirements --baseline",
+      "note": "Catalog completeness only; it does not assert functional completion."
+    },
+    "requirementsFull": {
+      "status": "FAIL",
+      "command": "pnpm verify:requirements",
+      "note": "Fails closed because acceptance statuses and evidence are incomplete. This is the expected honest result."
+    },
+    "releaseVerifier": {
+      "status": "FAIL",
+      "command": "pnpm verify:release",
+      "reason": "INVALID_OR_MISSING_VERIFICATION_REPORT",
+      "note": "No enterprise verification report with 130 PASS results exists."
+    },
+    "dockerDevStack": {
+      "status": "PASS",
+      "apiPort": 64700,
+      "postgresPort": 64710,
+      "testPostgresPort": 64711,
+      "healthLive": 200,
+      "healthReady": 200,
+      "note": "The anthys-dev api and postgres containers and the isolated test postgres container are healthy."
+    },
+    "githubActions": {
+      "status": "PASS",
+      "note": ".github/workflows/ci.yml is absent; no workflow runs on push."
+    }
+  },
+  "catalog": {
+    "acceptanceCases": 130,
+    "status": {
+      "NOT_RUN": 130
+    },
+    "requirements": 36,
+    "requirementStatus": {
+      "IN_PROGRESS": 36
+    },
+    "catalogImplementationFilesMissing": 0
+  },
+  "stageManifest": {
+    "P00": "TESTED",
+    "P01": "TESTED",
+    "P02": "IN_PROGRESS",
+    "P03": "IN_PROGRESS",
+    "P04": "IN_PROGRESS",
+    "P05": "IN_PROGRESS",
+    "P06": "IN_PROGRESS",
+    "P07": "IN_PROGRESS",
+    "P08": "IN_PROGRESS",
+    "P09": "IN_PROGRESS",
+    "P10": "IN_PROGRESS",
+    "P11": "NOT_STARTED",
+    "P12": "NOT_STARTED",
+    "P13": "NOT_STARTED",
+    "P14": "NOT_STARTED",
+    "evidenceReferences": 531,
+    "missingEvidenceReferences": 270,
+    "missingEvidenceReport": "reports/stage-evidence-integrity-20261023.json"
+  },
+  "externalBlockers": {
+    "GLM": "BLOCKED_EXTERNAL",
+    "DINGTALK": "BLOCKED_EXTERNAL",
+    "DWS": "BLOCKED_EXTERNAL",
+    "COMPANY_MCP": "BLOCKED_EXTERNAL"
+  },
+  "notProven": [
+    "Live GLM model behavior, semantic quality and 600 evaluation trajectories.",
+    "Live DingTalk single chat, group mention, cards, files and callback certification.",
+    "Live DWS office resources, independent delegated runner, device flow and document ACL.",
+    "Live company MCP code/log/data authorization and upstream contracts.",
+    "Production deployment, monitoring, backup/restore drills and enterprise sign-off for P11-P14.",
+    "Statistics templates, semantics and data-permission features deferred under section 4.8."
+  ],
+  "statusesUnchanged": true,
+  "notes": [
+    "All executed gates use the pinned Node v24.21.0 toolchain and isolated PostgreSQL on 64711.",
+    "Controlled providers and route mocks cannot establish live acceptance.",
+    "reports/vitest-latest.json is restored to the full-suite run (280 suites, 3384 tests); the chaos slice is stored separately as reports/vitest-chaos-20261023.json."
+  ]
+}

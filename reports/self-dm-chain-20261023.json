@@ -1,0 +1,43 @@
+{
+  "status": "PASS",
+  "recordedAt": "2026-10-23T05:19:09.266Z",
+  "command": "pnpm test:self-dm",
+  "stageCount": 20,
+  "exitCode": 0,
+  "offlineStages": {
+    "passLines": 0,
+    "totalAsserts": 0
+  },
+  "browserStages": {
+    "passLines": 10,
+    "totalTests": 59
+  },
+  "dedicatedComponentRunners": [
+    "scripts/test-control-readback.mjs",
+    "scripts/test-permission-admin.mjs",
+    "scripts/test-group-contract-admin.mjs"
+  ],
+  "notIncluded": [],
+  "notes": [
+    "The chain uses controlled local providers and disposable PostgreSQL; no live DingTalk, DWS, GLM or company MCP calls.",
+    "A skipped default E2E run is not validation; the four bundle-gated specs are exercised by their dedicated runners.",
+    "T-case statuses remain NOT_RUN and R items remain IN_PROGRESS.",
+    "The chain now includes scripts/test-data-result.mjs, closing the 18 data-result E2E skips that the default Playwright run does not execute."
+  ],
+  "dataResultBundle": {
+    "status": "PASS",
+    "flow": {
+      "passed": 9,
+      "failed": 0,
+      "skipped": 0
+    },
+    "browser": {
+      "passed": 9,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0
+    },
+    "backendOrDatabaseStarted": false,
+    "realProviderCalls": 0
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "status": "PASS",
+  "recordedAt": "2026-10-23T05:02:10.808Z",
+  "command": "pnpm test:chaos",
+  "target": "18 implementation files mapped from the 11 CHAOS catalog cases",
+  "testFilesPassed": 18,
+  "testFilesFailed": 0,
+  "testsPassed": 230,
+  "testsFailed": 0,
+  "durationSeconds": 176.57,
+  "exitCode": 0,
+  "evidence": [
+    "reports/vitest-chaos-20261023.json"
+  ],
+  "notes": [
+    "The previous test:chaos target covered only 10 of the 18 mapped files; this run uses the corrected full target.",
+    "All 230 tests in those files passed; this is a broader runner slice than the 11 CHAOS catalog cases because the files also contain non-chaos assertions.",
+    "Local isolated PostgreSQL only; T-case statuses remain NOT_RUN."
+  ]
+}

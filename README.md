@@ -49,7 +49,10 @@ pnpm typecheck
 pnpm build
 pnpm test:prepare # macOS 上若 PG17 测试客户端无法构建，请使用已提供的隔离测试库
 pnpm test
+pnpm test:offline
+pnpm test:chaos
 pnpm test:e2e
+pnpm test:self-dm
 ```
 
 `/api/v1/health/live` 与 `/api/v1/health/ready` 分开检查。没有钉钉应用配置时 ingress 拒绝启动，不使用已有员工 CLI 登录替代机器人身份。已实现浏览器 OAuth、一次性 state、企业与目录身份匹配和任务工作台；真实 OAuth 仍需企业回调域名及已核验目录。构建后的工作台由 API 在 64700 同源提供。

@@ -1,0 +1,40 @@
+{
+  "status": "PASS",
+  "recordedAt": "2026-10-23T04:05:58.996Z",
+  "command": "node scripts/run-tests.mjs vitest run --coverage",
+  "nodeVersion": "v24.21.0",
+  "vitest": "5.0.4",
+  "provider": "v8",
+  "testFiles": {
+    "passed": 245,
+    "failed": 0
+  },
+  "tests": {
+    "passed": 3384,
+    "failed": 0
+  },
+  "durationSeconds": 3113.29,
+  "totals": {
+    "lines": 96.26,
+    "branches": 85.07,
+    "functions": 94.19,
+    "statements": 89.19
+  },
+  "thresholds": {
+    "lines": 85,
+    "branches": 80,
+    "functions": 85,
+    "statements": 85,
+    "criticalFilesBranches": 90
+  },
+  "thresholdsPassed": true,
+  "exitCode": 0,
+  "evidence": [
+    "reports/coverage-summary-20261023.json"
+  ],
+  "notes": [
+    "Full suite includes tests/unit, tests/integration, tests/contract and tests/security.",
+    "Two files report 0% because coverage is collected in their child process; they are not in the 90% critical-file threshold list.",
+    "This is local isolated-PostgreSQL evidence only; it does not change any T-case or R-item status."
+  ]
+}

@@ -1704,3 +1704,25 @@ docs/02 与 `config/stages.json` 要求主分支保留 SBOM、许可证与依赖
 ### 2026-10-23 移除 GitHub Actions 工作流（遵守本地测试约束）
 
 项目约束是不使用 GitHub Actions、测试在本地执行。仓库中仍保留随基线导入的 `.github/workflows/ci.yml`，其 `on: [push, pull_request]` 会在每次推送时触发 Actions，与本约束冲突，并会重复执行耗时的 coverage 与 self-dm 链。本切片删除该工作流，并从 `config/stages.json` 的 P00 模块清单移除该路径；本地验证入口（lint、typecheck、build、vitest、offline、E2E 与 self-dm）保持不变。删除工作流不改变任何验收结论、T 用例状态或 R 项状态。
+
+### 2026-10-23 全量本地验收审计（结论 NOT_COMPLETE，不改变 T/R 状态）
+
+本次对当前主分支做完整本地复核，使用固定 Node v24.21.0 与隔离 PostgreSQL 64711；全部为本地或受控 provider，没有任何 live 凭据、真实企业资源或外部消息。逐项证据见 `reports/completion-audit-20261023.json`。
+
+| 门禁 | 结果 | 关键数据 |
+|---|---|---|
+| lint / typecheck / build | PASS | 三个命令退出码均为 0 |
+| vitest + coverage | PASS | 245 文件、3384 用例、3113.29s；lines 96.26%、branches 85.07%、functions 94.19%、statements 89.19%，全部阈值通过 |
+| offline | PASS | 463 用例通过（runner 修复后） |
+| E2E desktop/mobile | PASS | 58 通过、230 跳过、0 失败、0 flaky；跳过项是 4 个专用 bundle 的文件级 `test.skip` |
+| CHAOS | PASS | 覆盖面从 10 个扩展到 18 个实现文件，230 用例通过 |
+| self-DM | PASS | 20 阶段全部通过，新增 data-result bundle（flow 9/9、browser 9/9） |
+| secret scan | PASS | 1386 个 Git 对象、5 个已配置秘密、0 命中 |
+| SBOM / licenses / audit | PASS | 629 个组件、674 个依赖、0 条 advisory |
+| requirements baseline | PASS | 仅目录完整性，不表示功能完成 |
+| requirements 全量 / release | FAIL（预期） | 全量门禁非零；release 因 `INVALID_OR_MISSING_VERIFICATION_REPORT` fail-closed |
+| Docker | PASS | API 64700 live/ready 均 200，PG 64710，测试 PG 64711 健康 |
+
+诚实结论：本审计**不宣布完成**。130 个验收用例仍全部为 `NOT_RUN`，36 个 R 项仍为 `IN_PROGRESS`；`config/stages.json` 中 P11（办公闭环与搜索）、P12（管理与全链路 UI）、P13（加固与运维）、P14（企业验收与交付）仍为 `NOT_STARTED`；GLM、钉钉、DWS、公司 MCP 的 live 验收仍为 `BLOCKED_EXTERNAL`。另外，`config/stages.json` 的 531 条证据引用中有 270 条在当前检出中不存在，P00/P01 的 `TESTED` 状态已过时，本审计不依赖这些状态。4.8 统计模板、口径和数据权限继续按二期处理，不在本次范围。
+
+本切片同时修正了 `test:chaos` 只覆盖 10/18 个 CHAOS 实现文件的问题，并把 `test-data-result.mjs` 加入 self-DM 链，使默认 E2E 中 18 个 data-result 跳过项获得独立执行证据。所有新增结果均为本地合成/受控证据，不能替代真实模型、钉钉、DWS 或公司 MCP 的企业联调。
