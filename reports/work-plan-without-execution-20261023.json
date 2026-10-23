@@ -1,0 +1,113 @@
+{
+  "schemaVersion": 1,
+  "case": "T044",
+  "date": "2026-10-23",
+  "status": "PASS",
+  "scope": "LOCAL_SYNTHETIC_WORK_PLAN_SEPARATION",
+  "live": false,
+  "baseCommit": "44572736c6e0a82dc2a20dc7cb26371ec681a70b",
+  "files": {
+    "tests/integration/work-plan-without-execution.test.ts": "459751a59fae1b1bffdb934e1e75eb4bd51cdc51950a62b35d47eeabbd9506b1",
+    "config/test-catalog.json": "3e2c22613a6beb0b945e3401c797d366cd639786131407ce5023fa21229c1d33",
+    "tests/support/backend-discovery-baseline.json": "974b51aefd2712f39f6690cf64fe57bdb3f770ad05abbb37215ff3807cbcbb1f",
+    "docs/04_TEST_ACCEPTANCE_AND_OPERATIONS.md": "795efaff6eb807f225f87fbab855321aa9d8d8df5193cc17dcba1b2f79f5be6e",
+    "packages/gateway/src/finalizer.ts": "413fc9826cc3adba4032a8276c4236921b54d61b27715e143a23dba2a935f43e",
+    "packages/runtime/src/final-plan.ts": "517927bad1af03298e40c74f4ecf2e0b59450ab6d2c81ca63ebcde1036e823cf",
+    "packages/runtime/src/narrative-review.ts": "5aaae5cc59cd2e8b030e582b4be804a730ab1cfdfa68f73f5dc0a76d70c9398b"
+  },
+  "surface": {
+    "entry": "DingTalkIngress.acceptTrustedCallback on an isolated PostgreSQL 64711 cluster, then AgentRuntime.advance",
+    "goal": "请帮我制定一份支付服务回滚演练的推进方案，包含步骤、依赖、风险和验证方式",
+    "provider": "Synthetic GLM SSE provider; no real model or DingTalk credentials",
+    "registeredCapabilities": [
+      "tasks.get@1.0.0 (READ)"
+    ],
+    "delivery": "DeliveryGateway with a synthetic sendReply; proactive sending throws"
+  },
+  "behavior": {
+    "planDelivered": "A CONVERSATION plan whose text contains steps, dependencies, risks, validation and an explicit no-change statement completes through the separate tool-free narrative review, is delivered once to the requesting user, and creates no tool_actions, approvals or non-RUN outbox rows.",
+    "executedClaimRejected": "A CONVERSATION plan claiming the rollback drill was already executed is rejected three times with UNBACKED_ACTION_PROSE even though the narrative review returned GENERAL; the run ends PARTIAL with result null and no delivery.",
+    "futurePromiseRejected": "A CONVERSATION plan promising daily monitoring and notifications is rejected three times with UNBACKED_ACTION_PROSE; the run ends PARTIAL with result null, no delivery and finalResultAllowed false."
+  },
+  "tests": {
+    "target": {
+      "file": "tests/integration/work-plan-without-execution.test.ts",
+      "tests": 3,
+      "passed": 3,
+      "cases": [
+        "a requested work plan is delivered as steps, dependencies, risks and validation without executing it",
+        "a plan claiming the work was already executed is rejected and never delivered",
+        "a plan promising future monitoring and notifications is rejected and never delivered"
+      ]
+    },
+    "regression": {
+      "files": [
+        "tests/integration/narrative-review.test.ts",
+        "tests/integration/runtime.test.ts",
+        "tests/integration/finalization.test.ts"
+      ],
+      "tests": 51,
+      "passed": 51
+    },
+    "unit": {
+      "file": "tests/unit/final-plan.test.ts",
+      "tests": 4,
+      "passed": 4
+    },
+    "isolation": {
+      "file": "tests/unit/test-isolation.test.ts",
+      "tests": 8,
+      "passed": 8,
+      "note": "Original 90 project files plus the approved added files; the new T044 file is listed in approvedAddedFiles."
+    }
+  },
+  "mutationCheck": [
+    {
+      "mutation": "packages/gateway/src/finalizer.ts: remove the assertNoUnbackedActionProse(plan.text) call",
+      "observed": "Both refusal tests fail: the executed-claim plan reaches the approved finalization after a single generation and is accepted as deliverable, so the expected three UNBACKED_ACTION_PROSE rejections and PARTIAL outcome never occur.",
+      "restored": true,
+      "restoredFileHash": "413fc9826cc3adba4032a8276c4236921b54d61b27715e143a23dba2a935f43e"
+    }
+  ],
+  "gates": {
+    "typecheck": "PASS",
+    "lint": "PASS",
+    "build": "PASS",
+    "schemaContract": {
+      "status": "PASS",
+      "migrations": 116,
+      "contractHash": "473b7415afaae98c2e384fa32e0da1dfe6d82b2ea24996c31f466f184d8efc94"
+    },
+    "capabilityOutputContracts": {
+      "status": "PASS",
+      "capabilities": 13
+    },
+    "secretScan": {
+      "status": "PASS",
+      "configuredSecretCount": 5,
+      "findings": []
+    },
+    "requirementsBaseline": "PASS",
+    "requirementsFull": {
+      "status": "FAIL_PREEXISTING",
+      "errors": 50,
+      "note": "36 R items remain IN_PROGRESS and 14 catalog cases remain NOT_RUN; T044 is no longer among the errors (previously 51)."
+    }
+  },
+  "catalog": {
+    "implementation": "tests/integration/work-plan-without-execution.test.ts",
+    "status": "NOT_RUN"
+  },
+  "notProven": [
+    "No live DingTalk single-chat delivery was exercised.",
+    "No live GLM request or response was exercised.",
+    "No real execution, release, monitoring or notification system was contacted.",
+    "The prose guard is a bounded pattern complement, not a general semantic proof of non-execution.",
+    "T044 remains NOT_RUN and R16 remains IN_PROGRESS; live acceptance remains BLOCKED_EXTERNAL."
+  ],
+  "statusUnchanged": {
+    "T044": "NOT_RUN",
+    "R16": "IN_PROGRESS",
+    "liveAcceptance": "BLOCKED_EXTERNAL"
+  }
+}

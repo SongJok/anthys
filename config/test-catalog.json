@@ -733,8 +733,9 @@
     "layer": "E2E",
     "precondition": "用户要求一份工作推进方案",
     "oracle": "输出可执行步骤、依赖、风险和验证，不虚构已执行",
-    "implementation": null,
-    "status": "NOT_RUN"
+    "implementation": "tests/integration/work-plan-without-execution.test.ts",
+    "status": "NOT_RUN",
+    "coverageNote": "Local synthetic T044 oracle over the isolated PostgreSQL 64711 cluster with a synthetic GLM SSE provider. A requested payment rollback-drill work plan is delivered through the separate tool-free narrative review as a CONVERSATION answer that still contains steps, dependencies, risks and validation; it records no tool_actions, no approvals and no outbox row other than the initial run dispatch, and the only capability offered to the drafting model is the reviewed READ task reader. Two CONVERSATION drafts whose prose claims that the drill was already executed, or promises daily monitoring and notification, are rejected three times with UNBACKED_ACTION_PROSE and never delivered even though the synthetic review returned GENERAL; the run ends PARTIAL with no delivery. A mutation check that removes the finalizer's assertNoUnbackedActionProse call makes both refusal tests fail. The full T044 catalog run against live DingTalk/GLM remains NOT_RUN."
   },
   {
     "id": "T045",
