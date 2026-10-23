@@ -29,3 +29,13 @@ export function dueReminder(rule:ScheduleRule,nextDue:string,now:string){
  }
  return {scheduledAt:latest,nextDueAt:future,missed:end-Date.parse(latest)>3600000};
 }
+/** Final check for a persisted occurrence: its own instant must still be an
+ * exact candidate of the current rule and inside the misfire grace. A newer
+ * persisted candidate is checked separately so fast intervals can deliver. */
+export function exactReminderCandidate(rule:ScheduleRule,scheduledAt:string,now:string){
+ const from=Date.parse(scheduledAt),at=Date.parse(now);
+ if(!Number.isFinite(from)||!Number.isFinite(at)||from>at)return false;
+ const grace=(rule.misfire.kind==='REMINDER_LATEST'?rule.misfire.graceSeconds:3600)*1000;
+ if(at-from>grace)return false;
+ try{const instant=new Date(from).toISOString();return dueReminder(rule,instant,instant)?.scheduledAt===instant;}catch{return false;}
+}

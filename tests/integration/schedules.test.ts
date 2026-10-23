@@ -7,6 +7,7 @@ import {secret,config} from '../../packages/config/src/index.js';
 import {Sessions} from '../../packages/identity/src/sessions.js';
 import {Schedules} from '../../packages/schedules/src/service.js';
 import {runReminderCycle} from '../../packages/schedules/src/cycle.js';
+import {reminderResultAllowed} from '../../packages/schedules/src/delivery.js';
 import {ReminderScheduler} from '../../packages/schedules/src/runner.js';
 import {DeliveryGateway} from '../../packages/gateway/src/delivery.js';
 import {RuntimeStore} from '../../packages/runtime/src/store.js';
@@ -149,6 +150,28 @@ it('damaged ciphertext can still be cancelled through the real owner API, replay
  const repeated=await api.app.inject(request);expect(repeated.statusCode).toBe(200);expect(repeated.json().data.replayed).toBe(true);expect((await root.query("SELECT count(*)::int n FROM schedule_events WHERE schedule_id=$1 AND operation='CANCEL'",[saved.id])).rows[0].n).toBe(1);
  expect(await w.scheduler.stage(w.ctx,oid!)).toBe('NOT_CLAIMED');expect(w.sends()).toBe(0);await expect(w.service.cancel(other.principal,saved.id,{},saved.etag,randomUUID())).rejects.toMatchObject({code:'SCHEDULE_NOT_FOUND'});await expect(w.service.cancel(w.principal,saved.id,{},'changed',key)).rejects.toMatchObject({code:'SCHEDULE_REQUEST_CONFLICT'});
  }finally{await api.app.close();}
+});
+it('a persisted occurrence whose instant was tampered away from the stored rule cannot stage or send',async()=>{
+ const w=await world();await w.create();w.advance();const [id]=await w.scheduler.claimDue(w.ctx);
+ await root.query("UPDATE schedule_occurrences SET scheduled_at=scheduled_at+interval '500 milliseconds',expires_at=expires_at+interval '500 milliseconds' WHERE id=$1",[id]);
+ expect(await w.scheduler.stage(w.ctx,id!)).toBe('MISSED');
+ const row=(await root.query('SELECT state,task_id,delivery_id FROM schedule_occurrences WHERE id=$1',[id])).rows[0];expect(row).toEqual({state:'MISSED',task_id:expect.any(String),delivery_id:null});
+ expect((await root.query('SELECT status FROM tasks WHERE id=$1',[row.task_id])).rows[0].status).toBe('CANCELLED');
+ expect((await root.query("SELECT published_at FROM outbox WHERE kind='SCHEDULE' AND aggregate_id=$1",[id])).rows[0].published_at).toBeInstanceOf(Date);
+ expect((await root.query('SELECT count(*)::int n FROM deliveries WHERE tenant_id=$1',[w.ctx.tenantId])).rows[0].n).toBe(0);expect(w.sends()).toBe(0);
+});
+it('a newer queued occurrence supersedes an older staged instant before physical send while exact fast-interval instants stay deliverable',async()=>{
+ const w=await world(),start=new Date(Math.floor((Date.now()-2000)/1000)*1000).toISOString();
+ const body={kind:'PRIVATE_TEXT_REMINDER',text:'核对交付清单',rule:{schemaVersion:1,kind:'INTERVAL',tz:'UTC',start:{kind:'UTC',at:start},everySeconds:1,misfire:{kind:'REMINDER_LATEST',graceSeconds:3600}}};
+ const first=(await w.service.create(w.principal,body,randomUUID())).schedule,second=(await w.service.create(w.principal,body,randomUUID())).schedule;w.advance();expect(await w.scheduler.claimDue(w.ctx)).toHaveLength(2);
+ const a=(await root.query('SELECT * FROM schedule_occurrences WHERE schedule_id=$1',[first.id])).rows[0],b=(await root.query('SELECT * FROM schedule_occurrences WHERE schedule_id=$1',[second.id])).rows[0];
+ expect(await w.scheduler.stage(w.ctx,a.id)).toBe('STAGED');expect(await w.scheduler.stage(w.ctx,b.id)).toBe('STAGED');
+ const staged=(await root.query('SELECT id,run_id,delivery_id,scheduled_at,revision FROM schedule_occurrences WHERE id=ANY($1::uuid[])',[[a.id,b.id]])).rows,sa=staged.find(row=>row.id===a.id)!,sb=staged.find(row=>row.id===b.id)!;
+ const result=(id:string)=>root.query('SELECT result FROM runs WHERE id=$1',[id]).then(r=>r.rows[0].result as string),allowed=(id:string)=>result(id).then(text=>db.scope(w.ctx,c=>reminderResultAllowed(c,w.ctx,vault,id,text)));
+ expect(await allowed(sa.run_id)).toBe(true);expect(await w.delivery.process(w.ctx,sa.delivery_id,new AbortController().signal)).toBe('APPLIED_UNVERIFIED');
+ const at=Date.parse((sb.scheduled_at as Date).toISOString());
+ await root.query("INSERT INTO schedule_occurrences(tenant_id,id,owner_id,schedule_id,revision,scheduled_at,state,expires_at) VALUES($1,$2,$3,$4,$5,$6,'QUEUED',$7)",[w.ctx.tenantId,randomUUID(),w.ctx.actorId,second.id,sb.revision,new Date(at+1000).toISOString(),new Date(at+3600000).toISOString()]);
+ expect(await allowed(sb.run_id)).toBe(false);expect(await w.delivery.process(w.ctx,sb.delivery_id,new AbortController().signal)).toBe('SUPPRESSED');expect(w.sends()).toBe(1);
 });
 it('scope failure or inactive ownership cannot starve healthy owners; abort stops the cycle rather than being swallowed',async()=>{
  const inactive=await world(),healthy=await world();await inactive.create();await healthy.create();await root.query("UPDATE users SET status='DEPARTED' WHERE id=$1",[inactive.ctx.actorId]);healthy.advance();inactive.advance();const scheduler=new ReminderScheduler(new Schedules(db,vault));let failures=0;

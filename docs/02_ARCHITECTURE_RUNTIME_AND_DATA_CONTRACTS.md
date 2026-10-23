@@ -997,6 +997,10 @@ MCP QUERY 返回绑定 nonce/tenant/actor/scope/version/sourceRevision 的严格
 
 scheduler按5秒tick、owner范围due索引及SKIP LOCKED，在同事务生成唯一(schedule,revision,UTC) occurrence+task+SCHEDULE outbox并推进规则。任务在确定性执行前保持非模型可领取状态；暂停/改版/取消撤销旧occurrence、关闭旧outbox、取消待执行任务并抑制PENDING投递。下一到期为空但最后发生点未执行时仍ACTIVE；本地执行后COMPLETED只表示规则结束。执行与物理发送前重核revision、身份、策略、内容/授权证据，UNKNOWN不重试。提醒只取最近错过一次且在一小时内，否则MISSED；不补发停机期间每个提醒。报表/监控与高风险写的独立misfire执行仍待完成。新迁移只在隔离64711库验证；真实schema升级须另批。
 
+### 私人提醒精确发生点终检（2026-10-23）
+
+staging与物理发送前都以当前密封规则重新推导持久化occurrence：即时点必须是规则在该时刻的精确候选，且未超出REMINDER_LATEST宽限；staging还要求不存在同schedule/revision、时点更晚的QUEUED/STAGED候选，发送前同样复核。被篡改的时点或已被新候选取代的旧时点不得创建delivery或发出字节；staging失败在同一事务内把该occurrence置MISSED/REVOKED并取消对应task/run、关闭outbox。终检只按“该时点自身是否为规则候选”判断，不以最新规则时点直接比较，因此亚秒/快速INTERVAL的正常候选仍可投递。仅隔离64711合成库验证；真实库、企业发送、模型与凭据均未操作。
+
 ### 2026-10-19 原生群事项来源与投递证明
 
 092仅新增task control_kind GROUP_CASE、以实际owned GROUP/MENTION_ONLY task/run为依据的独立native authority/member函数及owner私有不可变group_case_responses；不绕过H5 session检查。普通RUN队列复用零模型/工具预算的确定性分支；原goal与加密inbox全文保持相同。当前合同/委托/来源身份和新鲜完整群受众在执行前后及旧结果读取、最终两次发送检查复核。CASE正文/版本与LIST当前投影变化都会拒绝旧回执。一般GROUP企业工具及证据屏障保持。

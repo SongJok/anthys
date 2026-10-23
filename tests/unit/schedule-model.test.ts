@@ -1,4 +1,4 @@
-import {dueReminder,reminderPayload,createScheduleInput,renderReminder,scheduleEtag} from '../../packages/schedules/src/model.js';
+import {dueReminder,exactReminderCandidate,reminderPayload,createScheduleInput,renderReminder,scheduleEtag} from '../../packages/schedules/src/model.js';
 import {scheduleRuleSchema} from '../../packages/schedules/src/rules.js';
 const base={schemaVersion:1,kind:'RRULE',tz:'America/Los_Angeles',start:{kind:'LOCAL',at:'2026-01-01T09:00:00'},rrule:{frequency:'DAILY',interval:1},misfire:{kind:'REMINDER_LATEST'}};
 it('T052 missed daily reminders coalesce to only the latest due occurrence and preserve the original next rule',()=>{
@@ -18,6 +18,21 @@ it('interval reminders respect UNTIL/count from the actual DTSTART, including th
  const baseRule={schemaVersion:1,kind:'INTERVAL',tz:'UTC',start:{kind:'UTC',at:'0001-01-01T00:00:00Z'},everySeconds:1,misfire:{kind:'REMINDER_LATEST'}};
  expect(dueReminder(scheduleRuleSchema.parse({...baseRule,count:2}),'0001-01-01T00:00:01.000Z','0001-01-01T00:00:02.000Z')).toEqual({scheduledAt:'0001-01-01T00:00:01.000Z',nextDueAt:null,missed:false});
  const rule=scheduleRuleSchema.parse({...baseRule,start:{kind:'UTC',at:'2026-01-01T00:00:00Z'},until:'2026-01-01T00:00:04Z'});expect(dueReminder(rule,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:20.000Z')).toEqual({scheduledAt:'2026-01-01T00:00:04.000Z',nextDueAt:null,missed:false});
+});
+it('final exact-candidate check accepts only a real rule instant inside the misfire grace',()=>{
+ const once=scheduleRuleSchema.parse({schemaVersion:1,kind:'ONCE',tz:'UTC',start:{kind:'UTC',at:'2026-01-01T00:00:00Z'},misfire:{kind:'REMINDER_LATEST'}});
+ expect(exactReminderCandidate(once,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:56.000Z')).toBe(true);
+ expect(exactReminderCandidate(once,'2026-01-01T00:00:00.500Z','2026-01-01T00:00:56.000Z')).toBe(false);
+ expect(exactReminderCandidate(once,'2026-01-01T00:00:00.000Z','2026-01-01T01:00:00.001Z')).toBe(false);
+ expect(exactReminderCandidate(once,'2026-01-01T00:00:00.000Z','2025-12-31T23:59:59.999Z')).toBe(false);
+ const later=scheduleRuleSchema.parse({...once,start:{kind:'UTC',at:'2026-01-01T00:01:00Z'}});
+ expect(exactReminderCandidate(later,'2026-01-01T00:01:00.000Z','2026-01-01T00:00:56.000Z')).toBe(false);
+ const interval=scheduleRuleSchema.parse({schemaVersion:1,kind:'INTERVAL',tz:'UTC',start:{kind:'UTC',at:'2026-01-01T00:00:00Z'},everySeconds:300,misfire:{kind:'REMINDER_LATEST'}});
+ expect(exactReminderCandidate(interval,'2026-01-01T00:05:00.000Z','2026-01-01T00:06:00.000Z')).toBe(true);
+ expect(exactReminderCandidate(interval,'2026-01-01T00:05:01.000Z','2026-01-01T00:06:00.000Z')).toBe(false);
+ const daily=scheduleRuleSchema.parse(base);
+ expect(exactReminderCandidate(daily,'2026-01-02T17:00:00.000Z','2026-01-02T17:30:00.000Z')).toBe(true);
+ expect(exactReminderCandidate(daily,'2026-01-02T17:00:01.000Z','2026-01-02T17:30:00.000Z')).toBe(false);
 });
 it('a restored/corrupt due cursor that is not an actual rule occurrence cannot manufacture a reminder',()=>{
  for(const kind of ['ONCE','RRULE','INTERVAL']){const rule=scheduleRuleSchema.parse({schemaVersion:1,kind,tz:'UTC',start:{kind:'UTC',at:'2026-01-01T00:00:00Z'},misfire:{kind:'REMINDER_LATEST'},...(kind==='RRULE'?{rrule:{frequency:'DAILY'}}:kind==='INTERVAL'?{everySeconds:300}:{})});expect(()=>dueReminder(rule,'2026-01-01T00:00:01.000Z','2026-01-01T00:00:20.000Z')).toThrow('SCHEDULE_NEXT_DUE_INVALID');}

@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "case": "T047-T060",
+  "date": "2026-10-23",
+  "status": "PASS",
+  "scope": "LOCAL_ISOLATED_POSTGRES_EXACT_CANDIDATE",
+  "live": false,
+  "baseCommit": "007ca9f",
+  "node": "v24.21.0",
+  "database": "127.0.0.1:64711/anthys_test (isolated synthetic)",
+  "files": {
+    "packages/schedules/src/model.ts": "5de630b14148ffe0b301399bc522b9ce2e83e943d6ffd6366e7a812111f54624",
+    "packages/schedules/src/runner.ts": "eae77d392c71ebded57f0eed5eec18753ca2b658216ed0704755fe6622b51f42",
+    "packages/schedules/src/delivery.ts": "0b7f8d074101c065546b854fadd2be094c1407fd9fc73d66df1c9bd03c83a674",
+    "tests/integration/schedules.test.ts": "3739441b3b7897d494ef9ec4f5ce9c6033e71ef0fe1c3409f042d8e11de04a99",
+    "tests/unit/schedule-model.test.ts": "7af9abdf8d7ec66a9f239159daa477f611252c6045bb157b547bedd75352c05c",
+    "config/test-catalog.json": "41ed9a36e735e94c58dfa3d1be8a5f7cb68024b02d9a35b4e5c55c940bf1a15f",
+    "config/requirements.json": "ee9acc7266e3e0de9a9ebea53b6ef8e3751b288aa29c5805588dcfc00faeaf79",
+    "docs/02_ARCHITECTURE_RUNTIME_AND_DATA_CONTRACTS.md": "f5bd5c289184efb1ab52bda7993e10792afcc254243b49c510a2fa602ad6b1d6",
+    "docs/04_TEST_ACCEPTANCE_AND_OPERATIONS.md": "0e5bc209e448f1a79139093627de631ae261b5f993e3e56711226bf59dfecdcb"
+  },
+  "behavior": {
+    "exactCandidate": "A persisted occurrence instant is accepted only if the current sealed rule re-derives that exact instant and the instant is inside the REMINDER_LATEST grace. Future instants and rule-external instants are rejected.",
+    "staging": "A tampered instant (+500ms) is discarded as MISSED in the same transaction: occurrence MISSED, task/run cancelled, outbox closed, no delivery row, zero synthetic sends.",
+    "supersession": "A newer QUEUED occurrence with the same schedule/revision prevents the older staged instant from authorizing bytes; reminderResultAllowed is false and delivery.process returns SUPPRESSED.",
+    "fastIntervals": "The exact-candidate check does not compare against the newest rule instant, so an at-grid INTERVAL candidate is still staged and delivered once while an off-grid instant is rejected. A second control plan in the same world sends exactly once."
+  },
+  "tests": {
+    "target": {
+      "command": "node scripts/run-tests.mjs vitest run tests/integration/schedules.test.ts tests/unit/schedule-model.test.ts",
+      "integration": {"file": "tests/integration/schedules.test.ts", "tests": 24, "passed": 24},
+      "unit": {"file": "tests/unit/schedule-model.test.ts", "tests": 6, "passed": 6},
+      "total": {"tests": 30, "passed": 30}
+    },
+    "static": {
+      "typecheck": "node_modules/typescript/bin/tsc --noEmit passed with no diagnostics",
+      "eslint": "changed schedule source and test files passed"
+    }
+  },
+  "disclosure": "This is component-level local evidence on an isolated synthetic PostgreSQL cluster. T047-T060 remain NOT_RUN as end-to-end acceptance cases, R11 remains IN_PROGRESS, and scheduled reports/monitoring, enterprise business calendars, delegated/group notification contracts and live enterprise delivery are not claimed. No real database, provider credential, budget, deployment or enterprise message was used."
+}

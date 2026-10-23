@@ -1021,6 +1021,12 @@ T075/T077 对应 tests/integration/company-logs.test.ts 的原生 SSE 场景与�
 
 T052的当前补充仅验证私人提醒宽限/MISSED，未代替报表合并与监控不虚构历史观测。P08/R11和一期均未完成；原130项验收状态及必要真实企业/运维门槛不因本组件改为PASS。真实库、发送、预算、凭据和部署均未操作。
 
+### 私人提醒精确发生点终检（2026-10-23）
+
+本次在既有私人提醒组件上新增持久化occurrence时点与当前规则候选的最终一致性校验，并进入正式集成/单元入口。集成用例覆盖：真实PG中把已入队时点篡改为规则外时刻后staging返回MISSED、task取消、无delivery、outbox关闭且发送0；两个快速INTERVAL计划在精确候选时点完成确定性stage与物理发送，其中已stage的旧时点在插入同revision更新的QUEUED候选后，`reminderResultAllowed`为false且`delivery.process`为SUPPRESSED，另一计划仍正常发送一次。单元用例覆盖ONCE宽限内外/未来/规则外时点、INTERVAL网格内外与DAILY非候选时点。
+
+执行：固定Node v24.21.0运行`scripts/run-tests.mjs vitest run tests/integration/schedules.test.ts tests/unit/schedule-model.test.ts`，30/30通过（集成24、单元6）；`tsc --noEmit`与变更文件eslint通过。证据绑定源码/配置哈希见`reports/private-reminder-exact-candidate-20261023.json`。该记录只是本地隔离64711技术证据；T047–T060验收状态仍为NOT_RUN，R11仍为IN_PROGRESS，报表/监控、企业工作日历、委托/群通知与真实企业投递未完成；未使用真实库、凭据、预算或部署。
+
 ### 2026-10-19 原生群事项合成验收补充
 
 T108–T110新增实际SDK形状群入站→现有DWS CLI合成受众→真实PG事项事务→受保护确定性结果→独立API/notifier读者与合成sender的集成用例。包含重复回调、不同真实事件/资源不合并、负责人声明待确认、H5独立管理员人工确认、旧case/list投影失效、版本/权限拒绝、取消、SQL超时同事务回滚及UNKNOWN不重投。初始获准事项正文在最后发送前新增外部成员会阻断sender；它仍不是完整T033的初始获准敏感企业来源链。准确执行证据绑定后存于reports/native-group-cases-20261019。R14/R15仍IN_PROGRESS；不以该确定性切片代替模型汇总/群催办升级及真实验收。

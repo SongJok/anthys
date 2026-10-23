@@ -4,7 +4,7 @@ import type {DbContext} from '../../storage/src/database.js';
 import {hash} from '../../storage/src/crypto.js';
 import {canonical} from '../../gateway/src/index.js';
 import {scheduleIdentity,scheduleAudit,revokeSchedule,Schedules} from './service.js';
-import {dueReminder,renderReminder,ScheduleError} from './model.js';
+import {dueReminder,exactReminderCandidate,renderReminder,ScheduleError} from './model.js';
 const audience=(owner:string)=>({kind:'PRIVATE_USER',targetId:owner,classificationCeiling:'INTERNAL'});
 export class ReminderScheduler {
  constructor(readonly schedules:Schedules){}
@@ -32,6 +32,11 @@ export class ReminderScheduler {
   }return ids;
  });}
  async pending(ctx:DbContext){return this.schedules.transaction(ctx,undefined,async c=>(await c.query("SELECT id FROM schedule_occurrences WHERE state='QUEUED' ORDER BY created_at,id LIMIT 20")).rows.map(row=>row.id as string));}
+ private async discard(c:pg.PoolClient,ctx:DbContext,schedule:pg.QueryResultRow,row:pg.QueryResultRow,state:'MISSED'|'REVOKED'){
+  await c.query("UPDATE schedule_occurrences SET state=$2,updated_at=clock_timestamp() WHERE id=$1",[row.id,state]);
+  await c.query("UPDATE tasks SET status='CANCELLED',cancel_requested_at=coalesce(cancel_requested_at,clock_timestamp()) WHERE id=$1",[row.task_id]);await c.query("UPDATE runs SET status='CANCELLED' WHERE id=$1 AND status='WAITING_USER'",[row.run_id]);
+  await c.query("UPDATE outbox SET published_at=clock_timestamp() WHERE kind='SCHEDULE' AND aggregate_id=$1",[row.id]);await this.complete(c,ctx,schedule.id as string);
+ }
  async stage(ctx:DbContext,id:string,signal?:AbortSignal){return this.schedules.transaction(ctx,signal,async c=>{
   // Lock schedule before occurrence, matching edits; no inverse lock ordering.
   const schedule=(await c.query('SELECT s.* FROM schedules s JOIN schedule_occurrences o ON o.schedule_id=s.id AND o.tenant_id=s.tenant_id WHERE o.id=$1 FOR UPDATE OF s',[id])).rows[0];if(!schedule)return 'NOT_FOUND';
@@ -40,11 +45,11 @@ export class ReminderScheduler {
   let authorityValid=true;try{identity=await scheduleIdentity(c,ctx);authorityValid=Number(schedule.auth_epoch)===identity.authEpoch&&schedule.policy_version===identity.policyVersion;}catch(error){if(!(error instanceof ScheduleError))throw error;authorityValid=false;}if(!authorityValid){await this.block(c,ctx,schedule.id as string);valid=false;}
   const task=(await c.query("SELECT id FROM tasks WHERE id=$1 AND requester_id=$2 AND status='OPEN' AND control_kind='REMINDER' AND cancel_requested_at IS NULL",[row.task_id,ctx.actorId])).rowCount;
   if(!valid||!task||Date.parse((row.expires_at as Date).toISOString())<=this.schedules.clock()){
-   await c.query("UPDATE schedule_occurrences SET state=$2,updated_at=clock_timestamp() WHERE id=$1",[id,valid&&task?'MISSED':'REVOKED']);
-   await c.query("UPDATE tasks SET status='CANCELLED',cancel_requested_at=coalesce(cancel_requested_at,clock_timestamp()) WHERE id=$1",[row.task_id]);await c.query("UPDATE runs SET status='CANCELLED' WHERE id=$1 AND status='WAITING_USER'",[row.run_id]);
-   await c.query("UPDATE outbox SET published_at=clock_timestamp() WHERE kind='SCHEDULE' AND aggregate_id=$1",[id]);await this.complete(c,ctx,schedule.id as string);return valid&&task?'MISSED':'SUPPRESSED';
+   const outcome=valid&&task?'MISSED':'REVOKED';await this.discard(c,ctx,schedule,row,outcome);return outcome==='MISSED'?'MISSED':'SUPPRESSED';
   }
   let payload;try{payload=this.schedules.open(ctx,schedule);}catch{await this.block(c,ctx,schedule.id as string,'INVALID_SCHEDULE_DATA');return 'SUPPRESSED';}
+  const now=new Date(this.schedules.clock()).toISOString(),current=exactReminderCandidate(payload.rule,(row.scheduled_at as Date).toISOString(),now)&&!(await c.query("SELECT 1 FROM schedule_occurrences WHERE schedule_id=$1 AND revision=$2 AND scheduled_at>$3 AND state IN ('QUEUED','STAGED') LIMIT 1",[schedule.id,row.revision,row.scheduled_at])).rowCount;
+  if(!current){await this.discard(c,ctx,schedule,row,'MISSED');return 'MISSED';}
   const text=renderReminder(schedule.id as string,payload.text,(row.scheduled_at as Date).toISOString(),payload.rule.tz),deliveryId=randomUUID();
   await c.query("UPDATE tasks SET status='COMPLETED' WHERE id=$1",[row.task_id]);await c.query("UPDATE runs SET status='SUCCEEDED',result=$2,result_classification='INTERNAL' WHERE id=$1 AND status='WAITING_USER'",[row.run_id,text]);
   await c.query("INSERT INTO deliveries(tenant_id,id,owner_id,task_id,target,args_hash,state,content_ref,classification,source_run_id,source_session_no) VALUES($1,$2,$3,$4,$5,$6,'PENDING',$7,'INTERNAL',$8,1)",[ctx.tenantId,deliveryId,ctx.actorId,row.task_id,JSON.stringify(audience(ctx.actorId)),hash(canonical({occurrenceId:id,contentHash:hash(text)})),JSON.stringify(this.schedules.vault.seal(text,`${ctx.tenantId}:${ctx.actorId}:delivery:${deliveryId}`)),row.run_id]);

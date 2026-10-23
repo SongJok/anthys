@@ -785,7 +785,7 @@
       "tests/unit/schedule-model.test.ts",
       "tests/offline/schedule-flow.test.ts"
     ],
-    "coverageNote": "Actual local API/PG private deterministic reminders, desktop/mobile UI, native SDK-shaped inbox controls, DST and revision/current-authority barriers; registration/execution/delivery remain distinct and UNKNOWN is never retried. Exact new-candidate final checks pending. No real enterprise send/model/deployment certification and no full report/monitor acceptance."
+    "coverageNote": "Actual local API/PG private deterministic reminders, desktop/mobile UI, native SDK-shaped inbox controls, DST and revision/current-authority barriers; registration/execution/delivery remain distinct and UNKNOWN is never retried. Staging and pre-send re-derive the persisted instant as an exact rule candidate and reject newer QUEUED/STAGED supersessions. No real enterprise send/model/deployment certification and no full report/monitor acceptance."
   },
   {
     "id": "T048",
@@ -807,7 +807,7 @@
       "tests/unit/schedule-model.test.ts",
       "tests/offline/schedule-flow.test.ts"
     ],
-    "coverageNote": "Actual local API/PG private deterministic reminders, desktop/mobile UI, native SDK-shaped inbox controls, DST and revision/current-authority barriers; registration/execution/delivery remain distinct and UNKNOWN is never retried. Exact new-candidate final checks pending. No real enterprise send/model/deployment certification and no full report/monitor acceptance."
+    "coverageNote": "Actual local API/PG private deterministic reminders, desktop/mobile UI, native SDK-shaped inbox controls, DST and revision/current-authority barriers; registration/execution/delivery remain distinct and UNKNOWN is never retried. Staging and pre-send re-derive the persisted instant as an exact rule candidate and reject newer QUEUED/STAGED supersessions. No real enterprise send/model/deployment certification and no full report/monitor acceptance."
   },
   {
     "id": "T049",
@@ -828,7 +828,7 @@
       "tests/unit/schedule-model.test.ts",
       "tests/offline/schedule-flow.test.ts"
     ],
-    "coverageNote": "Actual local API/PG private deterministic reminders, desktop/mobile UI, native SDK-shaped inbox controls, DST and revision/current-authority barriers; registration/execution/delivery remain distinct and UNKNOWN is never retried. Exact new-candidate final checks pending. No real enterprise send/model/deployment certification and no full report/monitor acceptance."
+    "coverageNote": "Actual local API/PG private deterministic reminders, desktop/mobile UI, native SDK-shaped inbox controls, DST and revision/current-authority barriers; registration/execution/delivery remain distinct and UNKNOWN is never retried. Staging and pre-send re-derive the persisted instant as an exact rule candidate and reject newer QUEUED/STAGED supersessions. No real enterprise send/model/deployment certification and no full report/monitor acceptance."
   },
   {
     "id": "T050",
@@ -849,7 +849,7 @@
       "tests/unit/schedule-model.test.ts",
       "tests/offline/schedule-flow.test.ts"
     ],
-    "coverageNote": "Actual local API/PG private deterministic reminders, desktop/mobile UI, native SDK-shaped inbox controls, DST and revision/current-authority barriers; registration/execution/delivery remain distinct and UNKNOWN is never retried. Exact new-candidate final checks pending. No real enterprise send/model/deployment certification and no full report/monitor acceptance."
+    "coverageNote": "Actual local API/PG private deterministic reminders, desktop/mobile UI, native SDK-shaped inbox controls, DST and revision/current-authority barriers; registration/execution/delivery remain distinct and UNKNOWN is never retried. Staging and pre-send re-derive the persisted instant as an exact rule candidate and reject newer QUEUED/STAGED supersessions. No real enterprise send/model/deployment certification and no full report/monitor acceptance."
   },
   {
     "id": "T051",
@@ -870,7 +870,7 @@
       "tests/unit/schedule-model.test.ts",
       "tests/offline/schedule-flow.test.ts"
     ],
-    "coverageNote": "Actual local API/PG private deterministic reminders, desktop/mobile UI, native SDK-shaped inbox controls, DST and revision/current-authority barriers; registration/execution/delivery remain distinct and UNKNOWN is never retried. Exact new-candidate final checks pending. No real enterprise send/model/deployment certification and no full report/monitor acceptance."
+    "coverageNote": "Actual local API/PG private deterministic reminders, desktop/mobile UI, native SDK-shaped inbox controls, DST and revision/current-authority barriers; registration/execution/delivery remain distinct and UNKNOWN is never retried. Staging and pre-send re-derive the persisted instant as an exact rule candidate and reject newer QUEUED/STAGED supersessions. No real enterprise send/model/deployment certification and no full report/monitor acceptance."
   },
   {
     "id": "T052",
@@ -909,7 +909,7 @@
       "tests/unit/schedule-model.test.ts",
       "tests/offline/schedule-flow.test.ts"
     ],
-    "coverageNote": "Actual local API/PG private deterministic reminders, desktop/mobile UI, native SDK-shaped inbox controls, DST and revision/current-authority barriers; registration/execution/delivery remain distinct and UNKNOWN is never retried. Exact new-candidate final checks pending. No real enterprise send/model/deployment certification and no full report/monitor acceptance."
+    "coverageNote": "Actual local API/PG private deterministic reminders, desktop/mobile UI, native SDK-shaped inbox controls, DST and revision/current-authority barriers; registration/execution/delivery remain distinct and UNKNOWN is never retried. Staging and pre-send re-derive the persisted instant as an exact rule candidate and reject newer QUEUED/STAGED supersessions. No real enterprise send/model/deployment certification and no full report/monitor acceptance."
   },
   {
     "id": "T054",
@@ -931,7 +931,7 @@
       "tests/unit/schedule-model.test.ts",
       "tests/offline/schedule-flow.test.ts"
     ],
-    "coverageNote": "Actual local API/PG private deterministic reminders, desktop/mobile UI, native SDK-shaped inbox controls, DST and revision/current-authority barriers; registration/execution/delivery remain distinct and UNKNOWN is never retried. Exact new-candidate final checks pending. No real enterprise send/model/deployment certification and no full report/monitor acceptance."
+    "coverageNote": "Actual local API/PG private deterministic reminders, desktop/mobile UI, native SDK-shaped inbox controls, DST and revision/current-authority barriers; registration/execution/delivery remain distinct and UNKNOWN is never retried. Staging and pre-send re-derive the persisted instant as an exact rule candidate and reject newer QUEUED/STAGED supersessions. No real enterprise send/model/deployment certification and no full report/monitor acceptance."
   },
   {
     "id": "T055",
@@ -1045,7 +1045,7 @@
       "tests/unit/schedule-model.test.ts",
       "tests/offline/schedule-flow.test.ts"
     ],
-    "coverageNote": "Actual local API/PG private deterministic reminders, desktop/mobile UI, native SDK-shaped inbox controls, DST and revision/current-authority barriers; registration/execution/delivery remain distinct and UNKNOWN is never retried. Exact new-candidate final checks pending. No real enterprise send/model/deployment certification and no full report/monitor acceptance."
+    "coverageNote": "Actual local API/PG private deterministic reminders, desktop/mobile UI, native SDK-shaped inbox controls, DST and revision/current-authority barriers; registration/execution/delivery remain distinct and UNKNOWN is never retried. Staging and pre-send re-derive the persisted instant as an exact rule candidate and reject newer QUEUED/STAGED supersessions. No real enterprise send/model/deployment certification and no full report/monitor acceptance."
   },
   {
     "id": "T061",

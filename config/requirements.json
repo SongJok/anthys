@@ -262,7 +262,7 @@
     "intendedModules": [
       "packages/scheduler"
     ],
-    "remaining": "Private deterministic reminder implementation requires exact-candidate final validation; scheduled reports/monitoring, enterprise business-calendar provider, delegated/group notification contracts and live enterprise acceptance remain incomplete."
+    "remaining": "Private deterministic reminders now re-derive the persisted instant as an exact rule candidate at staging and before physical send and reject newer QUEUED/STAGED supersessions; scheduled reports/monitoring, enterprise business-calendar provider, delegated/group notification contracts and live enterprise acceptance remain incomplete."
   },
   "R12": {
     "tests": [
