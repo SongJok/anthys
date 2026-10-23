@@ -266,7 +266,7 @@ services:
       test:
         - CMD-SHELL
         - >-
-          node -e "const s=require('node:fs').statSync('/data/worker-heartbeat');process.exit(Date.now()-s.mtimeMs<=30000?0:1)"
+          node -e "const {isWorkerHeartbeatFresh}=require('/app/dist/packages/runtime/src/worker-heartbeat.js');process.exit(isWorkerHeartbeatFresh('/data/worker-heartbeat',30000,Date.now())?0:1)"
       interval: 10s
       timeout: 5s
       retries: 3

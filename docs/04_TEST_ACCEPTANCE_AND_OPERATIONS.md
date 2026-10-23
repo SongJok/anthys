@@ -1742,3 +1742,15 @@ docs/02 与 `config/stages.json` 要求主分支保留 SBOM、许可证与依赖
 诚实结论：本审计**不宣布完成**。130 个验收用例仍全部为 `NOT_RUN`，36 个 R 项仍为 `IN_PROGRESS`；`config/stages.json` 中 P11（办公闭环与搜索）、P12（管理与全链路 UI）、P13（加固与运维）、P14（企业验收与交付）仍为 `NOT_STARTED`；GLM、钉钉、DWS、公司 MCP 的 live 验收仍为 `BLOCKED_EXTERNAL`。另外，`config/stages.json` 的 531 条证据引用中有 270 条在当前检出中不存在，P00/P01 的 `TESTED` 状态已过时，本审计不依赖这些状态。4.8 统计模板、口径和数据权限继续按二期处理，不在本次范围。
 
 本切片同时修正了 `test:chaos` 只覆盖 10/18 个 CHAOS 实现文件的问题，并把 `test-data-result.mjs` 加入 self-DM 链，使默认 E2E 中 18 个 data-result 跳过项获得独立执行证据。所有新增结果均为本地合成/受控证据，不能替代真实模型、钉钉、DWS 或公司 MCP 的企业联调。
+
+### 2026-10-23 worker 心跳单一实现与部署就绪探针脚本化（不改变 T/R 状态）
+
+本切片收口了上一节遗留的心跳实现分歧，并把手工执行的部署就绪核对固化为可重复脚本。
+
+**心跳实现收敛。** 此前 worker 的心跳存在两个真值来源：写入路径把时间戳存进文件内容，而新鲜度判定读的是文件 mtime。二者由同一主机时钟在同一时刻写入，运维上等价，但判定逻辑无法注入时钟，也与写入语义脱节。新增 `packages/runtime/src/worker-heartbeat.ts` 作为唯一实现：写入 `String(now)`（文件模式 0600，节流为每 5 秒至多一次），新鲜度判定读取文件内容中记录的时间戳，`now - recorded <= 30000` 为新鲜；文件缺失、内容为空、内容非数字一律判为陈旧（fail-closed）。判定保持同步函数，因此开发与生产 Compose 的健康检查可以直接 `require('/app/dist/packages/runtime/src/worker-heartbeat.js')` 复用同一份实现，不再各自内联 mtime 逻辑。
+
+**部署就绪探针脚本化。** 新增 `scripts/deployment-readiness.ts`（`npm run operations:readiness`），一次运行输出并落盘为 `reports/deployment-readiness-probe-<YYYYMMDD>.json`。探针在运行中的 Compose 栈上一次性核对 11 项：服务存在与容器健康状态；api 镜像与 broker 镜像内置的迁移契约数量、末项迁移名与契约哈希，并与数据库 `public.schema_migrations` 的实际条目数三方比对；`oa_queue.version`；public schema 表数；api 的 live/ready 端点与 broker 的 `/health/ready` 回环/容器内 HTTP 状态；`/var/run/docker.sock` 的挂载归属；broker 的 secret 挂载名与环境变量名边界（按 `/dingtalk|glm|dws|company/i` 匹配，出现即判定越界）；以及在 worker 容器内用镜像自带的同一个心跳模块分别判定在线心跳、2 分钟前的陈旧心跳与缺失心跳。2026-10-23 的运行结果为 11 项全部 PASS：镜像契约 116（末项 `116_company_data_template_lifecycle.sql`，哈希 `473b7415afaae98c2e384fa32e0da1dfe6d82b2ea24996c31f466f184d8efc94`）、数据库 116、`oa_queue.version=46`、public 表 133、api live/ready 200 ALIVE/READY、broker ready 200 READY、socket 仅归 sandbox-broker、broker 侧无任何凭据类环境变量、心跳判定 live=真/stale=假/missing=假。报告只记录挂载名、环境变量名、计数、状态与哈希，不含任何密钥值。
+
+**生产编排首次渲染校验。** `deploy/compose/compose.prod.yml` 此前从未被渲染验证过。本次以占位环境变量渲染 `default`、`dingtalk`、`scoped`、`dws`、`sandbox` 五个 profile，五个均渲染成功（无语法与插值错误）；在必需变量置空时渲染以退出码 1 失败并报出缺失变量名，fail-closed 行为符合预期。
+
+**边界。** 心跳证明的是 worker 发布周期仍在推进，不是真实模型任务执行；探针的全部请求都是回环 HTTP、容器内 HTTP 或 PostgreSQL 查询，未发起任何 live 钉钉、GLM、DWS 或公司 MCP 调用。GLM、钉钉、DWS 与公司 MCP 的 live 验收继续为 `BLOCKED_EXTERNAL`，130 项 T 用例与 36 项 R 项状态未因此改变，`config/stages.json` 中 270 条历史证据引用仍然缺失、不予伪造。证据见 `reports/deployment-readiness-probe-20261023.json`。

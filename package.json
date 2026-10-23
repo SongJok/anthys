@@ -51,7 +51,8 @@
     "sandbox:setup": "node deploy/setup-sandbox-broker.mjs",
     "operations:backup": "node --import tsx scripts/project-backup.ts",
     "operations:restore": "node --import tsx scripts/project-restore.ts",
-    "operations:verify-restore": "node --import tsx scripts/restore-verification.ts"
+    "operations:verify-restore": "node --import tsx scripts/restore-verification.ts",
+    "operations:readiness": "node --import tsx scripts/deployment-readiness.ts"
   },
   "dependencies": {
     "@fastify/cookie": "11.1.3",

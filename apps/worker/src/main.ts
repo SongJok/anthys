@@ -12,7 +12,7 @@ import {GroupAudience} from '../../../packages/groups/src/audience.js';
 import {configureDws} from '../../../packages/dws/src/configuration.js';
 import {registerDwsCapabilities} from '../../../packages/dws/src/capabilities.js';
 import {configureCompanyCode} from '../../../packages/company/src/configuration.js';
-import {readFile,writeFile} from 'node:fs/promises';
+import {readFile} from 'node:fs/promises';
 import {z} from 'zod';
 import {loadEnvFile,config,secret} from '../../../packages/config/src/index.js';
 import {Database} from '../../../packages/storage/src/database.js';
@@ -21,6 +21,7 @@ import {RuntimeStore} from '../../../packages/runtime/src/store.js';
 import {BudgetRecovery} from '../../../packages/runtime/src/budget-recovery.js';
 import {RetryDispatcher} from '../../../packages/runtime/src/retry.js';
 import {publishWorkerCycle} from '../../../packages/runtime/src/worker-cycle.js';
+import {createWorkerHeartbeat} from '../../../packages/runtime/src/worker-heartbeat.js';
 import {assertOwnedTrialService} from '../../../packages/runtime/src/trial-supervision.js';
 import {AgentRuntime,registerTaskCapability} from '../../../packages/runtime/src/loop.js';
 import {RunQueue} from '../../../packages/tasks/src/queue.js';
@@ -65,8 +66,9 @@ if(!trial){
 }
 await queue.work(async job=>{if(!scopes.some(s=>s.tenantId===job.tenantId&&s.actorId===job.actorId))throw Error('UNREGISTERED_WORKER_SUBJECT');await runtime.advance({tenantId:job.tenantId,actorId:job.actorId},job.runId,undefined,shutdown.signal,job.generation);});
 const sandboxRetention=!trial?new SandboxArtifactRetentionSweeper(db,fileStore):undefined;
-const heartbeatFile=process.env['WORKER_HEARTBEAT_FILE'];let heartbeatAt=0;
-const markAlive=async()=>{if(!heartbeatFile||Date.now()-heartbeatAt<5000)return;const now=Date.now();await writeFile(heartbeatFile,String(now),{mode:0o600});heartbeatAt=now;};
+const heartbeatFile=process.env['WORKER_HEARTBEAT_FILE'];
+const heartbeat=heartbeatFile?createWorkerHeartbeat(heartbeatFile):undefined;
+const markAlive=async()=>{await heartbeat?.write();};
 let publishing=false;const publish=async()=>{if(publishing||shutdown.signal.aborted)return;publishing=true;try{await publishWorkerCycle(db,scopes,{store,budgetRecovery,retryDispatcher,queue});await companyAgent?.poll();await markAlive();}catch{console.error('OUTBOX_PUBLISH_FAILED');}finally{publishing=false;}};
 let watching=false;const watch=async()=>{if(!watches||watching||shutdown.signal.aborted)return;watching=true;try{const summary=await runWatchCycle(scopes,watches.store,{observer:watches.observer,notifier:watches.notifier},shutdown.signal),renewal=await runWatchRenewalCycle(scopes,watches.store,{notifier:watches.renewalNotifier},shutdown.signal);if(summary.failedScopes||renewal.failedScopes)console.error('WATCH_CYCLE_SCOPE_FAILURES:'+(summary.failedScopes+renewal.failedScopes));}catch{if(!shutdown.signal.aborted)console.error('WATCH_CYCLE_FAILED');}finally{watching=false;}};
 let retaining=false;const retain=async()=>{if(!sandboxRetention||retaining||shutdown.signal.aborted)return;retaining=true;try{const summary=await sandboxRetention.sweep();if(summary.failed)console.error('SANDBOX_ARTIFACT_RETENTION_FAILURES:'+summary.failed);}catch{if(!shutdown.signal.aborted)console.error('SANDBOX_ARTIFACT_RETENTION_FAILED');}finally{retaining=false;}};
