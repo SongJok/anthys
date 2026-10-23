@@ -1,0 +1,696 @@
+{
+  "config": {
+    "argv": [
+      "/Users/tuwan/.npm/_npx/538786c08bcb9442/node_modules/node/bin/node",
+      "/Users/tuwan/work/code/aider/anthys/node_modules/@playwright/test/cli.js",
+      "test",
+      "--config=tests/browser/escalation-witness.config.ts"
+    ],
+    "configFile": "/Users/tuwan/work/code/aider/anthys/tests/browser/escalation-witness.config.ts",
+    "rootDir": "/Users/tuwan/work/code/aider/anthys/tests/browser",
+    "failOnFlakyTests": false,
+    "forbidOnly": true,
+    "fullyParallel": false,
+    "globalSetup": null,
+    "globalTeardown": null,
+    "globalTimeout": 0,
+    "grep": {},
+    "grepInvert": null,
+    "maxFailures": 0,
+    "metadata": {
+      "actualWorkers": 1
+    },
+    "preserveOutput": "always",
+    "projects": [
+      {
+        "outputDir": "/Users/tuwan/work/code/aider/anthys/.data/escalation-witness-results",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "chromium",
+        "name": "chromium",
+        "testDir": "/Users/tuwan/work/code/aider/anthys/tests/browser",
+        "testIgnore": [],
+        "testMatch": [
+          "escalation-fetch-witness.spec.ts"
+        ],
+        "timeout": 30000
+      }
+    ],
+    "filteredProjects": [
+      {
+        "grep": {},
+        "grepInvert": null,
+        "outputDir": "/Users/tuwan/work/code/aider/anthys/.data/escalation-witness-results",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "name": "chromium",
+        "testDir": "/Users/tuwan/work/code/aider/anthys/tests/browser",
+        "snapshotDir": "/Users/tuwan/work/code/aider/anthys/tests/browser",
+        "testIgnore": [],
+        "testMatch": [
+          "escalation-fetch-witness.spec.ts"
+        ],
+        "timeout": 30000,
+        "use": {
+          "channel": "chrome",
+          "headless": true,
+          "serviceWorkers": "block",
+          "trace": "retain-on-failure"
+        },
+        "dependencies": [],
+        "ignoreSnapshots": false,
+        "__projectId": "chromium"
+      }
+    ],
+    "quiet": false,
+    "reporter": [
+      [
+        "list",
+        null
+      ],
+      [
+        "json",
+        {
+          "outputFile": "/Users/tuwan/work/code/aider/anthys/reports/escalation-fetch-body-ci-20261021/component-browser.json"
+        }
+      ]
+    ],
+    "reportSlowTests": {
+      "max": 5,
+      "threshold": 300000
+    },
+    "shard": null,
+    "tags": [],
+    "updateSnapshots": "default",
+    "updateSourceMethod": "patch",
+    "version": "1.64.0",
+    "workers": 1,
+    "webServer": null
+  },
+  "suites": [
+    {
+      "title": "escalation-fetch-witness.spec.ts",
+      "file": "escalation-fetch-witness.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [],
+      "suites": [
+        {
+          "title": "native escalation fetch witness contract, real local HTTP only",
+          "file": "escalation-fetch-witness.spec.ts",
+          "line": 32,
+          "column": 6,
+          "specs": [
+            {
+              "title": "preserves original Promise/Response and exactly one normal confirm/read/cancel at 1280",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "/Users/tuwan/work/code/aider/anthys/tests/browser/escalation-fetch-witness.spec.ts",
+                        "line": 32,
+                        "column": 6
+                      }
+                    }
+                  ],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 436,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-23T09:05:57.844Z",
+                      "annotations": [
+                        {
+                          "type": "serial",
+                          "location": {
+                            "file": "/Users/tuwan/work/code/aider/anthys/tests/browser/escalation-fetch-witness.spec.ts",
+                            "line": 32,
+                            "column": 6
+                          }
+                        }
+                      ],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "093868778fc97e13f966-54cded0c485bb7017008",
+              "file": "escalation-fetch-witness.spec.ts",
+              "line": 37,
+              "column": 3
+            },
+            {
+              "title": "preserves original Promise/Response and exactly one normal confirm/read/cancel at 390",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "/Users/tuwan/work/code/aider/anthys/tests/browser/escalation-fetch-witness.spec.ts",
+                        "line": 32,
+                        "column": 6
+                      }
+                    }
+                  ],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 257,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-23T09:05:58.751Z",
+                      "annotations": [
+                        {
+                          "type": "serial",
+                          "location": {
+                            "file": "/Users/tuwan/work/code/aider/anthys/tests/browser/escalation-fetch-witness.spec.ts",
+                            "line": 32,
+                            "column": 6
+                          }
+                        }
+                      ],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "093868778fc97e13f966-2b5b0f190e57b38bb1b2",
+              "file": "escalation-fetch-witness.spec.ts",
+              "line": 37,
+              "column": 3
+            },
+            {
+              "title": "explicitly rejects INVALID_JSON while the actual application response remains readable",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "/Users/tuwan/work/code/aider/anthys/tests/browser/escalation-fetch-witness.spec.ts",
+                        "line": 32,
+                        "column": 6
+                      }
+                    }
+                  ],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 234,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-23T09:05:59.042Z",
+                      "annotations": [
+                        {
+                          "type": "serial",
+                          "location": {
+                            "file": "/Users/tuwan/work/code/aider/anthys/tests/browser/escalation-fetch-witness.spec.ts",
+                            "line": 32,
+                            "column": 6
+                          }
+                        }
+                      ],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "093868778fc97e13f966-1cf4b18ee538c6541085",
+              "file": "escalation-fetch-witness.spec.ts",
+              "line": 59,
+              "column": 3
+            },
+            {
+              "title": "explicitly rejects OVERSIZE while the actual application response remains readable",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "/Users/tuwan/work/code/aider/anthys/tests/browser/escalation-fetch-witness.spec.ts",
+                        "line": 32,
+                        "column": 6
+                      }
+                    }
+                  ],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 240,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-23T09:05:59.284Z",
+                      "annotations": [
+                        {
+                          "type": "serial",
+                          "location": {
+                            "file": "/Users/tuwan/work/code/aider/anthys/tests/browser/escalation-fetch-witness.spec.ts",
+                            "line": 32,
+                            "column": 6
+                          }
+                        }
+                      ],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "093868778fc97e13f966-2178f9439a20090c7ccc",
+              "file": "escalation-fetch-witness.spec.ts",
+              "line": 59,
+              "column": 3
+            },
+            {
+              "title": "LATE_HEADERS uses one deadline from fetch invocation and does not abort the original request",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "/Users/tuwan/work/code/aider/anthys/tests/browser/escalation-fetch-witness.spec.ts",
+                        "line": 32,
+                        "column": 6
+                      }
+                    }
+                  ],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 427,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-23T09:05:59.541Z",
+                      "annotations": [
+                        {
+                          "type": "serial",
+                          "location": {
+                            "file": "/Users/tuwan/work/code/aider/anthys/tests/browser/escalation-fetch-witness.spec.ts",
+                            "line": 32,
+                            "column": 6
+                          }
+                        }
+                      ],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "093868778fc97e13f966-a6db8a8ee2bec3736e02",
+              "file": "escalation-fetch-witness.spec.ts",
+              "line": 64,
+              "column": 3
+            },
+            {
+              "title": "SPLIT_DEADLINE uses one deadline from fetch invocation and does not abort the original request",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "/Users/tuwan/work/code/aider/anthys/tests/browser/escalation-fetch-witness.spec.ts",
+                        "line": 32,
+                        "column": 6
+                      }
+                    }
+                  ],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 418,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-23T09:05:59.981Z",
+                      "annotations": [
+                        {
+                          "type": "serial",
+                          "location": {
+                            "file": "/Users/tuwan/work/code/aider/anthys/tests/browser/escalation-fetch-witness.spec.ts",
+                            "line": 32,
+                            "column": 6
+                          }
+                        }
+                      ],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "093868778fc97e13f966-c43124487aeb5a5d936c",
+              "file": "escalation-fetch-witness.spec.ts",
+              "line": 64,
+              "column": 3
+            },
+            {
+              "title": "rejects duplicate exact correlations without replaying either request",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "/Users/tuwan/work/code/aider/anthys/tests/browser/escalation-fetch-witness.spec.ts",
+                        "line": 32,
+                        "column": 6
+                      }
+                    }
+                  ],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 253,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-23T09:06:00.409Z",
+                      "annotations": [
+                        {
+                          "type": "serial",
+                          "location": {
+                            "file": "/Users/tuwan/work/code/aider/anthys/tests/browser/escalation-fetch-witness.spec.ts",
+                            "line": 32,
+                            "column": 6
+                          }
+                        }
+                      ],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "093868778fc97e13f966-cd0410bfa95fe0cb62ba",
+              "file": "escalation-fetch-witness.spec.ts",
+              "line": 68,
+              "column": 2
+            },
+            {
+              "title": "rejects a new document instead of using a stale request sequence",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "/Users/tuwan/work/code/aider/anthys/tests/browser/escalation-fetch-witness.spec.ts",
+                        "line": 32,
+                        "column": 6
+                      }
+                    }
+                  ],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 204,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-23T09:06:00.675Z",
+                      "annotations": [
+                        {
+                          "type": "serial",
+                          "location": {
+                            "file": "/Users/tuwan/work/code/aider/anthys/tests/browser/escalation-fetch-witness.spec.ts",
+                            "line": 32,
+                            "column": 6
+                          }
+                        }
+                      ],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "093868778fc97e13f966-fbfba74a6e0e28fca221",
+              "file": "escalation-fetch-witness.spec.ts",
+              "line": 71,
+              "column": 2
+            },
+            {
+              "title": "bounded missing-match wait performs no request",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "/Users/tuwan/work/code/aider/anthys/tests/browser/escalation-fetch-witness.spec.ts",
+                        "line": 32,
+                        "column": 6
+                      }
+                    }
+                  ],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 192,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-23T09:06:00.887Z",
+                      "annotations": [
+                        {
+                          "type": "serial",
+                          "location": {
+                            "file": "/Users/tuwan/work/code/aider/anthys/tests/browser/escalation-fetch-witness.spec.ts",
+                            "line": 32,
+                            "column": 6
+                          }
+                        }
+                      ],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "093868778fc97e13f966-2be93c0a52076b38a8ff",
+              "file": "escalation-fetch-witness.spec.ts",
+              "line": 74,
+              "column": 2
+            },
+            {
+              "title": "record overflow fails observation without resending or suppressing application fetches",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "/Users/tuwan/work/code/aider/anthys/tests/browser/escalation-fetch-witness.spec.ts",
+                        "line": 32,
+                        "column": 6
+                      }
+                    }
+                  ],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 236,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-23T09:06:01.086Z",
+                      "annotations": [
+                        {
+                          "type": "serial",
+                          "location": {
+                            "file": "/Users/tuwan/work/code/aider/anthys/tests/browser/escalation-fetch-witness.spec.ts",
+                            "line": 32,
+                            "column": 6
+                          }
+                        }
+                      ],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "093868778fc97e13f966-9f73a64f65ea6afdc850",
+              "file": "escalation-fetch-witness.spec.ts",
+              "line": 77,
+              "column": 2
+            },
+            {
+              "title": "dispose is idempotent, restores native fetch and removes future navigation injection",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "/Users/tuwan/work/code/aider/anthys/tests/browser/escalation-fetch-witness.spec.ts",
+                        "line": 32,
+                        "column": 6
+                      }
+                    }
+                  ],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 167,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-23T09:06:01.328Z",
+                      "annotations": [
+                        {
+                          "type": "serial",
+                          "location": {
+                            "file": "/Users/tuwan/work/code/aider/anthys/tests/browser/escalation-fetch-witness.spec.ts",
+                            "line": 32,
+                            "column": 6
+                          }
+                        }
+                      ],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "093868778fc97e13f966-a9245aa4cdc88a6a489f",
+              "file": "escalation-fetch-witness.spec.ts",
+              "line": 80,
+              "column": 2
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "stats": {
+    "startTime": "2026-10-23T09:05:57.529Z",
+    "duration": 4042.33,
+    "expected": 11,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  }
+}

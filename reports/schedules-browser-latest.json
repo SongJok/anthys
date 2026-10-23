@@ -1,0 +1,308 @@
+{
+  "config": {
+    "argv": [
+      "/Users/tuwan/.npm/_npx/538786c08bcb9442/node_modules/node/bin/node",
+      "/Users/tuwan/work/code/aider/anthys/node_modules/@playwright/test/cli.js",
+      "test",
+      "--config=tests/browser/schedules.config.ts"
+    ],
+    "configFile": "/Users/tuwan/work/code/aider/anthys/tests/browser/schedules.config.ts",
+    "rootDir": "/Users/tuwan/work/code/aider/anthys/tests/browser",
+    "failOnFlakyTests": false,
+    "forbidOnly": true,
+    "fullyParallel": false,
+    "globalSetup": null,
+    "globalTeardown": null,
+    "globalTimeout": 0,
+    "grep": {},
+    "grepInvert": null,
+    "maxFailures": 0,
+    "metadata": {
+      "actualWorkers": 1
+    },
+    "preserveOutput": "always",
+    "projects": [
+      {
+        "outputDir": "/Users/tuwan/work/code/aider/anthys/.data/schedules-browser-results",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "desktop",
+        "name": "desktop",
+        "testDir": "/Users/tuwan/work/code/aider/anthys/tests/browser",
+        "testIgnore": [],
+        "testMatch": [
+          "schedules.spec.ts"
+        ],
+        "timeout": 30000
+      },
+      {
+        "outputDir": "/Users/tuwan/work/code/aider/anthys/.data/schedules-browser-results",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "mobile",
+        "name": "mobile",
+        "testDir": "/Users/tuwan/work/code/aider/anthys/tests/browser",
+        "testIgnore": [],
+        "testMatch": [
+          "schedules.spec.ts"
+        ],
+        "timeout": 30000
+      }
+    ],
+    "filteredProjects": [
+      {
+        "grep": {},
+        "grepInvert": null,
+        "outputDir": "/Users/tuwan/work/code/aider/anthys/.data/schedules-browser-results",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "name": "desktop",
+        "testDir": "/Users/tuwan/work/code/aider/anthys/tests/browser",
+        "snapshotDir": "/Users/tuwan/work/code/aider/anthys/tests/browser",
+        "testIgnore": [],
+        "testMatch": "schedules.spec.ts",
+        "timeout": 30000,
+        "use": {
+          "baseURL": "http://localhost:64702",
+          "channel": "chrome",
+          "headless": true,
+          "serviceWorkers": "block",
+          "trace": "retain-on-failure",
+          "viewport": {
+            "width": 1280,
+            "height": 850
+          }
+        },
+        "dependencies": [],
+        "ignoreSnapshots": false,
+        "__projectId": "desktop"
+      },
+      {
+        "grep": {},
+        "grepInvert": null,
+        "outputDir": "/Users/tuwan/work/code/aider/anthys/.data/schedules-browser-results",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "name": "mobile",
+        "testDir": "/Users/tuwan/work/code/aider/anthys/tests/browser",
+        "snapshotDir": "/Users/tuwan/work/code/aider/anthys/tests/browser",
+        "testIgnore": [],
+        "testMatch": "schedules.spec.ts",
+        "timeout": 30000,
+        "use": {
+          "baseURL": "http://localhost:64702",
+          "channel": "chrome",
+          "headless": true,
+          "serviceWorkers": "block",
+          "trace": "retain-on-failure",
+          "viewport": {
+            "width": 390,
+            "height": 844
+          },
+          "isMobile": true,
+          "hasTouch": true
+        },
+        "dependencies": [],
+        "ignoreSnapshots": false,
+        "__projectId": "mobile"
+      }
+    ],
+    "quiet": false,
+    "reporter": [
+      [
+        "list",
+        null
+      ],
+      [
+        "json",
+        {
+          "outputFile": "/Users/tuwan/work/code/aider/anthys/reports/schedules-browser-latest.json"
+        }
+      ]
+    ],
+    "reportSlowTests": {
+      "max": 5,
+      "threshold": 300000
+    },
+    "shard": null,
+    "tags": [],
+    "updateSnapshots": "default",
+    "updateSourceMethod": "patch",
+    "version": "1.64.0",
+    "workers": 1,
+    "webServer": {
+      "command": "\"/Users/tuwan/.npm/_npx/538786c08bcb9442/node_modules/node/bin/node\" --import tsx tests/browser/schedules-server.ts",
+      "cwd": "/Users/tuwan/work/code/aider/anthys/",
+      "url": "http://localhost:64702/api/v1/health/ready",
+      "reuseExistingServer": false,
+      "timeout": 30000
+    }
+  },
+  "suites": [
+    {
+      "title": "schedules.spec.ts",
+      "file": "schedules.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "T047/T053 real browser/API/PG saves without extra approval, edits paused rule, resumes and cancels with current revision",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "desktop",
+              "projectName": "desktop",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2799,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-23T09:18:13.274Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "6ec3d340f1699b4ea2ca-1ac87890e421265a4308",
+          "file": "schedules.spec.ts",
+          "line": 8,
+          "column": 1
+        },
+        {
+          "title": "UNKNOWN remains unverified from actual persisted delivery; hiding clears private details and restoration rereads",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "desktop",
+              "projectName": "desktop",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1052,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-23T09:18:16.466Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "6ec3d340f1699b4ea2ca-880cce340a146b78cf90",
+          "file": "schedules.spec.ts",
+          "line": 17,
+          "column": 1
+        },
+        {
+          "title": "T047/T053 real browser/API/PG saves without extra approval, edits paused rule, resumes and cancels with current revision",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "mobile",
+              "projectName": "mobile",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 3292,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-23T09:18:17.872Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "6ec3d340f1699b4ea2ca-6b667d4f2ce76141984f",
+          "file": "schedules.spec.ts",
+          "line": 8,
+          "column": 1
+        },
+        {
+          "title": "UNKNOWN remains unverified from actual persisted delivery; hiding clears private details and restoration rereads",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "mobile",
+              "projectName": "mobile",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1162,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-23T09:18:21.929Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "6ec3d340f1699b4ea2ca-daeeaefe9e85d16a9673",
+          "file": "schedules.spec.ts",
+          "line": 17,
+          "column": 1
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "stats": {
+    "startTime": "2026-10-23T09:18:09.998Z",
+    "duration": 13231.876999999999,
+    "expected": 4,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  }
+}

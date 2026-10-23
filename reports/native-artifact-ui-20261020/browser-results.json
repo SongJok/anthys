@@ -1,0 +1,238 @@
+{
+  "config": {
+    "argv": [
+      "/Users/tuwan/.npm/_npx/538786c08bcb9442/node_modules/node/bin/node",
+      "/Users/tuwan/work/code/aider/anthys/node_modules/@playwright/test/cli.js",
+      "test",
+      "--config=tests/browser/native-artifacts-ui.config.ts"
+    ],
+    "configFile": "/Users/tuwan/work/code/aider/anthys/tests/browser/native-artifacts-ui.config.ts",
+    "rootDir": "/Users/tuwan/work/code/aider/anthys/tests/browser",
+    "failOnFlakyTests": false,
+    "forbidOnly": true,
+    "fullyParallel": false,
+    "globalSetup": null,
+    "globalTeardown": null,
+    "globalTimeout": 0,
+    "grep": {},
+    "grepInvert": null,
+    "maxFailures": 0,
+    "metadata": {
+      "actualWorkers": 1
+    },
+    "preserveOutput": "always",
+    "projects": [
+      {
+        "outputDir": "/Users/tuwan/work/code/aider/anthys/reports/native-artifact-ui-20261020/browser-artifacts",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "desktop",
+        "name": "desktop",
+        "testDir": "/Users/tuwan/work/code/aider/anthys/tests/browser",
+        "testIgnore": [],
+        "testMatch": [
+          "native-artifacts-ui.spec.ts"
+        ],
+        "timeout": 30000
+      },
+      {
+        "outputDir": "/Users/tuwan/work/code/aider/anthys/reports/native-artifact-ui-20261020/browser-artifacts",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "mobile",
+        "name": "mobile",
+        "testDir": "/Users/tuwan/work/code/aider/anthys/tests/browser",
+        "testIgnore": [],
+        "testMatch": [
+          "native-artifacts-ui.spec.ts"
+        ],
+        "timeout": 30000
+      }
+    ],
+    "filteredProjects": [
+      {
+        "grep": {},
+        "grepInvert": null,
+        "outputDir": "/Users/tuwan/work/code/aider/anthys/reports/native-artifact-ui-20261020/browser-artifacts",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "name": "desktop",
+        "testDir": "/Users/tuwan/work/code/aider/anthys/tests/browser",
+        "snapshotDir": "/Users/tuwan/work/code/aider/anthys/tests/browser",
+        "testIgnore": [],
+        "testMatch": [
+          "native-artifacts-ui.spec.ts"
+        ],
+        "timeout": 30000,
+        "use": {
+          "baseURL": "http://localhost:64702",
+          "channel": "chrome",
+          "headless": true,
+          "serviceWorkers": "block",
+          "trace": "retain-on-failure",
+          "viewport": {
+            "width": 1280,
+            "height": 800
+          }
+        },
+        "dependencies": [],
+        "ignoreSnapshots": false,
+        "__projectId": "desktop"
+      },
+      {
+        "grep": {},
+        "grepInvert": null,
+        "outputDir": "/Users/tuwan/work/code/aider/anthys/reports/native-artifact-ui-20261020/browser-artifacts",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "name": "mobile",
+        "testDir": "/Users/tuwan/work/code/aider/anthys/tests/browser",
+        "snapshotDir": "/Users/tuwan/work/code/aider/anthys/tests/browser",
+        "testIgnore": [],
+        "testMatch": [
+          "native-artifacts-ui.spec.ts"
+        ],
+        "timeout": 30000,
+        "use": {
+          "baseURL": "http://localhost:64702",
+          "channel": "chrome",
+          "headless": true,
+          "serviceWorkers": "block",
+          "trace": "retain-on-failure",
+          "viewport": {
+            "width": 390,
+            "height": 844
+          },
+          "isMobile": true,
+          "hasTouch": true
+        },
+        "dependencies": [],
+        "ignoreSnapshots": false,
+        "__projectId": "mobile"
+      }
+    ],
+    "quiet": false,
+    "reporter": [
+      [
+        "list",
+        null
+      ],
+      [
+        "json",
+        {
+          "outputFile": "/Users/tuwan/work/code/aider/anthys/reports/native-artifact-ui-20261020/browser-results.json"
+        }
+      ]
+    ],
+    "reportSlowTests": {
+      "max": 5,
+      "threshold": 300000
+    },
+    "shard": null,
+    "tags": [],
+    "updateSnapshots": "default",
+    "updateSourceMethod": "patch",
+    "version": "1.64.0",
+    "workers": 1,
+    "webServer": null
+  },
+  "suites": [
+    {
+      "title": "native-artifacts-ui.spec.ts",
+      "file": "native-artifacts-ui.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "private tool draft is visibly unverified, keeps protected downloads and refuses forged verification",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "desktop",
+              "projectName": "desktop",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1235,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-23T09:18:05.065Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "9f7ed958281fbc0744b1-198b1df0923362a80214",
+          "file": "native-artifacts-ui.spec.ts",
+          "line": 29,
+          "column": 1
+        },
+        {
+          "title": "private tool draft is visibly unverified, keeps protected downloads and refuses forged verification",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "mobile",
+              "projectName": "mobile",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 852,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-23T09:18:07.814Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "9f7ed958281fbc0744b1-060add500a27e26ebeb1",
+          "file": "native-artifacts-ui.spec.ts",
+          "line": 29,
+          "column": 1
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "stats": {
+    "startTime": "2026-10-23T09:18:04.242Z",
+    "duration": 5095.335,
+    "expected": 2,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  }
+}

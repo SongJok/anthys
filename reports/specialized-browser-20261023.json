@@ -1,0 +1,104 @@
+{
+  "schemaVersion": 1,
+  "case": "SPECIALIZED_BROWSER_CONFIGS",
+  "date": "2026-10-23",
+  "status": "PASS",
+  "scope": "LOCAL_SYNTHETIC_AND_ISOLATED_POSTGRES_BROWSER_CONFIGS",
+  "live": false,
+  "baseCommit": "55a47389aec38225acc303d8646f4dce40fc2dbf",
+  "node": "v24.21.0",
+  "runner": {
+    "pattern": "node scripts/run-tests.mjs playwright test --config=<config>",
+    "note": "Each configuration starts its own local synthetic server or component bundle through the pinned Node executable. Tests that assert real API and PostgreSQL behaviour use the isolated test database enforced by the runner; no live DingTalk, DWS, GLM or upstream company-MCP call was made."
+  },
+  "configs": {
+    "artifacts": {
+      "config": "tests/browser/artifacts.config.ts",
+      "expected": 8,
+      "unexpected": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "durationMs": 32483.974,
+      "startTime": "2026-10-23T09:04:41.473Z",
+      "report": {"path": "reports/artifacts-browser-latest.json", "sha256": "67d2d7f8e879c5660b8a9a6fa290ea18a9eaf34cd87e484be8018e50ede67b2e"}
+    },
+    "company-agent": {
+      "config": "tests/browser/company-agent.config.ts",
+      "expected": 2,
+      "unexpected": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "durationMs": 42154.273,
+      "startTime": "2026-10-23T09:05:14.833Z",
+      "report": {"path": "reports/company-agent-browser-20261019/playwright-results.json", "sha256": "6a30a68ea7b5dd5e89ee21ea83a94fad0b9e7e54974039c35a0dd898de4fb743"}
+    },
+    "escalation-witness": {
+      "config": "tests/browser/escalation-witness.config.ts",
+      "expected": 11,
+      "unexpected": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "durationMs": 4042.33,
+      "startTime": "2026-10-23T09:05:57.529Z",
+      "report": {"path": "reports/escalation-fetch-body-ci-20261021/component-browser.json", "sha256": "3b3acacee6f4d5ca4cde508320af8eb54080bc4d9a5e2e0384c800564013fa48"}
+    },
+    "group-cases": {
+      "config": "tests/browser/group-cases.config.ts",
+      "expected": 16,
+      "unexpected": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "durationMs": 213120.825,
+      "startTime": "2026-10-23T09:12:44.601Z",
+      "report": {"path": "reports/group-cases-browser-latest.json", "sha256": "038ec828167a12d9670f64946fba0307e0954cdf1f196ac042aed4c3bf94f2f4"}
+    },
+    "group-escalations-ui": {
+      "config": "tests/browser/group-escalations-ui.config.ts",
+      "expected": 6,
+      "unexpected": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "durationMs": 6557.064,
+      "startTime": "2026-10-23T09:16:21.138Z",
+      "report": {"path": "reports/group-case-escalation-ui-20261020/delivery-compat/browser-results.json", "sha256": "ec89b6b40926d36a4f62ea38d15cef28032bcad588d1a53a4c12fb8e3fd3b39f"}
+    },
+    "group-reminders": {
+      "config": "tests/browser/group-reminders.config.ts",
+      "expected": 6,
+      "unexpected": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "durationMs": 95229.272,
+      "startTime": "2026-10-23T09:16:28.213Z",
+      "report": {"path": "reports/group-reminders-browser-latest.json", "sha256": "b8514f2e63dc79d9d1d35fb435980659a6816368311a89fffaeafee5b2f943c3"}
+    },
+    "native-artifacts-ui": {
+      "config": "tests/browser/native-artifacts-ui.config.ts",
+      "expected": 2,
+      "unexpected": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "durationMs": 5095.335,
+      "startTime": "2026-10-23T09:18:04.242Z",
+      "report": {"path": "reports/native-artifact-ui-20261020/browser-results.json", "sha256": "af41d90a5c1bdf8ba41e84c6ae32946b4ff13a2252079fa0af8921eb589dcb67"}
+    },
+    "schedules": {
+      "config": "tests/browser/schedules.config.ts",
+      "expected": 4,
+      "unexpected": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "durationMs": 13231.877,
+      "startTime": "2026-10-23T09:18:09.998Z",
+      "report": {"path": "reports/schedules-browser-latest.json", "sha256": "405ae9d234d3e58834f5d0b2a38b6da59c8d0c0fe00fd366ed2ac97a5f47178b"}
+    }
+  },
+  "totals": {"expected": 55, "unexpected": 0, "skipped": 0, "flaky": 0},
+  "flakeRecord": {
+    "config": "group-cases",
+    "firstRun": "1 of 16 failed: mobile T110 independent administrator confirmation reached the deliberately maintained 30s per-test bound while the final API status read was in flight.",
+    "diagnosis": "The T110 serial group passed alone on mobile (3/3; 20.0s, 15.9s, 15.7s), so the bound and the product flow were not changed.",
+    "rerun": "Full configuration rerun passed 16/16 in 213.1s."
+  },
+  "disclosure": "This is local browser evidence against synthetic servers and the isolated PostgreSQL test database. The group-cases and escalation configurations exercise the real API and database on that isolated cluster; the UI bundle configurations use the real components with intercepted routes. No live enterprise acceptance is claimed: affected T-cases remain NOT_RUN and related R items remain IN_PROGRESS."
+}

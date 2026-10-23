@@ -1,0 +1,987 @@
+{
+  "config": {
+    "argv": [
+      "/Users/tuwan/.npm/_npx/538786c08bcb9442/node_modules/node/bin/node",
+      "/Users/tuwan/work/code/aider/anthys/node_modules/@playwright/test/cli.js",
+      "test",
+      "--config=tests/browser/group-cases.config.ts"
+    ],
+    "configFile": "/Users/tuwan/work/code/aider/anthys/tests/browser/group-cases.config.ts",
+    "rootDir": "/Users/tuwan/work/code/aider/anthys/tests/browser",
+    "failOnFlakyTests": false,
+    "forbidOnly": true,
+    "fullyParallel": false,
+    "globalSetup": null,
+    "globalTeardown": null,
+    "globalTimeout": 0,
+    "grep": {},
+    "grepInvert": null,
+    "maxFailures": 0,
+    "metadata": {
+      "actualWorkers": 1
+    },
+    "preserveOutput": "always",
+    "projects": [
+      {
+        "outputDir": "/Users/tuwan/work/code/aider/anthys/.data/group-cases-browser-results",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "desktop",
+        "name": "desktop",
+        "testDir": "/Users/tuwan/work/code/aider/anthys/tests/browser",
+        "testIgnore": [],
+        "testMatch": [
+          "group-cases.spec.ts",
+          "group-cases-window.spec.ts",
+          "group-escalations-real-api.spec.ts",
+          "group-contract-restore-real-api.spec.ts"
+        ],
+        "timeout": 30000
+      },
+      {
+        "outputDir": "/Users/tuwan/work/code/aider/anthys/.data/group-cases-browser-results",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "mobile",
+        "name": "mobile",
+        "testDir": "/Users/tuwan/work/code/aider/anthys/tests/browser",
+        "testIgnore": [],
+        "testMatch": [
+          "group-cases.spec.ts",
+          "group-cases-window.spec.ts",
+          "group-escalations-real-api.spec.ts",
+          "group-contract-restore-real-api.spec.ts"
+        ],
+        "timeout": 30000
+      }
+    ],
+    "filteredProjects": [
+      {
+        "grep": {},
+        "grepInvert": null,
+        "outputDir": "/Users/tuwan/work/code/aider/anthys/.data/group-cases-browser-results",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "name": "desktop",
+        "testDir": "/Users/tuwan/work/code/aider/anthys/tests/browser",
+        "snapshotDir": "/Users/tuwan/work/code/aider/anthys/tests/browser",
+        "testIgnore": [],
+        "testMatch": [
+          "group-cases.spec.ts",
+          "group-cases-window.spec.ts",
+          "group-escalations-real-api.spec.ts",
+          "group-contract-restore-real-api.spec.ts"
+        ],
+        "timeout": 30000,
+        "use": {
+          "baseURL": "http://localhost:64702",
+          "channel": "chrome",
+          "headless": true,
+          "serviceWorkers": "block",
+          "trace": "retain-on-failure",
+          "viewport": {
+            "width": 1280,
+            "height": 800
+          }
+        },
+        "dependencies": [],
+        "ignoreSnapshots": false,
+        "__projectId": "desktop"
+      },
+      {
+        "grep": {},
+        "grepInvert": null,
+        "outputDir": "/Users/tuwan/work/code/aider/anthys/.data/group-cases-browser-results",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "name": "mobile",
+        "testDir": "/Users/tuwan/work/code/aider/anthys/tests/browser",
+        "snapshotDir": "/Users/tuwan/work/code/aider/anthys/tests/browser",
+        "testIgnore": [],
+        "testMatch": [
+          "group-cases.spec.ts",
+          "group-cases-window.spec.ts",
+          "group-escalations-real-api.spec.ts",
+          "group-contract-restore-real-api.spec.ts"
+        ],
+        "timeout": 30000,
+        "use": {
+          "baseURL": "http://localhost:64702",
+          "channel": "chrome",
+          "headless": true,
+          "serviceWorkers": "block",
+          "trace": "retain-on-failure",
+          "viewport": {
+            "width": 390,
+            "height": 844
+          },
+          "isMobile": true,
+          "hasTouch": true
+        },
+        "dependencies": [],
+        "ignoreSnapshots": false,
+        "__projectId": "mobile"
+      }
+    ],
+    "quiet": false,
+    "reporter": [
+      [
+        "list",
+        null
+      ],
+      [
+        "json",
+        {
+          "outputFile": "/Users/tuwan/work/code/aider/anthys/reports/group-cases-browser-latest.json"
+        }
+      ]
+    ],
+    "reportSlowTests": {
+      "max": 5,
+      "threshold": 300000
+    },
+    "shard": null,
+    "tags": [],
+    "updateSnapshots": "default",
+    "updateSourceMethod": "patch",
+    "version": "1.64.0",
+    "workers": 1,
+    "webServer": {
+      "command": "\"/Users/tuwan/.npm/_npx/538786c08bcb9442/node_modules/node/bin/node\" --import tsx tests/browser/group-cases-server.ts",
+      "cwd": "/Users/tuwan/work/code/aider/anthys/",
+      "url": "http://localhost:64702/api/v1/health/ready",
+      "reuseExistingServer": false,
+      "timeout": 30000
+    }
+  },
+  "suites": [
+    {
+      "title": "group-cases-window.spec.ts",
+      "file": "group-cases-window.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "registration windows use real API/PG, show UTC coverage, clear drafts and ignore a late real response",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "desktop",
+              "projectName": "desktop",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 9727,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-23T09:12:52.920Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "3d33a7f2bf5d150be824-cbfec1af44c564a39b74",
+          "file": "group-cases-window.spec.ts",
+          "line": 25,
+          "column": 1
+        },
+        {
+          "title": "registration windows use real API/PG, show UTC coverage, clear drafts and ignore a late real response",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "mobile",
+              "projectName": "mobile",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 9057,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-23T09:14:31.158Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "3d33a7f2bf5d150be824-c01f98d6b65fa564d003",
+          "file": "group-cases-window.spec.ts",
+          "line": 25,
+          "column": 1
+        }
+      ]
+    },
+    {
+      "title": "group-cases.spec.ts",
+      "file": "group-cases.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "T108/T109 browser uses real API and PG for shared cards, received mentions, coverage and distinct resources",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "desktop",
+              "projectName": "desktop",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 12860,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-23T09:13:03.804Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "458ff37eb21ec93b87d8-b1e3ab1c147f7dc1fb0d",
+          "file": "group-cases.spec.ts",
+          "line": 14,
+          "column": 1
+        },
+        {
+          "title": "T108/T109 browser uses real API and PG for shared cards, received mentions, coverage and distinct resources",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "mobile",
+              "projectName": "mobile",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 10990,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-23T09:14:40.789Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "458ff37eb21ec93b87d8-4f8d80b8a49586506029",
+          "file": "group-cases.spec.ts",
+          "line": 14,
+          "column": 1
+        }
+      ],
+      "suites": [
+        {
+          "title": "T110 actual assignment, owner statement and independent administrator confirmation",
+          "file": "group-cases.spec.ts",
+          "line": 28,
+          "column": 15,
+          "specs": [
+            {
+              "title": "browser administrator assigns the current member",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "/Users/tuwan/work/code/aider/anthys/tests/browser/group-cases.spec.ts",
+                        "line": 28,
+                        "column": 15
+                      }
+                    }
+                  ],
+                  "expectedStatus": "passed",
+                  "projectId": "desktop",
+                  "projectName": "desktop",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 19057,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-23T09:13:16.674Z",
+                      "annotations": [
+                        {
+                          "type": "serial",
+                          "location": {
+                            "file": "/Users/tuwan/work/code/aider/anthys/tests/browser/group-cases.spec.ts",
+                            "line": 28,
+                            "column": 15
+                          }
+                        }
+                      ],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "458ff37eb21ec93b87d8-326f19075a97463c60fb",
+              "file": "group-cases.spec.ts",
+              "line": 30,
+              "column": 2
+            },
+            {
+              "title": "browser owner statement stays waiting for independent confirmation",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "/Users/tuwan/work/code/aider/anthys/tests/browser/group-cases.spec.ts",
+                        "line": 28,
+                        "column": 15
+                      }
+                    }
+                  ],
+                  "expectedStatus": "passed",
+                  "projectId": "desktop",
+                  "projectName": "desktop",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 14105,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-23T09:13:35.744Z",
+                      "annotations": [
+                        {
+                          "type": "serial",
+                          "location": {
+                            "file": "/Users/tuwan/work/code/aider/anthys/tests/browser/group-cases.spec.ts",
+                            "line": 28,
+                            "column": 15
+                          }
+                        }
+                      ],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "458ff37eb21ec93b87d8-759be26d3c93e732538a",
+              "file": "group-cases.spec.ts",
+              "line": 40,
+              "column": 2
+            },
+            {
+              "title": "browser independent administrator confirms and closes the same case",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "/Users/tuwan/work/code/aider/anthys/tests/browser/group-cases.spec.ts",
+                        "line": 28,
+                        "column": 15
+                      }
+                    }
+                  ],
+                  "expectedStatus": "passed",
+                  "projectId": "desktop",
+                  "projectName": "desktop",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 12507,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-23T09:13:49.857Z",
+                      "annotations": [
+                        {
+                          "type": "serial",
+                          "location": {
+                            "file": "/Users/tuwan/work/code/aider/anthys/tests/browser/group-cases.spec.ts",
+                            "line": 28,
+                            "column": 15
+                          }
+                        }
+                      ],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "458ff37eb21ec93b87d8-3a0959b6594122e56d36",
+              "file": "group-cases.spec.ts",
+              "line": 46,
+              "column": 2
+            },
+            {
+              "title": "browser administrator assigns the current member",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "/Users/tuwan/work/code/aider/anthys/tests/browser/group-cases.spec.ts",
+                        "line": 28,
+                        "column": 15
+                      }
+                    }
+                  ],
+                  "expectedStatus": "passed",
+                  "projectId": "mobile",
+                  "projectName": "mobile",
+                  "results": [
+                    {
+                      "workerIndex": 1,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 18235,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-23T09:14:51.786Z",
+                      "annotations": [
+                        {
+                          "type": "serial",
+                          "location": {
+                            "file": "/Users/tuwan/work/code/aider/anthys/tests/browser/group-cases.spec.ts",
+                            "line": 28,
+                            "column": 15
+                          }
+                        }
+                      ],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "458ff37eb21ec93b87d8-9a9f6de3314dae1e2ebe",
+              "file": "group-cases.spec.ts",
+              "line": 30,
+              "column": 2
+            },
+            {
+              "title": "browser owner statement stays waiting for independent confirmation",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "/Users/tuwan/work/code/aider/anthys/tests/browser/group-cases.spec.ts",
+                        "line": 28,
+                        "column": 15
+                      }
+                    }
+                  ],
+                  "expectedStatus": "passed",
+                  "projectId": "mobile",
+                  "projectName": "mobile",
+                  "results": [
+                    {
+                      "workerIndex": 1,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 22703,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-23T09:15:10.034Z",
+                      "annotations": [
+                        {
+                          "type": "serial",
+                          "location": {
+                            "file": "/Users/tuwan/work/code/aider/anthys/tests/browser/group-cases.spec.ts",
+                            "line": 28,
+                            "column": 15
+                          }
+                        }
+                      ],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "458ff37eb21ec93b87d8-c4b29a5ec0f1a8d8130e",
+              "file": "group-cases.spec.ts",
+              "line": 40,
+              "column": 2
+            },
+            {
+              "title": "browser independent administrator confirms and closes the same case",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "/Users/tuwan/work/code/aider/anthys/tests/browser/group-cases.spec.ts",
+                        "line": 28,
+                        "column": 15
+                      }
+                    }
+                  ],
+                  "expectedStatus": "passed",
+                  "projectId": "mobile",
+                  "projectName": "mobile",
+                  "results": [
+                    {
+                      "workerIndex": 1,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 17943,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-23T09:15:32.751Z",
+                      "annotations": [
+                        {
+                          "type": "serial",
+                          "location": {
+                            "file": "/Users/tuwan/work/code/aider/anthys/tests/browser/group-cases.spec.ts",
+                            "line": 28,
+                            "column": 15
+                          }
+                        }
+                      ],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "458ff37eb21ec93b87d8-eaf64a6e88e6db7ed4c1",
+              "file": "group-cases.spec.ts",
+              "line": 46,
+              "column": 2
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "group-contract-restore-real-api.spec.ts",
+      "file": "group-contract-restore-real-api.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "administrator explicitly restores a paused contract through the actual UI/API/PostgreSQL",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "desktop",
+              "projectName": "desktop",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1821,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-23T09:14:02.385Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "07663c0a87f791a647da-f2fe9b2d44fae865a753",
+          "file": "group-contract-restore-real-api.spec.ts",
+          "line": 8,
+          "column": 1
+        },
+        {
+          "title": "administrator explicitly restores a paused contract through the actual UI/API/PostgreSQL",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "mobile",
+              "projectName": "mobile",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 3272,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-23T09:15:50.727Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "07663c0a87f791a647da-d2a975f8f44dbb866517",
+          "file": "group-contract-restore-real-api.spec.ts",
+          "line": 8,
+          "column": 1
+        }
+      ]
+    },
+    {
+      "title": "group-escalations-real-api.spec.ts",
+      "file": "group-escalations-real-api.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [],
+      "suites": [
+        {
+          "title": "selected real case uses actual API and PostgreSQL for administrator escalation",
+          "file": "group-escalations-real-api.spec.ts",
+          "line": 12,
+          "column": 15,
+          "specs": [
+            {
+              "title": "owner is denied for the actual persisted open case",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "/Users/tuwan/work/code/aider/anthys/tests/browser/group-escalations-real-api.spec.ts",
+                        "line": 12,
+                        "column": 15
+                      }
+                    }
+                  ],
+                  "expectedStatus": "passed",
+                  "projectId": "desktop",
+                  "projectName": "desktop",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 6966,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-23T09:14:04.261Z",
+                      "annotations": [
+                        {
+                          "type": "serial",
+                          "location": {
+                            "file": "/Users/tuwan/work/code/aider/anthys/tests/browser/group-escalations-real-api.spec.ts",
+                            "line": 12,
+                            "column": 15
+                          }
+                        }
+                      ],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "7c24323759319fc36de5-8f85c2f32e619c876f56",
+              "file": "group-escalations-real-api.spec.ts",
+              "line": 15,
+              "column": 2
+            },
+            {
+              "title": "administrator reviews, confirms, reads without repeating, then cancels once",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "/Users/tuwan/work/code/aider/anthys/tests/browser/group-escalations-real-api.spec.ts",
+                        "line": 12,
+                        "column": 15
+                      }
+                    }
+                  ],
+                  "expectedStatus": "passed",
+                  "projectId": "desktop",
+                  "projectName": "desktop",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 19497,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-23T09:14:11.247Z",
+                      "annotations": [
+                        {
+                          "type": "serial",
+                          "location": {
+                            "file": "/Users/tuwan/work/code/aider/anthys/tests/browser/group-escalations-real-api.spec.ts",
+                            "line": 12,
+                            "column": 15
+                          }
+                        }
+                      ],
+                      "attachments": [
+                        {
+                          "name": "actual-escalation-confirmation",
+                          "contentType": "application/json",
+                          "body": "eyJlbGFwc2VkTXMiOjY1ODMsInN0YXR1cyI6MjAwLCJraW5kIjoiUVVFVUVEIiwiY29kZSI6bnVsbH0="
+                        },
+                        {
+                          "name": "actual-escalation-response",
+                          "contentType": "application/json",
+                          "body": "eyJvcGVyYXRpb24iOiJRVUVVRUQiLCJlbGFwc2VkTXMiOjQxODEsInN0YXR1cyI6MjAwLCJraW5kIjoiUVVFVUVEIiwiY29kZSI6bnVsbH0="
+                        },
+                        {
+                          "name": "actual-escalation-response",
+                          "contentType": "application/json",
+                          "body": "eyJvcGVyYXRpb24iOiJDQU5DRUxMRURfTE9DQUwiLCJlbGFwc2VkTXMiOjEyNSwic3RhdHVzIjoyMDAsImtpbmQiOiJDQU5DRUxMRURfTE9DQUwiLCJjb2RlIjpudWxsfQ=="
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "7c24323759319fc36de5-8b4594dab4cebc91a3a2",
+              "file": "group-escalations-real-api.spec.ts",
+              "line": 23,
+              "column": 2
+            },
+            {
+              "title": "owner is denied for the actual persisted open case",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "/Users/tuwan/work/code/aider/anthys/tests/browser/group-escalations-real-api.spec.ts",
+                        "line": 12,
+                        "column": 15
+                      }
+                    }
+                  ],
+                  "expectedStatus": "passed",
+                  "projectId": "mobile",
+                  "projectName": "mobile",
+                  "results": [
+                    {
+                      "workerIndex": 1,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 7800,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-23T09:15:54.077Z",
+                      "annotations": [
+                        {
+                          "type": "serial",
+                          "location": {
+                            "file": "/Users/tuwan/work/code/aider/anthys/tests/browser/group-escalations-real-api.spec.ts",
+                            "line": 12,
+                            "column": 15
+                          }
+                        }
+                      ],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "7c24323759319fc36de5-6ca6507d098eb229bc3a",
+              "file": "group-escalations-real-api.spec.ts",
+              "line": 15,
+              "column": 2
+            },
+            {
+              "title": "administrator reviews, confirms, reads without repeating, then cancels once",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "/Users/tuwan/work/code/aider/anthys/tests/browser/group-escalations-real-api.spec.ts",
+                        "line": 12,
+                        "column": 15
+                      }
+                    }
+                  ],
+                  "expectedStatus": "passed",
+                  "projectId": "mobile",
+                  "projectName": "mobile",
+                  "results": [
+                    {
+                      "workerIndex": 1,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 15698,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-23T09:16:01.894Z",
+                      "annotations": [
+                        {
+                          "type": "serial",
+                          "location": {
+                            "file": "/Users/tuwan/work/code/aider/anthys/tests/browser/group-escalations-real-api.spec.ts",
+                            "line": 12,
+                            "column": 15
+                          }
+                        }
+                      ],
+                      "attachments": [
+                        {
+                          "name": "actual-escalation-confirmation",
+                          "contentType": "application/json",
+                          "body": "eyJlbGFwc2VkTXMiOjY0NTEsInN0YXR1cyI6MjAwLCJraW5kIjoiUVVFVUVEIiwiY29kZSI6bnVsbH0="
+                        },
+                        {
+                          "name": "actual-escalation-response",
+                          "contentType": "application/json",
+                          "body": "eyJvcGVyYXRpb24iOiJRVUVVRUQiLCJlbGFwc2VkTXMiOjE4MDIsInN0YXR1cyI6MjAwLCJraW5kIjoiUVVFVUVEIiwiY29kZSI6bnVsbH0="
+                        },
+                        {
+                          "name": "actual-escalation-response",
+                          "contentType": "application/json",
+                          "body": "eyJvcGVyYXRpb24iOiJDQU5DRUxMRURfTE9DQUwiLCJlbGFwc2VkTXMiOjczLCJzdGF0dXMiOjIwMCwia2luZCI6IkNBTkNFTExFRF9MT0NBTCIsImNvZGUiOm51bGx9"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "7c24323759319fc36de5-18a2ab1108231d61ea50",
+              "file": "group-escalations-real-api.spec.ts",
+              "line": 23,
+              "column": 2
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "stats": {
+    "startTime": "2026-10-23T09:12:44.601Z",
+    "duration": 213120.82499999998,
+    "expected": 16,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  }
+}

@@ -1,0 +1,248 @@
+{
+  "config": {
+    "argv": [
+      "/Users/tuwan/.npm/_npx/538786c08bcb9442/node_modules/node/bin/node",
+      "/Users/tuwan/work/code/aider/anthys/node_modules/@playwright/test/cli.js",
+      "test",
+      "--config=tests/browser/company-agent.config.ts"
+    ],
+    "configFile": "/Users/tuwan/work/code/aider/anthys/tests/browser/company-agent.config.ts",
+    "rootDir": "/Users/tuwan/work/code/aider/anthys/tests/browser",
+    "failOnFlakyTests": false,
+    "forbidOnly": true,
+    "fullyParallel": false,
+    "globalSetup": null,
+    "globalTeardown": null,
+    "globalTimeout": 0,
+    "grep": {},
+    "grepInvert": null,
+    "maxFailures": 0,
+    "metadata": {
+      "actualWorkers": 1
+    },
+    "preserveOutput": "always",
+    "projects": [
+      {
+        "outputDir": "/Users/tuwan/work/code/aider/anthys/.data/company-agent-browser-results",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "desktop",
+        "name": "desktop",
+        "testDir": "/Users/tuwan/work/code/aider/anthys/tests/browser",
+        "testIgnore": [],
+        "testMatch": [
+          "company-agent.spec.ts"
+        ],
+        "timeout": 45000
+      },
+      {
+        "outputDir": "/Users/tuwan/work/code/aider/anthys/.data/company-agent-browser-results",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "mobile",
+        "name": "mobile",
+        "testDir": "/Users/tuwan/work/code/aider/anthys/tests/browser",
+        "testIgnore": [],
+        "testMatch": [
+          "company-agent.spec.ts"
+        ],
+        "timeout": 45000
+      }
+    ],
+    "filteredProjects": [
+      {
+        "grep": {},
+        "grepInvert": null,
+        "outputDir": "/Users/tuwan/work/code/aider/anthys/.data/company-agent-browser-results",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "name": "desktop",
+        "testDir": "/Users/tuwan/work/code/aider/anthys/tests/browser",
+        "snapshotDir": "/Users/tuwan/work/code/aider/anthys/tests/browser",
+        "testIgnore": [],
+        "testMatch": [
+          "company-agent.spec.ts"
+        ],
+        "timeout": 45000,
+        "use": {
+          "baseURL": "http://localhost:64702",
+          "channel": "chrome",
+          "headless": true,
+          "serviceWorkers": "block",
+          "trace": "retain-on-failure",
+          "viewport": {
+            "width": 1280,
+            "height": 800
+          }
+        },
+        "dependencies": [],
+        "ignoreSnapshots": false,
+        "__projectId": "desktop"
+      },
+      {
+        "grep": {},
+        "grepInvert": null,
+        "outputDir": "/Users/tuwan/work/code/aider/anthys/.data/company-agent-browser-results",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "name": "mobile",
+        "testDir": "/Users/tuwan/work/code/aider/anthys/tests/browser",
+        "snapshotDir": "/Users/tuwan/work/code/aider/anthys/tests/browser",
+        "testIgnore": [],
+        "testMatch": [
+          "company-agent.spec.ts"
+        ],
+        "timeout": 45000,
+        "use": {
+          "baseURL": "http://localhost:64702",
+          "channel": "chrome",
+          "headless": true,
+          "serviceWorkers": "block",
+          "trace": "retain-on-failure",
+          "viewport": {
+            "width": 390,
+            "height": 844
+          },
+          "isMobile": true,
+          "hasTouch": true
+        },
+        "dependencies": [],
+        "ignoreSnapshots": false,
+        "__projectId": "mobile"
+      }
+    ],
+    "quiet": false,
+    "reporter": [
+      [
+        "list",
+        null
+      ],
+      [
+        "json",
+        {
+          "outputFile": "/Users/tuwan/work/code/aider/anthys/reports/company-agent-browser-20261019/playwright-results.json"
+        }
+      ]
+    ],
+    "reportSlowTests": {
+      "max": 5,
+      "threshold": 300000
+    },
+    "shard": null,
+    "tags": [],
+    "updateSnapshots": "default",
+    "updateSourceMethod": "patch",
+    "version": "1.64.0",
+    "workers": 1,
+    "webServer": {
+      "command": "\"/Users/tuwan/.npm/_npx/538786c08bcb9442/node_modules/node/bin/node\" --import tsx tests/browser/company-agent-server.ts",
+      "cwd": "/Users/tuwan/work/code/aider/anthys/",
+      "url": "http://localhost:64702/api/v1/health/ready",
+      "reuseExistingServer": false,
+      "timeout": 60000,
+      "gracefulShutdown": {
+        "signal": "SIGTERM",
+        "timeout": 15000
+      }
+    }
+  },
+  "suites": [
+    {
+      "title": "company-agent.spec.ts",
+      "file": "company-agent.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "real local API polling and confirmed cancellation retain UNKNOWN without a repeated enterprise call",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 45000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "desktop",
+              "projectName": "desktop",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 6437,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-23T09:05:41.499Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "846114568ad66ba1ded4-03e17142e27f13e91d76",
+          "file": "company-agent.spec.ts",
+          "line": 12,
+          "column": 1
+        },
+        {
+          "title": "real local API polling and confirmed cancellation retain UNKNOWN without a repeated enterprise call",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 45000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "mobile",
+              "projectName": "mobile",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 5944,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-23T09:05:50.082Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "846114568ad66ba1ded4-c1a40857a03b559a5540",
+          "file": "company-agent.spec.ts",
+          "line": 12,
+          "column": 1
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "stats": {
+    "startTime": "2026-10-23T09:05:14.833Z",
+    "duration": 42154.273,
+    "expected": 2,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  }
+}
