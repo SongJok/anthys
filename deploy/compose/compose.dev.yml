@@ -23,11 +23,13 @@
 #                       deploy/setup-sandbox-broker.mjs --build first)
 #
 # Ports: API on 127.0.0.1:64700; Postgres on 127.0.0.1:64710 for host tooling.
+# ANTHYS_COMPOSE_PROJECT, ANTHYS_API_PORT and ANTHYS_PG_PORT exist so the
+# delivery oracle can boot a second, isolated stack without touching this one.
 # Containers always use postgres:5432 via the generated *_database_url secrets.
 # No plaintext credentials and no host networking. The Docker socket is mounted
 # only into the isolated sandbox broker, never into the API or worker.
 
-name: anthys-dev
+name: ${ANTHYS_COMPOSE_PROJECT:-anthys-dev}
 
 x-app-image: &app-image ${ANTHYS_APP_IMAGE:-anthys-app:dev}
 
@@ -117,7 +119,7 @@ services:
     secrets:
       - pg_admin_password
     ports:
-      - "127.0.0.1:64710:5432"
+      - "127.0.0.1:${ANTHYS_PG_PORT:-64710}:5432"
     volumes:
       - pg_data:/var/lib/postgresql/data
     # The official entrypoint starts as root and drops to postgres, so keep
@@ -221,7 +223,7 @@ services:
       - app_data:/data
       - *private-mcp
     ports:
-      - "127.0.0.1:64700:64700"
+      - "127.0.0.1:${ANTHYS_API_PORT:-64700}:64700"
     depends_on:
       migrate:
         condition: service_completed_successfully
