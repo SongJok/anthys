@@ -1,0 +1,120 @@
+{
+  "status": "PASS",
+  "scope": "LOCAL_SYNTHETIC_PLAYWRIGHT_TASK_APPROVAL_ARTIFACT",
+  "live": false,
+  "generatedAt": "2026-10-23T01:36:00Z",
+  "source": {
+    "baseCommit": "1cbb148f525b70f3a7cf443bf5167d77705fa006",
+    "workingTree": true,
+    "files": {
+      "tests/browser/workbench-approval.spec.ts": "c0e02c6682ebe00f4cbe1fc032ef3dd1669617595fb121d88c2b9daa2acf1045",
+      "tests/browser/artifacts-server.ts": "c90e767b70c176742abc25c6f0fd6150c8d4350e55a2701c53c5ccd9f796c2af",
+      "tests/browser/artifacts.config.ts": "add8abf9bc758f35288f06d3d2fccb7255f3c1faced8e363c89cfda1669c3c3f",
+      "config/test-catalog.json": "78066f9f6e07cc5374908ea2e8d6431e89f64850c221e62fe778d12a72c9a025",
+      "docs/04_TEST_ACCEPTANCE_AND_OPERATIONS.md": "ddc3fa24a506933f6c1423d04b7be50b33ca89ef3dd412925553f47a30196324",
+      "packages/gateway/src/control-plane.ts": "741e89f0300974b340f5c8fe1d4e5aa1f76a540a41ffc02088554502a7552bf5",
+      "reports/vitest-latest.json": "486bd6c292c86bd97224b328ea6ba3d5f4da81a57cf3a387a6f77a6ac71e8b11",
+      "reports/artifacts-browser-latest.json": "5aafc7a8d2628a031397f58fa079d8d45ad8432b3e5dee96ebf00a019e22b7a1"
+    }
+  },
+  "surface": {
+    "entry": "tests/browser/workbench-approval.spec.ts through the real web app rendered by apps/web and the real Fastify API from apps/api, backed by a disposable PostgreSQL on 127.0.0.1:64711",
+    "projects": "Playwright Chromium desktop 1280x800 and mobile 390x844, both against the same isolated server on http://localhost:64702, no route mocks",
+    "fixtures": "tests/browser/artifacts-server.ts starts the real server with the production ControlPlane and a real session secret; each project gets a private artifact task, a private native artifact task and a private T116 tenant. The T116 approval fixture registers a synthetic SHARED_WRITE CORE capability whose execute would insert a SYNTHETIC_T116_WRITE outbox row, sends a private sentinel argument, pauses the run at WAITING_APPROVAL, and adds a real ACTION_APPROVER reviewer with a session.",
+    "singleAuthority": "No new endpoint, table, capability or authentication mode was added. packages/gateway/src/control-plane.ts is byte-identical to the committed version; only the browser test harness gained the production ControlPlane and the synthetic approval fixture."
+  },
+  "behavior": {
+    "artifactIsGeneratedAndDownloadedThroughTheRealApi": "On both viewports the owner generates a protected artifact from the protected result through the UI, saves the real server bytes through the one-use download, verifies the bytes contain the exact synthetic value, and verifies the displayed SHA-256 text equals the hash recomputed from the saved file.",
+    "ownerSeesPendingApprovalWithoutPrivateInput": "On the approval task the owner ledger shows the capability, 需要申请审批, 等待审批人决定 and the declared preview 合成审批演示, never the T116_PRIVATE_INPUT_SENTINEL argument, and offers no 批准此动作 button.",
+    "reviewerApprovesThroughTheRealControlPlane": "After switching to the reviewer session the 待我审批 inbox lists the approval, the preview shows only the declared preview and the resource, hides the sentinel, and clicking 批准此动作 calls the real HTTP control plane and returns 已批准，尚未执行。系统将按当前权限恢复原任务。 with an empty inbox afterwards.",
+    "approvalDoesNotExecuteTheCapability": "Immediately after approval the isolated database shows zero SYNTHETIC_T116_WRITE outbox rows for the T116 tenant, tool_actions.state APPROVED, approvals.state APPROVED and runs.status QUEUED with resume_action_id equal to the approved action. The owner ledger shows 已批准，尚未执行 and never 执行结果已核验, and still offers no approve button.",
+    "foreignDeepLinkIsDenied": "Another tenant session receives HTTP 404 from /api/v1/tasks/<approvalTaskId>; the deep link renders the login-required status, never the approval goal or the 动作账本 region.",
+    "noHorizontalOverflow": "On both viewports document.documentElement.scrollWidth stays within window.innerWidth at the artifact, approval, approved-ledger and foreign-denied checkpoints.",
+    "oracleIsNotVacuous": "A mutation replaced the tool_actions state with a constant 'VERIFIED' in ControlPlane.taskActions; both viewports then failed the post-approval assertion because the ledger claimed 执行结果已核验. The file was restored byte-for-byte (sha256 741e89f0..., git diff empty) and the suite passed again 8/8."
+  },
+  "tests": {
+    "commands": [
+      "pnpm typecheck",
+      "pnpm lint",
+      "pnpm build",
+      "node scripts/run-tests.mjs playwright test --config=tests/browser/artifacts.config.ts",
+      "node --import tsx scripts/verify-requirements.ts --baseline",
+      "node --import tsx scripts/verify-requirements.ts",
+      "node scripts/scan-secrets.mjs"
+    ],
+    "playwright": {
+      "config": "tests/browser/artifacts.config.ts",
+      "projects": ["desktop 1280x800", "mobile 390x844"],
+      "expected": 8,
+      "unexpected": 0,
+      "flaky": 0,
+      "skipped": 0,
+      "durationMs": 14943,
+      "target": {
+        "file": "tests/browser/workbench-approval.spec.ts",
+        "tests": 2,
+        "note": "one T116 test per project"
+      },
+      "regression": {
+        "file": "tests/browser/artifacts.spec.ts",
+        "tests": 6,
+        "note": "3 artifact tests per project, unchanged and passing next to the new T116 fixture"
+      }
+    },
+    "gates": {
+      "typecheck": "PASS",
+      "lint": "PASS",
+      "build": "PASS (116 migrations, contractHash 473b7415afaae98c2e384fa32e0da1dfe6d82b2ea24996c31f466f184d8efc94; 13 capability output contracts; vite built)",
+      "requirementsBaseline": "PASS (0 errors)",
+      "requirementsFull": "FAIL_PREEXISTING (47 errors: 36 R-items whose status stays IN_PROGRESS and 11 T-cases with no implementation file yet - T020 T069 T070 T082 T089 T090 T094 T096 T121 T126 T129; T116 left this list in this slice)",
+      "secretScan": "PASS (0 findings over the configured objects, 5 configured secrets)"
+    }
+  },
+  "evidence": {
+    "directory": "reports/t116-workbench-20261023",
+    "committed": false,
+    "note": "The screenshots and the copied Playwright JSON stay local as run evidence, following the existing report convention. This JSON is the committed record.",
+    "browserResults": {
+      "file": "reports/t116-workbench-20261023/browser-results.json",
+      "sha256": "5aafc7a8d2628a031397f58fa079d8d45ad8432b3e5dee96ebf00a019e22b7a1",
+      "startTime": "2026-10-23T01:34:21.793Z",
+      "expected": 8,
+      "unexpected": 0,
+      "flaky": 0
+    },
+    "screenshots": {
+      "reports/t116-workbench-20261023/screenshots/desktop-artifact.png": "881ee990a81d4295ff82a0706d086bdaa549ab4b94a11a2d702715606ab503e0",
+      "reports/t116-workbench-20261023/screenshots/desktop-approval-preview.png": "2a93747b5d6ee400da2506bf69f1ebb33d9fa84241b71484495182a42e3b100e",
+      "reports/t116-workbench-20261023/screenshots/desktop-approved-ledger.png": "5d5fef51358d5c5ebae946b5ecc97f6134d3c64029fb7cfbb0b4eb5631cac74b",
+      "reports/t116-workbench-20261023/screenshots/desktop-foreign-denied.png": "ebca4365b0dbf8a56149106f78aaf58457d28bf8a24b7695cce2f7141afcdace",
+      "reports/t116-workbench-20261023/screenshots/mobile-artifact.png": "9bcf085b4827e765825d1e01cf4ca59b464f954866cd298ae701ad4c8e2b542a",
+      "reports/t116-workbench-20261023/screenshots/mobile-approval-preview.png": "2df089f8dc5b6e2c4016ec32be691d99783365b50aac584279e1fe9fa1acebd0",
+      "reports/t116-workbench-20261023/screenshots/mobile-approved-ledger.png": "6afb53219a3e768c9a057265d8e7e603be038ed1a48a842182d57c27e2e94066",
+      "reports/t116-workbench-20261023/screenshots/mobile-foreign-denied.png": "4e9005488d0440253378e974af78d0f929083f5eb07bd73ac22ba5d548b6bd20"
+    }
+  },
+  "catalog": {
+    "case": "T116",
+    "priority": "P1",
+    "layer": "E2E",
+    "requirements": ["R03", "R32"],
+    "precondition": "移动端/桌面端完整查看任务、审批与成果",
+    "oracle": "按钮可操作、无关键溢出、状态一致，未授权直接URL拒绝",
+    "implementation": "tests/browser/workbench-approval.spec.ts",
+    "status": "NOT_RUN",
+    "note": "The status stays NOT_RUN because the catalog run itself was not executed and the real DingTalk client rendering remains external. The local synthetic browser oracle now covers the catalog precondition and oracle."
+  },
+  "notProven": [
+    "live DingTalk client rendering of the same task, approval and artifact surfaces",
+    "real enterprise approver identities, roles and authority changes delivered by DingTalk",
+    "live GLM, DingTalk, DWS or company MCP acceptance",
+    "the production deployment on port 64700 and the development PostgreSQL on port 64710",
+    "T116 full catalog acceptance or R03 and R32 completion"
+  ],
+  "statusUnchanged": {
+    "T116": "NOT_RUN",
+    "R03": "IN_PROGRESS",
+    "R32": "IN_PROGRESS",
+    "liveAcceptance": "BLOCKED_EXTERNAL"
+  }
+}

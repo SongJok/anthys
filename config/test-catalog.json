@@ -1919,8 +1919,9 @@
     "layer": "E2E",
     "precondition": "移动端/桌面端完整查看任务、审批与成果",
     "oracle": "按钮可操作、无关键溢出、状态一致，未授权直接URL拒绝",
-    "implementation": null,
-    "status": "NOT_RUN"
+    "implementation": "tests/browser/workbench-approval.spec.ts",
+    "status": "NOT_RUN",
+    "coverageNote": "真实 API + 隔离 PostgreSQL 的桌面/移动端浏览器用例：生成与受保护下载成果，待审批预览与批准，审批后动作/运行保持未执行，外域用户直接任务 URL 返回 404 且不显示任务。真实钉钉客户端仍待外部验收。"
   },
   {
     "id": "T117",
