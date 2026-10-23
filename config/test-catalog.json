@@ -2125,8 +2125,9 @@
     "layer": "E2E",
     "precondition": "空环境按交付脚本安装、迁移、构建、启动",
     "oracle": "可重复执行，步骤无隐含开发机依赖；报告真实结果",
-    "implementation": null,
-    "status": "NOT_RUN"
+    "implementation": "deploy/verify-delivery.sh",
+    "status": "NOT_RUN",
+    "coverageNote": "从 git archive 的已提交树（不含 .env/.secrets/node_modules/dist/.data）在临时 Compose 项目与备用端口运行真实 deploy/dev-up.sh：首次 94 秒完成构建、迁移与启动，116 条迁移全部应用，live/ready 健康，api/postgres/worker 运行；再次执行 36 秒且 ready 与 116 条不变，随后 down -v 清理。未使用开发机 .env、卷或提供方凭据；不证明生产发布、第二台物理主机或任何真实外部能力。"
   },
   {
     "id": "T130",

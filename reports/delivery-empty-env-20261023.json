@@ -1,0 +1,102 @@
+{
+  "status": "PASS",
+  "scope": "LOCAL_EMPTY_ENV_DELIVERY",
+  "live": false,
+  "generatedAt": "2026-10-23T01:52:09Z",
+  "source": {
+    "testedCommit": "5790fd92c2b803062aabe00f9a4c4956a814eefc",
+    "evidenceWorkingTree": true,
+    "files": {
+      "deploy/verify-delivery.sh": "b3d6f2db2919a0ef98dc2723e5779f7d90eb7d818758a959c096871ce45a3c80",
+      "deploy/compose/compose.dev.yml": "0347d7196003a2063b40f71472df54133a771b58ef237087b8c9f90babc041ec",
+      "config/test-catalog.json": "db0b4675b50082848c97b024b926672e6cb5481d2be6f55c011342193ecf5e1d",
+      "docs/04_TEST_ACCEPTANCE_AND_OPERATIONS.md": "87d49676f4ca7edccc1fbe78b7f487944faa8bc64bdc3a85c5e0a6366222acd6",
+      "reports/t129-delivery-latest.json": "bfc6972505597c51f7ecdebb60bfc4c7ea899aeab960eb6a704b16d32da56431"
+    }
+  },
+  "surface": {
+    "entry": "deploy/verify-delivery.sh extracts the committed tree with git archive into a temporary directory and runs the real deliverer deploy/dev-up.sh there",
+    "isolation": "compose.dev.yml now accepts ANTHYS_COMPOSE_PROJECT, ANTHYS_API_PORT and ANTHYS_PG_PORT (defaults anthys-dev, 64700, 64710), so the oracle booted a second stack under a temporary Compose project on 127.0.0.1:64800 and 127.0.0.1:64810 without touching the running dev stack",
+    "emptyEnvironment": "the archive contained no .env, .secrets, .data, node_modules or dist; deploy/dev-up.sh generated fresh random local secrets in the temporary tree, and the GLM/DingTalk secret files stayed empty, so no provider credential was used",
+    "teardown": "the oracle runs compose down -v --remove-orphans, removes the temporary image and directory, and the wrapper verified afterwards that the temporary project and image were gone, 64800/64810 were free, and the original anthys-dev stack still ran 4 services on 64700/64710"
+  },
+  "measurements": {
+    "environment": {
+      "platform": "Darwin",
+      "arch": "arm64",
+      "node": "v24.21.0",
+      "dockerServer": "29.2.1",
+      "dockerCompose": "5.0.2",
+      "apiPort": 64800,
+      "postgresPort": 64810,
+      "modelCalls": 0
+    },
+    "firstDeliveryRun": {
+      "command": "./deploy/dev-up.sh",
+      "seconds": 94,
+      "exitCode": 0,
+      "live": "ALIVE",
+      "ready": "READY",
+      "migrationsApplied": 116,
+      "expectedMigrations": 116,
+      "runningServices": ["api", "postgres", "worker"]
+    },
+    "repeatDeliveryRun": {
+      "command": "./deploy/dev-up.sh",
+      "seconds": 36,
+      "exitCode": 0,
+      "ready": "READY",
+      "migrationsApplied": 116
+    },
+    "comparison": "the pre-existing anthys-dev database on 64710 still held 114 migrations during this run, so the fresh stack really applied the full 116-row schema rather than reusing a developer volume"
+  },
+  "behavior": {
+    "cleanRoomInstall": "From the committed tree alone the delivery script generated local secrets, built the application image, applied all 116 migrations, started postgres, api and worker, and reported live ALIVE and ready READY.",
+    "repeatable": "A second identical invocation completed in 36 seconds with exit code 0, ready READY and the migration count unchanged at 116, showing the delivery path is re-runnable without duplicate migration or port/project conflicts.",
+    "noHiddenMachineState": "The tree under test was produced by git archive and the oracle asserted the absence of .env, .secrets, .data, node_modules and dist, so developer credentials, dependencies and build output could not satisfy the install.",
+    "cleanup": "Teardown removed the temporary Compose project, volumes and image, freed both alternate ports, and left the pre-existing anthys-dev stack running untouched."
+  },
+  "tests": {
+    "commands": [
+      "deploy/verify-delivery.sh",
+      "pnpm typecheck",
+      "pnpm lint",
+      "pnpm build",
+      "node --import tsx scripts/verify-requirements.ts --baseline",
+      "node --import tsx scripts/verify-requirements.ts",
+      "node scripts/scan-secrets.mjs"
+    ],
+    "oracle": {
+      "command": "deploy/verify-delivery.sh",
+      "exitCode": 0,
+      "report": "reports/t129-delivery-latest.json",
+      "reportCommitted": false,
+      "testedCommit": "5790fd92c2b803062aabe00f9a4c4956a814eefc"
+    },
+    "gates": {
+      "typecheck": "PASS",
+      "lint": "PASS",
+      "build": "PASS (116 migrations, contractHash 473b7415afaae98c2e384fa32e0da1dfe6d82b2ea24996c31f466f184d8efc94, databaseAccess false)",
+      "requirementsBaseline": "PASS (0 errors)",
+      "requirementsFull": "FAIL_PREEXISTING (45 errors: 36 R-items whose status stays IN_PROGRESS and 9 T-cases with no implementation file yet - T020 T069 T070 T082 T089 T090 T094 T096 T126; T129 left this list in this slice)",
+      "secretScan": "PASS (0 findings over the configured objects, 5 configured secrets)"
+    }
+  },
+  "evidence": {
+    "committedReport": "reports/delivery-empty-env-20261023.json",
+    "measurementFile": "reports/t129-delivery-latest.json (local-only, untracked by convention; sha256 bfc6972505597c51f7ecdebb60bfc4c7ea899aeab960eb6a704b16d32da56431)",
+    "docs": "docs/04_TEST_ACCEPTANCE_AND_OPERATIONS.md gains the 2026-10-23 T129 section with the commands, measured seconds, migration count, cleanup verification and BLOCKED_EXTERNAL boundary",
+    "catalog": "config/test-catalog.json T129 keeps status NOT_RUN and gains implementation deploy/verify-delivery.sh plus a coverageNote that disclaims production release and live capability proof"
+  },
+  "notProven": [
+    "Not a production release or a second physical host; the run is a local Docker Desktop empty-environment check with cached base images and registry access.",
+    "The 94 s and 36 s timings are observations, not performance commitments; layer caches and network speed affect them.",
+    "No live GLM, DingTalk, DWS or company MCP capability was configured or exercised; those remain BLOCKED_EXTERNAL.",
+    "Cross-platform installation (Linux, Windows), upgrade-in-place and rollback were not exercised."
+  ],
+  "statusUnchanged": {
+    "catalogT129": "NOT_RUN",
+    "requirementsR35R36": "IN_PROGRESS",
+    "liveAcceptance": "BLOCKED_EXTERNAL"
+  }
+}
