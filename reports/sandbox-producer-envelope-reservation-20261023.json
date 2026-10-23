@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "case": "T097-T099",
+  "date": "2026-10-23",
+  "status": "PASS",
+  "scope": "LOCAL_ISOLATED_POSTGRES_EXACT_CANDIDATE",
+  "live": false,
+  "baseCommit": "4b76e24",
+  "node": "v24.21.0",
+  "database": "127.0.0.1:64711/anthys_test (isolated synthetic)",
+  "files": {
+    "packages/sandbox/src/producer.ts": "9c98a5a2cc90efaf10c7b0d3686bbbdd9c67acfb71f53bc51c87f98c530a19aa",
+    "tests/unit/sandbox-producer.test.ts": "e782b38964980fea208f3bf0433b5f4ff3d391699fa12b75c350b2a0b56f995d",
+    "tests/integration/sandbox-broker-service.test.ts": "f5b348905b85c0d1a3948ddd6540d92842e6275b85b0befb99d9c0c56dbb94af",
+    "tests/integration/group-reminder-physical-send.test.ts": "56307dcc7b8c7193e74e4e4d4478d205fc8955858f3412a81ba17a48abd3c5a5",
+    "tests/support/backend-discovery-baseline.json": "0022a4451e4c6efb5e3e10b532cfb27d61493b3de9d448309172d553bc784d4d",
+    "config/requirements.json": "d0dc52c230892e7b62483c868c25c3c687f59b91793c51316bb6a938dab86aca",
+    "reports/vitest-latest.json": "c0a784812ee2d65a32acf272aa08c70fceacb5b0669620282b44fbbe38a6ccb0"
+  },
+  "behavior": {
+    "closedJobFirst": "The complete closed job (subject, language, limits, allowed output types, code and input bytes) is validated before any artifact is registered, so a bad limit, output type or subject cannot leave orphan artifacts.",
+    "abortPrecedence": "An already-aborted signal rejects with SANDBOX_BROKER_CLIENT_ABORTED before the nonce generator or clock is consumed and before any upload.",
+    "envelopeReservation": "Exactly one nonce and one signing instant are reserved and validated after the abort check and before the first artifact upload. A throwing generator, a non-string or schema-invalid nonce, and a negative, unsafe or lifetime-overflowing clock are rejected as SANDBOX_PRODUCER_CONFIGURATION_INVALID with zero artifact registrations and zero submissions.",
+    "singleEnvelope": "The reserved nonce and issuedAt are reused for the one signed OA_ANALYSIS_JOB_V1 envelope, so every uploaded artifact and the submission share the same pre-validated signing clock. The producer still submits once and never retries an ambiguous submission."
+  },
+  "tests": {
+    "target": {
+      "unit": {"file": "tests/unit/sandbox-producer.test.ts", "tests": 3, "passed": 3, "source": "targeted run and full suite"},
+      "integration": {"file": "tests/integration/sandbox-broker-service.test.ts", "tests": 8, "passed": 8, "source": "targeted run and full suite"},
+      "harness": {"file": "tests/integration/group-reminder-physical-send.test.ts", "tests": 10, "passed": 10, "command": "node scripts/run-tests.mjs vitest run tests/integration/group-reminder-physical-send.test.ts", "durationSeconds": 123.01}
+    },
+    "full": {
+      "command": "node scripts/run-tests.mjs vitest run",
+      "testFiles": {"total": 246, "passed": 246, "failed": 0},
+      "tests": {"total": 3391, "passed": 3391, "failed": 0},
+      "durationSeconds": 3363.54
+    },
+    "static": {
+      "typecheck": "node_modules/typescript/bin/tsc --noEmit passed with no diagnostics",
+      "eslint": "packages/sandbox/src/producer.ts, the unit and broker-service tests, and the DWS physical-send test passed"
+    }
+  },
+  "harness": "The DWS physical-send fixture receives explicit 120s test and hook budgets because each of its ten synthetic cold-OAuth cases runs 10.6-13.6s standalone and previously exceeded the global 20s/30s budgets under host load. Assertions are unchanged.",
+  "disclosure": "This is component-level local evidence on an isolated synthetic PostgreSQL cluster. T097/T098/T099 remain NOT_RUN as end-to-end acceptance cases and R21 remains IN_PROGRESS; live GLM, DingTalk, DWS and upstream company-MCP acceptance remains BLOCKED_EXTERNAL. No real database, provider credential, budget, deployment or enterprise message was used. The producer is not yet invoked by any application capability or job queue."
+}
