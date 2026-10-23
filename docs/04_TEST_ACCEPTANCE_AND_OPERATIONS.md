@@ -1700,3 +1700,7 @@ docs/02 与 `config/stages.json` 要求主分支保留 SBOM、许可证与依赖
 - `reports/dependency-audit.json`：`pnpm audit --json` 于 2026-10-23T03:23Z 查询注册表的结果，674 个依赖，info/low/moderate/high/critical 均为 0。
 
 边界：这三份产物只反映本机 node_modules 与当次注册表 advisory 快照；SBOM 不包含操作系统包、容器基础镜像或全局工具，制品镜像未被扫描；注册表审计不保证覆盖所有已披露或未披露漏洞，不能替代企业漏洞管理流程与镜像 CVE 扫描。该证据不改变任何 T 用例的 `NOT_RUN` 或 R 项的 `IN_PROGRESS` 状态。
+
+### 2026-10-23 移除 GitHub Actions 工作流（遵守本地测试约束）
+
+项目约束是不使用 GitHub Actions、测试在本地执行。仓库中仍保留随基线导入的 `.github/workflows/ci.yml`，其 `on: [push, pull_request]` 会在每次推送时触发 Actions，与本约束冲突，并会重复执行耗时的 coverage 与 self-dm 链。本切片删除该工作流，并从 `config/stages.json` 的 P00 模块清单移除该路径；本地验证入口（lint、typecheck、build、vitest、offline、E2E 与 self-dm）保持不变。删除工作流不改变任何验收结论、T 用例状态或 R 项状态。

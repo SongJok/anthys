@@ -36,8 +36,7 @@
       "pnpm-lock.yaml",
       "config",
       "scripts",
-      "deploy/images/app.Dockerfile",
-      ".github/workflows/ci.yml"
+      "deploy/images/app.Dockerfile"
     ],
     "migrations": [],
     "migrationReason": "P00 has no business schema; identity and subsequent schema migrations start in P01.",
