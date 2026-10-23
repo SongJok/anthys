@@ -1949,8 +1949,9 @@
     "layer": "CHAOS",
     "precondition": "外部支持幂等键，同一action重复请求",
     "oracle": "只产生一次外部业务对象；记录真实provider结果",
-    "implementation": null,
-    "status": "NOT_RUN"
+    "implementation": "tests/integration/action-idempotency.test.ts",
+    "status": "NOT_RUN",
+    "coverageNote": "Local synthetic T118 oracle over the isolated PostgreSQL 64711 cluster. A synthetic reviewed external write capability declares supportsIdempotency, persists exactly one durable business object per provider idempotency key, and is read back to VERIFIED through the authenticated approval workflow. The gateway derives the provider key from the reviewed action scope (run, capability and args hash), so six replays of the same approved action all receive the recorded OK/VERIFIED result while the adapter is invoked exactly once, exactly one external object exists, only one ledger row exists and only one tool call is consumed. A different argument set becomes a separate action that cannot reuse the prior approval or provider key. A mutation check that replaces the stable args hash in the action key with a fresh random UUID makes both tests fail because replays turn back into unapproved actions. Real upstream provider idempotency headers and live acceptance remain NOT_RUN."
   },
   {
     "id": "T119",

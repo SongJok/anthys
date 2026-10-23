@@ -1,0 +1,100 @@
+{
+  "schemaVersion": 1,
+  "case": "T118",
+  "date": "2026-10-23",
+  "status": "PASS",
+  "scope": "LOCAL_SYNTHETIC_PROVIDER_IDEMPOTENCY",
+  "live": false,
+  "baseCommit": "8e5e317570112a71c15b4bf9839023d5e0c5d742",
+  "files": {
+    "tests/integration/action-idempotency.test.ts": "be19aafe3434a3cfabc32b542e88ff5e97db42159a246621a22c0f5898ded9de",
+    "config/test-catalog.json": "6b1a08d34966688d32fd19c69960898c4f7056ee5cc00d0ee0a0d142404ffcb9",
+    "tests/support/backend-discovery-baseline.json": "08447ad455e501420f1aef2b6e20c58b4b4735bbe1054b1315ed4a8fa4cca879",
+    "docs/04_TEST_ACCEPTANCE_AND_OPERATIONS.md": "a641c15e41ff16cb9c030239be4bd2df626b07501858559b8fba35764b94ba87",
+    "packages/gateway/src/index.ts": "3c5a947f05f368ab55907cd437a5e621b2e037e489ab698a5ba0cc801471d9ad",
+    "tests/integration/gateway.test.ts": "b6e28d9476e9fa0104f014602f86a039ad67c7f19ab7b3a89b22f06d6eccde44"
+  },
+  "surface": {
+    "entry": "Gateway.execute on an isolated PostgreSQL 64711 cluster with a seeded tenant and the authenticated HTTP approval workflow",
+    "capability": "Synthetic reviewed external write (provider MCP, risk SHARED_WRITE, supportsIdempotency true)",
+    "providerBehavior": "Persists one durable business object per provider idempotency key in the outbox and reads it back to VERIFIED",
+    "approval": "approveViaApi over the real API route, CSRF check and one-time decision"
+  },
+  "behavior": {
+    "replay": "Six executions of the same approved action with identical arguments all return the recorded OK/VERIFIED provider receipt while the adapter is invoked exactly once.",
+    "singleObject": "Exactly one external object, one VERIFIED ledger row, one consumed approval and one consumed tool call exist after the initial execution and six replays.",
+    "stableKey": "The provider receives the same key as the ledger's logical_action_key, derived from the run, capability and reviewed args hash rather than regenerated per request.",
+    "differentArgs": "An execution with a different argument value becomes a separate action that requires its own approval and cannot reuse the prior provider key; no second external object is created."
+  },
+  "tests": {
+    "target": {
+      "file": "tests/integration/action-idempotency.test.ts",
+      "tests": 2,
+      "passed": 2,
+      "cases": [
+        "replaying the same approved action reuses one provider idempotency key and one external object",
+        "a different argument set is a separate action and cannot reuse the prior approval or provider key"
+      ]
+    },
+    "regression": {
+      "files": [
+        "tests/integration/gateway.test.ts"
+      ],
+      "tests": 11,
+      "passed": 11
+    },
+    "isolation": {
+      "file": "tests/unit/test-isolation.test.ts",
+      "tests": 8,
+      "passed": 8,
+      "note": "Original 90 project files plus the approved added files; the new T118 file is listed in approvedAddedFiles."
+    }
+  },
+  "mutationCheck": [
+    {
+      "mutation": "packages/gateway/src/index.ts: replace the stable args hash inside the logical action key with a fresh random UUID per request",
+      "observed": "Both tests fail: a replay no longer resolves to the approved action and returns NEEDS_APPROVAL instead of the recorded OK/VERIFIED result.",
+      "restored": true,
+      "restoredFileHash": "3c5a947f05f368ab55907cd437a5e621b2e037e489ab698a5ba0cc801471d9ad"
+    }
+  ],
+  "gates": {
+    "typecheck": "PASS",
+    "lint": "PASS",
+    "build": "PASS",
+    "schemaContract": {
+      "status": "PASS",
+      "migrations": 116,
+      "contractHash": "473b7415afaae98c2e384fa32e0da1dfe6d82b2ea24996c31f466f184d8efc94"
+    },
+    "capabilityOutputContracts": {
+      "status": "PASS",
+      "capabilities": 13
+    },
+    "secretScan": {
+      "status": "PASS",
+      "findings": []
+    },
+    "requirementsBaseline": "PASS",
+    "requirementsFull": {
+      "status": "FAIL_PREEXISTING",
+      "errors": 49,
+      "note": "36 R items remain IN_PROGRESS and 13 catalog cases remain NOT_RUN; T118 is no longer among the errors (previously 50)."
+    }
+  },
+  "catalog": {
+    "implementation": "tests/integration/action-idempotency.test.ts",
+    "status": "NOT_RUN"
+  },
+  "notProven": [
+    "The synthetic provider is not a real upstream system; no real provider idempotency header or duplicate-suppression behavior was exercised.",
+    "No live DingTalk, GLM, DWS or company-MCP request was made.",
+    "The test does not certify crash recovery between provider commit and ledger write beyond the existing synthetic checkpoint oracles.",
+    "T118 remains NOT_RUN and R31 remains IN_PROGRESS; live acceptance remains BLOCKED_EXTERNAL."
+  ],
+  "statusUnchanged": {
+    "T118": "NOT_RUN",
+    "R31": "IN_PROGRESS",
+    "liveAcceptance": "BLOCKED_EXTERNAL"
+  }
+}

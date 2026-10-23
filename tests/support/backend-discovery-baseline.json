@@ -209,6 +209,7 @@
   "knownExcludedOnlyByCLI": "tests/security/gateway-matrix.test.ts",
   "approvedAddedFiles": [
     "tests/contract/dm-identity-process.test.ts",
+    "tests/integration/action-idempotency.test.ts",
     "tests/integration/advice-without-release.test.ts",
     "tests/integration/analysis-sandbox.test.ts",
     "tests/integration/artifact-format-export.test.ts",
