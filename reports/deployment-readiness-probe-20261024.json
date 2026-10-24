@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "case": "LOCAL_DOCKER_DEPLOYMENT_READINESS_PROBE",
-  "generatedAt": "2026-10-24T03:32:50.910Z",
+  "generatedAt": "2026-10-24T04:35:40.492Z",
   "status": "PASS",
   "live": false,
   "liveProviderCalls": 0,

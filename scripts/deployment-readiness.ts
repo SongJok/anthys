@@ -2,16 +2,14 @@ import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {createHash} from 'node:crypto';
 import {mkdir,readFile,writeFile} from 'node:fs/promises';
+import {socketIsolation,brokerCredentialLeaks as leakNames,endpointFailures as failingEndpoints,heartbeatHealthy,migrationAgreement,overallStatus,credentialPattern,type Check,type Result} from './readiness-checks.js';
 const exec=promisify(execFile);
 const composeFile=process.env['ANTHYS_READINESS_COMPOSE_FILE']??'deploy/compose/compose.dev.yml';
 const envFile=process.env['ANTHYS_READINESS_ENV_FILE']??'.env';
 const prodFile=process.env['ANTHYS_READINESS_PROD_COMPOSE_FILE']??'deploy/compose/compose.prod.yml';
 const profiles=(process.env['ANTHYS_READINESS_PROFILES']??'sandbox').split(',').map(s=>s.trim()).filter(Boolean);
 const services=['api','postgres','worker','sandbox-broker'] as const;
-const credentialPattern=/dingtalk|glm|dws|company/i;
 const maxHeartbeatAgeMs=30_000;
-type Result='PASS'|'FAIL'|'ABSENT';
-type Check={id:string;result:Result;detail:string;evidence:Record<string,unknown>};
 const checks:Check[]=[];
 const check=(id:string,result:Result,detail:string,evidence:Record<string,unknown>={}):Check=>{const c={id,result,detail,evidence};checks.push(c);return c;};
 async function run(command:string,args:string[],env?:NodeJS.ProcessEnv):Promise<string>{
@@ -41,7 +39,7 @@ const brokerContract=containers['sandbox-broker']?await contractInContainer('san
 let databaseMigrations:number|null=null,lastMigration:string|null=null;
 try{lastMigration=(await psql('SELECT name FROM public.schema_migrations ORDER BY name DESC LIMIT 1')).trim()||null;databaseMigrations=Number((await psql('SELECT count(*) FROM public.schema_migrations')).trim());}catch{/* reported below */}
 check('imageSchemaContract',apiContract&&brokerContract?'PASS':'FAIL',apiContract&&brokerContract?`The api image and the broker image both embed the ${apiContract.count}-migration contract.`:'The running images do not expose a readable required-migrations contract.',{api:apiContract,broker:brokerContract});
-const contractMatch=apiContract&&brokerContract&&databaseMigrations!==null&&apiContract.count===databaseMigrations&&brokerContract.count===databaseMigrations&&lastMigration===apiContract.last;
+const contractMatch=migrationAgreement(apiContract,brokerContract,databaseMigrations,lastMigration);
 check('migrationContractMatch',contractMatch?'PASS':'FAIL',contractMatch?`The image contract (${apiContract!.count}), the broker image contract (${brokerContract!.count}) and the database (${databaseMigrations}) agree on the exact migration set.`:`The image contract (${apiContract?.count??'unknown'}), the broker image contract (${brokerContract?.count??'unknown'}) and the database (${databaseMigrations??'unknown'}) disagree.`,{image:apiContract?.count??null,brokerImage:brokerContract?.count??null,database:databaseMigrations,lastMigration});
 let queueVersion:string|null=null,publicTables:number|null=null;
 try{queueVersion=(await psql('SELECT version FROM oa_queue.version')).trim();}catch{/* reported below */}
@@ -65,16 +63,14 @@ try{
  const raw=(await compose(['exec','-T','sandbox-broker','node','-e',"fetch('http://127.0.0.1:8092/health/ready').then(async r=>console.log(JSON.stringify({status:r.status,body:await r.text()}))).catch(()=>console.log(JSON.stringify({error:'BROKER_UNREACHABLE'})))"])).trim();
  endpoints['broker_ready']=JSON.parse(raw) as {status:number;body:unknown};
 }catch{endpoints['broker_ready']={error:'BROKER_PROBE_FAILED'};}
-const endpointFailures=Object.entries(endpoints).filter(([,value])=>'error'in value||(value as {status:number}).status!==200);
-check('healthEndpoints',endpointFailures.length?'FAIL':'PASS',endpointFailures.length?`Unhealthy endpoints: ${endpointFailures.map(([name])=>name).join(', ')}.`:'The api live/ready endpoints and the broker readiness endpoint all returned 200.',endpoints);
-const socketMounts=Object.fromEntries(Object.entries(containers).filter(([,c])=>c).map(([service,c])=>[service,c!.mounts.filter(m=>m.target==='/var/run/docker.sock'||m.source==='/var/run/docker.sock').map(m=>m.target)]));
-const socketOwners=Object.entries(socketMounts).filter(([,targets])=>targets.length).map(([service])=>service);
-const socketIsolated=socketOwners.length===1&&socketOwners[0]==='sandbox-broker';
-check('dockerSocketIsolation',socketIsolated?'PASS':'FAIL',socketIsolated?'Only sandbox-broker mounts /var/run/docker.sock; the api, worker and postgres containers mount no socket.':`Docker socket mounts found on: ${socketOwners.join(', ')||'none'}.`,socketMounts);
+const endpointFailures=failingEndpoints(endpoints);
+check('healthEndpoints',endpointFailures.length?'FAIL':'PASS',endpointFailures.length?`Unhealthy endpoints: ${endpointFailures.join(', ')}.`:'The api live/ready endpoints and the broker readiness endpoint all returned 200.',endpoints);
+const socket=socketIsolation(containers);
+check('dockerSocketIsolation',socket.isolated?'PASS':'FAIL',socket.isolated?'Only sandbox-broker mounts /var/run/docker.sock; the api, worker and postgres containers mount no socket.':`Docker socket mounts found on: ${socket.owners.join(', ')||'none'}.`,socket.mounts);
 const broker=containers['sandbox-broker'];
 const brokerSecretMounts=broker?broker.mounts.filter(m=>m.target.startsWith('/run/secrets/')).map(m=>m.target.replace('/run/secrets/','')).sort():[];
 const brokerEnvNames=broker?broker.envNames:[];
-const brokerCredentialLeaks=[...brokerSecretMounts,...brokerEnvNames].filter(name=>credentialPattern.test(name));
+const brokerCredentialLeaks=leakNames(brokerSecretMounts,brokerEnvNames);
 check('brokerCredentialBoundary',broker?brokerCredentialLeaks.length===0?'PASS':'FAIL':'ABSENT',broker?brokerCredentialLeaks.length===0?'The broker holds only its runtime database URL, master key and broker auth/config/public key; no DingTalk, GLM, DWS or company-MCP credential name is present.':`The broker exposes credential-bearing names: ${brokerCredentialLeaks.join(', ')}.`:'The sandbox broker is not running, so its credential boundary was not probed.',{secretsMounted:brokerSecretMounts,envNames:brokerEnvNames});
 if(containers.worker){
  let heartbeat:Record<string,unknown>={};
@@ -84,7 +80,7 @@ if(containers.worker){
   await compose(['exec','-T','worker','node','-e',"require('fs').rmSync('/tmp/stale-heartbeat',{force:true})"]);
   heartbeat=verdict;
  }catch(error){heartbeat={error:String((error as Error).message)};}
- const ok=heartbeat['live']===true&&heartbeat['stale']===false&&heartbeat['missing']===false;
+ const ok=heartbeatHealthy(heartbeat);
  check('workerHeartbeat',ok?'PASS':'FAIL',ok?'The worker heartbeat module inside the image reports the live heartbeat as fresh and both a two-minute-old and a missing heartbeat as stale.':'The heartbeat predicate inside the running image did not separate the live heartbeat from the stale and missing controls.',{...heartbeat,maxAgeMs:maxHeartbeatAgeMs,probe:"require('/app/dist/packages/runtime/src/worker-heartbeat.js')"});
 }else check('workerHeartbeat','ABSENT','The worker is not running, so the heartbeat was not probed.',{});
 const prodRender:{profiles:Record<string,'PASS'|'FAIL'>;failClosed:'PASS'|'FAIL'}={profiles:{},failClosed:'PASS'};
@@ -96,12 +92,12 @@ for(const profile of ['','dingtalk','scoped','dws','sandbox']){
 try{await run('docker',['compose','-f',prodFile,'config','--quiet'],{ANTHYS_APP_IMAGE:'',ANTHYS_SECRETS_DIR:'',ANTHYS_APP_ORIGIN:''});prodRender.failClosed='FAIL';}catch{prodRender.failClosed='PASS';}
 const prodOk=Object.values(prodRender.profiles).every(v=>v==='PASS')&&prodRender.failClosed==='PASS';
 check('prodComposeRender',prodOk?'PASS':'FAIL',prodOk?`The production stack renders for every profile and still fails closed when the required variables are missing.`:'The production stack failed to render for at least one profile or no longer fails closed.',prodRender as unknown as Record<string,unknown>);
-const providerEnvNames=containers.api?containers.api.envNames.filter(name=>/dingtalk|glm|dws|company/i.test(name)):[];
+const providerEnvNames=containers.api?containers.api.envNames.filter(name=>credentialPattern.test(name)):[];
 const report={
  schemaVersion:1,
  case:'LOCAL_DOCKER_DEPLOYMENT_READINESS_PROBE',
  generatedAt:new Date().toISOString(),
- status:checks.every(c=>c.result==='PASS')?'PASS':'FAIL',
+ status:overallStatus(checks),
  live:false,
  liveProviderCalls:0,
  compose:{file:composeFile,envFile,profiles,prodFile,fileSha256:await sha256(composeFile),prodFileSha256:await sha256(prodFile)},

@@ -1828,3 +1828,27 @@ docs/02 与 `config/stages.json` 要求主分支保留 SBOM、许可证与依赖
 边界：本节只补本地 oracle，不改产品代码与数据口径；4.8 统计模板、口径与数据权限仍属二期。GLM、钉钉、DWS 与公司 MCP 的 live 验收继续为 `BLOCKED_EXTERNAL`，130 项 T 用例与 36 项 R 项状态未因此改变，`config/stages.json` 中 270 条历史证据引用仍然缺失、不予伪造。
 
 **全量结果与门禁复核（均为本地执行，HEAD 仍为 `5b86d51`）。** `node scripts/run-tests.mjs vitest run` 退出码 0，250 个测试文件全部 passed，3418/3418 用例通过、0 失败、0 跳过（报告计数 `numTotalTestSuites=286 passed=286`、`numTotalTests=3418 passed=3418`），耗时 3171.94 s，开始时间 `2026-10-24T03:38:29Z`；`reports/vitest-latest.json` 的 `success` 为 `true`。相比上一轮 3408 项，新增的 10 项正是本节两个 oracle（4 + 6），其余用例与判定未变。`node --import tsx scripts/verify-requirements.ts --baseline` 返回 PASS、退出码 0；全量模式返回 FAIL、44 条错误，恰为 36 项 R 的 `implementation incomplete` 与 8 项 T 的 `test implementation absent`（T020/T069/T070/T082 需真实外部资产，T089/T090/T094/T096 属二期 4.8）。`node --import tsx scripts/verify-release.ts` 以 `INVALID_OR_MISSING_VERIFICATION_REPORT` fail-closed，`reports/enterprise-verification.json` 不存在。
+
+### 2026-10-24 部署就绪探针的本地 oracle（不改变 T/R 状态）
+
+`scripts/deployment-readiness.ts` 的 11 项检查此前只有“在真实栈上跑一次”的证据，判定逻辑本身不可单测：若某个谓词退化成恒真，探针仍会输出 PASS，交付门禁就会失效。本轮把纯判定函数抽到 `scripts/readiness-checks.ts`（`socketIsolation`、`brokerCredentialLeaks`、`endpointFailures`、`heartbeatHealthy`、`migrationAgreement`、`overallStatus` 与共用的凭据名正则），探针改为调用同一份实现，行为与文案、证据字段保持原样；新增 `tests/unit/readiness-checks.test.ts`（6 项）作为本地 oracle：
+
+- socket 隔离只在 `sandbox-broker` 是唯一挂载方时通过；任意其它服务也挂载、或没有任何挂载，都判失败并列出实际归属服务。
+- broker 凭据边界按 secret 挂载名与环境变量名匹配 `dingtalk|glm|dws|company`，命中即逐项列出；仅数据库 URL、主密钥、broker 自身认证与公钥名时不报越界。
+- 健康端点只接受 200：503 与传输错误都会进入失败列表并保留端点名。
+- 心跳判定要求 `live=true`、`stale=false`、`missing=false`；陈旧控制项为真、缺失控制项为真、live 为假或整段为错误对象时一律失败。
+- 迁移契约要求 api 镜像、broker 镜像与数据库三方数量相等且末项迁移名一致；任一镜像契约缺失或数据库计数不可读即失败。
+- 汇总状态只有全部检查为 PASS 才为 PASS，出现 `FAIL` 或 `ABSENT` 均为 FAIL。
+
+定向执行为 6/6 通过，与发现守卫合并执行为 14/14 通过；`tsc --noEmit` 与 `eslint`（三个文件）退出码均为 0；新用例文件已登记进发现基线（161 条批准新增、0 重复、原始 90 条不变）。抽取后在同一运行中的本地 Compose 栈上重跑 `npm run operations:readiness`，11 项仍全部 PASS（`reports/deployment-readiness-probe-20261024.json`，`generatedAt=2026-10-24T04:35:40.492Z`），说明重构没有改变探针结论。
+
+边界：本节只补探针自身的本地 oracle，不改任何检查项、阈值或产品代码。探针仍只做回环/容器内 HTTP 与 PostgreSQL 查询；GLM、钉钉、DWS 与公司 MCP 的 live 验收继续为 `BLOCKED_EXTERNAL`，130 项 T 用例与 36 项 R 项状态未因此改变，`config/stages.json` 中 270 条历史证据引用仍然缺失、不予伪造。
+
+**全量结果与门禁复核（均为本地执行，基线提交 `bed5d06` 加本轮改动，提交后即 HEAD）**
+
+- 全量 vitest：`node scripts/run-tests.mjs vitest run`，退出码 0；`reports/vitest-latest.json` 记录 `success=true`、`numTotalTests=3424`、`numPassedTests=3424`、`numFailedTests=0`、`numPendingTests=0`、`numTotalTestSuites=287`、`testResults=251`；终端汇总为 `Test Files 251 passed (251)`、`Tests 3424 passed (3424)`、`Start at 12:35:46`、`Duration 3112.13s`。该文件是本轮唯一一次全量写入，未被定向运行覆盖。
+- baseline 门禁：`node --import tsx scripts/verify-requirements.ts --baseline` 退出码 0，输出 `{"mode":"BASELINE_INTEGRITY_ONLY","status":"PASS","errors":[]}`。
+- 全量门禁：`node --import tsx scripts/verify-requirements.ts` 退出码 1，输出 `status=FAIL`、`errors=44`，按文本分类恰为 36 条 `implementation incomplete`（R 项仍 IN_PROGRESS）与 8 条 `test implementation absent`（T089/T090/T094/T096 属二期 4.8；T020/T069/T070/T082 需真实外部资产）。门禁未做任何放宽。
+- 发布门禁：`node --import tsx scripts/verify-release.ts` 退出码 1，输出 `profile=ENTERPRISE_DWS`、`status=FAIL`、`reasons=["INVALID_OR_MISSING_VERIFICATION_REPORT"]`；`reports/enterprise-verification.json` 仍不存在，fail-closed 符合预期。
+
+因此本轮的“绿”仅指本地 vitest 全绿与三项门禁按设计表现；一期交付仍为 `BLOCKED_EXTERNAL`，T/R 计数与 270 条缺失证据引用的声明不变。
