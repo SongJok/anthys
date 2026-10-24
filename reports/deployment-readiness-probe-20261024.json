@@ -1,0 +1,389 @@
+{
+  "schemaVersion": 1,
+  "case": "LOCAL_DOCKER_DEPLOYMENT_READINESS_PROBE",
+  "generatedAt": "2026-10-24T03:32:50.910Z",
+  "status": "PASS",
+  "live": false,
+  "liveProviderCalls": 0,
+  "compose": {
+    "file": "deploy/compose/compose.dev.yml",
+    "envFile": ".env",
+    "profiles": [
+      "sandbox"
+    ],
+    "prodFile": "deploy/compose/compose.prod.yml",
+    "fileSha256": "7111c717904376a7577b02bed4378561472b605eca25571a0b3d1790adb25c9d",
+    "prodFileSha256": "738206b03a1a4d4e2f111cd18d727ba538729c597968e1ce543a7510dcde585d"
+  },
+  "source": {
+    "workerHeartbeatSha256": "f7fa2a7a804df9e7e072e213c066328319c5fac282e9d13f384a5cd213f5745e",
+    "workerMainSha256": "b0aca969e51dde80278365ea0cb5ba050bc6159e1f929644cc284f718beaa0f9"
+  },
+  "services": {
+    "api": {
+      "state": "running",
+      "health": "healthy",
+      "user": "10001:10001",
+      "image": "anthys-app:dev",
+      "mountTargets": [
+        "/data",
+        "/run/company-mcp",
+        "/run/secrets/app_master_key",
+        "/run/secrets/database_url",
+        "/run/secrets/dingtalk_client_secret",
+        "/run/secrets/glm_api_key",
+        "/run/secrets/queue_database_url",
+        "/run/secrets/runtime_database_url",
+        "/run/secrets/session_secret"
+      ],
+      "envNames": [
+        "APP_ENV",
+        "APP_MASTER_KEY_FILE",
+        "APP_ORIGIN",
+        "ATTACHMENT_DOWNLOAD_HOSTS",
+        "BUDGET_POLICY_FILE",
+        "COMPANY_DATA_MCP_CONFIG_FILE",
+        "COMPANY_LOGS_MCP_CONFIG_FILE",
+        "COMPANY_MCP_CONFIG_FILE",
+        "DATABASE_URL_FILE",
+        "DINGTALK_CARD_TEMPLATE_FILE",
+        "DINGTALK_CARD_TEMPLATE_ID",
+        "DINGTALK_CLIENT_ID",
+        "DINGTALK_CLIENT_SECRET_FILE",
+        "DINGTALK_CORP_ID",
+        "DINGTALK_REPLY_ONLY",
+        "DINGTALK_ROBOT_CODE",
+        "DINGTALK_TENANT_ID",
+        "DWS_ENABLED",
+        "DWS_RUNNER_AUTH_KEY_FILE",
+        "DWS_RUNNER_CONFIG_FILE",
+        "DWS_RUNNER_URL",
+        "FILE_STORE_ROOT",
+        "GLM_API_KEY_FILE",
+        "GLM_BASE_URL",
+        "GLM_MODEL",
+        "HOME",
+        "HOST",
+        "LIVE_TEST_ENABLED",
+        "MOCK_PROVIDERS",
+        "NODE_VERSION",
+        "PATH",
+        "PORT",
+        "PRIVATE_MEMORY_MODEL_POLICY_FILE",
+        "QUEUE_DATABASE_URL_FILE",
+        "RELEASE_PROFILE",
+        "RUNTIME_DATABASE_URL_FILE",
+        "SANDBOX_ENABLED",
+        "SESSION_SECRET_FILE",
+        "TENANT_BINDINGS_FILE",
+        "WORKER_SCOPE_FILE",
+        "YARN_VERSION"
+      ]
+    },
+    "postgres": {
+      "state": "running",
+      "health": "healthy",
+      "user": "",
+      "image": "postgres:17-bookworm@sha256:3645570cccdfa447589da9f57dd740faa29b30938e861289a5574b6ca6b03826",
+      "mountTargets": [
+        "/run/secrets/pg_admin_password",
+        "/var/lib/postgresql/data"
+      ],
+      "envNames": [
+        "GOSU_VERSION",
+        "LANG",
+        "PATH",
+        "PGDATA",
+        "PG_MAJOR",
+        "PG_VERSION",
+        "POSTGRES_DB",
+        "POSTGRES_INITDB_ARGS",
+        "POSTGRES_PASSWORD_FILE",
+        "POSTGRES_USER"
+      ]
+    },
+    "worker": {
+      "state": "running",
+      "health": "healthy",
+      "user": "10001:10001",
+      "image": "anthys-app:dev",
+      "mountTargets": [
+        "/data",
+        "/run/company-mcp",
+        "/run/secrets/app_master_key",
+        "/run/secrets/database_url",
+        "/run/secrets/dingtalk_client_secret",
+        "/run/secrets/glm_api_key",
+        "/run/secrets/queue_database_url",
+        "/run/secrets/runtime_database_url",
+        "/run/secrets/session_secret"
+      ],
+      "envNames": [
+        "APP_ENV",
+        "APP_MASTER_KEY_FILE",
+        "APP_ORIGIN",
+        "ATTACHMENT_DOWNLOAD_HOSTS",
+        "BUDGET_POLICY_FILE",
+        "COMPANY_DATA_MCP_CONFIG_FILE",
+        "COMPANY_LOGS_MCP_CONFIG_FILE",
+        "COMPANY_MCP_CONFIG_FILE",
+        "DATABASE_URL_FILE",
+        "DINGTALK_CARD_TEMPLATE_FILE",
+        "DINGTALK_CARD_TEMPLATE_ID",
+        "DINGTALK_CLIENT_ID",
+        "DINGTALK_CLIENT_SECRET_FILE",
+        "DINGTALK_CORP_ID",
+        "DINGTALK_REPLY_ONLY",
+        "DINGTALK_ROBOT_CODE",
+        "DINGTALK_TENANT_ID",
+        "DWS_ENABLED",
+        "DWS_RUNNER_AUTH_KEY_FILE",
+        "DWS_RUNNER_CONFIG_FILE",
+        "DWS_RUNNER_URL",
+        "FILE_STORE_ROOT",
+        "GLM_API_KEY_FILE",
+        "GLM_BASE_URL",
+        "GLM_MODEL",
+        "HOME",
+        "HOST",
+        "LIVE_TEST_ENABLED",
+        "MOCK_PROVIDERS",
+        "NODE_VERSION",
+        "PATH",
+        "PORT",
+        "PRIVATE_MEMORY_MODEL_POLICY_FILE",
+        "QUEUE_DATABASE_URL_FILE",
+        "RELEASE_PROFILE",
+        "RUNTIME_DATABASE_URL_FILE",
+        "SANDBOX_ENABLED",
+        "SESSION_SECRET_FILE",
+        "TENANT_BINDINGS_FILE",
+        "WORKER_HEARTBEAT_FILE",
+        "WORKER_SCOPE_FILE",
+        "YARN_VERSION"
+      ]
+    },
+    "sandbox-broker": {
+      "state": "running",
+      "health": "healthy",
+      "user": "10001:10001",
+      "image": "anthys-sandbox-broker:dev",
+      "mountTargets": [
+        "/data/artifacts",
+        "/run/anthys-policies",
+        "/run/secrets/app_master_key",
+        "/run/secrets/runtime_database_url",
+        "/run/secrets/sandbox_broker_auth_key",
+        "/run/secrets/sandbox_broker_config",
+        "/run/secrets/sandbox_broker_public_key",
+        "/var/lib/anthys-sandbox",
+        "/var/run/docker.sock"
+      ],
+      "envNames": [
+        "APP_ENV",
+        "APP_MASTER_KEY_FILE",
+        "DATABASE_URL_FILE",
+        "HOME",
+        "HOST",
+        "NODE_VERSION",
+        "PATH",
+        "SANDBOX_BROKER_AUTH_KEY_FILE",
+        "YARN_VERSION"
+      ]
+    }
+  },
+  "api": {
+    "origin": "http://127.0.0.1:64700",
+    "providerEnvNamesPresent": [
+      "COMPANY_DATA_MCP_CONFIG_FILE",
+      "COMPANY_LOGS_MCP_CONFIG_FILE",
+      "COMPANY_MCP_CONFIG_FILE",
+      "DINGTALK_CARD_TEMPLATE_FILE",
+      "DINGTALK_CARD_TEMPLATE_ID",
+      "DINGTALK_CLIENT_ID",
+      "DINGTALK_CLIENT_SECRET_FILE",
+      "DINGTALK_CORP_ID",
+      "DINGTALK_REPLY_ONLY",
+      "DINGTALK_ROBOT_CODE",
+      "DINGTALK_TENANT_ID",
+      "DWS_ENABLED",
+      "DWS_RUNNER_AUTH_KEY_FILE",
+      "DWS_RUNNER_CONFIG_FILE",
+      "DWS_RUNNER_URL",
+      "GLM_API_KEY_FILE",
+      "GLM_BASE_URL",
+      "GLM_MODEL"
+    ],
+    "note": "Names only; no secret value is recorded. Presence of configuration is not live acceptance."
+  },
+  "checks": [
+    {
+      "id": "servicesPresent",
+      "result": "PASS",
+      "detail": "api, postgres, worker and sandbox-broker are all running.",
+      "evidence": {
+        "running": [
+          "api",
+          "postgres",
+          "worker",
+          "sandbox-broker"
+        ],
+        "absent": []
+      }
+    },
+    {
+      "id": "serviceHealth",
+      "result": "PASS",
+      "detail": "Every inspected container reports health=healthy.",
+      "evidence": {
+        "health": {
+          "api": "healthy",
+          "postgres": "healthy",
+          "worker": "healthy",
+          "sandbox-broker": "healthy"
+        }
+      }
+    },
+    {
+      "id": "imageSchemaContract",
+      "result": "PASS",
+      "detail": "The api image and the broker image both embed the 116-migration contract.",
+      "evidence": {
+        "api": {
+          "count": 116,
+          "last": "116_company_data_template_lifecycle.sql",
+          "hash": "473b7415afaae98c2e384fa32e0da1dfe6d82b2ea24996c31f466f184d8efc94"
+        },
+        "broker": {
+          "count": 116,
+          "last": "116_company_data_template_lifecycle.sql",
+          "hash": "473b7415afaae98c2e384fa32e0da1dfe6d82b2ea24996c31f466f184d8efc94"
+        }
+      }
+    },
+    {
+      "id": "migrationContractMatch",
+      "result": "PASS",
+      "detail": "The image contract (116), the broker image contract (116) and the database (116) agree on the exact migration set.",
+      "evidence": {
+        "image": 116,
+        "brokerImage": 116,
+        "database": 116,
+        "lastMigration": "116_company_data_template_lifecycle.sql"
+      }
+    },
+    {
+      "id": "queueSchema",
+      "result": "PASS",
+      "detail": "oa_queue.version = 46.",
+      "evidence": {
+        "version": "46"
+      }
+    },
+    {
+      "id": "publicTables",
+      "result": "PASS",
+      "detail": "The public schema holds 133 tables.",
+      "evidence": {
+        "tables": 133
+      }
+    },
+    {
+      "id": "healthEndpoints",
+      "result": "PASS",
+      "detail": "The api live/ready endpoints and the broker readiness endpoint all returned 200.",
+      "evidence": {
+        "api_live": {
+          "status": 200,
+          "body": {
+            "data": {
+              "status": "ALIVE"
+            }
+          }
+        },
+        "api_ready": {
+          "status": 200,
+          "body": {
+            "data": {
+              "status": "READY"
+            }
+          }
+        },
+        "broker_ready": {
+          "status": 200,
+          "body": "{\"status\":\"READY\"}"
+        }
+      }
+    },
+    {
+      "id": "dockerSocketIsolation",
+      "result": "PASS",
+      "detail": "Only sandbox-broker mounts /var/run/docker.sock; the api, worker and postgres containers mount no socket.",
+      "evidence": {
+        "api": [],
+        "postgres": [],
+        "worker": [],
+        "sandbox-broker": [
+          "/var/run/docker.sock"
+        ]
+      }
+    },
+    {
+      "id": "brokerCredentialBoundary",
+      "result": "PASS",
+      "detail": "The broker holds only its runtime database URL, master key and broker auth/config/public key; no DingTalk, GLM, DWS or company-MCP credential name is present.",
+      "evidence": {
+        "secretsMounted": [
+          "app_master_key",
+          "runtime_database_url",
+          "sandbox_broker_auth_key",
+          "sandbox_broker_config",
+          "sandbox_broker_public_key"
+        ],
+        "envNames": [
+          "APP_ENV",
+          "APP_MASTER_KEY_FILE",
+          "DATABASE_URL_FILE",
+          "HOME",
+          "HOST",
+          "NODE_VERSION",
+          "PATH",
+          "SANDBOX_BROKER_AUTH_KEY_FILE",
+          "YARN_VERSION"
+        ]
+      }
+    },
+    {
+      "id": "workerHeartbeat",
+      "result": "PASS",
+      "detail": "The worker heartbeat module inside the image reports the live heartbeat as fresh and both a two-minute-old and a missing heartbeat as stale.",
+      "evidence": {
+        "live": true,
+        "stale": false,
+        "missing": false,
+        "maxAgeMs": 30000,
+        "probe": "require('/app/dist/packages/runtime/src/worker-heartbeat.js')"
+      }
+    },
+    {
+      "id": "prodComposeRender",
+      "result": "PASS",
+      "detail": "The production stack renders for every profile and still fails closed when the required variables are missing.",
+      "evidence": {
+        "profiles": {
+          "default": "PASS",
+          "dingtalk": "PASS",
+          "scoped": "PASS",
+          "dws": "PASS",
+          "sandbox": "PASS"
+        },
+        "failClosed": "PASS"
+      }
+    }
+  ],
+  "limitations": {
+    "liveAcceptance": "Live GLM, DingTalk, DWS and upstream company-MCP acceptance remains BLOCKED_EXTERNAL. This probe proves local deployment integrity only; affected T-cases stay NOT_RUN and R items stay IN_PROGRESS.",
+    "workerHeartbeat": "The worker heartbeat proves that the publish cycle keeps completing. It does not execute a queued model run and is not a substitute for live provider acceptance.",
+    "secretHandling": "No secret value is reproduced. Only mount names, environment-variable names, counts and statuses are recorded."
+  }
+}

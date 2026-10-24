@@ -15,7 +15,11 @@ import {companyDataFixture,syntheticDataQuery} from '../support/company-data-mcp
 const root=new pg.Pool({connectionString:secret('MIGRATION_DATABASE_URL')!}),db=new Database(secret('RUNTIME_DATABASE_URL')!),vault=new Vault(new Map([['1',Buffer.from(secret('APP_MASTER_KEY')!,'hex')]]),'1'),store=new RuntimeStore(db,vault),sources:Awaited<ReturnType<typeof companyDataFixture>>[]=[];
 afterAll(async()=>{for(const source of sources)await source.close();await db.close();await root.end();});
 const name=toolName('company.data.query','1.0.0'),signal=()=>new AbortController().signal;
-async function fresh(timeoutMs=200){
+// The upstream CHECK pays the first pg round trip of the fixture (measured
+// 95-140 ms); a 200 ms client budget made the pre-dispatch authorization
+// check time out under load and turned the call into DENIED instead of the
+// upstream timeout this test exercises.
+async function fresh(timeoutMs=600){
  const ctx={tenantId:randomUUID(),actorId:randomUUID()};await root.query("INSERT INTO tenants(tenant_id,id,corp_id,name,status) VALUES($1,$1,$1::uuid::text,'synthetic timeout data','ACTIVE') ON CONFLICT(tenant_id) DO NOTHING",[ctx.tenantId]);await root.query("INSERT INTO users(tenant_id,id,external_user_id,display_name,status) VALUES($1,$2,$2::uuid::text,'synthetic data','ACTIVE')",[ctx.tenantId,ctx.actorId]);
  const binding={corpId:ctx.tenantId,robotCode:'synthetic-data-robot',appOrigin:'http://localhost:64700'},msgId=randomUUID(),event:DWClientDownStream={specVersion:'1.0',type:'CALLBACK',headers:{appId:'synthetic',connectionId:'synthetic',contentType:'application/json',messageId:msgId,time:String(Date.now()),topic:TOPIC_ROBOT},data:JSON.stringify({msgId,chatbotCorpId:ctx.tenantId,senderCorpId:ctx.tenantId,senderStaffId:ctx.actorId,conversationId:'synthetic-timeout-dm-'+ctx.actorId,conversationType:'1',robotCode:binding.robotCode,msgtype:'text',text:{content:'Query the certified payments success-rate template'},createAt:Date.now(),senderId:ctx.actorId,chatbotUserId:'bot',sessionWebhook:'https://oapi.dingtalk.com/robot/send?access_token=synthetic-timeout',sessionWebhookExpiredTime:Date.now()+600000})};
  const task=(await new DingTalkIngress(db,vault,{tenantId:ctx.tenantId,...binding}).acceptTrustedCallback(event))!,runId=(await db.scope(ctx,c=>c.query('SELECT id FROM runs WHERE task_id=$1',[task.taskId]))).rows[0].id as string,lease=(await store.acquire(ctx,runId,'synthetic-timeout'))!,fixture=await companyDataFixture(root,ctx,runId);sources.push(fixture);
@@ -27,7 +31,7 @@ async function fresh(timeoutMs=200){
 async function auditRows(ctx:{tenantId:string;actorId:string}){return (await db.scope(ctx,c=>c.query('SELECT *,row_count::text count_text FROM data_executions ORDER BY created_at,id'))).rows;}
 async function actionRows(ctx:{tenantId:string;actorId:string}){return (await db.scope(ctx,c=>c.query("SELECT state,retry_safety FROM tool_actions WHERE capability_id='company.data.query' ORDER BY created_at,id"))).rows;}
 it('T092 component: a timed-out upstream query is never compensated by a new query and stays reconcilable',async()=>{
- const f=await fresh();f.fixture.modes.queryDelayMs=900;
+ const f=await fresh();f.fixture.modes.queryDelayMs=1500;
  const result=await f.gateway.execute(f.ctx,f.lease,name,syntheticDataQuery,signal());
  expect(result).toMatchObject({status:'UNKNOWN',completeness:'UNKNOWN',remediation:{kind:'COMPANY_DATA_UPSTREAM_TIMEOUT'}});
  expect(result.data).toBeUndefined();
@@ -64,7 +68,7 @@ it('T092 component: a caller cancellation is distinct from an upstream timeout a
  expect(await actionRows(f.ctx)).toHaveLength(0);
 });
 it('T092 component: a timeout inside the upstream gate never produces a result row or a second query',async()=>{
- const f=await fresh();f.fixture.modes.queryDelayMs=900;
+ const f=await fresh();f.fixture.modes.queryDelayMs=1500;
  const result=await f.gateway.execute(f.ctx,f.lease,name,syntheticDataQuery,signal());
  expect(result.status).toBe('UNKNOWN');
  const rows=await auditRows(f.ctx);

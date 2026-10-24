@@ -1754,3 +1754,47 @@ docs/02 与 `config/stages.json` 要求主分支保留 SBOM、许可证与依赖
 **生产编排首次渲染校验。** `deploy/compose/compose.prod.yml` 此前从未被渲染验证过。本次以占位环境变量渲染 `default`、`dingtalk`、`scoped`、`dws`、`sandbox` 五个 profile，五个均渲染成功（无语法与插值错误）；在必需变量置空时渲染以退出码 1 失败并报出缺失变量名，fail-closed 行为符合预期。
 
 **边界。** 心跳证明的是 worker 发布周期仍在推进，不是真实模型任务执行；探针的全部请求都是回环 HTTP、容器内 HTTP 或 PostgreSQL 查询，未发起任何 live 钉钉、GLM、DWS 或公司 MCP 调用。GLM、钉钉、DWS 与公司 MCP 的 live 验收继续为 `BLOCKED_EXTERNAL`，130 项 T 用例与 36 项 R 项状态未因此改变，`config/stages.json` 中 270 条历史证据引用仍然缺失、不予伪造。证据见 `reports/deployment-readiness-probe-20261023.json`。
+
+### 2026-10-23 来源快照失效路径的本地判定（不改变 T/R 状态）
+
+`packages/gateway/src/source-snapshot.ts` 是原生制品宿主在创建制品前调用的来源快照：它读取本次运行的 `tool_actions` 账本，为每条来源动作重新推导授权与分级，任一条不可证明即整体失败。此前该文件的 32 个分支中只有 21 个被覆盖（branches 65.62%、statements 69.69%），最关键的失效路径——账本被篡改、授权漂移、上下文变化——没有本地判定。
+
+新增 `tests/integration/source-snapshot.test.ts`（11 项集成用例）覆盖：
+
+- 正常路径：真实 `Gateway.execute` 产生的来源动作被采信，返回当前 provider session、已核验证据与最高来源分级。MCP 来源为 `RESTRICTED`，CORE 来源为 `INTERNAL`，能力自带 `classifyResult` 时以其结果为准，无法识别的分级降级为 `RESTRICTED` 而不是留空。
+- 上下文变化：`provider_session_no` 前进但没有对应 checkpoint、来源授权被撤销，均以 `SOURCE_CONTEXT_CHANGED` 拒绝。
+- 规模上限：单次运行超过 64 条来源动作以 `SOURCE_SNAPSHOT_LIMIT` 拒绝，而不是静默截断。
+- 账本不可解：状态为 `UNKNOWN` 的动作以 `SOURCE_ACTION_UNRESOLVED` 拒绝。
+- 能力漂移：来源能力已不再注册以 `SOURCE_CAPABILITY_CHANGED` 拒绝。
+- 授权漂移：来源动作记录的执行策略版本已变以 `SOURCE_AUTHORITY_CHANGED` 拒绝。
+- 中止：快照被中止时不返回任何证据。
+
+这些用例用真实网关写入来源动作以保留生产来源字段，只对故意构造的损坏账本行使用迁移角色直写，因此断言的是生产路径的实际判定而不是替身行为。定向执行结果为 11/11 通过，`tsc --noEmit` 与 `eslint` 均退出码 0。覆盖变化以 `reports/coverage-summary-20261023.json` 为基线、用定向 `json-summary` 复测：`packages/gateway/src/source-snapshot.ts` 的 branches 由 65.62%（21/32）升至 93.75%（30/32），statements 由 69.69%（23/33）升至 87.87%（29/33），lines 保持 100%；functions 仍为 50%（1/2），未覆盖的那个函数是 `sourceSelectionsAllowed` 的回调，只有存在待应用的来源选择回复时才会执行，在不伪造生产来源选择流程的前提下无法触发，故如实保留。
+
+门禁复核（均为本地执行）：`node --import tsx scripts/verify-requirements.ts --baseline` 返回 PASS、退出码 0；全量模式返回 FAIL、44 条错误，恰为 36 项 R 的 `implementation incomplete` 与 8 项 T 的 `test implementation absent`（T020/T069/T070/T082 需要真实外部资产，T089/T090/T094/T096 属二期 4.8），与既有预期一致。`node --import tsx scripts/verify-release.ts` 以 `INVALID_OR_MISSING_VERIFICATION_REPORT` fail-closed，`reports/enterprise-verification.json` 不存在。部署就绪探针在本次提交前重跑一次，11 项仍全部 PASS（`reports/deployment-readiness-probe-20261023.json`），证明该探针可重复执行。
+
+边界：这些用例全部使用隔离 PostgreSQL 与合成能力，不发起任何 live 钉钉、GLM、DWS 或公司 MCP 调用；GLM、钉钉、DWS 与公司 MCP 的 live 验收继续为 `BLOCKED_EXTERNAL`，130 项 T 用例与 36 项 R 项状态未因此改变，`config/stages.json` 中 270 条历史证据引用仍然缺失、不予伪造。
+
+### 2026-10-24 上游数据超时用例的时序校准（不改变 T/R 状态）
+
+`312b2ac` 的全量 vitest 有 2 项失败。第一项是发现基线漂移：`312b2ac` 新增了 `tests/unit/worker-heartbeat.test.ts` 却没有登记进 `tests/support/backend-discovery-baseline.json`，现已把该文件与 `tests/integration/source-snapshot.test.ts` 一并登记，原有 90 个文件与计数、CLI-only 排除、发现噪声断言、执行策略与全部覆盖率门槛均未改动。
+
+第二项是 `tests/integration/data-timeout-reconciliation.test.ts` 的第 1 个用例，在 HEAD `312b2ac` 上可独立复现（隔离运行 1 failed | 2 passed），不是并发负载造成的偶发。失败形态是 `DENIED/RESOURCE_SOURCE_OR_EGRESS_DENIED` 而不是 `UNKNOWN/COMPANY_DATA_UPSTREAM_TIMEOUT`。对 `CompanyDataClient.request` 临时插桩后测得：派发前的上游 `CHECK` 各自只有一次 pg 往返，但该往返在本机首次调用时耗时 95–140 ms，之后稳定在 9–15 ms；而客户端的 `AbortSignal.timeout` 同时覆盖工具发现与上游调用，用例原本只给 200 ms。负载稍高时首个 `CHECK` 就超时，`current()` 按设计返回 null，网关据此判定拒绝，于是永远走不到本用例要验证的 `QUERY` 超时路径。
+
+修复只落在用例时序上，产品代码与断言均未改动：`fresh()` 的客户端预算由 200 ms 调整为 600 ms（覆盖实测最坏 140 ms 的冷启动开销），上游 `QUERY` 延迟由 900 ms 调整为 1500 ms，仍严格大于预算并与失败超时保持可分界的间隔，尾部 1100 ms 观察窗仍落在延迟结束之后。定向连续执行 5 次均为 3/3 通过（`success=true`，failed=0），`tsc --noEmit` 与 `eslint` 退出码均为 0。该用例断言的语义未变：超时后不得再开第二次上游查询，动作账本停在 `UNKNOWN`，审计行记录 `query_id=null` 与 `reconciled`，两次网关资源校验加恰好一次对账 `CHECK`。
+
+边界：本次不改动任何门禁、账号权限或产品判定；GLM、钉钉、DWS 与公司 MCP 的 live 验收继续为 `BLOCKED_EXTERNAL`，130 项 T 用例与 36 项 R 项状态未因此改变，`config/stages.json` 中 270 条历史证据引用仍然缺失、不予伪造。
+
+### 2026-10-24 全量回归在 312b2ac 上的收口（T036 负载时序校准，不改变 T/R 状态）
+
+上一节的时序校准之后的全量重跑仍有 1 项失败：`tests/security/gateway-matrix.test.ts` 的 T036（10,000 例授权矩阵）在 index 9950 处，独立 oracle 判定 `ALLOW`，网关实际返回 `UNKNOWN`，而该例的合成 provider 计数为 `{read:0,write:0,verify:0}`——即这次写入没有产生任何外部效果，属于在派发预算耗尽后被判定为需要人工对账，而不是授权判定错误。报告中的单次运行数据为：计划 10000、完成 9999、allowed 821、denied 9179、approvals 262、providerErrors 0。
+
+**定性。** 单独执行该文件为全绿（105.8 s，10000/10000），并在网关派发 catch 处临时插入错误日志后单独运行，没有任何输出；该插桩已用 `git checkout -- packages/gateway/src/index.ts` 撤回，网关源码在本提交中无改动。因此这是一个只在全量套件高负载下出现的时序偶发，不是可复现的授权缺陷。
+
+**校准（只落在用例预算与诊断信息上）。** 每次 `gateway.execute` 的 `AbortSignal` 预算由 10 s 调整为 60 s；`Row` 增加 `remediation` 字段，把网关返回的 `remediation.kind` 记入每行结果与两条断言的失败消息，使任何再次出现都能直接指出原因。oracle `referenceAuthorization`、期望的 provider 计数、审批流程与产品代码均未改动；公司数据超时的语义仍由 `tests/integration/data-timeout-reconciliation.test.ts` 用 600 ms 预算独立判定，不依赖本文件的预算。`tsc --noEmit` 与 `eslint` 在改动后退出码均为 0。
+
+**全量结果（当前工作树，HEAD 仍为 `312b2ac`）。** `node scripts/run-tests.mjs vitest run` 退出码 0，`testResults` 中 248 个文件全部为 passed，3408/3408 用例通过、0 失败、0 跳过（报告计数 `numTotalTestSuites=283 passed=283`、`numTotalTests=3408 passed=3408`），耗时 3135.31 s，开始时间 `2026-10-24T02:40:12Z`；`reports/vitest-latest.json` 的 `success` 为 `true`。
+
+**门禁复核（均为本地执行）。** `node --import tsx scripts/verify-requirements.ts --baseline` 返回 PASS、退出码 0。全量模式返回 FAIL、44 条错误，恰为 36 项 R 的 `implementation incomplete` 与 8 项 T 的 `test implementation absent`（T020/T069/T070/T082 需要真实外部资产，T089/T090/T094/T096 属二期 4.8），与既有预期一致。`node --import tsx scripts/verify-release.ts` 以 `INVALID_OR_MISSING_VERIFICATION_REPORT` fail-closed，`reports/enterprise-verification.json` 不存在。`npm run operations:readiness` 退出码 0，11 项全部 PASS，报告为 `reports/deployment-readiness-probe-20261024.json`：镜像/数据库迁移契约 116 一致、`oa_queue.version=46`、public 表 133、api live/ready 200、broker ready 200、docker socket 仅归 sandbox-broker、broker 侧无凭据类环境变量、worker 心跳 live=真/stale=假/missing=假、生产编排五个 profile 渲染与缺失变量 fail-closed 均 PASS。
+
+边界：本次不改动任何门禁、账号权限或产品判定，也不把负载偶发的容错预算当作功能完成；GLM、钉钉、DWS 与公司 MCP 的 live 验收继续为 `BLOCKED_EXTERNAL`，130 项 T 用例与 36 项 R 项状态未因此改变，`config/stages.json` 中 270 条历史证据引用仍然缺失、不予伪造。
