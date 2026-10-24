@@ -1900,3 +1900,24 @@ docs/02 与 `config/stages.json` 要求主分支保留 SBOM、许可证与依赖
 - 270 条声明的复核：`config/stages.json` 共 15 个阶段、531 条原始引用、307 条去重引用，其中 270 条所指文件不存在，与文档声明一致。
 
 边界：本节只补门禁证据检查的本地 oracle，不改验收标准、T/R 状态或任何外部集成。GLM、钉钉、DWS 与公司 MCP 的 live 验收继续为 `BLOCKED_EXTERNAL`，130 项 T 用例与 36 项 R 项状态未因此改变，`config/stages.json` 中 270 条历史证据引用仍然缺失、不予伪造。
+
+### 2026-10-24 需求门禁 CLI 的本地 oracle（不改变 T/R 状态）
+
+`verifyRequirements` 的判定函数已有 fixture 用例，但它作为命令行入口的那一层没有任何 oracle：`--baseline` 决定跑哪种模式、`VERIFY_REQUIREMENTS_ROOT` 决定检查哪棵树、输出 JSON 的 `status` 与退出码决定门禁是否真的会被判为失败。若 `process.exitCode=1` 或 flag 解析被改坏，函数级用例仍然全绿，门禁却会静默放行。
+
+本轮在已注册的 `tests/unit/verify-requirements.test.ts`（不新增文件，因此 `backend-discovery-baseline.json` 无需改动）追加 2 条用例，用 `execFile(process.execPath,['--import','tsx',script,...mode])` 真正启动脚本：
+
+- 完整 fixture：`--baseline` 退出码 0、stderr 为空、stdout 为 `{"mode":"BASELINE_INTEGRITY_ONLY","status":"PASS","errors":[]}`；不带 flag 时退出码 0、`FULL_IMPLEMENTATION` 同为 PASS。
+- 破损 fixture：先把 `R01` 置为 `IN_PROGRESS`、把 `R02` 指向不存在的模块，此时 baseline 退出码 1 且只报 `R02:missing module src/absent.ts`（证明 baseline 忽略实现状态但仍校验模块存在）；修好模块后 baseline 退出码 0，而全量退出码 1 且只报 `R01:implementation incomplete`，stderr 为空。
+
+**结果（本地执行，基线提交 `67a4df2` 加本轮改动）**
+
+- `node node_modules/typescript/bin/tsc --noEmit`：退出码 0。
+- `node node_modules/eslint/bin/eslint.js tests/unit/verify-requirements.test.ts`：退出码 0。
+- `node scripts/run-tests.mjs vitest run tests/unit/verify-requirements.test.ts`：`4 passed (4)`。
+- 全量：`node scripts/run-tests.mjs vitest run`，退出码 0；`reports/vitest-latest.json` 记录 `success=true`、`numTotalTests=3432`、`numPassedTests=3432`、`numFailedTests=0`、`numPendingTests=0`、`numTotalTestSuites=287`、`testResults=251`；终端汇总为 `Test Files 251 passed (251)`、`Tests 3432 passed (3432)`、`Start at 15:25:33`、`Duration 3184.30s`。该文件是本次唯一一次全量写入；测试过程重写的 `gateway-matrix-latest.json`、`t121-load-intake-latest.json`、`independent-cluster-restore-20261020/actual-path.json` 属随机/计时数据，已恢复为 HEAD 版本而未入库。
+- baseline 门禁：`node --import tsx scripts/verify-requirements.ts --baseline` 退出码 0，`{"mode":"BASELINE_INTEGRITY_ONLY","status":"PASS","errors":[]}`。
+- 全量门禁：`node --import tsx scripts/verify-requirements.ts` 退出码 1，`status=FAIL`、`errors=44`，按文本分类仍为 36 条 `implementation incomplete` 与 8 条 `test implementation absent`，门禁未改动。
+- 发布门禁：`node --import tsx scripts/verify-release.ts` 退出码 1，`status=FAIL`、`reasons=["INVALID_OR_MISSING_VERIFICATION_REPORT"]`；`reports/enterprise-verification.json` 仍不存在。
+
+边界：本节只补门禁命令行入口的本地 oracle，不改产品代码、门禁逻辑或验收标准。GLM、钉钉、DWS 与公司 MCP 的 live 验收继续为 `BLOCKED_EXTERNAL`，130 项 T 用例与 36 项 R 项状态未因此改变，`config/stages.json` 中 270 条历史证据引用仍然缺失、不予伪造。
