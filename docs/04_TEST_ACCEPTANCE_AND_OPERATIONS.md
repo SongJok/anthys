@@ -1942,3 +1942,29 @@ docs/02 与 `config/stages.json` 要求主分支保留 SBOM、许可证与依赖
 - 发布门禁：退出码 1，`status=FAIL`、`reasons=["INVALID_OR_MISSING_VERIFICATION_REPORT"]`；`reports/enterprise-verification.json` 仍不存在。
 
 边界：本节只补发布门禁命令行入口的本地 oracle，不改产品代码、门禁逻辑或验收标准。GLM、钉钉、DWS 与公司 MCP 的 live 验收继续为 `BLOCKED_EXTERNAL`，130 项 T 用例与 36 项 R 项状态未因此改变，`config/stages.json` 中 270 条历史证据引用仍然缺失、不予伪造。
+
+### 2026-10-24 部署就绪报告的本地 oracle（不改变 T/R 状态）
+
+`scripts/readiness-checks.ts` 的判定函数已有 fixture 用例，但已入库的两份 `reports/deployment-readiness-probe-*.json` 此前没有任何测试引用：报告是否仍然声明 `live:false`、`liveProviderCalls:0`、11 项检查是否齐全且顺序不变、`status` 是否真的由检查结果推导、环境变量是否只记录名字、broker 是否携带供应商凭据、限制声明是否还写着 `BLOCKED_EXTERNAL`/`NOT_RUN`/`IN_PROGRESS`，全都没有 oracle。报告一旦被手改成“live 已验证”，全套单元用例仍然全绿。
+
+本轮新增已注册用例文件 `tests/unit/deployment-readiness-report.test.ts`（2 条，并在 `backend-discovery-baseline.json` 的 `approvedAddedFiles` 登记），读取 `reports/` 下所有 `deployment-readiness-probe-YYYYMMDD.json`：
+
+- 正向：恰好两份报告（20261023、20261024），`schemaVersion=1`、`case=LOCAL_DOCKER_DEPLOYMENT_READINESS_PROBE`、`live=false`、`liveProviderCalls=0`、11 个 check id 顺序一致、`status` 与 `overallStatus(checks)` 一致、四个服务均为 `healthy`、`compose.file/prodFile` 指向 dev/prod 编排且四个 sha256 均为 64 位十六进制、`providerEnvNamesPresent` 与 `envNames` 全部匹配 `^[A-Za-z_][A-Za-z0-9_]*$`（即只有名字、没有值）、broker 的 `secretsMounted`/`envNames` 经 `brokerCredentialLeaks` 判定为空、限制文本同时包含 `BLOCKED_EXTERNAL`、`NOT_RUN`、`IN_PROGRESS` 与 “No secret value”。
+- 反向：把 `live` 改成 `true` 且 `liveProviderCalls=2`、把某条检查置为 `FAIL` 但保留 `status=PASS`、在 broker 证据里塞入 `GLM_API_KEY`、把密钥挂载记成 `/run/secrets/...` 路径、把 `envNames` 写成 `NAME=value`、删掉一条检查、把限制文本改成“已验证”或清空密钥声明，均被各自的问题码捕获（`live`/`liveProviderCalls`/`statusNotDerivedFromChecks`/`brokerCredentialLeak`/`secretMountRecordedAsPath`/`envValueRecorded`/`checkIds`/`liveAcceptanceLimitation`/`secretHandlingLimitation`）。
+
+同时给 `tests/unit/readiness-checks.test.ts` 补了两个此前没有覆盖的判定分支：容器把 socket 挂到别的 target（`target=/sock, source=/var/run/docker.sock`）仍算 socket 持有者，`aliased.isolated=false` 且 `owners=['api','sandbox-broker']`；`brokerCredentialLeaks` 的匹配对大小写不敏感（`Company_Mcp_Token`、`dws_runner_auth_key` 被命名），而 `SANDBOX_BROKER_PUBLIC_KEY`、`SANDBOX_BROKER_AUTH_KEY_FILE` 不算泄漏。
+
+**结果（本地执行，基线提交 `29c0146` 加本轮改动）**
+
+- `node node_modules/typescript/bin/tsc --noEmit`：退出码 0。
+- `node node_modules/eslint/bin/eslint.js tests/unit/deployment-readiness-report.test.ts tests/unit/readiness-checks.test.ts`：退出码 0。
+- `node scripts/run-tests.mjs vitest run tests/unit/readiness-checks.test.ts tests/unit/deployment-readiness-report.test.ts`：`8 passed (8)`。
+- `node scripts/run-tests.mjs vitest run tests/unit/deployment-readiness-report.test.ts tests/unit/test-isolation.test.ts`：`10 passed (10)`（确认新文件已在发现基线中登记）。
+- 全量：`node scripts/run-tests.mjs vitest run`，退出码 0；`reports/vitest-latest.json` 记录 `success=true`、`numTotalTests=3436`、`numPassedTests=3436`、`numFailedTests=0`、`numPendingTests=0`、`numTotalTestSuites=288`、`testResults=252`；终端汇总为 `Test Files 252 passed (252)`、`Tests 3436 passed (3436)`、`Start at 18:10:31`、`Duration 3145.75s`。
+- 首次全量运行曾退出 1：`tests/integration/recovery-safety-source.test.ts > cold fence ...` 在 `packages/operations/src/recovery-safety-source.ts` 的 `RECOVERY_SOURCE_FENCE_NOT_CONFIRMED` 处失败（3436 项中 3435 通过、1 失败），属终止后端与断言之间又出现新连接的时间窗竞争；单跑该文件 `3 passed (3)`（3.95s），重跑全量即全绿，与本次仅新增测试的改动无关。
+- 测试过程重写的 `gateway-matrix-latest.json`、`t121-load-intake-latest.json`、`independent-cluster-restore-20261020/actual-path.json` 属随机/计时数据，已恢复为 HEAD 版本而未入库。
+- baseline 门禁：`node --import tsx scripts/verify-requirements.ts --baseline` 退出码 0，`{"mode":"BASELINE_INTEGRITY_ONLY","status":"PASS","errors":[]}`。
+- 全量门禁：`node --import tsx scripts/verify-requirements.ts` 退出码 1，`status=FAIL`、`errors=44`，仍为 36 条 `implementation incomplete` 与 8 条 `test implementation absent`，门禁未改动。
+- 发布门禁：`node --import tsx scripts/verify-release.ts` 退出码 1，`status=FAIL`、`reasons=["INVALID_OR_MISSING_VERIFICATION_REPORT"]`；`reports/enterprise-verification.json` 仍不存在。
+
+边界：本节只补已入库部署就绪报告的诚实性 oracle 与两个缺失的判定分支，不改产品代码、探针逻辑、门禁或验收标准。GLM、钉钉、DWS 与公司 MCP 的 live 验收继续为 `BLOCKED_EXTERNAL`，130 项 T 用例与 36 项 R 项状态未因此改变，`config/stages.json` 中 270 条历史证据引用仍然缺失、不予伪造。

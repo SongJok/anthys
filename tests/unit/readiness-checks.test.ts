@@ -10,11 +10,15 @@ it('passes socket isolation only when the broker is the sole socket owner',()=>{
  const none=socketIsolation({api:view([]),'sandbox-broker':view([])});
  expect(none.isolated).toBe(false);expect(none.owners).toEqual([]);
  expect(socketIsolation({api:null,'sandbox-broker':view([],[])})).toEqual({isolated:false,owners:[],mounts:{'sandbox-broker':[]}});
+ const aliased=socketIsolation({api:{mounts:[{target:'/sock',source:'/var/run/docker.sock'}],envNames:[]},'sandbox-broker':view(['/var/run/docker.sock'])});
+ expect(aliased.isolated).toBe(false);expect(aliased.owners).toEqual(['api','sandbox-broker']);expect(aliased.mounts['api']).toEqual(['/sock']);
 });
 it('names any broker secret mount or environment variable that carries a provider credential',()=>{
  expect(brokerCredentialLeaks(['ANTHYS_DATABASE_URL','ANTHYS_MASTER_KEY','SANDBOX_BROKER_AUTH_TOKEN'],['PATH','HOME','ANTHYS_BROKER_PUBLIC_KEY'])).toEqual([]);
  expect(brokerCredentialLeaks(['dingtalk-app-secret'],['GLM_API_KEY','COMPANY_MCP_TOKEN','DWS_ACCESS_TOKEN'])).toEqual(['dingtalk-app-secret','GLM_API_KEY','COMPANY_MCP_TOKEN','DWS_ACCESS_TOKEN']);
  expect(brokerCredentialLeaks([],['ANTHYS_DATABASE_URL'])).toEqual([]);
+ expect(brokerCredentialLeaks(['Company_Mcp_Token'],['dws_runner_auth_key'])).toEqual(['Company_Mcp_Token','dws_runner_auth_key']);
+ expect(brokerCredentialLeaks(['SANDBOX_BROKER_PUBLIC_KEY'],['SANDBOX_BROKER_AUTH_KEY_FILE'])).toEqual([]);
 });
 it('treats a transport error or any status other than 200 as a failed endpoint',()=>{
  expect(endpointFailures({api_live:{status:200},api_ready:{status:200},broker_ready:{status:200}})).toEqual([]);
