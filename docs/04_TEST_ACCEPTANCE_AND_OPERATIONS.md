@@ -1968,3 +1968,30 @@ docs/02 与 `config/stages.json` 要求主分支保留 SBOM、许可证与依赖
 - 发布门禁：`node --import tsx scripts/verify-release.ts` 退出码 1，`status=FAIL`、`reasons=["INVALID_OR_MISSING_VERIFICATION_REPORT"]`；`reports/enterprise-verification.json` 仍不存在。
 
 边界：本节只补已入库部署就绪报告的诚实性 oracle 与两个缺失的判定分支，不改产品代码、探针逻辑、门禁或验收标准。GLM、钉钉、DWS 与公司 MCP 的 live 验收继续为 `BLOCKED_EXTERNAL`，130 项 T 用例与 36 项 R 项状态未因此改变，`config/stages.json` 中 270 条历史证据引用仍然缺失、不予伪造。
+
+### 2026-10-24 浏览器/E2E 证据报告的本地 oracle（不改变 T/R 状态）
+
+`reports/e2e-full-20261023.json`、`reports/offline-browser-bundles-20261023.json`、`reports/specialized-browser-20261023.json` 三份已入库汇总此前没有任何测试引用：主套件 58 项加 2 条 persona 讲解用例、230 项项目级跳过到 4 个离线 bundle 的映射、170 项离线用例、8 个专用配置共 55 项，以及每个数字背后的原始 Playwright 报告 sha256，全都只靠人工核对。任何一份汇总被手改成 `status=PASS`、调大一个通过数、换掉一个摘要或删掉一条诚实声明，全套单元用例仍然全绿。
+
+本轮新增已注册用例文件 `tests/unit/browser-evidence-report.test.ts`（2 条，并在 `backend-discovery-baseline.json` 的 `approvedAddedFiles` 登记，数量现为 163）。校验函数 `problems()` 把三份汇总的每个头条数字都还原到已入库的原始报告、摘要或兄弟汇总：
+
+- 摘要与统计：每个 `report.path` 必须存在且其内容 sha256 等于汇总记录的 64 位十六进制摘要；原始 JSON 的 `stats.expected/unexpected/skipped/flaky/duration/startTime` 必须与汇总逐一相等（时长按 0.01ms 容差）。
+- E2E 主套件：`schemaVersion=1`、`case=BROWSER_E2E_FULL`、`status=PASS`、`live=false`、`projects=['desktop','mobile']`；`skipReasons` 计数之和与 `skipAnnotations` 计数之和都必须等于 `skipped=230`；每条跳过 spec 必须由某个离线 bundle 的 `closesE2ESkips.spec` 解释、计数相等，且该 bundle 的命令包含 `exercisedBy` 指向的脚本；`bundleEvidence.path` 必须严格等于离线汇总路径。
+- 离线 bundle：恰好 4 个，每个 `browser.failed/skipped/flaky` 与 `flow.failed/skipped` 全为 0，命令必须以 `node --import ./scripts/test-network-guard.mjs ` 开头；`runner.backendOrDatabaseStarted=false`、`realProviderCalls=0`；三处合计分别等于 115（浏览器）、55（离线流程）、170（tests=115+55）；被解释的跳过数必须同时等于 230 与 E2E 主套件跳过数；`files` 中 12 个文件（4 个 runner 脚本、4 个 spec、4 个 offline 测试）的 sha256 必须与当前文件一致。
+- 专用配置：恰好 8 个，配置路径必须是 `tests/browser/*.config.ts`，每个 `unexpected/flaky` 为 0，`expected/skipped` 合计等于汇总；每个报告同样做摘要与统计核对。
+- 诚实声明：三份汇总都必须包含 `NOT_RUN` 与 `IN_PROGRESS`，E2E 汇总还必须包含 `BLOCKED_EXTERNAL` 与 “not counted as browser validation” 短语；`live` 必须为 `false`。
+
+负向用例逐项构造不可信汇总并断言问题码：改摘要（`e2e.main:digestMismatch`）、改通过数（`e2e.main:statsExpected`）、改某 spec 跳过数（同时报 `e2e.skipReasonTotal` 与 `e2e.skipCountMismatch:data-result.spec.ts`）、把 spec 移到一个不存在的名字（`e2e.unexplainedSkip:absent.spec.ts`）、把 `live` 改成 `true`、把声明改成 “All browser validation is complete.”（同时报 `e2e.disclosure:BLOCKED_EXTERNAL` 与 `e2e.skipsNotDisclaimed`）、调大离线浏览器合计、去掉网络守卫前缀、篡改 `offline.files` 里的脚本摘要、改 bundle 的解释数量（同时报 `offline.skipCoverage` 与 `e2e.skipCountMismatch`）、改专用配置的期望数（同时报 `specialized.expectedTotal` 与 `specialized.artifacts:statsExpected`）、把专用汇总改成 `live=true`。
+
+**结果（本地执行，基线提交 `0f3d70d` 加本轮改动）**
+
+- `node node_modules/typescript/bin/tsc --noEmit`：退出码 0。
+- `node node_modules/eslint/bin/eslint.js tests/unit/browser-evidence-report.test.ts`：退出码 0。
+- `node scripts/run-tests.mjs vitest run tests/unit/browser-evidence-report.test.ts tests/unit/test-isolation.test.ts`：`10 passed (10)`（确认新文件已在发现基线中登记）。
+- 全量：`node scripts/run-tests.mjs vitest run`，退出码 0；`reports/vitest-latest.json` 记录 `success=true`、`numTotalTests=3438`、`numPassedTests=3438`、`numFailedTests=0`、`numPendingTests=0`、`numTotalTestSuites=289`、`testResults=253`；终端汇总为 `Test Files 253 passed (253)`、`Tests 3438 passed (3438)`、`Start at 20:07:41`、`Duration 3259.50s`。该文件是本次唯一一次全量写入。
+- 测试过程重写的 `gateway-matrix-latest.json`、`t121-load-intake-latest.json`、`independent-cluster-restore-20261020/actual-path.json` 属随机/计时数据，已恢复为 HEAD 版本而未入库。
+- baseline 门禁：`node --import tsx scripts/verify-requirements.ts --baseline` 退出码 0，`{"mode":"BASELINE_INTEGRITY_ONLY","status":"PASS","errors":[]}`。
+- 全量门禁：`node --import tsx scripts/verify-requirements.ts` 退出码 1，`status=FAIL`、`errors=44`，仍为 36 条 `implementation incomplete` 与 8 条 `test implementation absent`，门禁未改动。
+- 发布门禁：`node --import tsx scripts/verify-release.ts` 退出码 1，`status=FAIL`、`reasons=["INVALID_OR_MISSING_VERIFICATION_REPORT"]`；`reports/enterprise-verification.json` 仍不存在。
+
+边界：本节只补已入库浏览器/E2E 汇总的诚实性 oracle，不改产品代码、浏览器配置、门禁或验收标准。GLM、钉钉、DWS 与公司 MCP 的 live 验收继续为 `BLOCKED_EXTERNAL`，130 项 T 用例与 36 项 R 项状态未因此改变，`config/stages.json` 中 270 条历史证据引用仍然缺失、不予伪造。
