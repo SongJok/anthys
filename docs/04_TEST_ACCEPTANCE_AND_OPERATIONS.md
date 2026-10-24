@@ -1798,3 +1798,33 @@ docs/02 与 `config/stages.json` 要求主分支保留 SBOM、许可证与依赖
 **门禁复核（均为本地执行）。** `node --import tsx scripts/verify-requirements.ts --baseline` 返回 PASS、退出码 0。全量模式返回 FAIL、44 条错误，恰为 36 项 R 的 `implementation incomplete` 与 8 项 T 的 `test implementation absent`（T020/T069/T070/T082 需要真实外部资产，T089/T090/T094/T096 属二期 4.8），与既有预期一致。`node --import tsx scripts/verify-release.ts` 以 `INVALID_OR_MISSING_VERIFICATION_REPORT` fail-closed，`reports/enterprise-verification.json` 不存在。`npm run operations:readiness` 退出码 0，11 项全部 PASS，报告为 `reports/deployment-readiness-probe-20261024.json`：镜像/数据库迁移契约 116 一致、`oa_queue.version=46`、public 表 133、api live/ready 200、broker ready 200、docker socket 仅归 sandbox-broker、broker 侧无凭据类环境变量、worker 心跳 live=真/stale=假/missing=假、生产编排五个 profile 渲染与缺失变量 fail-closed 均 PASS。
 
 边界：本次不改动任何门禁、账号权限或产品判定，也不把负载偶发的容错预算当作功能完成；GLM、钉钉、DWS 与公司 MCP 的 live 验收继续为 `BLOCKED_EXTERNAL`，130 项 T 用例与 36 项 R 项状态未因此改变，`config/stages.json` 中 270 条历史证据引用仍然缺失、不予伪造。
+
+### 2026-10-24 生产配置验收 oracle（不改变 T/R 状态）
+
+`packages/config/src/index.ts` 的生产分支此前只在失败路径上被间接覆盖：没有用例证明“挂载文件齐全、密钥足够强、origin 为 https 的合法生产配置确实能通过解析”，也没有用例区分 `*_FILE` 挂载、规范名内联、遗留别名三者的优先级。新增 `tests/unit/config-production.test.ts` 直接对这一行为下断言：
+
+- 合法路径：`APP_ENV=production` + `APP_ORIGIN=https://anthys.example.com` + 四个 `*_FILE` 挂载，解析成功且其余字段取默认值（`PORT=64700`、`MOCK_PROVIDERS='false'`、`RELEASE_PROFILE='ENTERPRISE_DWS'`）。
+- 密钥强度：31 字符、`changeme…`、`default…`、`password…`、`test…` 五类挂载值均以 `INVALID_SECRET:DATABASE_URL` 拒绝，证明长度不足与占位前缀是各自独立的拒绝条件。
+- 挂载要求与 origin 绑定：四个内联密钥（即使强度足够）以 `PRODUCTION_SECRET_MOUNT_REQUIRED` 拒绝；`https://localhost`、`https://127.0.0.1`、`https://anthys.example.invalid`、`http://…` 四种 origin 与 `MOCK_PROVIDERS=true` 均以 `UNSAFE_PRODUCTION_CONFIG` 拒绝。
+- 解析优先级：`secret()` 先读 `<NAME>_FILE`（含首尾空白裁剪），再回落到规范环境变量，最后是遗留别名（例如 `DINGTALK_APP_SECRET[_FILE]`、`GLM_API_KEY_FILE` 优先于 `AIDER_AI_DEFAULT_API_KEY`）；未配置时返回 `undefined` 而不是空串或占位值。
+
+这些用例只读进程内的合成文件与合成环境对象，不读 `.env`、不连数据库、不发起任何外部调用。定向执行为 4/4 通过（`node scripts/run-tests.mjs vitest run tests/unit/config-production.test.ts`，`Tests 4 passed (4)`），`tsc --noEmit` 与 `eslint` 退出码均为 0。该文件已登记进 `tests/support/backend-discovery-baseline.json`，原有 90 个文件与计数、CLI-only 排除、执行策略和覆盖率门槛均未改动，发现守卫 `tests/unit/test-isolation.test.ts` 定向执行 8/8 通过。
+
+边界：本节只补本地 oracle，不改产品代码；GLM、钉钉、DWS 与公司 MCP 的 live 验收继续为 `BLOCKED_EXTERNAL`，130 项 T 用例与 36 项 R 项状态未因此改变，`config/stages.json` 中 270 条历史证据引用仍然缺失、不予伪造。
+
+### 2026-10-24 公司数据结果溯源 oracle（不改变 T/R 状态）
+
+`packages/company/src/data-result-contract.ts` 是 `company.data.query` 的输出契约，除字段形状外还用四个跨字段规则保证“投影结果与查询、模板、来源回执、半开窗口一致”。此前只有 `tests/unit/capability-output.test.ts` 用一份合法投影验证了通过路径，四条不一致规则没有任何直接断言。新增 `tests/unit/company-data-result-contract.test.ts`（6 项）把契约本身当 oracle：
+
+- 合法投影经 `parseCapabilityResult` 端到端接受；`status=OK` 却缺 `data` 时以 `data:SUCCESS_DATA_REQUIRED` 拒绝。
+- `queryId` 与 `source.queryId` 不一致以 `data.queryId:QUERY_ID_MISMATCH` 拒绝。
+- 模板漂移两侧都拦：`template.key/version/hash` 偏离查询，或 `source.templateKey/templateVersion/templateHash` 偏离模板引用，六种组合均以 `data.template:TEMPLATE_MISMATCH` 拒绝。
+- 来源回执与投影不一致以 `data.source:SOURCE_RECEIPT_MISMATCH` 拒绝，覆盖 watermark、observedAt 与 completeness 三项。
+- 窗口必须恰为查询的 `[start,end)`：起点或终点错位以 `data.window:WINDOW_MISMATCH` 拒绝，`interval` 写成闭区间在字段级即被拒绝。
+- 顶层私有字段（`privateLeak`）、`untrustedContent=false`、`upstreamCertification='VERIFIED'` 均被拒绝；`rowScope` 按设计是受键名格式约束的开放记录（1–16 个 scope 键），因此不在本用例中当作私有字段处理。
+
+用例使用与输出契约清单测试相同的合成投影，只调用纯 schema 解析，不读 `.env`、不连数据库、不发起任何外部调用。定向执行为 6/6 通过；与生产配置 oracle 合并执行为 10/10 通过，`tsc --noEmit` 与 `eslint` 退出码均为 0；该文件同样登记进发现基线，守卫 8/8 通过。
+
+边界：本节只补本地 oracle，不改产品代码与数据口径；4.8 统计模板、口径与数据权限仍属二期。GLM、钉钉、DWS 与公司 MCP 的 live 验收继续为 `BLOCKED_EXTERNAL`，130 项 T 用例与 36 项 R 项状态未因此改变，`config/stages.json` 中 270 条历史证据引用仍然缺失、不予伪造。
+
+**全量结果与门禁复核（均为本地执行，HEAD 仍为 `5b86d51`）。** `node scripts/run-tests.mjs vitest run` 退出码 0，250 个测试文件全部 passed，3418/3418 用例通过、0 失败、0 跳过（报告计数 `numTotalTestSuites=286 passed=286`、`numTotalTests=3418 passed=3418`），耗时 3171.94 s，开始时间 `2026-10-24T03:38:29Z`；`reports/vitest-latest.json` 的 `success` 为 `true`。相比上一轮 3408 项，新增的 10 项正是本节两个 oracle（4 + 6），其余用例与判定未变。`node --import tsx scripts/verify-requirements.ts --baseline` 返回 PASS、退出码 0；全量模式返回 FAIL、44 条错误，恰为 36 项 R 的 `implementation incomplete` 与 8 项 T 的 `test implementation absent`（T020/T069/T070/T082 需真实外部资产，T089/T090/T094/T096 属二期 4.8）。`node --import tsx scripts/verify-release.ts` 以 `INVALID_OR_MISSING_VERIFICATION_REPORT` fail-closed，`reports/enterprise-verification.json` 不存在。
