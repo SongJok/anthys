@@ -1,0 +1,83 @@
+{
+  "schemaVersion": 1,
+  "testId": "T121",
+  "layer": "LOAD",
+  "status": "PASS",
+  "environment": {
+    "platform": "darwin",
+    "arch": "arm64",
+    "cpus": 10,
+    "node": "v24.21.0",
+    "postgres": "127.0.0.1:64711",
+    "runner": "vitest single process through scripts/run-tests.mjs",
+    "modelCalls": 0,
+    "mockLatencyUsedAsModelSla": false
+  },
+  "load": {
+    "sustainedMs": 20000,
+    "ratePerSecond": 30,
+    "ticks": 200,
+    "dispatched": 871,
+    "uniqueMessages": 518,
+    "acceptedDuplicateDeliveries": 187,
+    "burst": 100,
+    "burstDeliveredInOneTick": true,
+    "backpressureRefusals": 166,
+    "redeliveryRounds": 3,
+    "redeliveredAttempts": 171
+  },
+  "ack": {
+    "samples": 705,
+    "p50Ms": 28.68,
+    "p95Ms": 333.83,
+    "p99Ms": 564.52,
+    "maxMs": 647.37,
+    "thresholdMs": 1000
+  },
+  "durability": {
+    "inboxEvents": 518,
+    "inboxRowsPerEvent": 1,
+    "uniqueTasks": 518,
+    "uniqueRuns": 518,
+    "runOutboxRows": 518,
+    "taskReceiptRows": 518
+  },
+  "queue": {
+    "unpublishedBefore": 518,
+    "published": 518,
+    "drainMs": 701.01,
+    "drainSamples": [
+      518,
+      468,
+      418,
+      368,
+      318,
+      268,
+      218,
+      168,
+      118,
+      68,
+      18,
+      0
+    ],
+    "finalDepth": 0,
+    "pgBossJobs": 518,
+    "threshold": "drained to zero within the measured window"
+  },
+  "scheduler": {
+    "schedules": 12,
+    "claimed": 12,
+    "claimMs": 90.14,
+    "p95LagMs": 341,
+    "maxLagMs": 341,
+    "thresholdMs": 30000
+  },
+  "memory": {
+    "heapUsedBefore": 58641864,
+    "heapUsedAfter": 58738632,
+    "heapDelta": 96768,
+    "rssDelta": 28229632,
+    "note": "short load window, not a 24-hour soak"
+  },
+  "disclosure": "This is a shortened local load run on one process and the isolated PostgreSQL, not the document section 9 8vCPU/16GiB 30-minute baseline or a 24-hour soak. No model or upstream was called, so no model or network SLA is claimed from these numbers."
+}

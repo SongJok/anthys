@@ -1,0 +1,56 @@
+{
+  "sourceAndTargetSystemIdentifiersDiffer": true,
+  "originalSourceDatabaseDestroyed": true,
+  "originalFileRootDestroyed": true,
+  "productionRestoreCommand": {
+    "schemaVersion": 1,
+    "status": "RESTORED_SET_RECONCILIATION_REQUIRED",
+    "profileHash": "8b9a614e7a86cb25ea4320000df146f3246d38f27a0e2c06c99ebf3c72538952",
+    "backupSetId": "8f1f230f-341c-4fca-8a19-b8727feb100d",
+    "backupReceiptSha256": "1e7f2f2c1fdb56b2e76fbe8f0b16900862a75cee6433a679b2529f0123441942",
+    "postgresContentFingerprint": "58d0cb8ca5c3c5e388f1e3c9c926f71bbf751bd0deb02da690aa18fbc751dc20",
+    "fileStoreManifestSha256": "e07f705c13b22048cdfe903d98e34731df0cf8ab51ff70c8b206bef6382ee176",
+    "sourceAndTargetClustersDiffer": true,
+    "externalDispatchResumeAuthorized": false,
+    "revocationAndExternalStateReconciliationRequired": true,
+    "applicationKeyRecoveryVerified": false,
+    "servicesStarted": false,
+    "restoredRootSha256": "e8914307947f0dad0596fce64132fd4cd765e034b590ed5450260b4e65bdf1b1"
+  },
+  "comparison": {
+    "schemaVersion": 1,
+    "status": "MATCH",
+    "beforeFingerprint": "58d0cb8ca5c3c5e388f1e3c9c926f71bbf751bd0deb02da690aa18fbc751dc20",
+    "afterFingerprint": "58d0cb8ca5c3c5e388f1e3c9c926f71bbf751bd0deb02da690aa18fbc751dc20",
+    "schemaMatches": true,
+    "metadataMatches": true,
+    "dataMatches": true,
+    "sequencesMatch": true,
+    "externalDispatchResumeAuthorized": false,
+    "revocationAndExternalStateReconciliationRequired": true
+  },
+  "syntheticApplicationKeyRecovery": {
+    "status": "SYNTHETIC_APPLICATION_KEY_RECOVERY_VERIFIED",
+    "contentSha256": "db64111592ec1e207a159243ce8e3867006e7c8ddf4c347a5bdd5d513b6172f1",
+    "credentialSha256": "2f1840b003776cd22abb272b0c40e7d52053131a174f7821ae06cf47461116e0",
+    "servicesStarted": false,
+    "externalDispatchResumeAuthorized": false
+  },
+  "wrongKeyRejected": true,
+  "repeatRestoreRejected": true,
+  "fixture": {
+    "image": "postgres:17-bookworm@sha256:3645570cccdfa447589da9f57dd740faa29b30938e861289a5574b6ca6b03826",
+    "nodeBinarySha256": "0f8949d1028f6d61506b2d5bc57e7e6fe893d7b1997509b7847294fc9c616584",
+    "nodeSourceIntegrity": "sha256:724282c3b43aec998aa9527380465b45d229e021b58035f5f4f63095eabfe5d5",
+    "network": "none",
+    "hostMounts": 0,
+    "publishedPorts": 0,
+    "productionBundles": true
+  },
+  "cleanup": {
+    "state": "DESTROYED",
+    "confirmedAbsent": true
+  },
+  "realOperationsPerformed": false,
+  "phaseOneComplete": false
+}

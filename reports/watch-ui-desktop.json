@@ -1,0 +1,9 @@
+{
+  "scenario": "REAL_LOCAL_OWNER_CONDITION_WATCH_CREATE_BIND_PAUSE_RESUME_CANCEL",
+  "project": "desktop",
+  "watchId": "059e5649-92c7-40c1-9ccc-0c62b16e621f",
+  "lifecycle": "CANCELLED",
+  "sourceBound": true,
+  "crossOwnerDeniedByApiTest": true,
+  "live": false
+}

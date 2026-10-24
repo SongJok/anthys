@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "testId": "T129",
+  "layer": "E2E",
+  "status": "PASS",
+  "generatedAt": "2026-10-23T01:52:09Z",
+  "commit": "5790fd92c2b803062aabe00f9a4c4956a814eefc",
+  "environment": {
+    "platform": "Darwin",
+    "arch": "arm64",
+    "node": "v24.21.0",
+    "dockerServer": "29.2.1",
+    "dockerCompose": "5.0.2",
+    "composeProject": "anthys-delivery-1792720198-92864",
+    "apiPort": 64800,
+    "postgresPort": 64810,
+    "image": "anthys-app:delivery-20261023014958-92864",
+    "modelCalls": 0,
+    "providerCredentials": "none: the tree is a git archive with no .env/.secrets; setup-dev-secrets.mjs generated fresh random local secrets and empty GLM/DingTalk secret files"
+  },
+  "steps": {
+    "cleanExtract": "git archive 5790fd92c2b803062aabe00f9a4c4956a814eefc extracted to a temporary directory; asserted no .env, .secrets, .data, node_modules or dist",
+    "firstDeliveryRun": {"command": "./deploy/dev-up.sh", "seconds": 94, "exitCode": 0},
+    "health": {"live": "ALIVE", "ready": "READY"},
+    "migrations": {"applied": 116, "expected": 116},
+    "runningServices": "api postgres worker ",
+    "repeatDeliveryRun": {"command": "./deploy/dev-up.sh", "seconds": 36, "exitCode": 0, "ready": "READY", "migrations": 116},
+    "teardown": "docker compose down -v --remove-orphans and removal of the temporary image and directory"
+  },
+  "disclosure": "This proves a repeatable local empty-environment install, migrate, build and start from the committed tree on an isolated Compose project and alternate ports. Docker layer caches and package registries may speed the build; the run used no developer .env, .secrets, volumes or provider credentials. It is not a production release, not a second physical host, and does not verify any live GLM, DingTalk, DWS or company MCP capability."
+}

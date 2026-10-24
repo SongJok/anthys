@@ -1,0 +1,17 @@
+{
+  "scenario": "REAL_LOCAL_OAUTH_TASK_CANCELLATION_WITH_LONG_ACTION_IDENTIFIERS",
+  "project": "mobile",
+  "viewport": {
+    "clientWidth": 390,
+    "scrollWidth": 390,
+    "innerWidth": 390,
+    "visualWidth": 390,
+    "offsetLeft": 0,
+    "offsetTop": 0
+  },
+  "nativeClick": true,
+  "cancellationUiVerified": true,
+  "logout401Verified": true,
+  "forceClick": false,
+  "live": false
+}

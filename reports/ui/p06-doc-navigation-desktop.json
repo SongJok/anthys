@@ -1,0 +1,46 @@
+{
+  "kind": "ISOLATED_CHROME_NAVIGATION",
+  "project": "desktop",
+  "live": false,
+  "actualPageshowCount": 9,
+  "actualPersistedCount": 0,
+  "events": [
+    {
+      "persisted": false,
+      "trusted": true
+    },
+    {
+      "persisted": false,
+      "trusted": true
+    },
+    {
+      "persisted": false,
+      "trusted": true
+    },
+    {
+      "persisted": false,
+      "trusted": true
+    },
+    {
+      "persisted": false,
+      "trusted": true
+    },
+    {
+      "persisted": false,
+      "trusted": true
+    },
+    {
+      "persisted": false,
+      "trusted": true
+    },
+    {
+      "persisted": false,
+      "trusted": true
+    },
+    {
+      "persisted": false,
+      "trusted": true
+    }
+  ],
+  "note": "Actual reload/back/forward executed. BFCache certification is not inferred when actualPersistedCount is zero; the separate lifecycle scenario tests a synthesized persisted event."
+}

@@ -1,0 +1,15 @@
+{
+  "scenario": "REAL_LOCAL_AUTHORIZED_GET_WITH_1500MS_BROWSER_DELIVERY_DELAY",
+  "project": "desktop",
+  "peakConcurrent": 1,
+  "requests": [
+    {
+      "startedAt": "2026-10-23T08:57:59.935Z",
+      "elapsedMs": 1561,
+      "status": 200
+    }
+  ],
+  "permissionsBypassed": false,
+  "syntheticResponse": false,
+  "live": false
+}

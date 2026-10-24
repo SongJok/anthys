@@ -1,0 +1,15 @@
+{
+  "scenario": "REAL_LOCAL_AUTHORIZED_GET_WITH_1500MS_BROWSER_DELIVERY_DELAY",
+  "project": "mobile",
+  "peakConcurrent": 1,
+  "requests": [
+    {
+      "startedAt": "2026-10-23T08:59:25.286Z",
+      "elapsedMs": 1533,
+      "status": 200
+    }
+  ],
+  "permissionsBypassed": false,
+  "syntheticResponse": false,
+  "live": false
+}

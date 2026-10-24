@@ -1,0 +1,9 @@
+{
+  "scenario": "REAL_LOCAL_OWNER_CONDITION_WATCH_CREATE_BIND_PAUSE_RESUME_CANCEL",
+  "project": "mobile",
+  "watchId": "73d95051-c733-4149-a058-ed55ce21f180",
+  "lifecycle": "CANCELLED",
+  "sourceBound": true,
+  "crossOwnerDeniedByApiTest": true,
+  "live": false
+}
