@@ -1852,3 +1852,29 @@ docs/02 与 `config/stages.json` 要求主分支保留 SBOM、许可证与依赖
 - 发布门禁：`node --import tsx scripts/verify-release.ts` 退出码 1，输出 `profile=ENTERPRISE_DWS`、`status=FAIL`、`reasons=["INVALID_OR_MISSING_VERIFICATION_REPORT"]`；`reports/enterprise-verification.json` 仍不存在，fail-closed 符合预期。
 
 因此本轮的“绿”仅指本地 vitest 全绿与三项门禁按设计表现；一期交付仍为 `BLOCKED_EXTERNAL`，T/R 计数与 270 条缺失证据引用的声明不变。
+
+### 2026-10-24 发布门禁的本地 oracle（不改变 T/R 状态）
+
+`tests/unit/release.test.ts` 此前只有一条反向用例（缺报告、空测试数组、`BLOCKED_EXTERNAL` 与 `E2E_MOCK`），从未证明一份合规报告可以放行，也没有覆盖 `PROFILE_MISMATCH`、九项必备声明、SEV2/SEV3 与 SEV0/SEV1 的区别、内外部能力的验证状态不对称、非 `LIVE`/非 `MOCK|FIXTURE` 的环境标签，以及报告结构自身的 fail-closed 行为。门禁若在这些分支上退化为恒不放行或恒放行，既有测试都无法发现。
+
+本轮在同一个已注册测试文件内补齐 5 条用例（共 6 条），并让 fixture 直接采用 `releaseReportSchema.parse` 的返回类型，避免测试替身与门禁契约漂移：
+
+- 合规的 `ENTERPRISE_DWS` 报告与 `BASE` 报告分别得到空 reasons；`BASE` 报告冒充企业档只得到 `DWS_CORE_NOT_LIVE_VERIFIED` 与 `dws.todo:MISSING_CAPABILITY`，企业报告冒充基础档只得到 `PROFILE_MISMATCH`。
+- 九项声明（`requirementsComplete`、`versionsLocked`、`restoreDrillPassed`、`secretsScanPassed`、`coveragePassed`、`mutationPassed`、`modelEvalPassed`、`redTeamPassed`、`loadSoakPassed`）逐项置 false 时，各自只产出同名 reason；SEV0/SEV1 产出 `BLOCKING_DEFECTS`，SEV2/SEV3 不阻塞。
+- 外部能力标为 `SYSTEM_VERIFIED` 或改为内部能力都产出 `:UNVERIFIED`；删掉 `company.logs` 或 `dws.drive` 分别产出 `:MISSING_CAPABILITY`；全部按内外部正确标注时无 reason。
+- 六项外部资产行（T020/T069/T070/T071/T082/T096）在 `E2E_MOCK`、`LIVE_FIXTURE`、`LOCAL_E2E` 下逐行产出 `:LIVE_EVIDENCE_REQUIRED`；非外部行的环境标签不触发该 reason。
+- 报告结构本身：未知顶层键、非法 profile、非 40 位提交号、未知 SEV、非法 testId、空 evidenceRefs、未知 status、未知验证状态与 129 条测试均直接判为 `INVALID_OR_MISSING_VERIFICATION_REPORT`（129 条那条同时给出 `BASELINE_TESTS_MISSING_OR_DUPLICATED` 与 `T130:NOT_RUN`）。
+
+校验中确认 `releaseReportSchema` 只在顶层 `.strict()`，嵌套行会丢弃未知键；因此本 oracle 断言的是现存的真实契约（未知顶层键拒绝），没有为了迁就测试去收紧或放宽门禁，也没有改 `scripts/verify-release.ts` 的任何一行。
+
+**结果（本地执行，基线提交 `a5c5680` 加本文件改动）**
+
+- `node node_modules/typescript/bin/tsc --noEmit`：退出码 0。
+- `node node_modules/eslint/bin/eslint.js tests/unit/release.test.ts`：退出码 0。
+- `node scripts/run-tests.mjs vitest run tests/unit/release.test.ts`：`6 passed (6)`。
+- 全量：`node scripts/run-tests.mjs vitest run`，退出码 0；`reports/vitest-latest.json` 记录 `success=true`、`numTotalTests=3429`、`numPassedTests=3429`、`numFailedTests=0`、`numPendingTests=0`、`numTotalTestSuites=287`、`testResults=251`；终端汇总为 `Test Files 251 passed (251)`、`Start at 13:34:15`、`Duration 3068.29s`。该文件是本次唯一一次全量写入。
+- baseline 门禁：`node --import tsx scripts/verify-requirements.ts --baseline` 退出码 0，输出 `{"mode":"BASELINE_INTEGRITY_ONLY","status":"PASS","errors":[]}`。
+- 全量门禁：`node --import tsx scripts/verify-requirements.ts` 退出码 1，`status=FAIL`、`errors=44`，按文本分类仍为 36 条 `implementation incomplete` 与 8 条 `test implementation absent`，门禁未改动。
+- 发布门禁：`node --import tsx scripts/verify-release.ts` 退出码 1，`status=FAIL`、`reasons=["INVALID_OR_MISSING_VERIFICATION_REPORT"]`；`reports/enterprise-verification.json` 仍不存在。
+
+边界：本节只补门禁自身的本地 oracle，不改产品代码、门禁逻辑或数据口径。GLM、钉钉、DWS 与公司 MCP 的 live 验收继续为 `BLOCKED_EXTERNAL`，130 项 T 用例与 36 项 R 项状态未因此改变，`config/stages.json` 中 270 条历史证据引用仍然缺失、不予伪造；上述 `reasons=[]` 只出现在离线构造的 fixture 中，不代表现实中已满足放行条件。
