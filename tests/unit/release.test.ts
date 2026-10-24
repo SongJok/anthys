@@ -1,4 +1,19 @@
+import {execFile} from 'node:child_process';
+import {mkdtemp,mkdir,rm,writeFile} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join,resolve} from 'node:path';
+import {promisify} from 'node:util';
 import {releaseReasons,releaseReportSchema,releaseEvidenceRefs,missingReleaseEvidence} from '../../scripts/verify-release.js';
+const exec=promisify(execFile),repoRoot=resolve(import.meta.dirname,'../..'),releaseScript=join(repoRoot,'scripts/verify-release.ts'),tsxLoader=join(repoRoot,'node_modules/tsx/dist/loader.mjs');
+async function releaseCli(report:unknown,...args:string[]):Promise<{code:number;stdout:string;stderr:string}>{
+ const root=await mkdtemp(join(tmpdir(),'anthys-release-cli-'));
+ try{
+  await mkdir(join(root,'reports'),{recursive:true});
+  if(report!==undefined)await writeFile(join(root,'reports/enterprise-verification.json'),JSON.stringify(report));
+  try{const result=await exec(process.execPath,['--import',tsxLoader,releaseScript,...args],{cwd:root,timeout:120000});return {code:0,stdout:result.stdout,stderr:result.stderr};}
+  catch(error){const failed=error as {code:number;stdout:string;stderr:string};return {code:failed.code,stdout:failed.stdout,stderr:failed.stderr};}
+ }finally{await rm(root,{recursive:true,force:true});}
+}
 type ReleaseReport=ReturnType<typeof releaseReportSchema.parse>;
 it('T127 missing reports, empty mandatory test arrays, blocked and mock live results cannot release',()=>{
  expect(releaseReasons(null,'ENTERPRISE_DWS')).toEqual(['INVALID_OR_MISSING_VERIFICATION_REPORT']);
@@ -52,4 +67,21 @@ it('the CLI evidence check inspects every reference and fails closed one reason 
  report.requiredTests[0]!.evidenceRefs=['reports/absent-test.json'];report.enabledCapabilities[0]!.evidenceRefs=['reports/absent-capability.json'];
  expect(await missingReleaseEvidence(report,exists(path=>!path.startsWith('reports/absent')))).toEqual(['EVIDENCE_MISSING:reports/absent-test.json','EVIDENCE_MISSING:reports/absent-capability.json']);
  expect(await missingReleaseEvidence(report,exists(()=>false))).toHaveLength(146);
+});
+it('the release CLI fails closed without a report and checks the profile it was asked for',async()=>{
+ const enterprise=await releaseCli(undefined);
+ expect(enterprise.code).toBe(1);expect(enterprise.stderr).toBe('');
+ expect(JSON.parse(enterprise.stdout)).toEqual({profile:'ENTERPRISE_DWS',status:'FAIL',reasons:['INVALID_OR_MISSING_VERIFICATION_REPORT']});
+ const base=await releaseCli(undefined,'--profile','BASE');
+ expect(base.code).toBe(1);expect(base.stderr).toBe('');
+ expect(JSON.parse(base.stdout)).toEqual({profile:'BASE',status:'FAIL',reasons:['INVALID_OR_MISSING_VERIFICATION_REPORT']});
+});
+it('the release CLI exits zero only when the report and every referenced evidence file exist',async()=>{
+ const passing=await releaseCli(releaseReport('ENTERPRISE_DWS'));
+ expect(passing.code).toBe(0);expect(passing.stderr).toBe('');
+ expect(JSON.parse(passing.stdout)).toEqual({profile:'ENTERPRISE_DWS',status:'PASS',reasons:[]});
+ const report=releaseReport('ENTERPRISE_DWS');report.requiredTests[0]!.evidenceRefs=['reports/absent-evidence.json'];
+ const missing=await releaseCli(report);
+ expect(missing.code).toBe(1);expect(missing.stderr).toBe('');
+ expect(JSON.parse(missing.stdout)).toEqual({profile:'ENTERPRISE_DWS',status:'FAIL',reasons:['EVIDENCE_MISSING:reports/absent-evidence.json']});
 });

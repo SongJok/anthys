@@ -1921,3 +1921,24 @@ docs/02 与 `config/stages.json` 要求主分支保留 SBOM、许可证与依赖
 - 发布门禁：`node --import tsx scripts/verify-release.ts` 退出码 1，`status=FAIL`、`reasons=["INVALID_OR_MISSING_VERIFICATION_REPORT"]`；`reports/enterprise-verification.json` 仍不存在。
 
 边界：本节只补门禁命令行入口的本地 oracle，不改产品代码、门禁逻辑或验收标准。GLM、钉钉、DWS 与公司 MCP 的 live 验收继续为 `BLOCKED_EXTERNAL`，130 项 T 用例与 36 项 R 项状态未因此改变，`config/stages.json` 中 270 条历史证据引用仍然缺失、不予伪造。
+
+### 2026-10-24 发布门禁 CLI 的本地 oracle（不改变 T/R 状态）
+
+`releaseReasons`、`releaseEvidenceRefs`、`missingReleaseEvidence` 都已有 fixture 用例，但真正决定放行的命令行入口此前没有 oracle：报告路径是否读对、`--profile` 是否生效、`process.exitCode=1` 是否真的设置。退出码一旦被删掉，全部单元用例仍然全绿，门禁却会静默放行。
+
+本轮在已注册的 `tests/unit/release.test.ts`（现 9 条）追加 2 条用例，用 `--import <repo>/node_modules/tsx/dist/loader.mjs` 在临时目录中启动脚本：`cwd` 指向临时目录，报告写到该目录的 `reports/enterprise-verification.json`，仓库内的同名文件仍不存在。
+
+- 无报告：默认 profile 退出码 1、stderr 为空、stdout 为 `{"profile":"ENTERPRISE_DWS","status":"FAIL","reasons":["INVALID_OR_MISSING_VERIFICATION_REPORT"]}`；传 `--profile BASE` 时同样失败，但 `profile` 为 `BASE`。
+- 合规报告（fixture 的 146 条引用都指向该报告自身，因此全部存在）：退出码 0、`reasons: []`；把一条测试行的 `evidenceRefs` 改为 `reports/absent-evidence.json` 后退出码 1，且只产出 `EVIDENCE_MISSING:reports/absent-evidence.json`。
+
+**结果（本地执行，基线提交 `a61de94` 加本轮改动）**
+
+- `node node_modules/typescript/bin/tsc --noEmit`：退出码 0。
+- `node node_modules/eslint/bin/eslint.js tests/unit/release.test.ts`：退出码 0。
+- `node scripts/run-tests.mjs vitest run tests/unit/release.test.ts`：`9 passed (9)`。
+- 全量：`node scripts/run-tests.mjs vitest run`，退出码 0；`reports/vitest-latest.json` 记录 `success=true`、`numTotalTests=3434`、`numPassedTests=3434`、`numFailedTests=0`、`numPendingTests=0`、`numTotalTestSuites=287`、`testResults=251`；终端汇总为 `Test Files 251 passed (251)`、`Tests 3434 passed (3434)`、`Start at 16:26:18`、`Duration 3002.20s`。该文件是本次唯一一次全量写入；测试过程重写的 `gateway-matrix-latest.json`、`t121-load-intake-latest.json`、`independent-cluster-restore-20261020/actual-path.json` 属随机/计时数据，已恢复为 HEAD 版本而未入库。
+- baseline 门禁：退出码 0，`{"mode":"BASELINE_INTEGRITY_ONLY","status":"PASS","errors":[]}`。
+- 全量门禁：退出码 1，`status=FAIL`、`errors=44`，仍为 36 条 `implementation incomplete` 与 8 条 `test implementation absent`，门禁未改动。
+- 发布门禁：退出码 1，`status=FAIL`、`reasons=["INVALID_OR_MISSING_VERIFICATION_REPORT"]`；`reports/enterprise-verification.json` 仍不存在。
+
+边界：本节只补发布门禁命令行入口的本地 oracle，不改产品代码、门禁逻辑或验收标准。GLM、钉钉、DWS 与公司 MCP 的 live 验收继续为 `BLOCKED_EXTERNAL`，130 项 T 用例与 36 项 R 项状态未因此改变，`config/stages.json` 中 270 条历史证据引用仍然缺失、不予伪造。
