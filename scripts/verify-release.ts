@@ -13,9 +13,11 @@ export function releaseReasons(input:unknown,profile:'BASE'|'ENTERPRISE_DWS'):st
  for(const id of ['glm.native','dingtalk.messages','company.code','company.logs','data.templates','search','artifacts','schedules',...(profile==='ENTERPRISE_DWS'?['dws.identity','dws.contact','dws.todo','dws.calendar','dws.doc','dws.drive','dws.aitable','dingtalk.cards']:[])])if(!r.enabledCapabilities.some(c=>c.id===id))errors.push(`${id}:MISSING_CAPABILITY`);
  if(profile==='ENTERPRISE_DWS'&&!r.dwsCoreVerified)errors.push('DWS_CORE_NOT_LIVE_VERIFIED');return errors;
 }
+export function releaseEvidenceRefs(report:{requiredTests:{evidenceRefs:string[]}[];enabledCapabilities:{evidenceRefs:string[]}[]}):string[]{return [...report.requiredTests.flatMap(t=>t.evidenceRefs),...report.enabledCapabilities.flatMap(c=>c.evidenceRefs)];}
+export async function missingReleaseEvidence(report:{requiredTests:{evidenceRefs:string[]}[];enabledCapabilities:{evidenceRefs:string[]}[]},exists:(path:string)=>Promise<boolean>):Promise<string[]>{const missing:string[]=[];for(const ref of releaseEvidenceRefs(report))if(!await exists(ref))missing.push('EVIDENCE_MISSING:'+ref);return missing;}
 if(import.meta.url===`file://${process.argv[1]}`){const i=process.argv.indexOf('--profile'),profile=z.enum(['BASE','ENTERPRISE_DWS']).parse(i>=0?process.argv[i+1]:'ENTERPRISE_DWS');let raw:unknown;
  try{raw=JSON.parse(await readFile('reports/enterprise-verification.json','utf8'));}catch{raw=null;}
  const reasons=releaseReasons(raw,profile),parsed=releaseReportSchema.safeParse(raw);
- if(parsed.success)for(const ref of [...parsed.data.requiredTests.flatMap(t=>t.evidenceRefs),...parsed.data.enabledCapabilities.flatMap(c=>c.evidenceRefs)])try{await access(ref);}catch{reasons.push('EVIDENCE_MISSING:'+ref);}
+ if(parsed.success)reasons.push(...await missingReleaseEvidence(parsed.data,path=>access(path).then(()=>true,()=>false)));
  console.log(JSON.stringify({profile,status:reasons.length?'FAIL':'PASS',reasons},null,2));if(reasons.length)process.exitCode=1;
 }

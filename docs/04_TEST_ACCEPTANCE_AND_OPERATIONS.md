@@ -1878,3 +1878,25 @@ docs/02 与 `config/stages.json` 要求主分支保留 SBOM、许可证与依赖
 - 发布门禁：`node --import tsx scripts/verify-release.ts` 退出码 1，`status=FAIL`、`reasons=["INVALID_OR_MISSING_VERIFICATION_REPORT"]`；`reports/enterprise-verification.json` 仍不存在。
 
 边界：本节只补门禁自身的本地 oracle，不改产品代码、门禁逻辑或数据口径。GLM、钉钉、DWS 与公司 MCP 的 live 验收继续为 `BLOCKED_EXTERNAL`，130 项 T 用例与 36 项 R 项状态未因此改变，`config/stages.json` 中 270 条历史证据引用仍然缺失、不予伪造；上述 `reasons=[]` 只出现在离线构造的 fixture 中，不代表现实中已满足放行条件。
+
+### 2026-10-24 发布门禁“证据存在性”检查的本地 oracle（不改变 T/R 状态）
+
+`releaseReasons` 的纯规则已有 oracle，但 CLI 在报告结构解析成功后还会逐条检查 `evidenceRefs` 指向的文件是否存在，缺失时追加 `EVIDENCE_MISSING:<ref>`。这条 fail-closed 路径此前没有任何本地用例：即使它退化成“只要报告结构合法就放行证据检查”，测试也发现不了。
+
+本轮把“收集哪些引用”和“逐条判定”抽成 `releaseEvidenceRefs` 与 `missingReleaseEvidence(report, exists)`：顺序保持测试行在前、能力在后，每个缺失引用产出一条原因；CLI 改为把 `access(path)` 映射为布尔值传入。判定文案与顺序不变，唯一的代码改动是把内联循环变成可测函数。
+
+新增 1 条用例（该文件共 7 条）：企业档 fixture 恰好 146 条引用（130 条测试行 + 16 项能力），全部存在时无 reason 且每条引用都被查询一次；把一条测试行和一条能力的引用换成不存在文件后，按顺序得到两条 `EVIDENCE_MISSING`；全部不存在时得到 146 条，证明不会在第一条缺失后就提前放行。
+
+**结果（本地执行，基线提交 `66c5b08` 加本轮改动，提交后即 HEAD）**
+
+- `node node_modules/typescript/bin/tsc --noEmit`：退出码 0。
+- `node node_modules/eslint/bin/eslint.js tests/unit/release.test.ts scripts/verify-release.ts`：退出码 0。
+- `node scripts/run-tests.mjs vitest run tests/unit/release.test.ts`：`7 passed (7)`。
+- 全量：`node scripts/run-tests.mjs vitest run`，退出码 0；`reports/vitest-latest.json` 记录 `success=true`、`numTotalTests=3430`、`numPassedTests=3430`、`numFailedTests=0`、`numPendingTests=0`、`numTotalTestSuites=287`、`testResults=251`；终端汇总为 `Test Files 251 passed (251)`、`Start at 14:28:50`、`Duration 3185.28s`。该文件是本次唯一一次全量写入。
+- baseline 门禁：`node --import tsx scripts/verify-requirements.ts --baseline` 退出码 0，`{"mode":"BASELINE_INTEGRITY_ONLY","status":"PASS","errors":[]}`。
+- 全量门禁：`node --import tsx scripts/verify-requirements.ts` 退出码 1，`status=FAIL`、`errors=44`，仍为 36 条 `implementation incomplete` 与 8 条 `test implementation absent`，门禁未改动。
+- 发布门禁：`node --import tsx scripts/verify-release.ts` 退出码 1，`status=FAIL`、`reasons=["INVALID_OR_MISSING_VERIFICATION_REPORT"]`；`reports/enterprise-verification.json` 仍不存在。
+- 探针可重复性：在当前树重跑 `npm run operations:readiness`，`status=PASS`，11 项检查全部 PASS（含 `prodComposeRender`），`generatedAt=2026-10-24T06:28:21.487Z`；与上一份报告的唯一差异就是该时间戳，已随本轮入库。
+- 270 条声明的复核：`config/stages.json` 共 15 个阶段、531 条原始引用、307 条去重引用，其中 270 条所指文件不存在，与文档声明一致。
+
+边界：本节只补门禁证据检查的本地 oracle，不改验收标准、T/R 状态或任何外部集成。GLM、钉钉、DWS 与公司 MCP 的 live 验收继续为 `BLOCKED_EXTERNAL`，130 项 T 用例与 36 项 R 项状态未因此改变，`config/stages.json` 中 270 条历史证据引用仍然缺失、不予伪造。

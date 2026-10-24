@@ -1,4 +1,4 @@
-import {releaseReasons,releaseReportSchema} from '../../scripts/verify-release.js';
+import {releaseReasons,releaseReportSchema,releaseEvidenceRefs,missingReleaseEvidence} from '../../scripts/verify-release.js';
 type ReleaseReport=ReturnType<typeof releaseReportSchema.parse>;
 it('T127 missing reports, empty mandatory test arrays, blocked and mock live results cannot release',()=>{
  expect(releaseReasons(null,'ENTERPRISE_DWS')).toEqual(['INVALID_OR_MISSING_VERIFICATION_REPORT']);
@@ -43,4 +43,13 @@ it('the report schema is fail-closed on unknown top-level keys, malformed ids, e
  for(const tester of [(t:ReleaseReport['requiredTests'][number])=>({...t,testId:'T1'}),(t:ReleaseReport['requiredTests'][number])=>({...t,evidenceRefs:[]}),(t:ReleaseReport['requiredTests'][number])=>({...t,status:'DONE'})])expect(invalid({requiredTests:valid.requiredTests.map((t,i)=>i===0?tester(t):t)})).toEqual(['INVALID_OR_MISSING_VERIFICATION_REPORT']);
  expect(invalid({enabledCapabilities:valid.enabledCapabilities.map((c,i)=>i===0?{...c,verificationState:'TRUSTED'}:c)})).toEqual(['INVALID_OR_MISSING_VERIFICATION_REPORT']);
  expect(invalid({requiredTests:valid.requiredTests.slice(0,129)})).toEqual(['BASELINE_TESTS_MISSING_OR_DUPLICATED','T130:NOT_RUN']);
+});
+it('the CLI evidence check inspects every reference and fails closed one reason per missing file',async()=>{
+ const report=releaseReport('ENTERPRISE_DWS'),seen:string[]=[],exists=(allow:(path:string)=>boolean)=>async(path:string)=>{seen.push(path);return allow(path);};
+ expect(releaseEvidenceRefs(report)).toHaveLength(146);
+ expect(await missingReleaseEvidence(report,exists(()=>true))).toEqual([]);
+ expect(seen).toHaveLength(146);
+ report.requiredTests[0]!.evidenceRefs=['reports/absent-test.json'];report.enabledCapabilities[0]!.evidenceRefs=['reports/absent-capability.json'];
+ expect(await missingReleaseEvidence(report,exists(path=>!path.startsWith('reports/absent')))).toEqual(['EVIDENCE_MISSING:reports/absent-test.json','EVIDENCE_MISSING:reports/absent-capability.json']);
+ expect(await missingReleaseEvidence(report,exists(()=>false))).toHaveLength(146);
 });
