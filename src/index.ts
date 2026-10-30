@@ -277,6 +277,7 @@ async function main(): Promise<void> {
       getDingTalkConfig: () => baseConfig.getDingTalkConfig(),
       getMemoryConfig: () => baseConfig.getMemoryConfig(),
       getBystanderConfig: () => baseConfig.getBystanderConfig(),
+      getVisionConfig: () => baseConfig.getVisionConfig(),
       getDatabaseUrl: () => baseConfig.getDatabaseUrl(),
       assertReady: () => baseConfig.assertReady(),
     };
@@ -522,6 +523,15 @@ async function main(): Promise<void> {
             logger: harnessLogger,
           })
         : undefined;
+    logger.info(
+      {
+        enabled: visionConfig?.enabled ?? false,
+        ready: Boolean(visionDescriber),
+        apiKeyConfigured: Boolean(visionConfig?.apiKey),
+        model: visionConfig?.model,
+      },
+      'vision configuration resolved',
+    );
     if (visionConfig?.enabled && !visionConfig.apiKey) {
       logger.warn(
         { model: visionConfig.model },
