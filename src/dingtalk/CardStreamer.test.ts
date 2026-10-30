@@ -537,6 +537,25 @@ describe('CardStreamer', () => {
       expect(finals[0]?.content).toContain('最终答案');
     });
 
+    it('未收到 completed 直接收尾时补终态角标', async () => {
+      const fake = fakeApi();
+      const streamer = new CardStreamer({
+        api: fake.api,
+        message: inbound(),
+        cardTemplateId: 'tpl-ai',
+        robotCode: 'robot-1',
+        layout: 'ai',
+      });
+      await streamer.start();
+
+      streamer.handle({ type: 'answer_delta', content: '测试答案' });
+      await streamer.finish();
+
+      const final = fake.updates.find((update) => update.isFinalize);
+      expect(final?.content).toContain('> 已完成');
+      expect(final?.content).not.toContain('正在思考');
+    });
+
     it('超出卡片容量的答案截断并保留溢出文本', async () => {
       const fake = fakeApi();
       const streamer = new CardStreamer({
@@ -555,7 +574,7 @@ describe('CardStreamer', () => {
       const final = fake.updates.find((update) => update.isFinalize);
       expect(final?.content).toContain('剩余部分随后发送');
       expect(Array.from(final?.content ?? '').length).toBeLessThanOrEqual(400);
-      expect(streamer.takeOverflowAnswer()).toBe('答'.repeat(225));
+      expect(streamer.takeOverflowAnswer()).toBe('答'.repeat(223));
       expect(streamer.takeOverflowAnswer()).toBe('');
     });
   });

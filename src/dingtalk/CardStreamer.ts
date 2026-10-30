@@ -277,6 +277,7 @@ export class CardStreamer {
   private dirtyStatus = false;
   private dirtyTools = false;
   private dirtyCitations = false;
+  private terminalStatus = false;
   private available = false;
   private finalizePromise: Promise<void> | null = null;
   private pending = new Map<string, CardUpdate>();
@@ -462,6 +463,7 @@ export class CardStreamer {
         this.status = event.usage.stopped
           ? `已停止 · ${(event.usage.durationMs / 1000).toFixed(1)}s · ${event.usage.totalTokens} tokens`
           : `已完成 · ${(event.usage.durationMs / 1000).toFixed(1)}s · ${event.usage.totalTokens} tokens`;
+        this.terminalStatus = true;
         this.dirtyStatus = true;
         this.throttler.cancel();
         this.flushDirty(false, false);
@@ -471,6 +473,7 @@ export class CardStreamer {
       case 'error': {
         this.toolLines.push(`- 处理出错：${event.message}`);
         this.status = event.retryable === false ? '处理失败' : '处理失败';
+        this.terminalStatus = true;
         this.dirtyThinking = this.layout !== 'v2';
         this.dirtyTools = this.layout === 'v2';
         this.dirtyStatus = true;
@@ -753,6 +756,12 @@ export class CardStreamer {
   private finalize(isError: boolean): Promise<void> {
     if (this.finalizePromise) return this.finalizePromise;
     this.throttler.cancel();
+    // 没走 completed/error 就直接收尾（例如管理端测试卡片）时补一个终态角标
+    if (!this.terminalStatus) {
+      this.status = isError ? '处理失败' : '已完成';
+      this.dirtyStatus = true;
+      this.terminalStatus = true;
+    }
     this.flushDirty(true, isError);
     this.finalizePromise = this.queue;
     return this.finalizePromise;
