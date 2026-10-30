@@ -228,6 +228,7 @@ export class DwsGroupMessageListener {
   private readonly ignoreSenders: Set<string>;
   private allowed: Set<string>;
   private seen = new Map<string, number>();
+  private readonly reportedUnlistened = new Set<string>();
   private pending = new Set<Promise<void>>();
   private child?: DwsGroupChildProcess;
   private restartTimer?: ReturnType<typeof setTimeout>;
@@ -415,7 +416,17 @@ export class DwsGroupMessageListener {
     if (this.isDuplicate(fields.messageId)) return;
     if (this.ignoreSenders.has(fields.senderOpenId)) return;
     if (this.ignoreSenders.has(fields.senderName)) return;
-    if (!this.allowed.has(fields.conversationId)) return;
+    if (!this.allowed.has(fields.conversationId)) {
+      // 每个群只提示一次，既证明事件流已连通，也方便排查漏配的群
+      if (!this.reportedUnlistened.has(fields.conversationId)) {
+        this.reportedUnlistened.add(fields.conversationId);
+        this.logger?.info(
+          { conversationId: fields.conversationId },
+          'dws group message ignored, add the conversationId to BYSTANDER_LISTEN_GROUPS to listen',
+        );
+      }
+      return;
+    }
 
     this.schedule(toInboundMessage(fields));
   }

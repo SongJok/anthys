@@ -117,6 +117,7 @@ describe('DwsGroupMessageListener', () => {
     allowed?: string[];
     shouldIgnore?: (messageId: string) => boolean;
     ignoreSenders?: string[];
+    logger?: typeof noopLogger;
   } = {}) {
     const children: FakeChild[] = [];
     const received: InboundMessage[] = [];
@@ -132,7 +133,7 @@ describe('DwsGroupMessageListener', () => {
         children.push(child);
         return child.asChild();
       },
-      logger: noopLogger,
+      logger: options.logger ?? noopLogger,
       onMessage: (message) => {
         received.push(message);
       },
@@ -282,6 +283,30 @@ describe('DwsGroupMessageListener', () => {
     await vi.advanceTimersByTimeAsync(30_000);
     expect(children).toHaveLength(2);
     listener.stop();
+  });
+
+  it('reports each unlistened group only once', async () => {
+    const info = vi.fn();
+    const { listener, children } = setup({
+      allowed: [],
+      logger: { ...noopLogger, info },
+    });
+    listener.start();
+    children[0]!.stdout.write(line(FLAT_MESSAGE));
+    children[0]!.stdout.write(line({ ...FLAT_MESSAGE, message_id: 'msg-2' }));
+
+    await vi.waitFor(() =>
+      expect(info).toHaveBeenCalledWith(
+        { conversationId: 'cid-1' },
+        expect.stringContaining('BYSTANDER_LISTEN_GROUPS'),
+      ),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(
+      info.mock.calls.filter((call) =>
+        String(call[0]?.conversationId ?? '') === 'cid-1',
+      ),
+    ).toHaveLength(1);
   });
 
   it('can refresh the allowed groups at runtime', async () => {
