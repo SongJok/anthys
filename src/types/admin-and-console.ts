@@ -44,7 +44,9 @@ export interface EnterpriseBotSystemConfig {
 
 export type AdminActionType =
   | 'UPDATE_LLM'
+  | 'UPDATE_DINGTALK'
   | 'RELOAD_MCP'
+  | 'UPDATE_MCP_POLICY'
   | 'UPDATE_GROUP_POLICY'
   | 'EMERGENCY_MUTE'
   | 'QUERY_STATS';

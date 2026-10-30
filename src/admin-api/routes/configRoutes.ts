@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { HTTPException } from 'hono/http-exception';
+import { maskSecret } from '../../config/DynamicConfigCenter.js';
 import type { DynamicConfigCenter } from '../../config/DynamicConfigCenter.js';
 import type {
   AdminAuditLog,
@@ -144,6 +145,11 @@ export function webActor(c: {
   return id && id.length > 0 ? id : 'web-console';
 }
 
+/** 表单回传掩码时视为保持原值，避免把掩码写成真实密钥 */
+function isSecretMask(input: string | undefined, current: string): boolean {
+  return input !== undefined && input.trim() === maskSecret(current);
+}
+
 /** 管理后台配置路由：钉钉、LLM/人设、群策略、审计大盘与 ReAct 轨迹 */
 export function createConfigRoutes(deps: ConfigRouteDeps): Hono {
   const app = new Hono();
@@ -161,13 +167,17 @@ export function createConfigRoutes(deps: ConfigRouteDeps): Hono {
 
   app.put('/config/dingtalk', async (c) => {
     const body = await readJsonBody(c);
+    const before = deps.configCenter.getSystemConfig().dingtalk;
+    const clientSecret = readString(body, 'clientSecret');
+    const currentSecret = deps.configCenter.getDingTalkConfig().clientSecret;
     await deps.configCenter.updateDingTalk(
       {
         ...(readString(body, 'clientId') !== undefined
           ? { clientId: readString(body, 'clientId')! }
           : {}),
-        ...(readString(body, 'clientSecret') !== undefined
-          ? { clientSecret: readString(body, 'clientSecret')! }
+        ...(clientSecret !== undefined &&
+        !isSecretMask(clientSecret, currentSecret)
+          ? { clientSecret }
           : {}),
         ...(readString(body, 'robotCode') !== undefined
           ? { robotCode: readString(body, 'robotCode')! }
@@ -184,9 +194,17 @@ export function createConfigRoutes(deps: ConfigRouteDeps): Hono {
       },
       actor(c),
     );
+    const after = deps.configCenter.getSystemConfig().dingtalk;
+    await recordWebAudit(
+      deps.configCenter,
+      webActor(c),
+      'UPDATE_DINGTALK',
+      { ...before },
+      { ...after },
+    );
     return c.json({
       ok: true,
-      config: deps.configCenter.getSystemConfig().dingtalk,
+      config: after,
       stream: deps.dingtalkTester?.streamStatus() ?? null,
     });
   });
@@ -218,6 +236,8 @@ export function createConfigRoutes(deps: ConfigRouteDeps): Hono {
     const persona = readObject(body, 'persona');
     const loop = readObject(body, 'loop');
     const provider = readString(body, 'provider');
+    const apiKey = readString(body, 'apiKey');
+    const currentApiKey = deps.configCenter.getLLMConfig().apiKey;
     if (
       provider !== undefined &&
       provider !== 'openai-compatible' &&
@@ -236,8 +256,8 @@ export function createConfigRoutes(deps: ConfigRouteDeps): Hono {
         ...(readString(body, 'model') !== undefined
           ? { model: readString(body, 'model')! }
           : {}),
-        ...(readString(body, 'apiKey') !== undefined
-          ? { apiKey: readString(body, 'apiKey')! }
+        ...(apiKey !== undefined && !isSecretMask(apiKey, currentApiKey)
+          ? { apiKey }
           : {}),
         ...(readNumber(body, 'temperature') !== undefined
           ? { temperature: readNumber(body, 'temperature')! }

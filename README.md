@@ -1,103 +1,174 @@
-# 钉钉智能体（阶段四）
+# 钉钉智能体
 
-钉钉 Stream 模式机器人：单聊与群聊 @ 机器人时，通过 AI 卡片流式输出原生思维链与 Markdown 正文；群内全量旁听并在高优故障/技术求助时主动回复，配合工作记忆、情景摘要与语义画像三层记忆。所有配置可通过管理员钉钉单聊或 Web 管理控制台在线调整，毫秒级热生效，无需重启进程。
+一个面向企业内部的知识与运维助手：以钉钉机器人的形态出现在单聊和群聊里，使用企业的 MCP 服务、钉钉 DWS 能力与隔离沙盒回答跨系统问题；在群里不打扰地旁听，只在真正需要时主动介入；回答过程与管控操作都留痕、可审计，运行期的模型、人设、预算、MCP、群策略与钉钉凭据都能在线热更新而无需重启。
 
-## 架构
+- **开箱即用的钉钉接入**：基于 Stream 模式，不需要公网域名、Webhook 或内网穿透。
+- **过程可见的回答**：AI 卡片同步流式展示原生思维链、工具调用轨迹与最终正文。
+- **克制的主动回复**：群内全量旁听，经三级漏斗判断后才对高优故障、技术求助作出回应。
+- **越用越懂团队**：工作记忆 + 情景摘要 + 语义画像三层记忆，跨会话保留上下文。
+- **双通道动态管控**：管理员既可以在钉钉单聊里用自然语言下达指令，也可以在 Web 控制台逐项配置，保存即生效。
+- **企业级边界**：管理员白名单、只读命令白名单、沙箱隔离、凭据掩码与全量操作审计。
 
+---
+
+## 目录
+
+- [适用场景](#适用场景)
+- [工作方式](#工作方式)
+- [快速部署](#快速部署)
+- [功能说明](#功能说明)
+- [管理控制台](#管理控制台)
+- [管理员单聊（ChatOps）](#管理员单聊chatops)
+- [管理 API](#管理-api)
+- [安全与数据](#安全与数据)
+- [运维与排障](#运维与排障)
+- [已知边界](#已知边界)
+
+---
+
+## 适用场景
+
+| 场景 | 员工看到的效果 |
+| --- | --- |
+| 故障排查 | 在群里讨论报错时，机器人主动拉取生产日志、检索代码与接口文档，给出可执行的结论 |
+| 数据速查 | 单聊询问「上周订单超时的集中原因」，机器人调用数据服务并用沙盒做聚合统计 |
+| 流程查询 | @ 机器人问「本周日程」「我的待办」「这份文档怎么规定的」，机器人调用 DWS 只读查询 |
+| 知识沉淀 | 团队术语、同事职责、历史结论被逐步记住，后续回答不再从零解释 |
+| 运营管控 | 管理员随时切换模型、调预算、增删 MCP、调整群策略，或一键紧急静音 |
+
+---
+
+## 工作方式
+
+```mermaid
+flowchart LR
+  A[员工 / 群成员] -->|单聊、@ 机器人、群消息| B(钉钉 Stream)
+  B --> C{消息路由}
+  C -->|单聊或 @| D[ReAct 智能体]
+  C -->|群内未 @| E[旁听判定]
+  E -->|命中主题且通过冷却与置信度| D
+  D --> F[工具层<br/>企业 MCP · DWS · 沙盒 · 内置工具]
+  D --> G[三层记忆]
+  D --> H[AI 卡片流式输出]
+  I[Web 控制台 / 管理员单聊] --> J[动态配置中心]
+  J -.热更新.-> B
+  J -.热更新.-> D
+  J -.热更新.-> F
 ```
-src/
-├── config/      环境变量、IConfigProvider 与 DynamicConfigCenter（PostgreSQL + 内存缓存 + EventEmitter）
-├── admin-api/   Hono 管理 REST API（/api/v1/admin/*）与 web-console 静态托管
-├── dingtalk/    Stream 网关、消息解析器、AI 卡片流式渲染器与节流器
-├── bystander/   群聊旁听缓冲、三级旁听漏斗、冷却限流与群级策略
-├── harness/     AgentHarness（消息 → 记忆 → 上下文 → 引擎）、ToolRegistry 与 DynamicLoopGuard
-├── react/       ReActRunner、内置工具、OpenAI/Anthropic 流式模型适配
-├── tools/       企业 MCP、DWS CLI、隔离沙盒与管理员 ChatOps 工具源
-├── memory/      PostgreSQL 会话仓库、三层记忆管理与上下文组装
-├── db/          Drizzle Schema（会话、记忆、动态配置与审计）、连接与 Seed
-└── index.ts     启动入口
-web-console/     React 19 + Vite + TypeScript + TailwindCSS + Ant Design 管理控制台
-```
 
-处理链路：
+1. 钉钉 Stream 推送消息，服务立即确认接收，再异步处理，避免重复投递。
+2. 单聊与 @ 消息直接进入智能体；群内未 @ 的消息先进入旁听缓冲，由零 Token 的规则层过滤掉大部分噪音。
+3. 少量候选消息经过防抢答等待、模型判定（低温度、无工具、无思维链）与置信度门槛，只有被判定为「需要回应」时才唤醒智能体。
+4. 智能体按当前人设、三层记忆与工具说明组装上下文，动态决定调用哪些工具、调用几次。
+5. 每个工具调用、思考过程与正文都实时写入同一张 AI 卡片，员工可以边等边看。
+6. 回答与过程落库，后台异步压缩早期对话、抽取长期术语与职责画像。
+7. 配置变更通过统一配置中心广播，Stream 连接（凭据变更时按需重建）、工具连接池与推理参数在运行中热应用。
 
-1. `DWClient` 注册 `TOPIC_ROBOT`，收到回调立即 ACK，再异步解析。
-2. 群聊消息（无论是否 @ 机器人）先写入 `GroupTranscriptBuffer`；非文本消息忽略；相同 `messageId` 去重。
-3. @ 消息走 `AgentHarness`；未 @ 消息进入 `BystanderTriageEngine`：L1 规则/冷却/忙闲过滤 → 8 秒防抢答窗口 → L2 小模型 JSON 判定 → 置信度门禁，只有 `PROACTIVE_REPLY` 才唤醒 ReAct 并创建卡片。
-4. `AgentHarness` 组装三层记忆（发言人画像、群聊旁听窗口、历史摘要），注入人设与工具说明，写入用户消息。
-5. `ReActRunner` 以 `stream: true` 运行：分离 `reasoning_content` / `thinking`、正文与 `tool_calls`。
-6. `CardStreamer` 把增量写入卡片三个区块：`thinking_section`、`answer_section`、`status_bar`；每 250ms 或每 80 字符刷新，工具事件与完成事件立即刷新。
-7. 助手回答（含推理与 token 用量）落库；后台异步把超过阈值的早期对话压缩为情景摘要，并抽取长期有效的术语/职责画像。
+---
 
-动态循环不使用固定轮数：由 `DynamicLoopGuard` 按墙钟时间、Token 预算与“同工具同参数连续调用”判定是否继续；预算耗尽时以 `tool_choice: none` 做一次收尾汇总。
+## 快速部署
 
-## 前置条件
+### 前置条件
 
-- Node.js 24+（项目要求）
-- pnpm
-- PostgreSQL（默认 `postgres://localhost:5432/dingtalk_agent`），并安装 pgvector 扩展
+| 项目 | 要求 |
+| --- | --- |
+| 运行环境 | Node.js 24 及以上、pnpm |
+| 数据库 | PostgreSQL，并启用 `pgvector` 扩展（语义记忆的向量列） |
+| 钉钉 | 企业内部应用 + 机器人，消息接收方式选择 **Stream 模式** |
+| 大模型 | 任一 OpenAI 兼容接口（DeepSeek、GLM、Qwen 等）或 Anthropic Messages API |
+| 浏览器 | 管理控制台支持现代 Chrome / Edge / Safari |
 
-## 钉钉侧准备
+推荐部署形态：一个常驻进程同时承担机器人与管理控制台，置于内网或受控网络，由 Nginx 之类反向代理对外暴露控制台端口即可。
 
-1. 在钉钉开放平台创建企业内部应用，启用机器人，消息接收方式选择 **Stream 模式**（无需公网域名或 Webhook）。
-2. 记录 `AppKey`（`DINGTALK_CLIENT_ID`）、`AppSecret`（`DINGTALK_CLIENT_SECRET`）与机器人 `robotCode`（通常与 AppKey 相同）。
-3. 在钉钉卡片平台创建 **AI 卡片模板**，模板变量必须包含：
-   - `thinking_section`：折叠区，展示原生思维链与工具调用轨迹（Markdown）
-   - `answer_section`：正文区（Markdown）
-   - `status_bar`：状态角标（纯文本，建议渲染在标题栏或底部）
-   将模板 ID 填入 `DINGTALK_CARD_TEMPLATE_ID`。
-4. 将机器人添加到目标群；群聊中 @ 机器人 的消息会正常应答，未 @ 消息会被静默旁听，仅在命中故障/求助信号时主动回复。
+### 钉钉侧准备
 
-## 启动
+1. 在钉钉开放平台创建企业内部应用，启用机器人，记录 **AppKey**、**AppSecret** 与 **RobotCode**（通常与 AppKey 相同）。
+2. 在钉钉卡片平台创建 **AI 卡片模板**，模板变量必须包含以下三个：
+
+   | 变量 | 用途 |
+   | --- | --- |
+   | `thinking_section` | 折叠区：原生思维链与工具调用轨迹（Markdown） |
+   | `answer_section` | 正文区（Markdown） |
+   | `status_bar` | 状态角标（纯文本，建议渲染在标题栏或底部） |
+
+3. 记录模板 ID，稍后填入 `DINGTALK_CARD_TEMPLATE_ID`。
+4. 将机器人加入目标群。群内 @ 机器人会正常应答；未 @ 的消息被静默旁听，命中条件才主动回复。
+
+### 安装依赖与初始化数据库
+
+> 建议先按下一节创建 `.env`（至少确认 `DATABASE_URL`），再执行初始化。
 
 ```bash
-cp .env.example .env
-# 填写 DINGTALK_*、LLM_BASE_URL、LLM_API_KEY、DATABASE_URL
-
-psql "$DATABASE_URL" -c "CREATE EXTENSION IF NOT EXISTS vector;"  # 语义记忆向量列
+# 安装依赖：控制台是独立的子工程，需要单独安装
 pnpm install
-pnpm run db:push      # 创建 conversations / messages / agent_configs / conversation_summaries
-                      # / semantic_memories / bystander_policies / sys_configs
-                      # / admin_audit_logs / react_traces
-pnpm run db:seed      # 写入默认人设与大模型配置（已有行不覆盖）
-pnpm build            # 构建 web-console 并编译服务端；控制台由后端静态托管
-pnpm start            # 或 pnpm dev（watch 模式）
+pnpm -C web-console install
+
+psql "postgres://localhost:5432/dingtalk_agent" -c "CREATE EXTENSION IF NOT EXISTS vector;"
+pnpm run db:push      # 创建会话、记忆、动态配置、审计与轨迹等数据表
+pnpm run db:seed      # 可选：预写入默认人设与模型配置，已有记录不覆盖
 ```
 
-`pnpm start` 会同时启动 Stream 客户端与管理 API（默认 `http://localhost:8787`）。未执行 `pnpm build` 时后端仍可启动，但 `/` 不会返回控制台页面。
+> 数据库连接串默认为 `postgres://localhost:5432/dingtalk_agent`，可通过 `DATABASE_URL` 覆盖；`psql` 命令请替换为实际连接串。
+> 人设与模型配置在服务启动时也会自动补齐，`db:seed` 主要用于提前初始化或 CI 场景。
 
-- 人设与大模型参数优先读取数据库 `agent_configs`，缺失时回退 `.env`；`LLM_API_KEY` 只从环境变量读取，不落库。
-- `pnpm start` 会先执行配置校验，缺少必需变量时直接退出并列出缺失项。
-- 进程退出时断开 Stream 连接、等待后台记忆维护任务并关闭数据库连接池。
+### 环境变量
 
-## 管理控制台与管理员单聊（ChatOps）
+将 `.env.example` 复制为 `.env`，按下列分组填写。缺少必需项时进程会立即退出并列出缺失的变量名。
 
-控制台（`http://localhost:8787/`）提供六个页面：
+**运行时与数据库**
 
-- **运行大盘**：Stream 连接、今日对话轮次与 Token、MCP 节点健康、各群旁听统计、最近管理审计。
-- **钉钉企业配置**：AppKey / AppSecret（掩码回显，留空表示不改）、RobotCode、AI 卡片模板 ID、管理员 StaffId 白名单、DWS CLI 开关、发送测试卡片。
-- **大模型与人设**：模型渠道、Base URL / 模型 / API Key、原生思维链、采样温度、ReAct 循环预算（耗时 / Token / 同工具连续调用 / 收敛自检）、人设与语气，支持沙盒对话测试。
-- **企业 MCP**：节点增删改查、一键连通性测试并浏览已发现工具 Schema、按群 / 角色控制工具调用权限。
-- **群聊旁听策略**：全局默认与按群覆盖、一键紧急静音。
-- **ReAct 审计轨迹**：分页查看每一步原生思维链、工具入参 / 耗时、沙盒输出与最终回答。
-
-管理员在钉钉单聊中会额外获得四个高危工具：`admin_inspect_system_status`、`admin_manage_mcp_server`、`admin_update_llm_or_persona`、`admin_configure_group_bystander`。仅当 `conversationType === '1'` 且发送人命中管理员白名单时才挂载；普通员工与群聊环境下这些工具物理不可见。
-
-| 环境变量 | 默认值 | 说明 |
+| 变量 | 默认值 | 说明 |
 | --- | --- | --- |
-| `ADMIN_API_TOKEN` | 空 | 管理 API Bearer Token；留空表示本地不校验 |
-| `ADMIN_PORT` | `8787` | 管理 API 与静态控制台端口 |
-| `ADMIN_STAFF_IDS` | 空 | 允许使用 `admin_*` 工具的管理员 StaffId（逗号分隔） |
-| `DWS_CLI_ENABLED` | `false` | 是否加载 DWS CLI 工具源（可在线切换） |
-| `MCP_SERVERS_CONFIG` | `config/mcp-servers.json` | 首次启动的 MCP 节点定义，之后以 `sys_configs` 为准 |
+| `NODE_ENV` | `development` | 运行环境标识 |
+| `LOG_LEVEL` | `info` | 日志级别 |
+| `DATABASE_URL` | `postgres://localhost:5432/dingtalk_agent` | PostgreSQL 连接串 |
 
-所有改动持久化到 `sys_configs`，并通过 `<scope>:changed` 事件热应用到 Stream 网关、MCP 连接池与 ReAct 引擎。Web 与 ChatOps 两条通道都会写入 `admin_audit_logs`，密钥与 MCP 凭据只记录掩码。
+**钉钉接入**
 
-## 群聊旁听与非 @ 自主回复
-
-| 环境变量 | 默认值 | 说明 |
+| 变量 | 默认值 | 说明 |
 | --- | --- | --- |
-| `BYSTANDER_ENABLED` | `true` | 是否开启群聊旁听缓冲 |
+| `DINGTALK_CLIENT_ID` | 必填 | 企业内部应用 AppKey |
+| `DINGTALK_CLIENT_SECRET` | 必填 | 应用 AppSecret |
+| `DINGTALK_ROBOT_CODE` | 必填 | 机器人编码，通常等于 AppKey |
+| `DINGTALK_CARD_TEMPLATE_ID` | 必填 | AI 卡片模板 ID，模板需包含三个变量（见上） |
+
+**大模型与人设**
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `LLM_PROVIDER` | `openai-compatible` | `openai-compatible` 或 `anthropic` |
+| `LLM_BASE_URL` | 必填 | 兼容接口地址，例如 `https://api.deepseek.com/v1` |
+| `LLM_API_KEY` | 必填 | 模型密钥，接口与审计中只显示掩码 |
+| `LLM_MODEL` | `deepseek-reasoner` | 模型名称 |
+| `LLM_TEMPERATURE` | `0.3` | 采样温度 |
+| `LLM_ENABLE_NATIVE_REASONING` | `true` | 是否请求原生思维链 |
+| `PERSONA_NAME` | `小钉` | 机器人名称 |
+| `PERSONA_ROLE_PROMPT` | 见示例 | 人设 Prompt |
+| `PERSONA_SPEAKING_STYLE` | 见示例 | 语气与表达风格 |
+
+**推理预算**
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `LOOP_MAX_WALL_TIME_MS` | `120000` | 单轮回答的最大墙钟时间 |
+| `LOOP_MAX_TOTAL_TOKENS` | `64000` | 单轮回答的 Token 上限 |
+| `LOOP_MAX_CONSECUTIVE_SAME_TOOL` | `2` | 同一工具同参数连续调用上限 |
+| `LOOP_CONVERGENCE_CHECK` | `true` | 是否启用信息收敛自检 |
+
+**记忆**
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `MEMORY_WINDOW_MESSAGES` | `20` | 上下文保留的最近消息数 |
+| `MEMORY_COMPRESSION_THRESHOLD_TOKENS` | `12000` | 触发情景摘要的 Token 阈值 |
+| `MEMORY_COMPRESSION_RATIO` | `0.6` | 每次压缩最早的对话比例 |
+| `MEMORY_SEMANTIC_LIMIT` | `6` | 每次组装上下文时召回的语义记忆条数 |
+
+**群聊旁听**
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `BYSTANDER_ENABLED` | `true` | 是否开启群聊旁听 |
 | `BYSTANDER_PROACTIVE_REPLY` | `true` | 是否允许非 @ 主动回复 |
 | `BYSTANDER_SLIDING_WINDOW_SIZE` | `20` | 每群保留的旁听条数 |
 | `BYSTANDER_COOLDOWN_SECONDS` | `180` | 同群两次主动回复的最小间隔 |
@@ -105,45 +176,306 @@ pnpm start            # 或 pnpm dev（watch 模式）
 | `BYSTANDER_TRIGGER_TOPICS` | `线上故障,SQL查询,接口报错,发布排期` | 重点关注主题（逗号分隔） |
 | `BYSTANDER_DEBOUNCE_MS` | `8000` | 疑似提问后的防抢答等待窗口 |
 
-- 三级漏斗保证非 @ 消息不会直接进入 ReAct：L1 零 Token 规则（表情/确认短语、冷却、群忙闲、技术信号预筛）→ 防抢答等待（期间有同事回复即静默）→ L2 JSON 分类器 → 置信度门禁。
-- 群级策略可在数据库 `bystander_policies` 表中覆盖上述默认值；数据库不可用时回退环境变量。
-- 主动回复使用与 @ 回复相同的 AI 卡片与 MCP/DWS 工具链路。
+**管理控制台与企业 MCP**
 
-## 三层记忆
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `ADMIN_API_TOKEN` | 空 | 管理 API 的 Bearer Token；为空时不做校验 |
+| `ADMIN_PORT` | `8787` | 管理 API 与控制台端口 |
+| `ADMIN_STAFF_IDS` | 空 | 允许使用管理指令的钉钉 StaffId（逗号分隔） |
+| `DWS_CLI_ENABLED` | `true`（`.env.example` 中为 `false`） | 是否启用 DWS 命令行工具源 |
+| `SANDBOX_ENABLED` | `true` | 是否启用隔离沙盒工具 |
+| `MCP_SERVERS_CONFIG` | `config/mcp-servers.json` | 首次启动时的 MCP 节点定义 |
+| `ENTERPRISE_MCP_TOKEN` | 空 | 示例企业 MCP 的访问令牌，供配置文件中 `${...}` 引用 |
 
-- **Working Memory**：当前会话历史窗口 + 每群 `GroupTranscriptBuffer` 滑动窗口。
-- **Episodic Memory**：单会话上下文超过 `MEMORY_COMPRESSION_THRESHOLD_TOKENS`（默认 12000）时，后台压缩最早 `MEMORY_COMPRESSION_RATIO`（默认 0.6）的对话，写入 `conversation_summaries`，并按已覆盖消息 ID 避免重复压缩。
-- **Semantic Memory**：从对话中抽取长期有效的团队术语与员工职责画像，写入 `semantic_memories`；组装上下文时按发言人、群与关键词（可选 pgvector 余弦排序）按需召回，召回条数由 `MEMORY_SEMANTIC_LIMIT` 控制。
-
-## LLM 兼容性
-
-- `LLM_PROVIDER=openai-compatible`：DeepSeek-R1、GLM、Qwen 等，读取 `reasoning_content` 或 `reasoning` 增量。
-- `LLM_PROVIDER=anthropic`：原生 Messages API，读取 `thinking_delta`；原生思考开启时自动省略 temperature，并约束 `budget_tokens < max_tokens`。
-- `LLM_ENABLE_NATIVE_REASONING=false` 时不请求原生思考，卡片只展示正文与工具轨迹。
-
-## 内置工具
-
-| 工具 | 作用 |
-| --- | --- |
-| `current_time` | 返回指定时区（`Asia/Shanghai` / `UTC`）的当前时间、Unix 毫秒、星期 |
-| `calculator` | 安全表达式计算（不使用 `eval`），支持 `+ - * / % ^`、括号、科学计数法 |
-| `system_status` | 进程、Node 版本、平台、运行时长、负载与内存占用 |
-
-## 验证
+### 构建与启动
 
 ```bash
-pnpm run typecheck
-pnpm test
+pnpm build     # 构建控制台静态资源，并编译服务端到 dist
+pnpm start     # 通过 tsx 直接运行 src/index.ts
 ```
 
-覆盖内容：动态预算与重复调用拦截、上下文窗口、ReAct 流式事件与多步工具、内置工具边界、消息解析、群聊 @ 过滤、Stream ACK/去重、卡片三区块节流与收尾、AgentHarness 多轮持久化；群聊旁听缓冲裁剪与多群隔离、三级漏斗（闲聊静默/报错主动触发/防抢答/冷却/置信度）、群聊旁听→主动回复→@ 追问携带上下文的完整链路、长对话摘要归档与画像/术语召回；动态配置热更新广播、管理员单聊工具的上下文权限隔离、管理 REST 接口 CRUD 与 MCP 凭据掩码回显。
+> 启动脚本依赖 `tsx`，安装依赖时请保留 devDependencies（不要使用 `--prod`）。
 
-真实钉钉与真实模型链路的端到端验收需要有效的企业应用凭据、卡片模板与 LLM Key；本仓库的自动化测试不访问外部网络。`src/harness/ToolRegistry.test.ts` 与 `src/tools/sandbox/IsolatedSandbox.test.ts` 依赖 `isolated-vm` 原生构建，缺失本机 ABI 构建时会跳过用例。
+启动后：
 
-## 阶段四边界
+- 机器人通过 Stream 连接钉钉，日志会出现 `dingtalk agent is ready`。
+- 管理控制台监听 `http://<host>:8787/`，同时提供 `/api/v1/admin/*` 与健康检查 `/health`。
+- 未执行 `pnpm build` 时服务仍可运行，但访问 `/` 不会返回控制台页面。
 
-- 动态配置持久化在 PostgreSQL `sys_configs`，进程重启后自动恢复；数据库不可用时回退 `.env` 默认值。
-- 管理员单聊口令由 ReAct 自主选择 `admin_*` 工具执行，权限边界完全依赖 `conversationType` 与 StaffId 白名单，不额外解析自然语言意图。
-- 群聊旁听缓冲保存在进程内存，重启后由新消息重新积累；情景摘要与语义记忆持久化在 PostgreSQL。
-- `ReAct 审计轨迹` 仅展示经 `react_traces` 落库的调用；未产生消息时为空。
-- 前端为单页应用，生产构建产物由后端静态托管，单容器即可部署；不含前端单测。
+### 上线自检
+
+1. 打开 `http://<host>:8787/health`，返回 `{"ok":true}`。
+2. 打开控制台 → **钉钉企业配置**，确认「Stream 连接状态」为已连接。
+3. 在钉钉单聊或群里 @ 机器人问一个简单问题，确认卡片能同时渲染思维链与正文；也可先在「大模型与人设」页发起沙盒对话，快速验证模型连通性。
+4. 在群里发一条非 @ 的技术求助，确认机器人按策略主动回复；再发一条闲聊，确认保持安静。
+
+---
+
+## 功能说明
+
+### 会话与卡片
+
+- 单聊与群聊 @ 机器人走同一套回答链路，回答过程实时写入一张 AI 卡片。
+- 卡片分三个区域：可折叠的思维链与工具轨迹、Markdown 正文、状态角标（思考中 / 调用工具 / 已完成）。
+- 流式刷新做了节流，工具调用与完成事件会立即刷新，避免长回答刷屏。
+- 关闭原生思维链后，卡片仅展示正文与工具轨迹。
+
+### 群聊旁听与主动回复
+
+机器人在群内的每一句话都会进入旁听缓冲，但绝大多数消息会在零 Token 的规则层被过滤，不会唤醒模型。是否主动回复由三级漏斗决定：
+
+1. **规则预筛**：过滤表情、寒暄、确认短语；检查群是否处于冷却期、是否正忙于其他回答；用主题词做技术信号预筛。
+2. **防抢答窗口**：疑似提问后等待一段时间，若期间已有同事回复，则保持沉默。
+3. **模型判定**：对最近若干条消息做一次低温度、无工具、无思维链的结构化判定，只有 `PROACTIVE_REPLY` 且置信度达到阈值才唤醒智能体。
+
+每个群都可以单独覆盖默认策略：
+
+| 策略项 | 含义 |
+| --- | --- |
+| 旁听开关 | 是否对该群启用旁听判定与主动回复 |
+| 非 @ 自主回复 | 是否允许主动发言 |
+| 冷却时间 | 同群两次主动回复的最小间隔 |
+| 滑动窗口 | 判定时参考的最近消息条数 |
+| 置信度阈值 | 主动回复的最低把握 |
+| 触发话题 | 重点关注的主题 |
+
+管理员还可以一键**紧急静音**：关闭全部群的旁听与主动回复，机器人退回仅响应 @ 的状态。
+
+### 三层记忆
+
+| 层级 | 内容 | 生命周期 |
+| --- | --- | --- |
+| 工作记忆 | 当前会话最近消息 + 每个群的旁听窗口 | 进程内与数据库会话表 |
+| 情景记忆 | 长对话经压缩后的摘要 | 持久化，随对话继续增量更新 |
+| 语义记忆 | 团队术语、员工职责画像 | 持久化，按发言人、群与关键词召回 |
+
+语义记忆在上下文组装时按关键词与最近更新召回少量长期知识，避免把整段历史塞进提示词。数据库已为语义记忆预留向量列，后续可无痛切换为向量检索。
+
+### 工具能力
+
+机器人的工具按需挂载，回答时会自行选择与组合：
+
+| 工具源 | 能力 |
+| --- | --- |
+| 内置工具 | `current_time` 时区时间、`calculator` 安全表达式计算、`system_status` 进程与资源状态 |
+| 企业 MCP | 通过 MCP 协议接入代码、数据、日志、接口文档等外部服务，可增删改查与热重载 |
+| 钉钉 DWS | 以只读方式查询文档、知识库、日历、待办、通讯录与审批 |
+| 隔离沙盒 | `sandbox_analyze_and_aggregate` 对工具返回的大批量数据做脚本化统计与聚合 |
+| 管理员工具 | 仅在管理员单聊中出现的管控指令，普通员工与群聊不可见 |
+
+#### 企业 MCP
+
+首次启动读取 `config/mcp-servers.json`，之后以数据库中的配置为准。节点格式：
+
+```json
+{
+  "servers": [
+    {
+      "id": "enterprise",
+      "name": "企业 AI 中台",
+      "domain": "general",
+      "transport": "streamable-http",
+      "endpointOrCommand": "https://mcp.example.com/chat",
+      "envOrHeaders": { "authorization": "Bearer ${ENTERPRISE_MCP_TOKEN}" },
+      "timeoutMs": 180000,
+      "maxResultChars": 16000,
+      "enabled": true
+    }
+  ]
+}
+```
+
+| 字段 | 说明 |
+| --- | --- |
+| `id` | 节点唯一标识，工具会以 `mcp__<id>__<tool>` 的形式暴露 |
+| `domain` | `code` / `data` / `log` / `apidoc` / `business` / `general` |
+| `transport` | `stdio` / `sse` / `streamable-http` |
+| `endpointOrCommand` | HTTP 地址，或 stdio 模式的启动命令 |
+| `args` | stdio 模式的启动参数 |
+| `envOrHeaders` | stdio 的环境变量或 HTTP 的请求头，支持 `${ENV}` 引用环境变量 |
+| `timeoutMs` / `maxResultChars` | 单次调用超时与结果长度上限 |
+
+补充行为：
+
+- 连接中断会自动退避重连；节点健康状态与控制台展示同步。
+- 一键连通性测试会新建连接并拉取该节点暴露的全部工具 Schema，可直接在控制台浏览。
+- 超大工具结果不会原样塞进上下文，会截断为预览并落盘，供沙盒进一步分析。
+- 支持按群、按角色的工具访问策略：可限制某群只能使用哪些节点、哪些工具。
+
+#### 钉钉 DWS
+
+启用后，机器人可以通过本机的 `dws` 命令行做只读查询，覆盖文档、知识库、日历、待办、通讯录与审批等域：
+
+| 域 | 允许的只读子命令 |
+| --- | --- |
+| 文档 / 知识库 | `search`、`read`、`list`、`get` |
+| 日历 | `list`、`today`、`search`、`freebusy` |
+| 待办 | `list`、`search`、`get`、`today` |
+| 通讯录 | `search`、`get`、`list`、`self` |
+| 审批 | `list`、`search`、`get` |
+
+使用前需要在运行机器上安装并登录 `dws` CLI。调用时不拼接 shell，当前发言人的身份通过环境变量注入；单次调用有 15 秒超时与输出长度上限，写操作不在支持范围内。
+
+#### 隔离沙盒
+
+`sandbox_analyze_and_aggregate` 用于处理「工具返回几百条记录，需要算个结论」这类问题：
+
+- JavaScript 片段在受限虚拟机中执行，限制内存与时长。
+- 其他语言在无网络、只读文件系统、内存受限的 Docker 容器中执行，需要运行机器已安装 Docker。
+- 输入来自上一步工具结果，输出结构化统计与结论，避免把原始数据全部喂给模型。
+
+### 动态推理预算
+
+回答不是固定轮数，而是按预算动态收敛：
+
+- **墙钟时间**：单轮回答超过时间上限即停止继续调用工具。
+- **Token 预算**：累计 Token 触及上限后进入收尾。
+- **同工具连续调用**：同一工具同参数重复调用达到上限会被拦截，迫使模型换思路。
+- **信息收敛自检**：发现信息已足够时提前收尾，避免无意义的多轮调用。
+
+预算耗尽时，机器人会做一次不带工具的汇总，保证仍有完整回答。
+
+---
+
+## 管理控制台
+
+控制台与机器人同进程提供，默认地址 `http://<host>:8787/`，共六个页面：
+
+| 页面 | 可以做什么 |
+| --- | --- |
+| **运行大盘** | 查看 Stream 状态、今日对话轮次与 Token、MCP 节点健康与工具数、各群旁听与主动回复统计、最近管理操作审计 |
+| **钉钉企业配置** | 修改 AppKey / AppSecret、RobotCode、AI 卡片模板、管理员白名单、DWS 开关；发送测试卡片验证链路 |
+| **大模型与人设** | 切换模型渠道与模型、修改 Base URL / API Key / 温度 / 原生思维链、调整 ReAct 预算、在线编辑人设与语气，并发起沙盒对话测试 |
+| **企业 MCP** | 增删改查节点、启停并热应用、一键连通性测试并浏览工具 Schema、维护按群 / 角色的工具权限 |
+| **群聊旁听策略** | 查看全局默认策略、按群覆盖旁听与主动回复参数、一键紧急静音 |
+| **ReAct 审计轨迹** | 按群过滤并分页查看每次回答的思维链、工具入参、耗时、沙盒输出与最终答案 |
+
+使用说明：
+
+- 首次打开会提示填写 **管理 API Token**，对应服务端 `ADMIN_API_TOKEN`，保存在浏览器本地。
+- 所有改动保存后立即生效，无需重启；页面会显示热更新结果。
+- AppSecret、模型 API Key 与 MCP 请求头不会回传明文。读取时显示掩码，**留空或保持掩码即表示不修改**；填写新值才会覆盖。
+- 生产环境请通过反向代理限制控制台访问来源，并设置强随机 `ADMIN_API_TOKEN`。
+
+---
+
+## 管理员单聊（ChatOps）
+
+管理员不需要打开网页，直接在钉钉里和机器人单聊就能完成大部分管控。例如：
+
+- 「把默认大模型切换为 DeepSeek-R1」
+- 「帮我测试并重载日志 MCP 服务」
+- 「把研发大群的非 @ 主动回复冷却时间改成 10 分钟」
+- 「查看今天调用耗时最长的 5 次查询」
+- 「帮我看看今天消耗了多少 Token」
+- 「紧急静音所有群」
+
+对应的管控能力：
+
+| 能力 | 说明 |
+| --- | --- |
+| `admin_inspect_system_status` | 在线 MCP 健康状态、今日 Token 与轮次、各群旁听与主动回复统计 |
+| `admin_manage_mcp_server` | 启用 / 禁用 / 重载指定 MCP 节点，并返回最新工具清单 |
+| `admin_update_llm_or_persona` | 切换模型、调整温度与原生思维链、修改人设与 ReAct 预算 |
+| `admin_configure_group_bystander` | 查询群列表、开关旁听与主动回复、调整冷却等策略、一键紧急静音 |
+| `admin_query_traces` | 按耗时或 Token 查询今日轨迹，定位最慢 / 最贵的调用 |
+
+权限边界：
+
+- 只有**单聊**且发送人命中 `ADMIN_STAFF_IDS` 白名单时，这些工具才会挂载。
+- 普通员工的单聊与任何群聊中，管理工具在物理层面不存在，无法被提示词诱导调用。
+- 每一次配置变更都会写入审计记录，包含操作人、动作类型与前后快照。
+
+---
+
+## 管理 API
+
+控制台通过以下 REST 接口操作；ChatOps 在进程内复用同一配置中心与审计链路。接口前缀 `/api/v1/admin`，需要带上 `Authorization: Bearer <ADMIN_API_TOKEN>`（未配置 Token 时不校验）。
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| GET | `/health` | 健康检查（无需鉴权） |
+| GET | `/dashboard` | 大盘数据 |
+| GET / PUT | `/config/dingtalk` | 读取 / 更新钉钉企业配置 |
+| POST | `/config/dingtalk/test-card` | 发送测试卡片 |
+| GET / PUT | `/config/llm` | 读取 / 更新模型、人设与预算 |
+| POST | `/config/llm/test` | 沙盒对话测试 |
+| GET | `/groups` | 已接入的群列表与最近活跃 |
+| GET / PUT | `/groups/:conversationId/policy` | 读取 / 更新单群旁听策略 |
+| POST | `/groups/emergency-mute` | 紧急静音（可指定单群或全部群） |
+| GET / POST / PUT / DELETE | `/mcp-servers` `/mcp-servers/:id` | MCP 节点管理 |
+| POST | `/mcp-servers/:id/test` | 连通性测试并返回工具 Schema |
+| GET / PUT | `/mcp-access-policies` | 按群 / 角色的工具权限 |
+| GET | `/traces` | 分页查询 ReAct 轨迹（支持按群、时间过滤） |
+| GET | `/audit-logs` | 管理操作审计 |
+
+---
+
+## 安全与数据
+
+| 方面 | 做法 |
+| --- | --- |
+| 管理入口 | 管理 API 用 Bearer Token；ChatOps 用管理员 StaffId 白名单；未设置 Token 时会在启动日志中明确告警 |
+| 凭据保护 | AppSecret、模型 API Key、MCP 请求头在接口与审计中只出现掩码，前端不可回读明文 |
+| 命令执行 | DWS 仅开放只读子命令；参数做白名单与长度校验 |
+| 代码执行 | 沙盒无网络、只读文件系统、内存与时长受限 |
+| 群内行为 | 旁听不响应、主动回复受冷却与置信度双重限制，支持一键静音 |
+| 审计 | 每次配置变更记录操作人、动作类型、变更前后快照与时间 |
+| 数据存储 | 会话、记忆与动态配置存于 PostgreSQL；密钥不会通过接口或审计明文回传 |
+
+主要数据表：
+
+| 表 | 内容 |
+| --- | --- |
+| `conversations` / `messages` | 会话与消息（含推理过程、Token 用量） |
+| `conversation_summaries` | 情景摘要 |
+| `semantic_memories` | 术语与职责画像（含向量） |
+| `bystander_policies` | 群级旁听策略 |
+| `sys_configs` | 动态配置（钉钉、模型、预算、MCP、默认群策略） |
+| `react_traces` | ReAct 执行轨迹 |
+| `admin_audit_logs` | 管理操作审计 |
+
+---
+
+## 运维与排障
+
+日常运维要点：
+
+- 健康检查：`GET /health`。
+- 配置以数据库为准，重启后自动恢复；数据库不可用时进程会启动失败，请先确认连接与建表已就绪。
+- 日志按级别输出到标准流，交由容器或系统日志收集。
+- 机器人与管理控制台同进程，单实例部署；水平扩容时注意 Stream 连接与群内冷却状态的一致性。
+
+常见问题：
+
+| 现象 | 排查方向 |
+| --- | --- |
+| 启动即退出并列出缺失变量 | 按提示补齐 `.env` 中的必需项 |
+| 访问 `/` 是 404 | 未执行 `pnpm build`，控制台静态资源不存在 |
+| 控制台接口返回 401 | `ADMIN_API_TOKEN` 与控制台里填写的 Token 不一致 |
+| 控制台任何请求都能进 | 服务端未设置 `ADMIN_API_TOKEN`，仅应在受控网络使用 |
+| MCP 节点显示连接失败 | 检查网络 / 代理 / 证书与请求头令牌；用「测试」按钮查看具体错误 |
+| MCP 显示在线但工具数为 0 | 节点未暴露工具，或启动时连接尚未完成；点「测试」可确认该节点实际暴露的工具 |
+| 群里不主动回复 | 检查群策略开关、冷却时间、置信度阈值，以及是否处于防抢答窗口 |
+| 卡片没有思维链 | 关闭了原生思维链，或所用模型不返回推理内容 |
+| 审计轨迹为空 | 还没有产生过 ReAct 调用；先让机器人回答一次问题 |
+| DWS 查询报错 | 本机 `dws` 登录态过期，需要重新登录后重试 |
+| 工具结果被截断 | 超过了节点 `maxResultChars`，可调大上限或用沙盒对落盘数据做聚合 |
+
+---
+
+## 已知边界
+
+- 动态配置面向单实例进程；多实例部署需要额外的配置分发与广播机制。
+- 群聊旁听缓冲位于进程内存，重启后由新消息重新积累；摘要与语义记忆不受影响。
+- 主动回复由模型判定驱动，不解析固定口令；对主题词与置信度的调整比改提示词更有效。
+- DWS 仅支持只读查询，审批处理、文档写入等写操作不在范围内。
+- 管理控制台是现代浏览器单页应用，不提供旧版浏览器兼容。
+- 真实钉钉、真实模型与企业 MCP 的联通性取决于部署环境的网络与凭据，需要在实际环境中验证。
+
+---
+
+## 反馈
+
+问题、建议或接入需求，欢迎在 [Issues](https://github.com/SongJok/anthys/issues) 中提出。

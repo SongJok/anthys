@@ -19,7 +19,9 @@ import type { AuditLog, DashboardPayload, McpServerStatus } from '../types';
 
 const ACTION_LABEL: Record<AuditLog['actionType'], string> = {
   UPDATE_LLM: '更新大模型',
+  UPDATE_DINGTALK: '更新钉钉配置',
   RELOAD_MCP: '重载 MCP',
+  UPDATE_MCP_POLICY: '更新工具权限',
   UPDATE_GROUP_POLICY: '更新群策略',
   EMERGENCY_MUTE: '紧急静音',
   QUERY_STATS: '查询统计',

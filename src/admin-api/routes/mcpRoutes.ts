@@ -315,13 +315,22 @@ export function createMcpRoutes(deps: McpRouteDeps): Hono {
 
   app.put('/mcp-access-policies', async (c) => {
     const body = await readJsonBody(c);
+    const before = deps.configCenter.getMcpAccessPolicies();
     await deps.configCenter.updateMcpAccessPolicies(
       readAccessPoliciesBody(body),
       actor(c),
     );
+    const policies = deps.configCenter.getMcpAccessPolicies();
+    await recordWebAudit(
+      deps.configCenter,
+      webActor(c),
+      'UPDATE_MCP_POLICY',
+      { policies: before },
+      { policies },
+    );
     return c.json({
       ok: true,
-      policies: deps.configCenter.getMcpAccessPolicies(),
+      policies,
     });
   });
 

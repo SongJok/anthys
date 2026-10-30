@@ -388,6 +388,39 @@ describe('钉钉与 LLM 配置接口', () => {
     expect(ctx.center.getDingTalkConfig().clientSecret).toBe(
       'ding-app-secret-123456',
     );
+    const audit = await ctx.center.listAuditLogs(20);
+    const entry = audit.find((item) => item.actionType === 'UPDATE_DINGTALK');
+    expect(entry?.afterSnapshot.robotCode).toBe('robot-code-v2');
+    expect(JSON.stringify(entry)).not.toContain('ding-app-secret-123456');
+  });
+
+  it('回传掩码时保持 AppSecret 与模型 API Key 不变', async () => {
+    const dingtalk = await ctx.app.request('/api/v1/admin/config/dingtalk', {
+      headers: headers(),
+    });
+    const clientSecretMasked = (await body(dingtalk)).config.clientSecretMasked;
+    const maskedPut = await ctx.app.request('/api/v1/admin/config/dingtalk', {
+      method: 'PUT',
+      headers: headers(),
+      body: JSON.stringify({ clientSecret: clientSecretMasked }),
+    });
+    expect(maskedPut.status).toBe(200);
+    expect(ctx.center.getDingTalkConfig().clientSecret).toBe(
+      'ding-app-secret-123456',
+    );
+
+    const llm = await ctx.app.request('/api/v1/admin/config/llm', {
+      headers: headers(),
+    });
+    const apiKeyMasked = (await body(llm)).llm.apiKey;
+    expect(apiKeyMasked).not.toBe('sk-env-secret-key');
+    const maskedLlmPut = await ctx.app.request('/api/v1/admin/config/llm', {
+      method: 'PUT',
+      headers: headers(),
+      body: JSON.stringify({ apiKey: apiKeyMasked }),
+    });
+    expect(maskedLlmPut.status).toBe(200);
+    expect(ctx.center.getLLMConfig().apiKey).toBe('sk-env-secret-key');
   });
 
   it('PUT 更新 LLM 与循环预算，POST 发起沙盒对话测试', async () => {
@@ -589,6 +622,10 @@ describe('企业 MCP 管理接口', () => {
     const policyBody = await body(put);
     expect(policyBody.policies[0].id).toBe('dev-group');
     expect(ctx.center.getMcpAccessPolicies()).toHaveLength(1);
+    const audit = await ctx.center.listAuditLogs(20);
+    expect(audit.some((item) => item.actionType === 'UPDATE_MCP_POLICY')).toBe(
+      true,
+    );
   });
 });
 
