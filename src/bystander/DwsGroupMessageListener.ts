@@ -236,6 +236,8 @@ export class DwsGroupMessageListener {
   private allowed: Set<string>;
   private seen = new Map<string, number>();
   private readonly reportedUnlistened = new Set<string>();
+  private readonly reportedIgnoredSenders = new Set<string>();
+  private readonly reportedShapes = new Set<string>();
   private pending = new Set<Promise<void>>();
   private child?: DwsGroupChildProcess;
   private restartTimer?: ReturnType<typeof setTimeout>;
@@ -299,9 +301,16 @@ export class DwsGroupMessageListener {
   }
 
   public setAllowedConversations(ids: Iterable<string>): void {
-    this.allowed = new Set(
-      [...ids].map((id) => id.trim()).filter(Boolean),
-    );
+    const next = new Set([...ids].map((id) => id.trim()).filter(Boolean));
+    const added = [...next].filter((id) => !this.allowed.has(id));
+    const removed = [...this.allowed].filter((id) => !next.has(id));
+    this.allowed = next;
+    if (added.length > 0 || removed.length > 0) {
+      this.logger?.info(
+        { count: next.size, added, removed },
+        'dws group listen allowlist updated',
+      );
+    }
   }
 
   public get isRunning(): boolean {
@@ -419,10 +428,40 @@ export class DwsGroupMessageListener {
       return;
     }
     const fields = parseDwsGroupEvent(payload);
-    if (!fields) return;
+    if (!fields) {
+      // 解析失败时只报一次同样的字段形状，避免刷屏又能定位协议变化
+      const shape = Object.keys(asRecord(payload) ?? {})
+        .sort()
+        .slice(0, 12)
+        .join(',');
+      if (!this.reportedShapes.has(shape)) {
+        this.reportedShapes.add(shape);
+        this.logger?.info(
+          { shape },
+          'dws group message dropped, no usable message fields',
+        );
+      }
+      return;
+    }
     if (this.isDuplicate(fields.messageId)) return;
-    if (this.ignoreSenders.has(fields.senderOpenId)) return;
-    if (this.ignoreSenders.has(fields.senderName)) return;
+    const senderKey = fields.senderOpenId || fields.senderName;
+    if (
+      this.ignoreSenders.has(fields.senderOpenId) ||
+      this.ignoreSenders.has(fields.senderName)
+    ) {
+      if (!this.reportedIgnoredSenders.has(senderKey)) {
+        this.reportedIgnoredSenders.add(senderKey);
+        this.logger?.info(
+          {
+            conversationId: fields.conversationId,
+            sender: fields.senderName,
+            senderOpenId: fields.senderOpenId,
+          },
+          'dws group message skipped, sender is in the ignore list',
+        );
+      }
+      return;
+    }
     if (!this.allowed.has(fields.conversationId)) {
       // 每个群只提示一次，既证明事件流已连通，也方便排查漏配的群
       if (!this.reportedUnlistened.has(fields.conversationId)) {

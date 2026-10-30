@@ -328,4 +328,65 @@ describe('DwsGroupMessageListener', () => {
     await vi.waitFor(() => expect(received).toHaveLength(1));
     expect(received[0]?.messageId).toBe('msg-2');
   });
+
+  it('logs allowlist changes so a missing group is visible', () => {
+    const info = vi.fn();
+    const { listener } = setup({ allowed: [], logger: { ...noopLogger, info } });
+
+    listener.setAllowedConversations(['cid-1']);
+    expect(info).toHaveBeenCalledWith(
+      { count: 1, added: ['cid-1'], removed: [] },
+      'dws group listen allowlist updated',
+    );
+
+    info.mockClear();
+    listener.setAllowedConversations(['cid-1']);
+    expect(info).not.toHaveBeenCalled();
+  });
+
+  it('reports an ignored sender once instead of dropping silently', async () => {
+    const info = vi.fn();
+    const { listener, children, received } = setup({
+      ignoreSenders: ['小美'],
+      logger: { ...noopLogger, info },
+    });
+    listener.start();
+    children[0]!.stdout.write(
+      line({ ...FLAT_MESSAGE, message_id: 'msg-bot-1', sender: '小美' }),
+    );
+    children[0]!.stdout.write(
+      line({ ...FLAT_MESSAGE, message_id: 'msg-bot-2', sender: '小美' }),
+    );
+
+    await vi.waitFor(() =>
+      expect(info).toHaveBeenCalledWith(
+        expect.objectContaining({ sender: '小美', conversationId: 'cid-1' }),
+        'dws group message skipped, sender is in the ignore list',
+      ),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(received).toHaveLength(0);
+    expect(
+      info.mock.calls.filter(
+        (call) =>
+          call[1] === 'dws group message skipped, sender is in the ignore list',
+      ),
+    ).toHaveLength(1);
+  });
+
+  it('reports the first parse failure for each payload shape', async () => {
+    const info = vi.fn();
+    const { listener, children } = setup({ logger: { ...noopLogger, info } });
+    listener.start();
+    children[0]!.stdout.write(
+      line({ type: 'user_im_group_updated', foo: 'bar' }),
+    );
+
+    await vi.waitFor(() =>
+      expect(info).toHaveBeenCalledWith(
+        { shape: 'foo,type' },
+        'dws group message dropped, no usable message fields',
+      ),
+    );
+  });
 });
