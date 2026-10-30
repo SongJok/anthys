@@ -6,6 +6,7 @@ import type {
   WorkspacePaths,
 } from '../types/mcp-and-sandbox.js';
 import { BuiltinToolProvider } from '../react/BuiltinTools.js';
+import { expandEnvPlaceholder } from '../config/envPlaceholder.js';
 import { DwsCliRunner } from '../tools/dws/DwsCliRunner.js';
 import { DwsCliToolProvider } from '../tools/dws/DwsCliToolProvider.js';
 import {
@@ -72,13 +73,6 @@ function envFlag(
   return !['0', 'false', 'no', 'off'].includes(raw.trim().toLowerCase());
 }
 
-function expandEnvString(value: string, env: NodeJS.ProcessEnv): string {
-  return value.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (match, name) => {
-    const replacement = env[name as string];
-    return replacement === undefined ? match : replacement;
-  });
-}
-
 function asString(
   value: unknown,
   field: string,
@@ -112,7 +106,7 @@ function normalizeServer(
       `MCP Server ${id} 的 transport 非法: ${transport}（允许: ${MCP_TRANSPORTS.join(', ')}）`,
     );
   }
-  const endpointOrCommand = expandEnvString(
+  const endpointOrCommand = expandEnvPlaceholder(
     asString(record.endpointOrCommand, 'endpointOrCommand', index),
     env,
   );
@@ -121,7 +115,7 @@ function normalizeServer(
         if (typeof item !== 'string') {
           throw new Error(`MCP Server ${id} 的 args 必须是字符串数组`);
         }
-        return expandEnvString(item, env);
+        return expandEnvPlaceholder(item, env);
       })
     : undefined;
   let envOrHeaders: Record<string, string> | undefined;
@@ -140,7 +134,7 @@ function normalizeServer(
       if (typeof value !== 'string') {
         throw new Error(`MCP Server ${id} 的 envOrHeaders.${key} 必须是字符串`);
       }
-      envOrHeaders[key] = expandEnvString(value, env);
+      envOrHeaders[key] = expandEnvPlaceholder(value, env);
     }
   }
   const timeoutMs = Number(record.timeoutMs ?? 15_000);

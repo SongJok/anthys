@@ -10,6 +10,7 @@ import type {
   McpToolCallResult,
   McpToolDescriptor,
 } from '../../types/mcp-and-sandbox.js';
+import { expandServerEnvPlaceholders } from '../../config/envPlaceholder.js';
 
 export interface McpPoolLogger {
   info?(obj: Record<string, unknown>, msg: string): void;
@@ -105,28 +106,34 @@ function headersOf(config: EnterpriseMcpServerConfig): Record<string, string> {
 export function createDefaultMcpTransport(
   config: EnterpriseMcpServerConfig,
 ): Transport {
-  switch (config.transport) {
+  const resolved = expandServerEnvPlaceholders(config);
+  if (resolved.endpointOrCommand.includes('${')) {
+    throw new Error(
+      `MCP Server "${config.id}" 的 endpointOrCommand 存在未配置的环境变量: ${resolved.endpointOrCommand}`,
+    );
+  }
+  switch (resolved.transport) {
     case 'stdio':
       return new StdioClientTransport({
-        command: config.endpointOrCommand,
-        args: config.args ?? [],
+        command: resolved.endpointOrCommand,
+        args: resolved.args ?? [],
         env: {
           ...getDefaultEnvironment(),
-          ...headersOf(config),
+          ...headersOf(resolved),
         },
         stderr: 'inherit',
       });
     case 'sse':
-      return new SSEClientTransport(new URL(config.endpointOrCommand), {
-        requestInit: { headers: headersOf(config) },
+      return new SSEClientTransport(new URL(resolved.endpointOrCommand), {
+        requestInit: { headers: headersOf(resolved) },
       });
     case 'streamable-http':
       return new StreamableHTTPClientTransport(
-        new URL(config.endpointOrCommand),
-        { requestInit: { headers: headersOf(config) } },
+        new URL(resolved.endpointOrCommand),
+        { requestInit: { headers: headersOf(resolved) } },
       );
     default: {
-      const exhaustive: never = config.transport;
+      const exhaustive: never = resolved.transport;
       throw new Error(`不支持的 MCP 传输协议: ${String(exhaustive)}`);
     }
   }

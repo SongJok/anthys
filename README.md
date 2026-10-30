@@ -186,6 +186,7 @@ pnpm run db:seed      # 可选：预写入默认人设与模型配置，已有�
 | `DWS_CLI_ENABLED` | `true`（`.env.example` 中为 `false`） | 是否启用 DWS 命令行工具源 |
 | `SANDBOX_ENABLED` | `true` | 是否启用隔离沙盒工具 |
 | `MCP_SERVERS_CONFIG` | `config/mcp-servers.json` | 首次启动时的 MCP 节点定义 |
+| `ENTERPRISE_MCP_ENDPOINT` | 空 | 示例企业 MCP 的地址，供配置文件中 `${...}` 引用 |
 | `ENTERPRISE_MCP_TOKEN` | 空 | 示例企业 MCP 的访问令牌，供配置文件中 `${...}` 引用 |
 
 ### 构建与启动
@@ -276,7 +277,7 @@ pnpm start     # 通过 tsx 直接运行 src/index.ts
       "name": "企业 AI 中台",
       "domain": "general",
       "transport": "streamable-http",
-      "endpointOrCommand": "https://mcp.example.com/chat",
+      "endpointOrCommand": "${ENTERPRISE_MCP_ENDPOINT}",
       "envOrHeaders": { "authorization": "Bearer ${ENTERPRISE_MCP_TOKEN}" },
       "timeoutMs": 180000,
       "maxResultChars": 16000,
@@ -291,13 +292,14 @@ pnpm start     # 通过 tsx 直接运行 src/index.ts
 | `id` | 节点唯一标识，工具会以 `mcp__<id>__<tool>` 的形式暴露 |
 | `domain` | `code` / `data` / `log` / `apidoc` / `business` / `general` |
 | `transport` | `stdio` / `sse` / `streamable-http` |
-| `endpointOrCommand` | HTTP 地址，或 stdio 模式的启动命令 |
-| `args` | stdio 模式的启动参数 |
+| `endpointOrCommand` | HTTP 地址，或 stdio 模式的启动命令，支持 `${ENV}` 引用环境变量 |
+| `args` | stdio 模式的启动参数，支持 `${ENV}` 引用环境变量 |
 | `envOrHeaders` | stdio 的环境变量或 HTTP 的请求头，支持 `${ENV}` 引用环境变量 |
 | `timeoutMs` / `maxResultChars` | 单次调用超时与结果长度上限 |
 
 补充行为：
 
+- `endpointOrCommand`、`args`、`envOrHeaders` 中的 `${VAR}` 在建立连接时按进程环境（`.env`）展开，地址与令牌只需写在 `.env`；变量缺失时连接失败并明确指出缺失的占位符。
 - 连接中断会自动退避重连；节点健康状态与控制台展示同步。
 - 一键连通性测试会新建连接并拉取该节点暴露的全部工具 Schema，可直接在控制台浏览。
 - 超大工具结果不会原样塞进上下文，会截断为预览并落盘，供沙盒进一步分析。

@@ -5,7 +5,7 @@
       "name": "企业 AI 中台",
       "domain": "general",
       "transport": "streamable-http",
-      "endpointOrCommand": "https://dd-agent.tuwan.com/mcp/chat",
+      "endpointOrCommand": "${ENTERPRISE_MCP_ENDPOINT}",
       "envOrHeaders": {
         "authorization": "Bearer ${ENTERPRISE_MCP_TOKEN}"
       },

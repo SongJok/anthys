@@ -367,6 +367,36 @@ describe('createDefaultMcpTransport', () => {
       ),
     ).toBeInstanceOf(StreamableHTTPClientTransport);
   });
+
+  it('建立连接前按进程环境展开 endpointOrCommand', () => {
+    const previous = process.env.ENTERPRISE_MCP_ENDPOINT;
+    process.env.ENTERPRISE_MCP_ENDPOINT = 'http://127.0.0.1:9000/mcp';
+    try {
+      expect(
+        createDefaultMcpTransport(
+          config('http', {
+            transport: 'streamable-http',
+            endpointOrCommand: '${ENTERPRISE_MCP_ENDPOINT}',
+          }),
+        ),
+      ).toBeInstanceOf(StreamableHTTPClientTransport);
+    } finally {
+      if (previous === undefined) delete process.env.ENTERPRISE_MCP_ENDPOINT;
+      else process.env.ENTERPRISE_MCP_ENDPOINT = previous;
+    }
+  });
+
+  it('环境变量缺失时给出明确错误', () => {
+    delete process.env.MISSING_MCP_ENDPOINT;
+    expect(() =>
+      createDefaultMcpTransport(
+        config('http', {
+          transport: 'streamable-http',
+          endpointOrCommand: '${MISSING_MCP_ENDPOINT}',
+        }),
+      ),
+    ).toThrow(/未配置的环境变量/);
+  });
 });
 
 describe('McpToolProvider', () => {
