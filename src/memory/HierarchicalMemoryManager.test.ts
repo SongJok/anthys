@@ -50,6 +50,7 @@ class InMemorySummaryStore implements EpisodicSummaryStore {
 
 class InMemorySemanticStore implements SemanticMemoryStore {
   public records: SemanticMemoryRecord[] = [];
+  public queries: SemanticRecallQuery[] = [];
 
   public async upsert(input: {
     scope: SemanticMemoryRecord['scope'];
@@ -89,6 +90,7 @@ class InMemorySemanticStore implements SemanticMemoryStore {
   public async search(
     query: SemanticRecallQuery,
   ): Promise<SemanticMemoryRecord[]> {
+    this.queries.push({ ...query });
     const terms = query.query
       .split(/[\s,，。;；、/]+/u)
       .map((term) => term.trim())
@@ -142,6 +144,10 @@ function setup(options: {
   extractor?: SemanticFactExtractor;
   threshold?: number;
   ratio?: number;
+  embedding?: {
+    dimensions: number;
+    embed(texts: string[]): Promise<number[][]>;
+  };
 } = {}) {
   const summaryStore = new InMemorySummaryStore();
   const semanticStore = new InMemorySemanticStore();
@@ -160,11 +166,81 @@ function setup(options: {
     extractor: options.extractor,
     compressionThresholdTokens: options.threshold ?? 12_000,
     compressionRatio: options.ratio ?? 0.6,
+    ...(options.embedding ? { embedding: options.embedding } : {}),
   });
   return { manager, summaryStore, semanticStore, summarizeCalls };
 }
 
 describe('HierarchicalMemoryManager', () => {
+  it('启用向量后写入与召回都携带 embedding', async () => {
+    const embedded: string[][] = [];
+    const ctx = setup({
+      embedding: {
+        dimensions: 3,
+        async embed(texts: string[]) {
+          embedded.push(texts);
+          return texts.map(() => [0.1, 0.2, 0.3]);
+        },
+      },
+    });
+
+    await ctx.manager.remember([
+      {
+        scope: 'user',
+        subjectKey: 'staff-1',
+        kind: 'profile',
+        content: '张三负责支付网关',
+        keywords: ['支付网关'],
+      },
+    ]);
+    expect(embedded).toEqual([['张三负责支付网关']]);
+    expect(ctx.semanticStore.records[0]?.embedding).toEqual([0.1, 0.2, 0.3]);
+
+    await ctx.manager.recall(
+      { query: '支付网关', scope: 'user', subjectKey: 'staff-1' },
+      [0.3, 0.2, 0.1],
+    );
+    expect(ctx.semanticStore.queries[0]?.embedding).toEqual([0.3, 0.2, 0.1]);
+
+    const assembled = await ctx.manager.assemble({
+      personaSystemPrompt: 'system',
+      userId: 'staff-1',
+      speakerNick: '张三',
+      semanticQuery: '支付网关怎么排查',
+    });
+    expect(assembled.userSemanticProfile).toContain('张三负责支付网关');
+    expect(ctx.semanticStore.queries.at(-1)?.embedding).toEqual([0.1, 0.2, 0.3]);
+  });
+
+  it('向量服务失败时回退关键词召回', async () => {
+    const warnings: string[] = [];
+    const manager = new HierarchicalMemoryManager({
+      summaryStore: new InMemorySummaryStore(),
+      semanticStore: new InMemorySemanticStore(),
+      embedding: {
+        dimensions: 3,
+        async embed() {
+          throw new Error('embedding down');
+        },
+      },
+      logger: {
+        info() {},
+        warn(_obj, msg) {
+          warnings.push(msg);
+        },
+      },
+    });
+
+    const result = await manager.assemble({
+      personaSystemPrompt: 'system',
+      userId: 'staff-1',
+      speakerNick: '张三',
+      semanticQuery: '支付网关',
+    });
+    expect(result.userSemanticProfile).toContain('发言人：张三');
+    expect(warnings).toContain('embedding failed, falling back to keyword recall');
+  });
+
   it('长对话超过阈值时把最早 60% 归档为情景摘要，且不重复压缩', async () => {
     const ctx = setup();
     const history = longHistory(30);

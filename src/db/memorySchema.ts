@@ -265,7 +265,8 @@ export class DrizzleMemoryStore
       .split(/[\s,，。;；、/]+/u)
       .map((term) => term.trim())
       .filter((term) => term.length > 0);
-    if (terms.length > 0) {
+    // 有向量时按余弦距离召回，不再要求关键词命中；否则回退关键词匹配
+    if (terms.length > 0 && !(query.embedding && query.embedding.length > 0)) {
       const keywordConditions = terms.map(
         (term) => sql`${semanticMemories.keywords} ? ${term}`,
       );

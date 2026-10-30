@@ -53,6 +53,7 @@ import {
   LlmSemanticFactExtractor,
 } from './memory/HierarchicalMemoryManager.js';
 import { DrizzleMemoryStore } from './db/memorySchema.js';
+import { OpenAIEmbeddingClient } from './memory/EmbeddingClient.js';
 import { createChatModel } from './react/createChatModel.js';
 import { ReActRunner } from './react/ReActRunner.js';
 import { AdminChatOpsToolProvider } from './tools/admin/AdminChatOpsToolProvider.js';
@@ -303,6 +304,22 @@ async function main(): Promise<void> {
       debounceMs: bystanderConfig.debounceMs,
       logger: harnessLogger,
     });
+    const embeddingConfig = configCenter.getEmbeddingConfig();
+    const embeddingClient =
+      embeddingConfig?.enabled && embeddingConfig.apiKey
+        ? new OpenAIEmbeddingClient({
+            baseUrl: embeddingConfig.baseUrl,
+            apiKey: embeddingConfig.apiKey,
+            model: embeddingConfig.model,
+            dimensions: embeddingConfig.dimensions,
+          })
+        : undefined;
+    if (embeddingClient) {
+      logger.info(
+        { model: embeddingConfig?.model, dimensions: embeddingClient.dimensions },
+        'semantic memory embedding enabled',
+      );
+    }
     const hierarchicalMemory = new HierarchicalMemoryManager({
       summaryStore: memoryStore,
       semanticStore: memoryStore,
@@ -311,6 +328,7 @@ async function main(): Promise<void> {
       compressionThresholdTokens: memoryConfig.compressionThresholdTokens,
       compressionRatio: memoryConfig.compressionRatio,
       semanticLimit: memoryConfig.semanticLimit,
+      ...(embeddingClient ? { embedding: embeddingClient } : {}),
       logger: harnessLogger,
     });
 

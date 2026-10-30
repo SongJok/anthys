@@ -5,6 +5,7 @@ import type {
 import type {
   DingTalkConfig,
   BystanderConfig,
+  EmbeddingConfig,
   IConfigProvider,
   MemoryConfig,
 } from './IConfigProvider.js';
@@ -167,6 +168,20 @@ export class EnvConfigProvider implements IConfigProvider {
       defaultModel: pick(this.env.LLM_ROUTE_DEFAULT_MODEL),
       proactiveModel: pick(this.env.LLM_ROUTE_PROACTIVE_MODEL),
       adminModel: pick(this.env.LLM_ROUTE_ADMIN_MODEL),
+    };
+  }
+
+  getEmbeddingConfig(): EmbeddingConfig {
+    const llm = this.getLLMConfig();
+    return {
+      enabled: parseBoolean(this.env.EMBEDDING_ENABLED, false),
+      baseUrl: (this.env.EMBEDDING_BASE_URL ?? llm.baseUrl).trim(),
+      apiKey: (this.env.EMBEDDING_API_KEY ?? llm.apiKey).trim(),
+      model: (this.env.EMBEDDING_MODEL ?? 'text-embedding-3-small').trim(),
+      dimensions: Math.max(
+        1,
+        parseNumber(this.env.EMBEDDING_DIMENSIONS, 1536),
+      ),
     };
   }
 

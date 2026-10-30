@@ -232,6 +232,10 @@ export class DynamicConfigCenter
     return this.defaults.getModelRouting?.() ?? {};
   }
 
+  public getEmbeddingConfig() {
+    return this.defaults.getEmbeddingConfig?.();
+  }
+
   public getBystanderConfig(): BystanderConfig {
     const defaults = this.defaults.getBystanderConfig();
     return {

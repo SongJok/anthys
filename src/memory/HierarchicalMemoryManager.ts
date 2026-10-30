@@ -12,6 +12,7 @@ import type {
   EpisodicSummaryStore,
   SemanticMemoryStore,
 } from '../db/memorySchema.js';
+import type { EmbeddingClient } from './EmbeddingClient.js';
 
 export interface MemoryLogger {
   info(obj: Record<string, unknown>, msg: string): void;
@@ -267,6 +268,8 @@ export interface HierarchicalMemoryManagerOptions {
   /** 语义召回条数 */
   semanticLimit?: number;
   estimateTokens?: (text: string) => number;
+  /** 配置后语义召回与写入都带向量，失败时自动回退关键词 */
+  embedding?: EmbeddingClient;
   logger?: MemoryLogger;
 }
 
@@ -290,6 +293,7 @@ export class HierarchicalMemoryManager {
   private readonly maxAssembledSummaries: number;
   private readonly semanticLimit: number;
   private readonly estimate: (text: string) => number;
+  private readonly embedding?: EmbeddingClient;
   private readonly logger?: MemoryLogger;
   private readonly compressing = new Set<string>();
 
@@ -314,6 +318,7 @@ export class HierarchicalMemoryManager {
     this.semanticLimit = Math.max(1, options.semanticLimit ?? 6);
     this.estimate =
       options.estimateTokens ?? ((text) => Math.ceil(text.length / 2));
+    this.embedding = options.embedding;
     this.logger = options.logger;
   }
 
@@ -401,6 +406,25 @@ export class HierarchicalMemoryManager {
       .slice(-6_000);
   }
 
+  private async embedTexts(
+    texts: string[],
+  ): Promise<number[][] | null> {
+    if (!this.embedding || texts.length === 0) return null;
+    try {
+      const vectors = await this.embedding.embed(texts);
+      if (vectors.some((vector) => vector.length !== this.embedding!.dimensions)) {
+        throw new Error('embedding dimension mismatch');
+      }
+      return vectors;
+    } catch (error) {
+      this.logger?.warn(
+        { error: error instanceof Error ? error.message : String(error) },
+        'embedding failed, falling back to keyword recall',
+      );
+      return null;
+    }
+  }
+
   public async remember(
     facts: Array<{
       scope: SemanticMemoryScope;
@@ -411,8 +435,9 @@ export class HierarchicalMemoryManager {
       embedding?: number[] | null;
     }>,
   ): Promise<SemanticMemoryRecord[]> {
+    const vectors = await this.embedTexts(facts.map((fact) => fact.content));
     const saved: SemanticMemoryRecord[] = [];
-    for (const fact of facts) {
+    for (const [index, fact] of facts.entries()) {
       saved.push(
         await this.semanticStore.upsert({
           scope: fact.scope,
@@ -420,7 +445,7 @@ export class HierarchicalMemoryManager {
           kind: fact.kind,
           content: fact.content,
           keywords: fact.keywords ?? [],
-          embedding: fact.embedding ?? null,
+          embedding: fact.embedding ?? vectors?.[index] ?? null,
         }),
       );
     }
@@ -429,9 +454,11 @@ export class HierarchicalMemoryManager {
 
   public async recall(
     query: SemanticRecallQuery,
+    embedding?: number[],
   ): Promise<SemanticRecallResult> {
     const records = await this.semanticStore.search({
       ...query,
+      ...(embedding && embedding.length > 0 ? { embedding } : {}),
       limit: query.limit ?? this.semanticLimit,
     });
     const profileLines: string[] = [];
@@ -457,19 +484,26 @@ export class HierarchicalMemoryManager {
         .join(' ')
         .slice(-500);
 
+    const queryVector = (await this.embedTexts([queryText]))?.[0];
     const [userRecall, groupRecall, episodicSummary] = await Promise.all([
-      this.recall({
-        query: queryText,
-        scope: 'user',
-        subjectKey: input.userId,
-      }),
+      this.recall(
+        {
+          query: queryText,
+          scope: 'user',
+          subjectKey: input.userId,
+        },
+        queryVector,
+      ),
       input.conversationId
-        ? this.recall({
-            query: queryText,
-            scope: 'group',
-            subjectKey: input.groupConversationId ?? input.conversationId,
-          })
-        : this.recall({ query: queryText, scope: 'global' }),
+        ? this.recall(
+            {
+              query: queryText,
+              scope: 'group',
+              subjectKey: input.groupConversationId ?? input.conversationId,
+            },
+            queryVector,
+          )
+        : this.recall({ query: queryText, scope: 'global' }, queryVector),
       input.conversationId
         ? this.latestEpisodicSummary(input.conversationId)
         : Promise.resolve(''),

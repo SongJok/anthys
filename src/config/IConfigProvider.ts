@@ -33,6 +33,14 @@ export interface BystanderConfig {
   debounceMs: number;
 }
 
+export interface EmbeddingConfig {
+  enabled: boolean;
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  dimensions: number;
+}
+
 export interface IConfigProvider {
   getLLMConfig(): LLMAndPersonaConfig;
   getLoopPolicy(): DynamicLoopPolicy;
@@ -43,6 +51,8 @@ export interface IConfigProvider {
   getUsagePolicy?(): UsagePolicy;
   /** 按场景选择模型，默认沿用全局模型 */
   getModelRouting?(): ModelRoutingPolicy;
+  /** 向量检索配置；未配置或关闭时回退关键词召回 */
+  getEmbeddingConfig?(): EmbeddingConfig | undefined;
   getDatabaseUrl(): string;
   /** 校验启动必需配置，缺失时抛出可读错误 */
   assertReady(): void;

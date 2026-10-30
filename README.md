@@ -164,6 +164,18 @@ pnpm run db:seed      # 可选：预写入默认人设与模型配置，已有�
 | `MEMORY_COMPRESSION_RATIO` | `0.6` | 每次压缩最早的对话比例 |
 | `MEMORY_SEMANTIC_LIMIT` | `6` | 每次组装上下文时召回的语义记忆条数 |
 
+**向量语义记忆**
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `EMBEDDING_ENABLED` | `false` | 是否启用 pgvector 向量召回；关闭时回退关键词匹配 |
+| `EMBEDDING_BASE_URL` | 沿用 `LLM_BASE_URL` | OpenAI 兼容的 embeddings 接口地址 |
+| `EMBEDDING_API_KEY` | 沿用 `LLM_API_KEY` | embeddings 接口密钥 |
+| `EMBEDDING_MODEL` | `text-embedding-3-small` | 向量模型名称 |
+| `EMBEDDING_DIMENSIONS` | `1536` | 向量维度，需与 `semantic_memories.embedding` 列一致 |
+
+启用后，语义记忆写入时生成向量，召回时按余弦距离排序；embedding 服务异常会自动降级为关键词召回，不影响回答。
+
 **群聊旁听**
 
 | 变量 | 默认值 | 说明 |
@@ -293,7 +305,7 @@ pnpm start     # 通过 tsx 直接运行 src/index.ts
 | 情景记忆 | 长对话经压缩后的摘要 | 持久化，随对话继续增量更新 |
 | 语义记忆 | 团队术语、员工职责画像 | 持久化，按发言人、群与关键词召回 |
 
-语义记忆在上下文组装时按关键词与最近更新召回少量长期知识，避免把整段历史塞进提示词。数据库已为语义记忆预留向量列，后续可无痛切换为向量检索。
+语义记忆在上下文组装时召回少量长期知识，避免把整段历史塞进提示词。配置 embedding 后按 pgvector 余弦距离检索，否则回退关键词匹配；embedding 服务异常时同样降级，不会阻塞回答。
 
 ### 工具能力
 
