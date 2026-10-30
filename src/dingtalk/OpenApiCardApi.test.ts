@@ -166,6 +166,37 @@ describe('OpenApiCardApi', () => {
     expect(request.body).not.toHaveProperty('imRobotOpenSpaceModel');
   });
 
+  it('delivers a group card as plain text mention for external members', async () => {
+    harness = await startHarness();
+    const api = singleApi(harness.endpoint);
+
+    await api.createAndDeliver({
+      cardTemplateId: 'tpl-1',
+      outTrackId: 'card_m3',
+      spaceId: 'dtv1.card//IM_GROUP.cid-3',
+      params: { content: '正在思考…' },
+      deliver: {
+        conversationType: '2',
+        robotCode: 'robot-9',
+        userId: '$:LWCP_v1:$4HmLodOH+bNXcmQ0cPrxiw==',
+        conversationId: 'cid-3',
+      },
+    });
+
+    const [request] = harness.requests;
+    expect(request.body).toMatchObject({
+      openSpaceId: 'dtv1.card//IM_GROUP.cid-3',
+      callbackType: 'STREAM',
+      imGroupOpenDeliverModel: { robotCode: 'robot-9' },
+      imGroupOpenSpaceModel: { supportForward: true },
+    });
+    expect(request.body).not.toHaveProperty('userId');
+    expect(request.body).not.toHaveProperty('userIdType');
+    expect(
+      (request.body.imGroupOpenDeliverModel as Record<string, unknown>).atUserIds,
+    ).toBeUndefined();
+  });
+
   it('sends streaming updates as a PUT with all block flags', async () => {
     harness = await startHarness();
     const api = singleApi(harness.endpoint, 'tok-2');

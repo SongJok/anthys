@@ -6,6 +6,7 @@ import type {
   PlanItem,
   StreamCitation,
 } from '../types/core.js';
+import { isStaffUserId } from './userIds.js';
 
 export type CardBlockKey =
   | 'thinking_section'
@@ -914,6 +915,10 @@ export class OpenApiCardApi implements CardApi {
 
   public async createAndDeliver(input: CardCreateInput): Promise<void> {
     const token = await this.options.getAccessToken();
+    // 外部群成员只有加密 senderId，放进 userId/atUserIds 会被钉钉判为非法参数（400）
+    const staffUserId = isStaffUserId(input.deliver.userId)
+      ? input.deliver.userId
+      : undefined;
     const request = new this.sdk.CreateAndDeliverRequest({
       cardTemplateId: input.cardTemplateId,
       outTrackId: input.outTrackId,
@@ -922,8 +927,7 @@ export class OpenApiCardApi implements CardApi {
       cardData: new this.sdk.CreateAndDeliverRequestCardData({
         cardParamMap: input.params,
       }),
-      userId: input.deliver.userId,
-      userIdType: 1,
+      ...(staffUserId ? { userId: staffUserId, userIdType: 1 } : {}),
       imRobotOpenDeliverModel:
         input.deliver.conversationType === '1'
           ? new this.sdk.CreateAndDeliverRequestImRobotOpenDeliverModel({
@@ -941,9 +945,9 @@ export class OpenApiCardApi implements CardApi {
         input.deliver.conversationType === '2'
           ? new this.sdk.CreateAndDeliverRequestImGroupOpenDeliverModel({
               robotCode: input.deliver.robotCode,
-              atUserIds: {
-                [input.deliver.userId]: input.deliver.userId,
-              },
+              ...(staffUserId
+                ? { atUserIds: { [staffUserId]: staffUserId } }
+                : {}),
             })
           : undefined,
       imGroupOpenSpaceModel:

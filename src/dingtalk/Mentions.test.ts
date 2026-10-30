@@ -57,4 +57,12 @@ describe('webhookMention', () => {
       atUserIds: [],
     });
   });
+
+  it('外部群成员没有 staffId 时退回昵称文本，不声明 atUserIds', () => {
+    expect(
+      webhookMention(
+        inbound({ senderStaffId: '$:LWCP_v1:$4HmLodOH+bNXcmQ0cPrxiw==' }),
+      ),
+    ).toEqual({ text: '@张三\n', atUserIds: [] });
+  });
 });
