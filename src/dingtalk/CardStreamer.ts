@@ -514,6 +514,7 @@ export class CardStreamer {
   }
 
   private async send(update: CardUpdate): Promise<void> {
+    if (!this.available) return;
     for (let attempt = 0; ; attempt += 1) {
       try {
         await this.limiter.acquire();
@@ -533,6 +534,15 @@ export class CardStreamer {
             },
             'streamingUpdate failed',
           );
+          // 正文或收尾更新彻底失败时卡片已无法交付答案，交由调用方走文本兜底
+          if (update.isFinalize || update.key === 'answer_section') {
+            this.available = false;
+            this.pending.clear();
+            this.logger?.warn(
+              { outTrackId: this.outTrackId, error: errorMessage(error) },
+              'card answer delivery unrecoverable, disabled for text fallback',
+            );
+          }
           return;
         }
         await sleep(250 * 2 ** attempt);

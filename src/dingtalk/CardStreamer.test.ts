@@ -355,6 +355,39 @@ describe('CardStreamer', () => {
     expect(updates.at(-1)?.content).toBe('答'.repeat(80));
   });
 
+  it('正文更新重试耗尽后标记卡片不可用，交由文本兜底', async () => {
+    let attempts = 0;
+    const api: CardApi = {
+      async createAndDeliver() {
+        return undefined;
+      },
+      async streamingUpdate() {
+        attempts += 1;
+        throw new Error('card instance not found');
+      },
+    };
+    const streamer = new CardStreamer({
+      api,
+      message: inbound(),
+      cardTemplateId: 'tpl-1',
+      robotCode: 'robot-1',
+      maxRetries: 1,
+    });
+    await streamer.start();
+    expect(streamer.isAvailable).toBe(true);
+
+    streamer.handle({ type: 'answer_delta', content: '答'.repeat(80) });
+    await settle();
+    await vi.advanceTimersByTimeAsync(250);
+    await settle();
+
+    expect(attempts).toBe(2);
+    expect(streamer.isAvailable).toBe(false);
+
+    await streamer.finish();
+    expect(attempts).toBe(2);
+  });
+
   it('v2 模板额外初始化工具、引用与操作区块', async () => {
     const fake = fakeApi();
     const streamer = new CardStreamer({

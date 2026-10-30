@@ -22,6 +22,7 @@ import {
   type CardLogger,
 } from './dingtalk/CardStreamer.js';
 import { StreamGateway, type StreamGatewayLogger } from './dingtalk/StreamGateway.js';
+import { sendTextFallback } from './dingtalk/TextFallback.js';
 import type { CardActionEvent } from './dingtalk/CardActions.js';
 import {
   AgentHarness,
@@ -97,6 +98,10 @@ function parseAdminIds(raw: string | undefined): string[] {
     .filter(Boolean);
 }
 
+/**
+ * 卡片不可用时的文本兜底：按长度分片发送并逐片重试，
+ * 避免长答案被钉钉 markdown 长度上限截断或整体丢失。
+ */
 async function sendSessionWebhook(
   message: InboundMessage,
   text: string,
@@ -110,28 +115,26 @@ async function sendSessionWebhook(
     );
     return;
   }
-  try {
-    const response = await fetch(webhook, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        msgtype: 'markdown',
-        markdown: { title: '智能助手', text },
-      }),
-      signal: AbortSignal.timeout(5_000),
-    });
-    if (!response.ok) {
-      logger.warn(
-        { messageId: message.messageId, status: response.status },
-        'sessionWebhook fallback failed',
-      );
-    }
-  } catch (error) {
-    logger.warn(
-      { messageId: message.messageId, error: errorText(error) },
-      'sessionWebhook fallback failed',
+  const result = await sendTextFallback({
+    webhook,
+    text,
+    logger,
+  });
+  if (result.ok) {
+    logger.info?.(
+      { messageId: message.messageId, chunks: result.chunks },
+      'text fallback delivered',
     );
+    return;
   }
+  logger.warn(
+    {
+      messageId: message.messageId,
+      chunks: result.chunks,
+      error: result.error,
+    },
+    'text fallback partially failed',
+  );
 }
 
 async function main(): Promise<void> {
