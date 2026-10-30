@@ -56,6 +56,8 @@ export interface ToolRegistryOptions {
   sandboxOptions?: IsolatedSandboxOptions;
   /** 管理员单聊工具（内部自带上下文隔离），仅在管理员单聊时返回工具 */
   adminProvider?: IToolProvider;
+  /** 产物投递等额外工具提供方，按工作区路径构造 */
+  artifactProvider?: (workspace: WorkspacePaths) => IToolProvider;
   /** MCP 工具按群/角色授权（实时读取，支持热更新） */
   toolAccess?: {
     policies: () => McpToolAccessPolicy[];
@@ -284,6 +286,9 @@ export class ToolRegistry {
 
     if (options.adminProvider) {
       providers.push(options.adminProvider);
+    }
+    if (options.artifactProvider) {
+      providers.push(options.artifactProvider(workspace));
     }
 
     return new ToolRegistry(

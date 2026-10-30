@@ -1,6 +1,15 @@
 /**
  * 1. 统一入站消息契约
  */
+export interface InboundAttachment {
+  type: 'image' | 'file' | 'audio' | 'video';
+  /** 钉钉机器人消息附件下载码，需换取 downloadUrl 后才能下载 */
+  downloadCode: string;
+  fileName?: string;
+  fileSize?: number;
+  durationMs?: number;
+}
+
 export interface InboundMessage {
   messageId: string;
   conversationId: string;
@@ -9,6 +18,7 @@ export interface InboundMessage {
   senderNick: string;
   isAtBot: boolean;
   text: string;
+  attachments?: InboundAttachment[];
   rawPayload: Record<string, unknown>;
   timestamp: number;
 }

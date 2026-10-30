@@ -23,6 +23,11 @@ import {
 } from './dingtalk/CardStreamer.js';
 import { StreamGateway, type StreamGatewayLogger } from './dingtalk/StreamGateway.js';
 import { sendTextFallback } from './dingtalk/TextFallback.js';
+import { DingTalkMediaSender } from './dingtalk/MediaSender.js';
+import { AttachmentStore } from './multimodal/AttachmentStore.js';
+import { enrichInboundMessage } from './multimodal/MessageEnricher.js';
+import { OpenAiVisionDescriber } from './multimodal/VisionDescriber.js';
+import { ArtifactToolProvider } from './tools/artifacts/ArtifactToolProvider.js';
 import type { CardActionEvent } from './dingtalk/CardActions.js';
 import {
   AgentHarness,
@@ -96,6 +101,16 @@ function parseAdminIds(raw: string | undefined): string[] {
     .split(',')
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function envEnabled(raw: string | undefined, fallback: boolean): boolean {
+  if (raw === undefined || raw.trim() === '') return fallback;
+  return !['0', 'false', 'no', 'off'].includes(raw.trim().toLowerCase());
+}
+
+function envMegabytes(raw: string | undefined, fallbackMb: number): number {
+  const mb = Number(raw);
+  return (Number.isFinite(mb) && mb > 0 ? mb : fallbackMb) * 1024 * 1024;
 }
 
 /**
@@ -206,6 +221,17 @@ async function main(): Promise<void> {
     const groupDirectory = new DrizzleGroupDirectory(dbHandle.db);
     const runControl = new RunControlRegistry();
     const metrics = new MetricsRegistry();
+    let activeClient: DWClient | undefined;
+    let cachedToken: { value: string; expiresAt: number } | null = null;
+    const getAccessToken = async (): Promise<string> => {
+      if (!activeClient) throw new Error('钉钉 Stream 客户端尚未就绪');
+      if (cachedToken && cachedToken.expiresAt > Date.now()) {
+        return cachedToken.value;
+      }
+      const value = String(await activeClient.getAccessToken());
+      cachedToken = { value, expiresAt: Date.now() + 30 * 60_000 };
+      return value;
+    };
     const mcpPort = createMcpAdminPort(
       () => toolRegistry?.pool ?? null,
       harnessLogger,
@@ -219,10 +245,38 @@ async function main(): Promise<void> {
       logger: harnessLogger,
     });
 
+    const artifactDeliveryEnabled = envEnabled(
+      process.env.ARTIFACT_DELIVERY_ENABLED,
+      true,
+    );
+    const artifactMaxBytes = envMegabytes(process.env.ARTIFACT_MAX_MB, 20);
+    const mediaSender = new DingTalkMediaSender({
+      robotCode: () => configCenter.getDingTalkConfig().robotCode,
+      getAccessToken,
+      logger: harnessLogger,
+      maxBytes: artifactMaxBytes,
+    });
+
     toolRegistry = await ToolRegistry.create({
       mcpServers: configCenter.getMcpServers(),
       enableDws: configCenter.getSystemConfig().dingtalk.dwsCliEnabled,
       adminProvider,
+      ...(artifactDeliveryEnabled
+        ? {
+            artifactProvider: (workspace) => {
+              const extraRoots = (process.env.ARTIFACT_ROOTS ?? '')
+                .split(',')
+                .map((item) => item.trim())
+                .filter(Boolean)
+                .map((item) => resolve(process.cwd(), item));
+              return new ArtifactToolProvider({
+                sender: mediaSender,
+                allowedRoots: [workspace.hostDir, ...extraRoots],
+                maxBytes: artifactMaxBytes,
+              });
+            },
+          }
+        : {}),
       toolAccess: {
         policies: () => configCenter.getMcpAccessPolicies(),
         isAdmin: (staffId) => configCenter.isAdmin(staffId),
@@ -240,6 +294,29 @@ async function main(): Promise<void> {
     );
 
     const toolProviders = toolRegistry.providers;
+    const attachmentStore = new AttachmentStore({
+      rootDir: resolve(toolRegistry.workspace.hostDir, 'attachments'),
+      robotCode: () => configCenter.getDingTalkConfig().robotCode,
+      getAccessToken,
+      logger: harnessLogger,
+      maxBytes: envMegabytes(process.env.ATTACHMENT_MAX_MB, 20),
+    });
+    const visionConfig = configCenter.getVisionConfig?.();
+    const visionDescriber =
+      visionConfig?.enabled && visionConfig.apiKey
+        ? new OpenAiVisionDescriber({
+            baseUrl: visionConfig.baseUrl,
+            apiKey: visionConfig.apiKey,
+            model: visionConfig.model,
+            logger: harnessLogger,
+          })
+        : undefined;
+    if (visionConfig?.enabled && !visionConfig.apiKey) {
+      logger.warn(
+        { model: visionConfig.model },
+        'VISION_ENABLED 已开启但缺少 API Key，图片只落盘不识别',
+      );
+    }
     const modelRef: { current: ChatModel } = {
       current: createChatModel(configCenter.getLLMConfig()),
     };
@@ -356,18 +433,6 @@ async function main(): Promise<void> {
           policyProvider.getPolicy(conversationId),
       },
     });
-
-    let activeClient: DWClient | undefined;
-    let cachedToken: { value: string; expiresAt: number } | null = null;
-    const getAccessToken = async (): Promise<string> => {
-      if (!activeClient) throw new Error('钉钉 Stream 客户端尚未就绪');
-      if (cachedToken && cachedToken.expiresAt > Date.now()) {
-        return cachedToken.value;
-      }
-      const value = String(await activeClient.getAccessToken());
-      cachedToken = { value, expiresAt: Date.now() + 30 * 60_000 };
-      return value;
-    };
 
     const cardApiRef: { current: OpenApiCardApi } = {
       current: new OpenApiCardApi({
@@ -547,11 +612,41 @@ async function main(): Promise<void> {
 
     async function handleIncoming(message: InboundMessage): Promise<void> {
       if (await commandRouter.tryHandle(message)) return;
-      runControl.remember(message);
+      let effective = message;
+      if (message.attachments && message.attachments.length > 0) {
+        try {
+          const enriched = await enrichInboundMessage(message, {
+            store: attachmentStore,
+            ...(visionDescriber ? { vision: visionDescriber } : {}),
+            logger: harnessLogger,
+          });
+          effective = enriched.message;
+          if (enriched.attachments.length > 0) {
+            metrics.inc(
+              'agent_attachments_total',
+              undefined,
+              enriched.attachments.length,
+            );
+          }
+          if (enriched.failed.length > 0) {
+            metrics.inc(
+              'agent_attachment_failures_total',
+              undefined,
+              enriched.failed.length,
+            );
+          }
+        } catch (error) {
+          logger.warn(
+            { messageId: message.messageId, error: errorText(error) },
+            'attachment enrichment failed, continue with raw message',
+          );
+        }
+      }
+      runControl.remember(effective);
       metrics.inc('agent_messages_total', {
-        conversationType: message.conversationType,
+        conversationType: effective.conversationType,
       });
-      await runTurn(message);
+      await runTurn(effective);
     }
 
     async function runProactiveTurn(

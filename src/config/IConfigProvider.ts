@@ -41,6 +41,13 @@ export interface EmbeddingConfig {
   dimensions: number;
 }
 
+export interface VisionConfig {
+  enabled: boolean;
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+}
+
 export interface IConfigProvider {
   getLLMConfig(): LLMAndPersonaConfig;
   getLoopPolicy(): DynamicLoopPolicy;
@@ -53,6 +60,8 @@ export interface IConfigProvider {
   getModelRouting?(): ModelRoutingPolicy;
   /** 向量检索配置；未配置或关闭时回退关键词召回 */
   getEmbeddingConfig?(): EmbeddingConfig | undefined;
+  /** 图片理解模型；未配置时图片只落盘不识别 */
+  getVisionConfig?(): VisionConfig | undefined;
   getDatabaseUrl(): string;
   /** 校验启动必需配置，缺失时抛出可读错误 */
   assertReady(): void;

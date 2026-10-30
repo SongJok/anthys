@@ -176,6 +176,21 @@ pnpm run db:seed      # 可选：预写入默认人设与模型配置，已有�
 
 启用后，语义记忆写入时生成向量，召回时按余弦距离排序；embedding 服务异常会自动降级为关键词召回，不影响回答。
 
+**多模态入站与产物投递**
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `VISION_ENABLED` | `false` | 是否调用视觉模型把用户图片转成文字描述 |
+| `VISION_BASE_URL` | 沿用 `LLM_BASE_URL` | 视觉模型接口地址 |
+| `VISION_API_KEY` | 沿用 `LLM_API_KEY` | 视觉模型接口密钥 |
+| `VISION_MODEL` | 沿用 `LLM_MODEL` | 支持图片输入的模型名，如 `qwen-vl-max` |
+| `ATTACHMENT_MAX_MB` | `20` | 入站附件大小上限 |
+| `ARTIFACT_DELIVERY_ENABLED` | `true` | 是否向模型暴露 `deliver_artifact` 文件回传工具 |
+| `ARTIFACT_MAX_MB` | `20` | 回传文件大小上限 |
+| `ARTIFACT_ROOTS` | 空 | 额外允许回传的目录（逗号分隔，相对项目根目录） |
+
+入站图片与文件会先按 `downloadCode` 换取下载地址，落盘到 `.workspace/attachments/<messageId>/`；启用视觉模型后，图片会附带一段文字描述再交给主模型。未启用时仅保留本地路径，可提示用户改用文字描述。
+
 **群聊旁听**
 
 | 变量 | 默认值 | 说明 |
@@ -250,6 +265,13 @@ pnpm start     # 通过 tsx 直接运行 src/index.ts
 - 工具返回超过阈值时做头尾保留截断；来自外部 MCP 的内容会包裹为 `<untrusted_tool_output>`，提示模型按数据处理而非按指令执行。
 - 关闭原生思维链后，卡片仅展示正文与工具轨迹。
 - 卡片创建失败，或正文/收尾更新重试耗尽时，自动降级为 `sessionWebhook` 文本回复：长答案按 1500 字符分片并标注「（i/n）」，单片失败按指数退避重试，单片仍失败也会继续发送剩余分片，保证用户至少收到部分内容。
+
+### 附件与产物
+
+- 支持在单聊或群里直接发送**图片、文件**（语音/视频按文件落盘）并 @ 机器人提问；附件按下载码落盘到 `.workspace/attachments/<messageId>/`，提示词里会附带文件名、大小与本地路径。
+- 开启 `VISION_ENABLED` 后，图片先由视觉模型转成文字描述（界面文字、报错信息、图表要点），主模型无需支持多模态即可理解截图；视觉接口失败时只保留路径并记录告警。
+- 模型可通过 `deliver_artifact` 工具把工作区内的文件回传为钉钉文件消息：先上传媒体换取 `media_id`，再按单聊/群聊接口发送；只允许白名单目录（`.workspace` 与 `ARTIFACT_ROOTS`），超限或越界会直接拒绝。
+- 入站附件下载失败不会丢弃整条消息：失败项会写进提示词，用户仍可收到基于现有信息的回答；指标 `agent_attachments_total` / `agent_attachment_failures_total` 可观察下载情况。
 
 ### 对话内命令
 

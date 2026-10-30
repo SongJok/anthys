@@ -56,8 +56,58 @@ describe('parseStreamMessage', () => {
     expect(message?.isAtBot).toBe(false);
   });
 
-  it('非文本消息返回 null', () => {
-    expect(parseStreamMessage(payload({ msgtype: 'picture' }))).toBeNull();
+  it('无法识别的非文本消息返回 null', () => {
+    expect(parseStreamMessage(payload({ msgtype: 'richText' }))).toBeNull();
+    expect(
+      parseStreamMessage(payload({ msgtype: 'picture', content: {} })),
+    ).toBeNull();
+  });
+
+  it('图片消息解析出下载码并生成占位正文', () => {
+    const message = parseStreamMessage(
+      payload({
+        msgtype: 'picture',
+        isInAtList: true,
+        content: { downloadCode: 'code-image' },
+      }),
+    );
+    expect(message?.text).toBe('[图片]');
+    expect(message?.isAtBot).toBe(true);
+    expect(message?.attachments).toEqual([
+      { type: 'image', downloadCode: 'code-image' },
+    ]);
+  });
+
+  it('文件消息保留文件名、大小与下载码', () => {
+    const message = parseStreamMessage(
+      payload({
+        msgtype: 'file',
+        content: {
+          downloadCode: 'code-file',
+          fileName: '季度报表.xlsx',
+          fileSize: 2048,
+        },
+      }),
+    );
+    expect(message?.text).toBe('[文件]');
+    expect(message?.attachments).toEqual([
+      {
+        type: 'file',
+        downloadCode: 'code-file',
+        fileName: '季度报表.xlsx',
+        fileSize: 2048,
+      },
+    ]);
+  });
+
+  it('兼容图片消息的 pictureDownloadCode 字段', () => {
+    const message = parseStreamMessage(
+      payload({
+        msgtype: 'picture',
+        content: { pictureDownloadCode: 'legacy-code' },
+      }),
+    );
+    expect(message?.attachments?.[0]?.downloadCode).toBe('legacy-code');
   });
 
   it('缺少必要字段时返回 null', () => {

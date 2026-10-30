@@ -8,6 +8,7 @@ import type {
   EmbeddingConfig,
   IConfigProvider,
   MemoryConfig,
+  VisionConfig,
 } from './IConfigProvider.js';
 import type {
   ModelRoutingPolicy,
@@ -182,6 +183,16 @@ export class EnvConfigProvider implements IConfigProvider {
         1,
         parseNumber(this.env.EMBEDDING_DIMENSIONS, 1536),
       ),
+    };
+  }
+
+  getVisionConfig(): VisionConfig {
+    const llm = this.getLLMConfig();
+    return {
+      enabled: parseBoolean(this.env.VISION_ENABLED, false),
+      baseUrl: (this.env.VISION_BASE_URL ?? llm.baseUrl).trim(),
+      apiKey: (this.env.VISION_API_KEY ?? llm.apiKey).trim(),
+      model: (this.env.VISION_MODEL ?? llm.model).trim(),
     };
   }
 

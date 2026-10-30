@@ -236,6 +236,10 @@ export class DynamicConfigCenter
     return this.defaults.getEmbeddingConfig?.();
   }
 
+  public getVisionConfig() {
+    return this.defaults.getVisionConfig?.();
+  }
+
   public getBystanderConfig(): BystanderConfig {
     const defaults = this.defaults.getBystanderConfig();
     return {
