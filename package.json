@@ -5,7 +5,12 @@
   "description": "DingTalk Stream gateway with native reasoning, dynamic ReAct harness and AI Card streaming",
   "type": "module",
   "engines": {
-    "node": ">=20"
+    "node": ">=24"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "isolated-vm"
+    ]
   },
   "scripts": {
     "start": "tsx src/index.ts",
@@ -19,9 +24,11 @@
   },
   "dependencies": {
     "@alicloud/dingtalk": "^2.2.48",
+    "@modelcontextprotocol/sdk": "^1.32.2",
     "dingtalk-stream": "^2.1.6-beta.1",
     "dotenv": "^16.4.5",
     "drizzle-orm": "^0.45.4",
+    "isolated-vm": "^7.0.1",
     "openai": "^7.45.1",
     "pg": "^8.13.1",
     "pino": "^9.5.0"

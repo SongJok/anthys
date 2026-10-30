@@ -11,9 +11,9 @@ import {
 } from './dingtalk/CardStreamer.js';
 import { StreamGateway, type StreamGatewayLogger } from './dingtalk/StreamGateway.js';
 import { AgentHarness, type HarnessLogger } from './harness/AgentHarness.js';
+import { ToolRegistry } from './harness/ToolRegistry.js';
 import { ContextAssembler } from './memory/ContextAssembler.js';
 import { DrizzleConversationRepository } from './memory/ConversationRepository.js';
-import { BuiltinToolProvider } from './react/BuiltinTools.js';
 import { createChatModel } from './react/createChatModel.js';
 import { ReActRunner } from './react/ReActRunner.js';
 import type { InboundMessage } from './types/core.js';
@@ -82,6 +82,7 @@ async function main(): Promise<void> {
   const cardLogger: CardLogger = harnessLogger;
 
   const dbHandle = createDatabase(config.getDatabaseUrl());
+  let toolRegistry: ToolRegistry | undefined;
 
   try {
     const baseLLM = config.getLLMConfig();
@@ -94,9 +95,19 @@ async function main(): Promise<void> {
     const memory = config.getMemoryConfig();
     const dingtalk = config.getDingTalkConfig();
 
+    toolRegistry = await ToolRegistry.create({ logger: harnessLogger });
+    logger.info(
+      {
+        providers: toolRegistry.providers.map((provider) => provider.providerName),
+        mcpServers: toolRegistry.pool?.listEnabledServers().map((server) => server.id) ?? [],
+        workspace: toolRegistry.workspace.hostDir,
+      },
+      'tool registry ready',
+    );
+
     const engine = new ReActRunner({
       model: createChatModel(llm),
-      toolProviders: [new BuiltinToolProvider()],
+      toolProviders: toolRegistry.providers,
       policy,
       temperature: llm.temperature,
       enableNativeReasoning: llm.enableNativeReasoning,
@@ -189,6 +200,7 @@ async function main(): Promise<void> {
       closing = true;
       logger.info({ signal }, 'shutting down');
       gateway.stop();
+      await toolRegistry?.close();
       await dbHandle.close();
       process.exit(0);
     };
@@ -201,6 +213,7 @@ async function main(): Promise<void> {
       },
       'startup failed',
     );
+    await toolRegistry?.close();
     await dbHandle.close();
     process.exitCode = 1;
   }
