@@ -3,20 +3,62 @@ import type { DwsCommandRequest } from '../../types/mcp-and-sandbox.js';
 
 export type DwsDomain = DwsCommandRequest['domain'];
 
-/** 仅开放只读查询子命令；写操作不在本阶段范围内。 */
+/** 按域开放的子命令白名单；多段命令用空格连接，如 `event create`。 */
 export const DWS_SUBCOMMAND_WHITELIST: Record<
   DwsDomain,
   readonly string[]
 > = {
   doc: ['search', 'read', 'list', 'get'],
   wiki: ['search', 'read', 'list', 'get'],
-  calendar: ['list', 'today', 'search', 'freebusy'],
-  todo: ['list', 'search', 'get', 'today'],
-  contact: ['search', 'get', 'list', 'self'],
-  approval: ['list', 'search', 'get'],
+  calendar: [
+    'list',
+    'today',
+    'search',
+    'freebusy',
+    'event create',
+    'event update',
+    'event delete',
+  ],
+  todo: [
+    'list',
+    'search',
+    'get',
+    'today',
+    'task create',
+    'task update',
+    'task done',
+  ],
+  contact: ['search', 'get', 'list', 'self', 'user invite', 'user update'],
+  approval: [
+    'list-pending',
+    'list-submitted',
+    'list-executed',
+    'list-cc',
+    'detail',
+    'records',
+    'tasks',
+    'list-forms',
+    'search-forms',
+    'form-schema',
+    'create-instance',
+    'approve',
+    'reject',
+    'revoke',
+  ],
+};
+
+/** 部分域在 CLI 中的真实命令前缀与 domain 名不一致 */
+const DOMAIN_COMMAND_PREFIX: Record<DwsDomain, readonly string[]> = {
+  doc: ['doc'],
+  wiki: ['wiki'],
+  calendar: ['calendar'],
+  todo: ['todo'],
+  contact: ['contact'],
+  approval: ['oa', 'approval'],
 };
 
 const DOMAINS = Object.keys(DWS_SUBCOMMAND_WHITELIST) as DwsDomain[];
+const SUBCOMMAND_TOKEN_PATTERN = /^[a-z][a-z0-9-]*$/i;
 const FLAG_NAME_PATTERN = /^[a-zA-Z][a-zA-Z0-9-]*$/;
 const MAX_FLAG_VALUE_LENGTH = 2_000;
 const DEFAULT_TIMEOUT_MS = 15_000;
@@ -59,16 +101,27 @@ export function buildDwsArgs(request: DwsCommandRequest): string[] {
     throw new Error(`不支持的 DWS 域: ${String(request.domain)}`);
   }
   const allowed = DWS_SUBCOMMAND_WHITELIST[request.domain];
-  if (!allowed.includes(request.subcommand)) {
+  const tokens = request.subcommand
+    .trim()
+    .split(/\s+/u)
+    .filter(Boolean);
+  if (
+    tokens.length === 0 ||
+    tokens.some((token) => !SUBCOMMAND_TOKEN_PATTERN.test(token))
+  ) {
+    throw new Error(`非法的 DWS 子命令: "${request.subcommand}"`);
+  }
+  const subcommand = tokens.join(' ');
+  if (!allowed.includes(subcommand)) {
     throw new Error(
-      `DWS 子命令不在白名单内: ${request.domain} ${request.subcommand}（允许: ${allowed.join(', ')}）`,
+      `DWS 子命令不在白名单内: ${request.domain} ${subcommand}（允许: ${allowed.join(', ')}）`,
     );
   }
   if (!request.operatorStaffId.trim()) {
     throw new Error('DWS 调用缺少 operatorStaffId');
   }
 
-  const args = [request.domain, request.subcommand];
+  const args = [...DOMAIN_COMMAND_PREFIX[request.domain], ...tokens];
   for (const [rawKey, value] of Object.entries(request.flags)) {
     const key = rawKey.trim();
     if (!FLAG_NAME_PATTERN.test(key)) {

@@ -9,6 +9,7 @@ import {
   DwsCliRunner,
   buildDwsArgs,
 } from './DwsCliRunner.js';
+import type { DwsPermissionNotice } from './DwsPermissionNotice.js';
 
 const FAKE_DWS_SOURCE = `#!/usr/bin/env node
 const args = process.argv.slice(2);
@@ -134,13 +135,54 @@ describe('buildDwsArgs 白名单与参数校验', () => {
     ).toThrow('缺少 operatorStaffId');
   });
 
-  it('所有域只开放只读子命令', () => {
-    const forbidden = ['create', 'delete', 'update', 'send', 'approve'];
+  it('写命令只出现在显式白名单中', () => {
+    expect(DWS_SUBCOMMAND_WHITELIST.calendar).toContain('event create');
+    expect(DWS_SUBCOMMAND_WHITELIST.calendar).toContain('event delete');
+    expect(DWS_SUBCOMMAND_WHITELIST.todo).toContain('task create');
+    expect(DWS_SUBCOMMAND_WHITELIST.contact).toContain('user invite');
+    expect(DWS_SUBCOMMAND_WHITELIST.approval).toContain('create-instance');
     for (const subcommands of Object.values(DWS_SUBCOMMAND_WHITELIST)) {
-      for (const command of forbidden) {
-        expect(subcommands).not.toContain(command);
-      }
+      expect(subcommands).not.toContain('delete');
+      expect(subcommands).not.toContain('exec');
     }
+  });
+
+  it('审批域映射到 oa approval 多段命令', () => {
+    expect(
+      buildDwsArgs({
+        domain: 'approval',
+        subcommand: 'list-pending',
+        flags: { start: '2026-10-01T00:00:00+08:00', end: '2026-10-31T23:59:59+08:00' },
+        operatorStaffId: 'staff-001',
+      }),
+    ).toEqual([
+      'oa',
+      'approval',
+      'list-pending',
+      '--start',
+      '2026-10-01T00:00:00+08:00',
+      '--end',
+      '2026-10-31T23:59:59+08:00',
+    ]);
+  });
+
+  it('支持多段子命令并拒绝非法字符', () => {
+    expect(
+      buildDwsArgs({
+        domain: 'calendar',
+        subcommand: 'event create',
+        flags: { title: '周会', yes: true },
+        operatorStaffId: 'staff-001',
+      }),
+    ).toEqual(['calendar', 'event', 'create', '--title', '周会', '--yes']);
+    expect(() =>
+      buildDwsArgs({
+        domain: 'calendar',
+        subcommand: 'event create; rm -rf /',
+        flags: {},
+        operatorStaffId: 'staff-001',
+      }),
+    ).toThrow('非法的 DWS 子命令');
   });
 });
 
@@ -237,14 +279,27 @@ describe('DwsCliRunner', () => {
 });
 
 describe('DwsCliToolProvider', () => {
-  it('暴露两个 DWS 工具', async () => {
+  it('暴露只读与写操作 DWS 工具', async () => {
     const provider = new DwsCliToolProvider({ runner: makeRunner() });
     expect(provider.providerName).toBe('dws');
     const tools = await provider.getTools(ctx);
     expect(tools.map((tool) => tool.name)).toEqual([
       'dws_doc_search_and_read',
       'dws_org_and_schedule',
+      'dws_calendar_manage',
+      'dws_calendar_cancel',
+      'dws_todo_manage',
+      'dws_contact_manage',
+      'dws_approval_manage',
     ]);
+    const risks = Object.fromEntries(
+      tools.map((tool) => [tool.name, tool.risk]),
+    );
+    expect(risks.dws_calendar_manage).toBe('write');
+    expect(risks.dws_calendar_cancel).toBe('destructive');
+    expect(risks.dws_todo_manage).toBe('write');
+    expect(risks.dws_contact_manage).toBe('write');
+    expect(risks.dws_approval_manage).toBe('write');
   });
 
   it('检索文档并透传员工身份', async () => {
@@ -306,7 +361,10 @@ describe('DwsCliToolProvider', () => {
 
     await expect(
       tool.execute({ resource: 'calendar', action: 'self' }, ctx),
-    ).rejects.toThrow('不支持操作 self');
+    ).rejects.toThrow('不支持只读操作 self');
+    await expect(
+      tool.execute({ resource: 'calendar', action: 'event create' }, ctx),
+    ).rejects.toThrow('不支持只读操作 event create');
 
     const output = JSON.parse(
       await tool.execute(
@@ -350,5 +408,178 @@ describe('DwsCliToolProvider', () => {
     await expect(
       orgTool.execute({ resource: 'drive', action: 'list' }, ctx),
     ).rejects.toThrow('不支持的资源类型');
+  });
+
+  it('日历写工具组装创建与取消命令', async () => {
+    const provider = new DwsCliToolProvider({ runner: makeRunner() });
+    const create = await findTool('dws_calendar_manage', provider);
+    const created = JSON.parse(
+      await create.execute(
+        {
+          action: 'create',
+          title: '周会',
+          start: '2026-11-02T14:00:00+08:00',
+          end: '2026-11-02T15:00:00+08:00',
+          attendees: ['user-1', 'user-2'],
+        },
+        ctx,
+      ),
+    ) as { ok: boolean; stdout: string };
+    expect(created.ok).toBe(true);
+    expect(
+      (JSON.parse(created.stdout) as { argv: string[] }).argv,
+    ).toEqual([
+      'calendar',
+      'event',
+      'create',
+      '--yes',
+      '--title',
+      '周会',
+      '--start',
+      '2026-11-02T14:00:00+08:00',
+      '--end',
+      '2026-11-02T15:00:00+08:00',
+      '--attendees',
+      'user-1,user-2',
+    ]);
+
+    const cancel = await findTool('dws_calendar_cancel', provider);
+    const cancelled = JSON.parse(
+      await cancel.execute({ eventId: 'event-1' }, ctx),
+    ) as { ok: boolean; stdout: string };
+    expect((JSON.parse(cancelled.stdout) as { argv: string[] }).argv).toEqual([
+      'calendar',
+      'event',
+      'delete',
+      '--id',
+      'event-1',
+      '--yes',
+    ]);
+  });
+
+  it('待办创建默认指派给当前提问人', async () => {
+    const provider = new DwsCliToolProvider({ runner: makeRunner() });
+    const tool = await findTool('dws_todo_manage', provider);
+    const output = JSON.parse(
+      await tool.execute({ action: 'create', title: '提交周报' }, ctx),
+    ) as { ok: boolean; stdout: string };
+    expect((JSON.parse(output.stdout) as { argv: string[] }).argv).toEqual([
+      'todo',
+      'task',
+      'create',
+      '--title',
+      '提交周报',
+      '--executors',
+      'staff-001',
+      '--yes',
+    ]);
+  });
+
+  it('审批写工具映射到 oa approval 并携带 --yes', async () => {
+    const provider = new DwsCliToolProvider({ runner: makeRunner() });
+    const tool = await findTool('dws_approval_manage', provider);
+    const output = JSON.parse(
+      await tool.execute(
+        {
+          action: 'create',
+          processCode: 'PROC-1',
+          formValues: { 事由: '测试' },
+        },
+        ctx,
+      ),
+    ) as { ok: boolean; stdout: string };
+    expect((JSON.parse(output.stdout) as { argv: string[] }).argv).toEqual([
+      'oa',
+      'approval',
+      'create-instance',
+      '--process-code',
+      'PROC-1',
+      '--form-values',
+      '{"事由":"测试"}',
+      '--originator-user-id',
+      'staff-001',
+      '--yes',
+    ]);
+
+    const approved = JSON.parse(
+      await tool.execute(
+        { action: 'approve', instanceId: 'inst-1', taskId: '12345' },
+        ctx,
+      ),
+    ) as { ok: boolean; stdout: string };
+    expect(
+      (JSON.parse(approved.stdout) as { argv: string[] }).argv,
+    ).toEqual([
+      'oa',
+      'approval',
+      'approve',
+      '--instance-id',
+      'inst-1',
+      '--task-id',
+      '12345',
+      '--yes',
+    ]);
+    await expect(
+      tool.execute(
+        { action: 'approve', instanceId: 'inst-1', taskId: 'task-not-numeric' },
+        ctx,
+      ),
+    ).rejects.toThrow('必须是正整数 ID');
+  });
+
+  it('权限缺失时通知管理员并对同一会话限频', async () => {
+    const notices: DwsPermissionNotice[] = [];
+    const provider = new DwsCliToolProvider({
+      runner: makeRunner({
+        env: { ...process.env, FAKE_DWS_FAIL: '1' },
+      }),
+      permissionNotifier: (notice) => {
+        notices.push(notice);
+        return true;
+      },
+    });
+    const tool = await findTool('dws_calendar_manage', provider);
+    const args = {
+      action: 'create',
+      title: '周会',
+      start: '2026-11-02T14:00:00+08:00',
+      end: '2026-11-02T15:00:00+08:00',
+    };
+
+    const first = JSON.parse(await tool.execute(args, ctx)) as {
+      permissionDenied: boolean;
+      adminNotified: boolean;
+      instruction: string;
+    };
+    expect(first.permissionDenied).toBe(true);
+    expect(first.adminNotified).toBe(true);
+    expect(first.instruction).toContain('Calendar.Event.Write');
+    expect(notices).toHaveLength(1);
+    expect(notices[0].domain).toBe('calendar');
+
+    const second = JSON.parse(await tool.execute(args, ctx)) as {
+      adminNotified: boolean;
+    };
+    expect(second.adminNotified).toBe(true);
+    expect(notices).toHaveLength(1);
+  });
+
+  it('文档资源级拒绝不通知管理员', async () => {
+    const notices: DwsPermissionNotice[] = [];
+    const provider = new DwsCliToolProvider({
+      runner: makeRunner({
+        env: { ...process.env, FAKE_DWS_FAIL: '1' },
+      }),
+      permissionNotifier: (notice) => {
+        notices.push(notice);
+        return true;
+      },
+    });
+    const tool = await findTool('dws_doc_search_and_read', provider);
+    const output = JSON.parse(
+      await tool.execute({ target: 'doc', action: 'list' }, ctx),
+    ) as { permissionDenied?: boolean };
+    expect(output.permissionDenied).toBeUndefined();
+    expect(notices).toHaveLength(0);
   });
 });

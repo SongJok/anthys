@@ -28,6 +28,8 @@ import {
 import { replyMention, webhookMention } from './dingtalk/Mentions.js';
 import { sendTextFallback } from './dingtalk/TextFallback.js';
 import { DingTalkMediaSender } from './dingtalk/MediaSender.js';
+import { DingTalkAdminTextSender } from './dingtalk/AdminTextSender.js';
+import { formatDwsPermissionNotice } from './tools/dws/DwsPermissionNotice.js';
 import { AttachmentStore } from './multimodal/AttachmentStore.js';
 import { enrichInboundMessage } from './multimodal/MessageEnricher.js';
 import { OpenAiVisionDescriber } from './multimodal/VisionDescriber.js';
@@ -350,6 +352,11 @@ async function main(): Promise<void> {
       logger: harnessLogger,
       maxBytes: artifactMaxBytes,
     });
+    const adminTextSender = new DingTalkAdminTextSender({
+      robotCode: () => configCenter.getDingTalkConfig().robotCode,
+      getAccessToken,
+      logger: harnessLogger,
+    });
 
     const authManager = new DwsAuthManager({
       binary: process.env.DWS_BINARY?.trim() || 'dws',
@@ -362,6 +369,33 @@ async function main(): Promise<void> {
       enableDws: configCenter.getSystemConfig().dingtalk.dwsCliEnabled,
       dwsAuth: authManager,
       dwsIsAdmin: (staffId) => configCenter.isAdmin(staffId),
+      dwsPermissionNotifier: async (notice) => {
+        const admins = configCenter
+          .getSystemConfig()
+          .dingtalk.adminStaffIds.filter(
+            (staffId) =>
+              staffId.trim() !== '' && staffId !== notice.senderStaffId,
+          );
+        if (admins.length === 0) {
+          // 提问人本身是管理员时，答案会直接展示给他，无需重复私聊
+          return configCenter.isAdmin(notice.senderStaffId);
+        }
+        const result = await adminTextSender.send(
+          admins,
+          formatDwsPermissionNotice(notice),
+        );
+        if (!result.ok) {
+          logger.warn(
+            {
+              conversationId: notice.conversationId,
+              domain: notice.domain,
+              failed: result.failed.length,
+            },
+            'dws permission notice delivery failed',
+          );
+        }
+        return result.ok;
+      },
       ...(process.env.DWS_BINARY?.trim()
         ? { dwsBinary: process.env.DWS_BINARY.trim() }
         : {}),

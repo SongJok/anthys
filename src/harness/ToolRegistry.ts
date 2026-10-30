@@ -10,6 +10,7 @@ import { expandEnvPlaceholder } from '../config/envPlaceholder.js';
 import { DwsCliRunner } from '../tools/dws/DwsCliRunner.js';
 import { DwsCliToolProvider } from '../tools/dws/DwsCliToolProvider.js';
 import type { DwsAuthManager } from '../tools/dws/DwsAuthManager.js';
+import type { DwsPermissionNotifier } from '../tools/dws/DwsPermissionNotice.js';
 import {
   IsolatedSandbox,
   type IsolatedSandboxOptions,
@@ -57,6 +58,8 @@ export interface ToolRegistryOptions {
   dwsAuth?: DwsAuthManager;
   /** 只有管理员可以触发 DWS 重新授权 */
   dwsIsAdmin?: (staffId: string) => boolean;
+  /** DWS 应用权限缺失时主动通知管理员 */
+  dwsPermissionNotifier?: DwsPermissionNotifier;
   /** dws 可执行文件路径，默认读取 DWS_BINARY 或 PATH 中的 dws */
   dwsBinary?: string;
   sandbox?: IsolatedSandbox;
@@ -283,6 +286,9 @@ export class ToolRegistry {
           }),
         ...(options.dwsAuth ? { auth: options.dwsAuth } : {}),
         ...(options.dwsIsAdmin ? { isAdmin: options.dwsIsAdmin } : {}),
+        ...(options.dwsPermissionNotifier
+          ? { permissionNotifier: options.dwsPermissionNotifier }
+          : {}),
       });
     if (options.enableDws ?? envFlag(env, 'DWS_CLI_ENABLED', true)) {
       dwsProvider = createDwsProvider();
