@@ -185,6 +185,34 @@ describe('AgentHarness', () => {
     expect(firstMessages.at(-1)).toEqual({ role: 'user', content: '现在几点？' });
   });
 
+  it('明文写明 20 分钟以上任务时直接拒接，不调用模型也不写库', async () => {
+    const calls: { messages: unknown[] }[] = [];
+    const { harness, rows } = createHarness(scriptedEngine(calls));
+    const events: AgentStreamEvent[] = [];
+    const result = await harness.handleMessage(
+      inbound({ text: '帮我整理季度报表，大概需要 40 分钟' }),
+      { emit: (event) => events.push(event) },
+    );
+
+    expect(calls).toHaveLength(0);
+    expect(rows).toHaveLength(0);
+    expect(result?.answer).toContain('机器人不认可这个需求');
+    expect(result?.answer).toContain('已关闭执行');
+    expect(events.map((event) => event.type)).toEqual([
+      'answer_delta',
+      'completed',
+    ]);
+  });
+
+  it('短任务里的时长描述不触发拒接', async () => {
+    const calls: { messages: unknown[] }[] = [];
+    const { harness } = createHarness(scriptedEngine(calls));
+    await harness.handleMessage(inbound({ text: '25 分钟后提醒我开会' }), {
+      emit: () => undefined,
+    });
+    expect(calls).toHaveLength(1);
+  });
+
   it('同一用户的后续追问带上多轮历史', async () => {
     const calls: { messages: unknown[] }[] = [];
     const { harness } = createHarness(scriptedEngine(calls));

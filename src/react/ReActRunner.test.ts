@@ -278,10 +278,13 @@ describe('ReActRunner', () => {
     ).toBe(true);
   });
 
-  it('Token 预算耗尽时进入禁止调用工具的收敛收尾', async () => {
+  it('Token 预算耗尽时拒接并停止执行', async () => {
     const model = new ScriptedModel([
       toolTurn([{ index: 0, id: 'c1', name: 'current_time', args: {} }], 10),
-      [{ contentDelta: '根据已获取的信息完成回答。' }, { finishReason: 'stop', usage: { totalTokens: 5 } }],
+      [
+        { contentDelta: '不应该再被调用。' },
+        { finishReason: 'stop', usage: { totalTokens: 5 } },
+      ],
     ]);
     const runner = new ReActRunner({
       model,
@@ -296,44 +299,34 @@ describe('ReActRunner', () => {
       emit: (event) => events.push(event),
     });
 
-    expect(model.requests).toHaveLength(2);
-    expect(model.requests[1]?.toolChoice).toBe('none');
-    expect(
-      model.requests[1]?.messages.some(
-        (message) =>
-          message.role === 'system' &&
-          message.content.includes('Token 预算上限'),
-      ),
-    ).toBe(true);
-    expect(result.answer).toBe('根据已获取的信息完成回答。');
+    expect(model.requests).toHaveLength(1);
+    expect(result.answer).toContain('机器人不认可这个需求');
+    expect(result.answer).toContain('已停止执行');
+    expect(result.answer).not.toContain('不应该再被调用');
+    expect(events.some((event) => event.type === 'answer_reset')).toBe(true);
     expect(events.at(-1)?.type).toBe('completed');
   });
 
-  it('时间预算耗尽时中止循环并完成收尾回答', async () => {
+  it('时间预算耗尽时拒接并中止循环', async () => {
     let now = 0;
     const basePolicy = { ...policy, maxWallTimeMs: 1_000 };
+    const requests: ChatCompletionRequest[] = [];
     const model: ChatModel = {
       modelName: 'time-scripted',
       async *streamChat(request) {
         requests.push(request);
-        if (requests.length === 1) {
-          yield {
-            toolCallDelta: {
-              index: 0,
-              id: 'c1',
-              name: 'current_time',
-              argumentsDelta: '{}',
-            },
-          };
-          now = 2_000;
-          yield { finishReason: 'tool_calls', usage: { totalTokens: 5 } };
-          return;
-        }
-        yield { contentDelta: '时间预算已到，先给出已有结论。' };
-        yield { finishReason: 'stop' };
+        yield {
+          toolCallDelta: {
+            index: 0,
+            id: 'c1',
+            name: 'current_time',
+            argumentsDelta: '{}',
+          },
+        };
+        now = 2_000;
+        yield { finishReason: 'tool_calls', usage: { totalTokens: 5 } };
       },
     };
-    const requests: ChatCompletionRequest[] = [];
     const runner = new ReActRunner({
       model,
       toolProviders: [new BuiltinToolProvider()],
@@ -348,8 +341,10 @@ describe('ReActRunner', () => {
       emit: (event) => events.push(event),
     });
 
-    expect(requests[1]?.toolChoice).toBe('none');
-    expect(result.answer).toBe('时间预算已到，先给出已有结论。');
+    expect(requests).toHaveLength(1);
+    expect(result.answer).toContain('机器人不认可这个需求');
+    expect(result.answer).toContain('已停止执行');
+    expect(events.some((event) => event.type === 'answer_reset')).toBe(true);
     expect(events.at(-1)?.type).toBe('completed');
   });
 

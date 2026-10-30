@@ -28,6 +28,7 @@ describe('DynamicLoopGuard', () => {
     now = 6_000;
     const result = guard.recordStep(10);
     expect(result.allowContinue).toBe(false);
+    expect(result.haltCode).toBe('wall-time');
     expect(result.haltReason).toContain('最大思考时间预算');
   });
 
@@ -39,6 +40,7 @@ describe('DynamicLoopGuard', () => {
     expect(guard.recordStep(999).allowContinue).toBe(true);
     const result = guard.recordStep(1);
     expect(result.allowContinue).toBe(false);
+    expect(result.haltCode).toBe('tokens');
     expect(result.haltReason).toContain('Token 预算');
   });
 

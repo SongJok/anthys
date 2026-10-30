@@ -158,7 +158,11 @@ export default function SystemSettingsPage() {
           >
             <Input placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />
           </Form.Item>
-          <Form.Item label="管理员 StaffId 白名单" name="adminStaffIds">
+          <Form.Item
+            label="管理员 StaffId 白名单"
+            name="adminStaffIds"
+            extra="这里的名单会覆盖 .env 的 DINGTALK_ADMIN / ADMIN_STAFF_IDS；管理员可在机器人单聊中直接下达管控指令"
+          >
             <Select
               mode="tags"
               tokenSeparators={[',', ' ']}

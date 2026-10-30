@@ -197,12 +197,20 @@ export default function LlmPersonaPage() {
           <Divider orientation="left">ReAct 循环预算</Divider>
           <Row gutter={16}>
             <Col span={6}>
-              <Form.Item label="单轮最大耗时（ms）" name="maxWallTimeMs">
+              <Form.Item
+                label="单轮最大耗时（ms）"
+                name="maxWallTimeMs"
+                extra="超过即拒接该需求并停止执行"
+              >
                 <InputNumber min={1000} step={1000} style={{ width: '100%' }} />
               </Form.Item>
             </Col>
             <Col span={6}>
-              <Form.Item label="Token 上限" name="maxTotalTokens">
+              <Form.Item
+                label="Token 上限"
+                name="maxTotalTokens"
+                extra="超过即拒接该需求并停止执行"
+              >
                 <InputNumber min={1000} step={1000} style={{ width: '100%' }} />
               </Form.Item>
             </Col>

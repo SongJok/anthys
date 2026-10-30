@@ -66,8 +66,8 @@ export class EnvConfigProvider implements IConfigProvider {
 
   getLoopPolicy(): DynamicLoopPolicy {
     return {
-      maxWallTimeMs: parseNumber(this.env.LOOP_MAX_WALL_TIME_MS, 120_000),
-      maxTotalTokens: parseNumber(this.env.LOOP_MAX_TOTAL_TOKENS, 64_000),
+      maxWallTimeMs: parseNumber(this.env.LOOP_MAX_WALL_TIME_MS, 900_000),
+      maxTotalTokens: parseNumber(this.env.LOOP_MAX_TOTAL_TOKENS, 120_000),
       maxConsecutiveSameTool: Math.max(
         1,
         parseNumber(this.env.LOOP_MAX_CONSECUTIVE_SAME_TOOL, 2),

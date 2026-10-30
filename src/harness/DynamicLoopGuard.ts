@@ -9,6 +9,8 @@ export interface LoopStepResult {
   allowContinue: boolean;
   injectWarning?: string;
   haltReason?: string;
+  /** 预算耗尽的具体原因，调用方据此给出拒接说明 */
+  haltCode?: 'wall-time' | 'tokens';
 }
 
 export class DynamicLoopGuard {
@@ -36,14 +38,15 @@ export class DynamicLoopGuard {
     if (elapsed >= this.policy.maxWallTimeMs) {
       return {
         allowContinue: false,
-        haltReason:
-          '已达到单次任务最大思考时间预算，正在基于已有信息汇总答案。',
+        haltCode: 'wall-time',
+        haltReason: '已达到单次任务最大思考时间预算，本次不再继续执行。',
       };
     }
     if (this.consumedTokens >= this.policy.maxTotalTokens) {
       return {
         allowContinue: false,
-        haltReason: '已达到上下文 Token 预算上限，正在为您收敛最终结论。',
+        haltCode: 'tokens',
+        haltReason: '已达到单次任务 Token 预算上限，本次不再继续执行。',
       };
     }
 

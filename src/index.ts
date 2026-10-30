@@ -127,12 +127,17 @@ function errorText(error: unknown): string {
   return error instanceof Error ? error.stack ?? error.message : String(error);
 }
 
-function parseAdminIds(raw: string | undefined): string[] {
-  if (!raw) return [];
-  return raw
-    .split(',')
-    .map((item) => item.trim())
-    .filter(Boolean);
+/** DINGTALK_ADMIN 与 ADMIN_STAFF_IDS 等价，合并去重后作为初始管理员 */
+function parseAdminIds(...raw: (string | undefined)[]): string[] {
+  const ids: string[] = [];
+  for (const value of raw) {
+    if (!value) continue;
+    for (const item of value.split(',')) {
+      const id = item.trim();
+      if (id && !ids.includes(id)) ids.push(id);
+    }
+  }
+  return ids;
 }
 
 function envEnabled(raw: string | undefined, fallback: boolean): boolean {
@@ -283,7 +288,10 @@ async function main(): Promise<void> {
       groupPolicies: new DrizzleGroupPolicyStore(dbHandle.db),
       auditStore: new DrizzleAdminAuditStore(dbHandle.db),
       initialMcpServers,
-      initialAdminStaffIds: parseAdminIds(process.env.ADMIN_STAFF_IDS),
+      initialAdminStaffIds: parseAdminIds(
+        process.env.DINGTALK_ADMIN,
+        process.env.ADMIN_STAFF_IDS,
+      ),
       logger: harnessLogger,
       now: Date.now,
     }).init();
@@ -1427,7 +1435,9 @@ async function main(): Promise<void> {
     });
     configCenter.on('loopPolicy:changed', (event) => {
       routedEngines.clear();
-      engine.updatePolicy(event.after as ReturnType<typeof configCenter.getLoopPolicy>);
+      const next = event.after as ReturnType<typeof configCenter.getLoopPolicy>;
+      engine.updatePolicy(next);
+      harness.updatePolicy(next);
       logger.info({ policy: event.after }, 'loop policy applied');
     });
     configCenter.on('defaultBystanderPolicy:changed', () => {

@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { DynamicLoopGuard, type LoopStepResult } from '../harness/DynamicLoopGuard.js';
+import { formatRuntimeRefusal } from '../harness/RequestAdmission.js';
 import type {
   AgentEngine,
   AgentStreamEvent,
@@ -198,6 +199,7 @@ export class ReActRunner implements AgentEngine {
     let totalTokens = 0;
     let steps = 0;
     let halted: string | undefined;
+    let refusal: string | undefined;
     let skipFinalTurn = false;
     let stopped = false;
     const citations: StreamCitation[] = [];
@@ -250,8 +252,13 @@ export class ReActRunner implements AgentEngine {
           break;
         }
         if (this.now() >= deadlineAt) {
-          halted =
-            '已达到单次任务最大思考时间预算，正在基于已有信息汇总答案。';
+          refusal = formatRuntimeRefusal({
+            reason: 'wall-time',
+            elapsedMs: this.now() - startedAt,
+            tokens: totalTokens,
+            policy,
+          });
+          skipFinalTurn = true;
           break;
         }
 
@@ -292,8 +299,13 @@ export class ReActRunner implements AgentEngine {
 
         if (!hasToolCalls || turn.aborted) {
           if (turn.aborted) {
-            halted =
-              '已达到单次任务最大思考时间预算，正在基于已有信息汇总答案。';
+            refusal = formatRuntimeRefusal({
+              reason: 'wall-time',
+              elapsedMs: this.now() - startedAt,
+              tokens: totalTokens,
+              policy,
+            });
+            skipFinalTurn = true;
           }
           break;
         }
@@ -357,7 +369,17 @@ export class ReActRunner implements AgentEngine {
         });
 
         if (!decision.allowContinue) {
-          halted = decision.haltReason;
+          if (decision.haltCode) {
+            refusal = formatRuntimeRefusal({
+              reason: decision.haltCode,
+              elapsedMs: this.now() - startedAt,
+              tokens: totalTokens,
+              policy,
+            });
+            skipFinalTurn = true;
+          } else {
+            halted = decision.haltReason;
+          }
           break;
         }
         for (const warning of warnings) {
@@ -366,6 +388,13 @@ export class ReActRunner implements AgentEngine {
         if (policy.convergenceCheck) {
           pushSystemOnce(messages, CONVERGENCE_NUDGE);
         }
+      }
+
+      if (refusal) {
+        // 拒接时清掉可能已经流出的半句，保证卡片只展示拒接结论
+        emit({ type: 'answer_reset', narration: '' });
+        answer = refusal;
+        emit({ type: 'answer_delta', content: refusal, final: true });
       }
 
       if (halted && !skipFinalTurn) {

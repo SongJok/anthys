@@ -24,6 +24,10 @@ import type {
   RunUsage,
 } from '../types/core.js';
 import { QuotaExceededError } from '../billing/UsageGuard.js';
+import {
+  assessRequestAdmission,
+  formatAdmissionRefusal,
+} from './RequestAdmission.js';
 
 export interface HarnessLogger {
   info(obj: Record<string, unknown>, msg: string): void;
@@ -126,6 +130,14 @@ export class AgentHarness {
     if (!text) return null;
     const quotaAnswer = await this.enforceQuota(message, handle.emit, false);
     if (quotaAnswer) return quotaAnswer;
+    const admissionAnswer = this.enforceAdmission(
+      message.senderStaffId,
+      message.conversationId,
+      text,
+      handle.emit,
+      handle.proactive ?? false,
+    );
+    if (admissionAnswer) return admissionAnswer;
 
     const { repository, assembler, engine, policy, persona } = this.options;
     const conversation = await repository.ensureConversation({
@@ -236,6 +248,16 @@ export class AgentHarness {
 
     const text = handle.decision.extractedQuery.trim() || message.text.trim();
     if (!text) return null;
+    if (!assessRequestAdmission(text).accepted) {
+      this.options.logger?.info(
+        {
+          conversationId: message.conversationId,
+          messageId: message.messageId,
+        },
+        'proactive reply skipped: request exceeds admission limits',
+      );
+      return null;
+    }
     if (await this.enforceQuota(message, handle.emit, true)) return null;
 
     const { repository, assembler, engine, policy, persona } = this.options;
@@ -466,6 +488,35 @@ export class AgentHarness {
       emit({ type: 'completed', usage: emptyUsage() });
       return { answer, reasoning: '', usage: emptyUsage() };
     }
+  }
+
+  /**
+   * 明文里已经写明是 20 分钟以上的任务时，不调用模型、不写记忆，
+   * 直接告知提问者机器人不认可该需求。
+   */
+  private enforceAdmission(
+    senderStaffId: string,
+    conversationId: string,
+    text: string,
+    emit: (event: AgentStreamEvent) => void,
+    proactive: boolean,
+  ): RunResult | null {
+    const decision = assessRequestAdmission(text);
+    if (decision.accepted) return null;
+    const answer = formatAdmissionRefusal(decision, this.options.policy);
+    this.options.logger?.info(
+      {
+        conversationId,
+        senderStaffId,
+        matched: decision.matched,
+        durationMs: decision.durationMs,
+        proactive,
+      },
+      'request refused by admission guard',
+    );
+    emit({ type: 'answer_delta', content: answer, final: true });
+    emit({ type: 'completed', usage: emptyUsage() });
+    return { answer, reasoning: '', usage: emptyUsage() };
   }
 
   private async recordUsage(
