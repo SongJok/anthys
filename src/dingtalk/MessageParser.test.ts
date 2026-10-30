@@ -67,11 +67,48 @@ describe('parseStreamMessage', () => {
     expect(message?.isAtBot).toBe(false);
   });
 
-  it('无法识别的非文本消息返回 null', () => {
+  it('无法识别或缺少下载码的消息返回 null', () => {
     expect(parseStreamMessage(payload({ msgtype: 'richText' }))).toBeNull();
     expect(
       parseStreamMessage(payload({ msgtype: 'picture', content: {} })),
     ).toBeNull();
+  });
+
+  it('富文本消息提取文字和全部图片', () => {
+    const message = parseStreamMessage(
+      payload({
+        msgtype: 'richText',
+        isInAtList: true,
+        content: {
+          richText: [
+            { text: '@小钉 看看这两张图' },
+            { type: 'picture', downloadCode: 'code-image-1' },
+            { type: 'picture', downloadCode: 'code-image-2' },
+          ],
+        },
+      }),
+    );
+    expect(message?.text).toBe('看看这两张图');
+    expect(message?.isAtBot).toBe(true);
+    expect(message?.attachments).toEqual([
+      { type: 'image', downloadCode: 'code-image-1' },
+      { type: 'image', downloadCode: 'code-image-2' },
+    ]);
+  });
+
+  it('纯图片富文本消息生成占位正文', () => {
+    const message = parseStreamMessage(
+      payload({
+        msgtype: 'richText',
+        content: {
+          richText: [{ type: 'picture', downloadCode: 'code-image' }],
+        },
+      }),
+    );
+    expect(message?.text).toBe('[图片]');
+    expect(message?.attachments).toEqual([
+      { type: 'image', downloadCode: 'code-image' },
+    ]);
   });
 
   it('图片消息解析出下载码并生成占位正文', () => {

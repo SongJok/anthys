@@ -93,7 +93,7 @@ function attachmentPlaceholder(attachment: InboundAttachment): string {
 
 /**
  * 把钉钉 Stream TOPIC_ROBOT 的 data 解析为统一入站消息。
- * 支持文本与 picture/file/audio/video 附件消息；其余类型返回 null。
+ * 支持文本、富文本与 picture/file/audio/video 附件消息；其余类型返回 null。
  */
 export function parseStreamMessage(
   raw: unknown,
@@ -125,6 +125,25 @@ export function parseStreamMessage(
     if (!content) return null;
     text = stripLeadingMentions(content);
     if (!text) return null;
+  } else if (payload.msgtype === 'richText') {
+    const content = payload.content;
+    if (content === null || typeof content !== 'object') return null;
+    const richText = (content as { richText?: unknown }).richText;
+    if (!Array.isArray(richText)) return null;
+    const textParts: string[] = [];
+    for (const item of richText) {
+      if (item === null || typeof item !== 'object') continue;
+      const block = item as Record<string, unknown>;
+      if (block.type === 'picture') {
+        const attachment = parseAttachment('picture', block);
+        if (attachment) attachments.push(attachment);
+      } else if (block.type === undefined || block.type === 'text') {
+        const part = asNonEmptyString(block.text);
+        if (part) textParts.push(part);
+      }
+    }
+    text = stripLeadingMentions(textParts.join(''));
+    if (!text && attachments.length === 0) return null;
   } else if (
     typeof payload.msgtype === 'string' &&
     (ATTACHMENT_TYPES as readonly string[]).includes(payload.msgtype)
