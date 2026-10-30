@@ -321,10 +321,11 @@ describe('阶段一链路集成（网关 → Harness → ReAct → 卡片）', (
     await done;
 
     expect(ctx.creates).toHaveLength(1);
+    expect(ctx.creates[0]?.outTrackId).toMatch(/^card_[0-9a-f]{32}$/);
     expect(ctx.creates[0]).toMatchObject({
       cardTemplateId: 'tpl-1',
-      outTrackId: 'card_msg-1',
-      spaceId: 'dtv1.card//im_single.staff-1',
+      outTrackId: ctx.creates[0]?.outTrackId,
+      spaceId: 'dtv1.card//IM_ROBOT.cid-1',
       params: {
         thinking_section: '正在思考…',
         answer_section: '',
@@ -404,7 +405,7 @@ describe('阶段一链路集成（网关 → Harness → ReAct → 卡片）', (
     expect(
       ctx.updates.some(
         (update) =>
-          update.outTrackId === 'card_msg-2' &&
+          update.outTrackId === ctx.creates[1]?.outTrackId &&
           update.key === 'answer_section' &&
           update.content === '4 再加 1 等于 5。' &&
           update.isFinalize,
@@ -444,9 +445,10 @@ describe('阶段一链路集成（网关 → Harness → ReAct → 卡片）', (
     });
     await done;
 
+    expect(ctx.creates[0]?.outTrackId).toMatch(/^card_[0-9a-f]{32}$/);
     expect(ctx.creates[0]).toMatchObject({
-      outTrackId: 'card_msg-g1',
-      spaceId: 'dtv1.card//im_group.cid-g',
+      outTrackId: ctx.creates[0]?.outTrackId,
+      spaceId: 'dtv1.card//IM_GROUP.cid-g',
       deliver: {
         conversationType: '2',
         userId: 'staff-a',
@@ -457,7 +459,7 @@ describe('阶段一链路集成（网关 → Harness → ReAct → 卡片）', (
     expect(
       ctx.updates.some(
         (update) =>
-          update.outTrackId === 'card_msg-g1' &&
+          update.outTrackId === ctx.creates[0]?.outTrackId &&
           update.key === 'answer_section' &&
           update.isFinalize &&
           update.content === '4 再加 1 等于 5。',

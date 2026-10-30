@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import type { AgentStreamEvent, InboundMessage } from '../types/core.js';
 
@@ -36,6 +37,7 @@ export interface CardApi {
 }
 
 export interface CardLogger {
+  info?(obj: Record<string, unknown>, msg: string): void;
   warn(obj: Record<string, unknown>, msg: string): void;
 }
 
@@ -142,11 +144,12 @@ export class CardStreamer {
   constructor(private readonly options: CardStreamerOptions) {
     this.api = options.api;
     this.logger = options.logger;
-    this.outTrackId = `card_${options.message.messageId}`;
+    // messageId 可能含 base64 的 / + =，不能直接做卡片标识
+    this.outTrackId = `card_${randomUUID().replace(/-/g, '')}`;
     this.spaceId =
       options.message.conversationType === '1'
-        ? `dtv1.card//im_single.${options.message.senderStaffId}`
-        : `dtv1.card//im_group.${options.message.conversationId}`;
+        ? `dtv1.card//IM_ROBOT.${options.message.conversationId}`
+        : `dtv1.card//IM_GROUP.${options.message.conversationId}`;
     this.throttler = new Throttler({
       intervalMs: options.intervalMs,
       maxChars: options.maxChars,
@@ -179,6 +182,10 @@ export class CardStreamer {
         },
       });
       this.available = true;
+      this.logger?.info?.(
+        { outTrackId: this.outTrackId, spaceId: this.spaceId },
+        'card created and delivered',
+      );
     } catch (error) {
       this.logger?.warn(
         { outTrackId: this.outTrackId, error: errorMessage(error) },
@@ -336,17 +343,34 @@ export class CardStreamer {
   }
 }
 
+interface CardDeliverResult {
+  success?: boolean;
+  errorMsg?: string;
+}
+
+interface DingTalkCardResponse {
+  statusCode?: number;
+  body?: {
+    success?: boolean;
+    result?: {
+      outTrackId?: string;
+      cardInstanceId?: string;
+      deliverResults?: CardDeliverResult[];
+    };
+  };
+}
+
 interface DingTalkCardSdkClient {
   createAndDeliverWithOptions(
     request: unknown,
     headers: unknown,
     runtime: unknown,
-  ): Promise<{ statusCode?: number; body?: { success?: boolean } }>;
+  ): Promise<DingTalkCardResponse>;
   streamingUpdateWithOptions(
     request: unknown,
     headers: unknown,
     runtime: unknown,
-  ): Promise<{ statusCode?: number; body?: { success?: boolean } }>;
+  ): Promise<DingTalkCardResponse>;
 }
 
 export interface OpenApiCardApiOptions {
@@ -367,10 +391,16 @@ export class OpenApiCardApi implements CardApi {
     CreateAndDeliverRequestCardData: new (
       value: Record<string, unknown>,
     ) => unknown;
-    CreateAndDeliverRequestImSingleOpenDeliverModel: new (
+    CreateAndDeliverRequestImRobotOpenDeliverModel: new (
+      value: Record<string, unknown>,
+    ) => unknown;
+    CreateAndDeliverRequestImRobotOpenSpaceModel: new (
       value: Record<string, unknown>,
     ) => unknown;
     CreateAndDeliverRequestImGroupOpenDeliverModel: new (
+      value: Record<string, unknown>,
+    ) => unknown;
+    CreateAndDeliverRequestImGroupOpenSpaceModel: new (
       value: Record<string, unknown>,
     ) => unknown;
     StreamingUpdateRequest: new (value: Record<string, unknown>) => unknown;
@@ -391,10 +421,16 @@ export class OpenApiCardApi implements CardApi {
       CreateAndDeliverRequestCardData: new (
         value: Record<string, unknown>,
       ) => unknown;
-      CreateAndDeliverRequestImSingleOpenDeliverModel: new (
+      CreateAndDeliverRequestImRobotOpenDeliverModel: new (
+        value: Record<string, unknown>,
+      ) => unknown;
+      CreateAndDeliverRequestImRobotOpenSpaceModel: new (
         value: Record<string, unknown>,
       ) => unknown;
       CreateAndDeliverRequestImGroupOpenDeliverModel: new (
+        value: Record<string, unknown>,
+      ) => unknown;
+      CreateAndDeliverRequestImGroupOpenSpaceModel: new (
         value: Record<string, unknown>,
       ) => unknown;
       StreamingUpdateRequest: new (value: Record<string, unknown>) => unknown;
@@ -420,10 +456,14 @@ export class OpenApiCardApi implements CardApi {
       CreateAndDeliverHeaders: cardModule.CreateAndDeliverHeaders,
       CreateAndDeliverRequestCardData:
         cardModule.CreateAndDeliverRequestCardData,
-      CreateAndDeliverRequestImSingleOpenDeliverModel:
-        cardModule.CreateAndDeliverRequestImSingleOpenDeliverModel,
+      CreateAndDeliverRequestImRobotOpenDeliverModel:
+        cardModule.CreateAndDeliverRequestImRobotOpenDeliverModel,
+      CreateAndDeliverRequestImRobotOpenSpaceModel:
+        cardModule.CreateAndDeliverRequestImRobotOpenSpaceModel,
       CreateAndDeliverRequestImGroupOpenDeliverModel:
         cardModule.CreateAndDeliverRequestImGroupOpenDeliverModel,
+      CreateAndDeliverRequestImGroupOpenSpaceModel:
+        cardModule.CreateAndDeliverRequestImGroupOpenSpaceModel,
       StreamingUpdateRequest: cardModule.StreamingUpdateRequest,
       StreamingUpdateHeaders: cardModule.StreamingUpdateHeaders,
       RuntimeOptions,
@@ -437,14 +477,24 @@ export class OpenApiCardApi implements CardApi {
       cardTemplateId: input.cardTemplateId,
       outTrackId: input.outTrackId,
       openSpaceId: input.spaceId,
+      callbackType: 'STREAM',
       cardData: new this.sdk.CreateAndDeliverRequestCardData({
         cardParamMap: input.params,
       }),
       userId: input.deliver.userId,
       userIdType: 1,
-      imSingleOpenDeliverModel:
+      imRobotOpenDeliverModel:
         input.deliver.conversationType === '1'
-          ? new this.sdk.CreateAndDeliverRequestImSingleOpenDeliverModel({})
+          ? new this.sdk.CreateAndDeliverRequestImRobotOpenDeliverModel({
+              spaceType: 'IM_ROBOT',
+              robotCode: input.deliver.robotCode,
+            })
+          : undefined,
+      imRobotOpenSpaceModel:
+        input.deliver.conversationType === '1'
+          ? new this.sdk.CreateAndDeliverRequestImRobotOpenSpaceModel({
+              supportForward: true,
+            })
           : undefined,
       imGroupOpenDeliverModel:
         input.deliver.conversationType === '2'
@@ -453,6 +503,12 @@ export class OpenApiCardApi implements CardApi {
               atUserIds: {
                 [input.deliver.userId]: input.deliver.userId,
               },
+            })
+          : undefined,
+      imGroupOpenSpaceModel:
+        input.deliver.conversationType === '2'
+          ? new this.sdk.CreateAndDeliverRequestImGroupOpenSpaceModel({
+              supportForward: true,
             })
           : undefined,
     });
@@ -467,6 +523,18 @@ export class OpenApiCardApi implements CardApi {
     if (response.body?.success === false) {
       throw new Error('createAndDeliver rejected by DingTalk');
     }
+    const failedDelivery = response.body?.result?.deliverResults?.find(
+      (result) => result.success === false,
+    );
+    if (failedDelivery) {
+      throw new Error(
+        `createAndDeliver delivery failed: ${failedDelivery.errorMsg ?? 'unknown'}`,
+      );
+    }
+    this.logger?.info?.(
+      { outTrackId: input.outTrackId, result: response.body?.result },
+      'createAndDeliver response',
+    );
   }
 
   public async streamingUpdate(update: CardUpdate): Promise<void> {

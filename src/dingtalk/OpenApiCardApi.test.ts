@@ -87,7 +87,7 @@ describe('OpenApiCardApi', () => {
     await api.createAndDeliver({
       cardTemplateId: 'tpl-1',
       outTrackId: 'card_m1',
-      spaceId: 'dtv1.card//im_single.staff-1',
+      spaceId: 'dtv1.card//IM_ROBOT.cid-1',
       params: {
         thinking_section: '思考中',
         answer_section: '',
@@ -109,7 +109,8 @@ describe('OpenApiCardApi', () => {
     expect(request.body).toMatchObject({
       cardTemplateId: 'tpl-1',
       outTrackId: 'card_m1',
-      openSpaceId: 'dtv1.card//im_single.staff-1',
+      openSpaceId: 'dtv1.card//IM_ROBOT.cid-1',
+      callbackType: 'STREAM',
       userId: 'staff-1',
       userIdType: 1,
       cardData: {
@@ -119,9 +120,15 @@ describe('OpenApiCardApi', () => {
           status_bar: '正在思考…',
         },
       },
-      imSingleOpenDeliverModel: {},
+      imRobotOpenDeliverModel: {
+        spaceType: 'IM_ROBOT',
+        robotCode: 'robot-1',
+      },
+      imRobotOpenSpaceModel: { supportForward: true },
     });
     expect(request.body).not.toHaveProperty('imGroupOpenDeliverModel');
+    expect(request.body).not.toHaveProperty('imGroupOpenSpaceModel');
+    expect(request.body).not.toHaveProperty('imSingleOpenDeliverModel');
   });
 
   it('delivers a group card with robot code and atUserIds', async () => {
@@ -131,7 +138,7 @@ describe('OpenApiCardApi', () => {
     await api.createAndDeliver({
       cardTemplateId: 'tpl-1',
       outTrackId: 'card_m2',
-      spaceId: 'dtv1.card//im_group.cid-2',
+      spaceId: 'dtv1.card//IM_GROUP.cid-2',
       params: {
         thinking_section: '',
         answer_section: '',
@@ -147,13 +154,16 @@ describe('OpenApiCardApi', () => {
 
     const [request] = harness.requests;
     expect(request.body).toMatchObject({
-      openSpaceId: 'dtv1.card//im_group.cid-2',
+      openSpaceId: 'dtv1.card//IM_GROUP.cid-2',
+      callbackType: 'STREAM',
       imGroupOpenDeliverModel: {
         robotCode: 'robot-9',
         atUserIds: { 'staff-9': 'staff-9' },
       },
+      imGroupOpenSpaceModel: { supportForward: true },
     });
-    expect(request.body).not.toHaveProperty('imSingleOpenDeliverModel');
+    expect(request.body).not.toHaveProperty('imRobotOpenDeliverModel');
+    expect(request.body).not.toHaveProperty('imRobotOpenSpaceModel');
   });
 
   it('sends streaming updates as a PUT with all block flags', async () => {
@@ -191,7 +201,7 @@ describe('OpenApiCardApi', () => {
       api.createAndDeliver({
         cardTemplateId: 'tpl-1',
         outTrackId: 'card_m1',
-        spaceId: 'dtv1.card//im_single.staff-1',
+        spaceId: 'dtv1.card//IM_ROBOT.cid-1',
         params: { thinking_section: '', answer_section: '', status_bar: '' },
         deliver: {
           conversationType: '1',

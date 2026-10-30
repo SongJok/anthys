@@ -59,7 +59,7 @@ describe('CardStreamer', () => {
     vi.useRealTimers();
   });
 
-  it('单聊卡片投放到 im_single 空间并初始化三个区块', async () => {
+  it('单聊卡片投放到 IM_ROBOT 空间并初始化三个区块', async () => {
     const fake = fakeApi();
     const streamer = new CardStreamer({
       api: fake.api,
@@ -70,11 +70,12 @@ describe('CardStreamer', () => {
     await streamer.start();
 
     expect(streamer.isAvailable).toBe(true);
+    expect(streamer.outTrackId).toMatch(/^card_[0-9a-f]{32}$/);
     expect(fake.created).toHaveLength(1);
     expect(fake.created[0]).toMatchObject({
       cardTemplateId: 'tpl-1',
-      outTrackId: 'card_msg-1',
-      spaceId: 'dtv1.card//im_single.staff-1',
+      outTrackId: streamer.outTrackId,
+      spaceId: 'dtv1.card//IM_ROBOT.cid-1',
       params: {
         thinking_section: '正在思考…',
         answer_section: '',
@@ -88,7 +89,7 @@ describe('CardStreamer', () => {
     });
   });
 
-  it('群聊卡片投放到 im_group 空间', async () => {
+  it('群聊卡片投放到 IM_GROUP 空间', async () => {
     const fake = fakeApi();
     const streamer = new CardStreamer({
       api: fake.api,
@@ -97,7 +98,7 @@ describe('CardStreamer', () => {
       robotCode: 'robot-1',
     });
     await streamer.start();
-    expect(fake.created[0]?.spaceId).toBe('dtv1.card//im_group.cid-9');
+    expect(fake.created[0]?.spaceId).toBe('dtv1.card//IM_GROUP.cid-9');
     expect(fake.created[0]?.deliver.conversationType).toBe('2');
   });
 
