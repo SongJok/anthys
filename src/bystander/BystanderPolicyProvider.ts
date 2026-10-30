@@ -19,6 +19,10 @@ export interface BystanderPolicyProviderOptions {
 export class BystanderPolicyProvider {
   constructor(private readonly options: BystanderPolicyProviderOptions) {}
 
+  /** 全局默认值热更新（Web/ChatOps 修改 defaultBystanderPolicy 后调用） */
+  public setDefaults(defaults: BystanderConfig): void {
+    this.options.defaults = defaults;
+  }
   public async getPolicy(
     conversationId: string,
   ): Promise<GroupBystanderPolicy> {

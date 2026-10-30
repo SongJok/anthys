@@ -15,7 +15,8 @@
   "scripts": {
     "start": "tsx src/index.ts",
     "dev": "tsx watch src/index.ts",
-    "build": "tsc",
+    "build": "pnpm -C web-console build && tsc",
+    "build:server": "tsc",
     "typecheck": "tsc --noEmit",
     "db:push": "drizzle-kit push",
     "db:generate": "drizzle-kit generate",
@@ -24,10 +25,12 @@
   },
   "dependencies": {
     "@alicloud/dingtalk": "^2.2.48",
+    "@hono/node-server": "^2.1.5",
     "@modelcontextprotocol/sdk": "^1.32.2",
     "dingtalk-stream": "^2.1.6-beta.1",
     "dotenv": "^16.4.5",
     "drizzle-orm": "^0.45.4",
+    "hono": "^4.13.14",
     "isolated-vm": "^7.0.1",
     "openai": "^7.45.1",
     "pg": "^8.13.1",

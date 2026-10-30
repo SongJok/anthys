@@ -1,56 +1,16 @@
 {
   "servers": [
     {
-      "id": "mcp-codebase",
-      "name": "代码库检索",
-      "domain": "code",
-      "transport": "stdio",
-      "endpointOrCommand": "npx",
-      "args": [
-        "-y",
-        "@modelcontextprotocol/server-filesystem",
-        "${CODEBASE_DIR}"
-      ],
-      "timeoutMs": 20000,
-      "enabled": false,
-      "maxResultChars": 8000
-    },
-    {
-      "id": "mcp-prod-log",
-      "name": "生产日志（SLS/ELK）",
-      "domain": "log",
+      "id": "enterprise",
+      "name": "企业 AI 中台",
+      "domain": "general",
       "transport": "streamable-http",
-      "endpointOrCommand": "http://127.0.0.1:8080/mcp",
+      "endpointOrCommand": "https://dd-agent.tuwan.com/mcp/chat",
       "envOrHeaders": {
-        "authorization": "Bearer ${PROD_LOG_TOKEN}"
+        "authorization": "Bearer ${ENTERPRISE_MCP_TOKEN}"
       },
-      "timeoutMs": 15000,
-      "enabled": false,
-      "maxResultChars": 8000
-    },
-    {
-      "id": "mcp-olap-data",
-      "name": "线上数仓（Doris/MySQL）",
-      "domain": "data",
-      "transport": "sse",
-      "endpointOrCommand": "http://127.0.0.1:8081/sse",
-      "envOrHeaders": {
-        "authorization": "Bearer ${OLAP_TOKEN}"
-      },
-      "timeoutMs": 15000,
-      "enabled": false,
-      "maxResultChars": 8000
-    },
-    {
-      "id": "mcp-apidoc",
-      "name": "接口文档（YApi/Swagger）",
-      "domain": "apidoc",
-      "transport": "stdio",
-      "endpointOrCommand": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-filesystem", "${APIDOC_DIR}"],
-      "timeoutMs": 15000,
-      "enabled": false,
-      "maxResultChars": 8000
+      "timeoutMs": 180000,
+      "maxResultChars": 16000
     }
   ]
 }

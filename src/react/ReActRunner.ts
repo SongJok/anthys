@@ -67,6 +67,23 @@ export class ReActRunner implements AgentEngine {
     this.now = options.now ?? Date.now;
   }
 
+  /** 热切换主模型（Web/ChatOps 修改 LLM 配置后调用） */
+  public updateModel(model: ChatModel): void {
+    this.options.model = model;
+  }
+
+  public updatePolicy(policy: DynamicLoopPolicy): void {
+    this.options.policy = policy;
+  }
+
+  public updateTemperature(temperature: number): void {
+    this.options.temperature = temperature;
+  }
+
+  public updateNativeReasoning(enabled: boolean): void {
+    this.options.enableNativeReasoning = enabled;
+  }
+
   public async run(input: {
     messages: ChatMessage[];
     context: ExecutionContext;

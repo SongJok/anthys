@@ -20,6 +20,8 @@ import {
   type McpTransportFactory,
 } from '../tools/mcp/McpClientPool.js';
 import { McpToolProvider } from '../tools/mcp/McpToolProvider.js';
+import type { ExecutionContext, ToolDefinition } from '../types/core.js';
+import type { McpToolAccessPolicy } from '../types/admin-and-console.js';
 
 const MCP_DOMAINS = [
   'code',
@@ -51,6 +53,13 @@ export interface ToolRegistryOptions {
   dwsRunner?: DwsCliRunner;
   sandbox?: IsolatedSandbox;
   sandboxOptions?: IsolatedSandboxOptions;
+  /** 管理员单聊工具（内部自带上下文隔离），仅在管理员单聊时返回工具 */
+  adminProvider?: IToolProvider;
+  /** MCP 工具按群/角色授权（实时读取，支持热更新） */
+  toolAccess?: {
+    policies: () => McpToolAccessPolicy[];
+    isAdmin: (staffId: string) => boolean;
+  };
 }
 
 function envFlag(
@@ -202,15 +211,19 @@ export class ToolRegistry {
   public readonly providers: IToolProvider[];
   public readonly workspace: WorkspacePaths;
   public readonly pool: McpClientPool | null;
+  private dwsProvider: IToolProvider | null;
 
   private constructor(
     providers: IToolProvider[],
     workspace: WorkspacePaths,
     pool: McpClientPool | null,
+    dwsProvider: IToolProvider | null,
+    private readonly dwsRunner?: DwsCliRunner,
   ) {
     this.providers = providers;
     this.workspace = workspace;
     this.pool = pool;
+    this.dwsProvider = dwsProvider;
   }
 
   public static async create(
@@ -228,7 +241,9 @@ export class ToolRegistry {
       ));
 
     let pool: McpClientPool | null = null;
-    if (servers.length > 0) {
+    // 显式传入 mcpServers（即使为空）时也建立连接池，
+    // 保证 Web/ChatOps 运行期新增的 MCP 节点可被热应用。
+    if (servers.length > 0 || options.mcpServers !== undefined) {
       pool = new McpClientPool({
         ...options.mcpOptions,
         servers,
@@ -250,15 +265,16 @@ export class ToolRegistry {
           pool,
           workspace,
           logger: options.logger,
+          ...(options.toolAccess ? { toolAccess: options.toolAccess } : {}),
         }),
       );
     }
+    let dwsProvider: IToolProvider | null = null;
     if (options.enableDws ?? envFlag(env, 'DWS_CLI_ENABLED', true)) {
-      providers.push(
-        new DwsCliToolProvider({
-          ...(options.dwsRunner ? { runner: options.dwsRunner } : {}),
-        }),
-      );
+      dwsProvider = new DwsCliToolProvider({
+        ...(options.dwsRunner ? { runner: options.dwsRunner } : {}),
+      });
+      providers.push(dwsProvider);
     }
     if (options.enableSandbox ?? envFlag(env, 'SANDBOX_ENABLED', true)) {
       providers.push(
@@ -272,7 +288,53 @@ export class ToolRegistry {
       );
     }
 
-    return new ToolRegistry(providers, workspace, pool);
+    if (options.adminProvider) {
+      providers.push(options.adminProvider);
+    }
+
+    return new ToolRegistry(
+      providers,
+      workspace,
+      pool,
+      dwsProvider,
+      options.dwsRunner,
+    );
+  }
+
+  /**
+   * 汇总当前上下文可见的工具。管理员工具由 AdminChatOpsToolProvider
+   * 在 getTools 内做 conversationType === '1' + 白名单双重校验。
+   */
+  public async assembleTools(ctx: ExecutionContext): Promise<ToolDefinition[]> {
+    const loaded = await Promise.all(
+      this.providers.map((provider) => provider.getTools(ctx)),
+    );
+    const tools: ToolDefinition[] = [];
+    const seen = new Set<string>();
+    for (const tool of loaded.flat()) {
+      if (seen.has(tool.name)) {
+        throw new Error(`工具名称重复: ${tool.name}`);
+      }
+      seen.add(tool.name);
+      tools.push(tool);
+    }
+    return tools;
+  }
+
+  /** DWS CLI 权限开关热切换：无需重建 MCP 连接或重启进程 */
+  public setDwsEnabled(enabled: boolean): void {
+    if (enabled) {
+      if (this.dwsProvider) return;
+      this.dwsProvider = new DwsCliToolProvider({
+        ...(this.dwsRunner ? { runner: this.dwsRunner } : {}),
+      });
+      this.providers.push(this.dwsProvider);
+      return;
+    }
+    if (!this.dwsProvider) return;
+    const index = this.providers.indexOf(this.dwsProvider);
+    if (index >= 0) this.providers.splice(index, 1);
+    this.dwsProvider = null;
   }
 
   private static async ensureWorkspace(

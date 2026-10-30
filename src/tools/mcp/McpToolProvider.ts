@@ -10,6 +10,12 @@ import type {
   WorkspacePaths,
 } from '../../types/mcp-and-sandbox.js';
 import type { McpClientPool, McpPoolLogger } from './McpClientPool.js';
+import type { McpToolAccessPolicy } from '../../types/admin-and-console.js';
+
+export interface McpToolAccessFilter {
+  policies: () => McpToolAccessPolicy[];
+  isAdmin: (staffId: string) => boolean;
+}
 
 export interface McpToolProviderOptions {
   pool: McpClientPool;
@@ -17,6 +23,7 @@ export interface McpToolProviderOptions {
   sampleSize?: number;
   logger?: McpPoolLogger;
   now?: () => number;
+  toolAccess?: McpToolAccessFilter;
 }
 
 const DEFAULT_SAMPLE_SIZE = 20;
@@ -145,9 +152,53 @@ export class McpToolProvider implements IToolProvider {
     this.now = options.now ?? Date.now;
   }
 
-  public async getTools(_ctx: ExecutionContext): Promise<ToolDefinition[]> {
+  public async getTools(ctx: ExecutionContext): Promise<ToolDefinition[]> {
     const descriptors = await this.options.pool.listTools();
-    return descriptors.map((descriptor) => this.toTool(descriptor));
+    const policy = this.selectPolicy(ctx);
+    if (!policy) return descriptors.map((descriptor) => this.toTool(descriptor));
+    return descriptors
+      .filter((descriptor) => this.isAllowed(policy, descriptor))
+      .map((descriptor) => this.toTool(descriptor));
+  }
+
+  /** 选中最具体的一条策略：群级优先于全局，角色级优先于不限角色 */
+  private selectPolicy(ctx: ExecutionContext): McpToolAccessPolicy | null {
+    const filter = this.options.toolAccess;
+    if (!filter) return null;
+    const role = filter.isAdmin(ctx.senderStaffId) ? 'admin' : 'employee';
+    const candidates = filter
+      .policies()
+      .filter(
+        (policy) =>
+          policy.enabled &&
+          (policy.conversationId === undefined ||
+            policy.conversationId === ctx.conversationId) &&
+          (policy.role === undefined || policy.role === role),
+      )
+      .map((policy) => ({
+        policy,
+        score:
+          (policy.conversationId ? 2 : 0) + (policy.role ? 1 : 0),
+      }))
+      .sort((a, b) => b.score - a.score);
+    return candidates[0]?.policy ?? null;
+  }
+
+  private isAllowed(
+    policy: McpToolAccessPolicy,
+    descriptor: McpToolDescriptor,
+  ): boolean {
+    if (
+      policy.allowedServerIds.length > 0 &&
+      !policy.allowedServerIds.includes(descriptor.serverId)
+    ) {
+      return false;
+    }
+    if (policy.allowedTools.length === 0) return true;
+    return (
+      policy.allowedTools.includes(descriptor.originalName) ||
+      policy.allowedTools.includes(descriptor.namespacedName)
+    );
   }
 
   private toTool(descriptor: McpToolDescriptor): ToolDefinition {

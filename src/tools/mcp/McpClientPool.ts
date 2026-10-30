@@ -204,18 +204,22 @@ export class McpClientPool {
       if (this.states.has(config.id)) {
         throw new Error(`MCP Server id 重复: ${config.id}`);
       }
-      this.states.set(config.id, {
-        config,
-        client: null,
-        transport: null,
-        connected: false,
-        connecting: null,
-        tools: [],
-        toolByNamespacedName: new Map(),
-        toolsFetchedAt: null,
-        lastError: null,
-      });
+      this.states.set(config.id, this.makeState(config));
     }
+  }
+
+  private makeState(config: EnterpriseMcpServerConfig): ServerState {
+    return {
+      config,
+      client: null,
+      transport: null,
+      connected: false,
+      connecting: null,
+      tools: [],
+      toolByNamespacedName: new Map(),
+      toolsFetchedAt: null,
+      lastError: null,
+    };
   }
 
   /** 连接所有启用的 Server；单个失败不会阻断其它 Server。 */
@@ -341,6 +345,71 @@ export class McpClientPool {
         await this.disconnect(state);
       }),
     );
+  }
+
+  /** 热重载单个 Server：断开旧连接、按最新配置重连并刷新工具清单 */
+  public async reloadServer(
+    serverId: string,
+  ): Promise<McpToolDescriptor[]> {
+    const state = this.states.get(serverId);
+    if (!state) throw new Error(`未知 MCP Server: ${serverId}`);
+    await this.disconnect(state);
+    state.tools = [];
+    state.toolByNamespacedName = new Map();
+    state.lastError = null;
+    if (!state.config.enabled) return [];
+    return this.loadTools(state, true);
+  }
+
+  /**
+   * 应用一份新的 Server 配置快照：新增/更新/删除节点并刷新工具。
+   * 单个节点连接失败不会阻断其它节点，错误记录在 status().lastError。
+   */
+  public async applyServers(
+    servers: EnterpriseMcpServerConfig[],
+  ): Promise<McpToolDescriptor[]> {
+    const incoming = new Map<string, EnterpriseMcpServerConfig>();
+    for (const config of servers) {
+      assertConfig(config);
+      if (incoming.has(config.id)) {
+        throw new Error(`MCP Server id 重复: ${config.id}`);
+      }
+      incoming.set(config.id, config);
+    }
+
+    for (const [id, state] of [...this.states.entries()]) {
+      const next = incoming.get(id);
+      if (!next) {
+        await this.disconnect(state);
+        this.states.delete(id);
+        continue;
+      }
+      if (JSON.stringify(state.config) !== JSON.stringify(next)) {
+        await this.disconnect(state);
+        state.config = next;
+        state.tools = [];
+        state.toolByNamespacedName = new Map();
+        state.lastError = null;
+      }
+    }
+    for (const [id, config] of incoming) {
+      if (!this.states.has(id)) this.states.set(id, this.makeState(config));
+    }
+
+    const collected: McpToolDescriptor[] = [];
+    for (const state of this.states.values()) {
+      if (!state.config.enabled) continue;
+      try {
+        collected.push(...(await this.loadTools(state, true)));
+      } catch (error) {
+        state.lastError = errorMessage(error);
+        this.logger?.warn?.(
+          { serverId: state.config.id, error: state.lastError },
+          'mcp server reload failed',
+        );
+      }
+    }
+    return collected;
   }
 
   private locateTool(

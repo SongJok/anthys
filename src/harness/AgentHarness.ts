@@ -312,6 +312,16 @@ export class AgentHarness {
     await Promise.allSettled([...this.memoryTasks]);
   }
 
+  /** 人设热更新：下一条消息立即使用新 Prompt */
+  public updatePersona(persona: PersonaInput): void {
+    this.options.persona = persona;
+  }
+
+  /** 动态循环预算热更新 */
+  public updatePolicy(policy: DynamicLoopPolicy): void {
+    this.options.policy = policy;
+  }
+
   private async buildMemoryContext(
     message: InboundMessage,
     dbConversationId: string,

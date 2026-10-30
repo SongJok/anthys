@@ -11,6 +11,9 @@ importers:
       '@alicloud/dingtalk':
         specifier: ^2.2.48
         version: 2.2.48
+      '@hono/node-server':
+        specifier: ^2.1.5
+        version: 2.1.5(hono@4.13.14)
       '@modelcontextprotocol/sdk':
         specifier: ^1.32.2
         version: 1.32.2(zod@4.6.7)
@@ -23,6 +26,9 @@ importers:
       drizzle-orm:
         specifier: ^0.45.4
         version: 0.45.4(@types/pg@8.23.1)(pg@8.23.1)
+      hono:
+        specifier: ^4.13.14
+        version: 4.13.14
       isolated-vm:
         specifier: ^7.0.1
         version: 7.0.1
