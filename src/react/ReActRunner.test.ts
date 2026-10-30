@@ -106,20 +106,31 @@ describe('ReActRunner', () => {
     });
 
     expect(events.map((event) => event.type)).toEqual([
+      'turn_start',
       'reasoning_delta',
       'answer_delta',
+      'answer_reset',
       'tool_start',
       'tool_end',
+      'turn_start',
       'reasoning_delta',
       'answer_delta',
       'completed',
     ]);
+    const reset = events.find((event) => event.type === 'answer_reset');
+    expect(reset).toMatchObject({
+      type: 'answer_reset',
+      narration: '我来查询一下。',
+    });
     const toolStart = events.find((event) => event.type === 'tool_start');
-    expect(toolStart).toEqual({
+    expect(toolStart).toMatchObject({
       type: 'tool_start',
       toolName: 'current_time',
       args: {},
     });
+    expect(
+      toolStart && 'stepId' in toolStart ? toolStart.stepId : undefined,
+    ).toBeTruthy();
     const toolEnd = events.find((event) => event.type === 'tool_end');
     expect(toolEnd).toMatchObject({
       type: 'tool_end',
@@ -130,7 +141,8 @@ describe('ReActRunner', () => {
       toolEnd && 'summary' in toolEnd ? toolEnd.summary : '',
     ).toContain('Asia/Shanghai');
 
-    expect(result.answer).toBe('我来查询一下。现在是 2026 年 10 月 30 日。');
+    expect(result.answer).toBe('现在是 2026 年 10 月 30 日。');
+    expect(result.narration).toBe('我来查询一下。');
     expect(result.reasoning).toBe('我需要先获取当前时间。已经拿到时间。');
     expect(result.usage.steps).toBe(2);
     expect(result.usage.totalTokens).toBe(20);
@@ -452,6 +464,9 @@ describe('ReActRunner', () => {
         emit: (event) => events.push(event),
       }),
     ).rejects.toThrow('上游模型不可用');
-    expect(events).toEqual([{ type: 'error', message: '上游模型不可用' }]);
+    expect(events).toEqual([
+      { type: 'turn_start', turnId: expect.any(String), step: 1 },
+      { type: 'error', message: '上游模型不可用', retryable: true },
+    ]);
   });
 });

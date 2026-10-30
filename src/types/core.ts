@@ -40,19 +40,82 @@ export interface DynamicLoopPolicy {
   convergenceCheck: boolean;
 }
 
+/** 流式引用（RAG / MCP 结果出处） */
+export interface StreamCitation {
+  index: number;
+  title: string;
+  url?: string;
+  snippet?: string;
+  source?: string;
+}
+
+export type PlanItemStatus = 'pending' | 'running' | 'done' | 'failed';
+
+export interface PlanItem {
+  id: string;
+  text: string;
+  status: PlanItemStatus;
+}
+
 /**
- * 4. 流式输出事件流契约（驱动钉钉 AI 卡片实时刷新）
+ * 4. 流式输出事件流契约 v2（驱动钉钉 AI 卡片实时刷新）
+ *
+ * 约定：
+ * - 每轮模型调用以 turn_start 开始，turnId 贯穿该轮的 delta / tool 事件；
+ * - 带工具调用的轮次中产出的正文是「过程说明」（narration），轮次结束时通过
+ *   answer_reset 把它从正文区移到思考区，避免工具前的话术污染最终答案；
+ * - 仅最后一轮（无工具调用）的正文进入 answer_delta 的最终答案。
  */
 export type AgentStreamEvent =
-  | { type: 'reasoning_delta'; content: string }
-  | { type: 'tool_start'; toolName: string; args: Record<string, unknown> }
-  | { type: 'tool_end'; toolName: string; summary: string; isError: boolean }
-  | { type: 'answer_delta'; content: string }
+  | { type: 'turn_start'; turnId: string; step: number }
+  | { type: 'reasoning_delta'; content: string; turnId?: string }
+  | { type: 'narration_delta'; content: string; turnId?: string }
+  | {
+      type: 'answer_delta';
+      content: string;
+      turnId?: string;
+      /** true 表示该轮已被判定为最终回答 */
+      final?: boolean;
+    }
+  | { type: 'answer_reset'; narration: string; turnId?: string }
+  | { type: 'plan'; items: PlanItem[] }
+  | { type: 'citation'; citations: StreamCitation[] }
+  | { type: 'status'; message: string }
+  | {
+      type: 'tool_start';
+      toolName: string;
+      args: Record<string, unknown>;
+      stepId?: string;
+      turnId?: string;
+    }
+  | {
+      type: 'tool_progress';
+      toolName: string;
+      message: string;
+      stepId?: string;
+      elapsedMs?: number;
+    }
+  | {
+      type: 'tool_end';
+      toolName: string;
+      summary: string;
+      isError: boolean;
+      stepId?: string;
+      turnId?: string;
+      durationMs?: number;
+      truncated?: boolean;
+      datasetKey?: string;
+    }
   | {
       type: 'completed';
-      usage: { totalTokens: number; steps: number; durationMs: number };
+      usage: {
+        totalTokens: number;
+        steps: number;
+        durationMs: number;
+        stopped?: boolean;
+      };
     }
-  | { type: 'error'; message: string };
+  | { type: 'error'; message: string; retryable?: boolean };
 
 /**
  * 工具执行上下文
@@ -66,6 +129,18 @@ export interface ExecutionContext {
   /** epoch ms，超过该时间点即视为预算耗尽 */
   deadlineAt: number;
   now: () => number;
+  /** 本次运行的中止信号（用户停止 / 超时 / 进程退出） */
+  signal?: AbortSignal;
+}
+
+/** 工具的结构化返回值：文本 + 引用 / 卸载信息 */
+export interface ToolExecutionOutput {
+  text: string;
+  citations?: StreamCitation[];
+  datasetKey?: string;
+  truncated?: boolean;
+  /** 覆盖默认摘要（展示在卡片的工具轨迹里） */
+  summary?: string;
 }
 
 /**
@@ -75,10 +150,19 @@ export interface ToolDefinition {
   name: string;
   description: string;
   parametersJsonSchema: Record<string, unknown>;
+  /** 是否可能产生写操作（用于审批 / 二次确认） */
+  risk?: 'read' | 'write' | 'destructive';
+  /** 工具来源，例如 builtin / mcp:code / dws / sandbox */
+  source?: string;
   execute: (
     args: Record<string, unknown>,
     ctx: ExecutionContext,
   ) => Promise<string>;
+  /** 需要回传引用 / 卸载数据集 / 自定义摘要时实现；优先于 execute */
+  executeStructured?: (
+    args: Record<string, unknown>,
+    ctx: ExecutionContext,
+  ) => Promise<ToolExecutionOutput>;
 }
 
 export interface IToolProvider {
@@ -146,11 +230,15 @@ export interface RunUsage {
   totalTokens: number;
   steps: number;
   durationMs: number;
+  stopped?: boolean;
 }
 
 export interface RunResult {
   answer: string;
   reasoning: string;
+  /** 带工具轮次中的过程说明（已被 answer_reset 移出正文） */
+  narration?: string;
+  citations?: StreamCitation[];
   usage: RunUsage;
 }
 
@@ -160,6 +248,9 @@ export interface StoredMessage {
   content: string;
   reasoning: string | null;
   createdAt: number;
+  /** 群聊中该消息的发送者昵称（用于回放时保留说话人） */
+  senderNick?: string | null;
+  metadata?: Record<string, unknown> | null;
 }
 
 export interface ConversationRecord {

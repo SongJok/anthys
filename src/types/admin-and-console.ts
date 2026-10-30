@@ -90,7 +90,14 @@ export interface ConfigChangeEvent {
 }
 
 /** 3. ReAct 全链路审计轨迹 */
-export type ReActTraceStepType = 'reasoning' | 'tool' | 'sandbox' | 'answer';
+export type ReActTraceStepType =
+  | 'reasoning'
+  | 'narration'
+  | 'plan'
+  | 'citation'
+  | 'tool'
+  | 'sandbox'
+  | 'answer';
 
 export interface ReActTraceStep {
   index: number;

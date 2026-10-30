@@ -114,6 +114,7 @@ export class TraceCollector {
   private readonly openTools: OpenToolStep[] = [];
   private reasoningBuffer = '';
   private reasoningText = '';
+  private narrationBuffer = '';
   private answerBuffer = '';
   private totalTokens = 0;
   private stepCount = 0;
@@ -131,6 +132,39 @@ export class TraceCollector {
         this.reasoningBuffer += event.content;
         this.reasoningText += event.content;
         return;
+      case 'narration_delta':
+        this.narrationBuffer += event.content;
+        return;
+      case 'answer_reset':
+        if (event.narration.trim()) {
+          this.flushReasoning();
+          this.narrationBuffer += event.narration;
+          this.flushNarration();
+        }
+        this.answerBuffer = '';
+        return;
+      case 'plan': {
+        this.flushReasoning();
+        this.steps.push({
+          index: this.steps.length,
+          type: 'plan',
+          content: event.items
+            .map((item) => `- [${item.status}] ${item.text}`)
+            .join('\n'),
+        });
+        return;
+      }
+      case 'citation': {
+        this.flushReasoning();
+        for (const citation of event.citations) {
+          this.steps.push({
+            index: this.steps.length,
+            type: 'citation',
+            content: `${citation.index}. ${citation.title}${citation.url ? ` ${citation.url}` : ''}`,
+          });
+        }
+        return;
+      }
       case 'tool_start': {
         this.flushReasoning();
         const step: ReActTraceStep = {
@@ -148,14 +182,17 @@ export class TraceCollector {
           .reverse()
           .find(
             (item) =>
-              item.step.toolName === event.toolName && item.step.durationMs === undefined,
+              item.step.toolName === event.toolName &&
+              item.step.durationMs === undefined,
           );
         if (open) {
-          open.step.durationMs = this.now() - open.startedAt;
+          open.step.durationMs =
+            event.durationMs ?? this.now() - open.startedAt;
           open.step.output = event.summary;
           open.step.isError = event.isError;
           this.openTools.splice(this.openTools.indexOf(open), 1);
         }
+        this.flushNarration();
         return;
       }
       case 'answer_delta':
@@ -181,6 +218,7 @@ export class TraceCollector {
     proactive: boolean;
   }): ReActTraceRecord {
     this.flushReasoning();
+    this.flushNarration();
     const answer = input.result.answer ?? this.answerBuffer;
     if (answer) {
       this.steps.push({
@@ -221,6 +259,16 @@ export class TraceCollector {
       content: this.reasoningBuffer,
     });
     this.reasoningBuffer = '';
+  }
+
+  private flushNarration(): void {
+    if (!this.narrationBuffer.trim()) return;
+    this.steps.push({
+      index: this.steps.length,
+      type: 'narration',
+      content: this.narrationBuffer.trim(),
+    });
+    this.narrationBuffer = '';
   }
 }
 

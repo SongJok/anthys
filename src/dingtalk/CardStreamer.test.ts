@@ -45,7 +45,7 @@ function fakeApi(options: { failCreate?: boolean } = {}): {
 }
 
 async function settle(): Promise<void> {
-  for (let index = 0; index < 10; index += 1) {
+  for (let index = 0; index < 50; index += 1) {
     await Promise.resolve();
   }
 }
@@ -253,5 +253,136 @@ describe('CardStreamer', () => {
     streamer.handle({ type: 'answer_delta', content: '答案' });
     await streamer.finish();
     expect(fake.updates).toHaveLength(0);
+  });
+
+  it('answer_reset 把过程说明移入思考区并清空正文', async () => {
+    const fake = fakeApi();
+    const streamer = new CardStreamer({
+      api: fake.api,
+      message: inbound(),
+      cardTemplateId: 'tpl-1',
+      robotCode: 'robot-1',
+    });
+    await streamer.start();
+
+    streamer.handle({ type: 'answer_delta', content: '我先查询一下。' });
+    streamer.handle({
+      type: 'answer_reset',
+      narration: '我先查询一下。',
+    });
+    streamer.handle({ type: 'answer_delta', content: '最终答案。' });
+    streamer.handle({
+      type: 'completed',
+      usage: { totalTokens: 10, steps: 2, durationMs: 1_000 },
+    });
+    await streamer.finish();
+
+    const finalAnswer = fake.updates.find((update) => update.isFinalize);
+    expect(finalAnswer?.key).toBe('answer_section');
+    expect(finalAnswer?.content).toBe('最终答案。');
+
+    const thinkingUpdates = fake.updates.filter(
+      (update) => update.key === 'thinking_section',
+    );
+    expect(thinkingUpdates.at(-1)?.content).toContain('我先查询一下。');
+    expect(fake.updates.filter((update) => update.isFinalize)).toHaveLength(1);
+  });
+
+  it('刷新期间只发送最新快照，不积压旧增量', async () => {
+    const updates: CardUpdate[] = [];
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const api: CardApi = {
+      async createAndDeliver() {
+        return undefined;
+      },
+      async streamingUpdate(update) {
+        updates.push(update);
+        await gate;
+      },
+    };
+    const streamer = new CardStreamer({
+      api,
+      message: inbound(),
+      cardTemplateId: 'tpl-1',
+      robotCode: 'robot-1',
+    });
+    await streamer.start();
+
+    streamer.handle({ type: 'answer_delta', content: 'A'.repeat(80) });
+    await settle();
+    expect(updates).toHaveLength(1);
+
+    streamer.handle({ type: 'answer_delta', content: 'B'.repeat(40) });
+    streamer.handle({ type: 'answer_delta', content: 'C'.repeat(40) });
+    release();
+    await settle();
+
+    const answers = updates.filter((update) => update.key === 'answer_section');
+    expect(answers).toHaveLength(2);
+    expect(answers[1]?.content).toBe(`${'A'.repeat(80)}${'B'.repeat(40)}${'C'.repeat(40)}`);
+  });
+
+  it('失败更新按退避重试成功', async () => {
+    const updates: CardUpdate[] = [];
+    let attempts = 0;
+    const api: CardApi = {
+      async createAndDeliver() {
+        return undefined;
+      },
+      async streamingUpdate(update) {
+        attempts += 1;
+        if (attempts === 1) throw new Error('rate limited');
+        updates.push(update);
+      },
+    };
+    const streamer = new CardStreamer({
+      api,
+      message: inbound(),
+      cardTemplateId: 'tpl-1',
+      robotCode: 'robot-1',
+    });
+    await streamer.start();
+
+    streamer.handle({ type: 'answer_delta', content: '答'.repeat(80) });
+    await settle();
+    await vi.advanceTimersByTimeAsync(250);
+    await settle();
+
+    expect(attempts).toBe(2);
+    expect(updates.at(-1)?.content).toBe('答'.repeat(80));
+  });
+
+  it('v2 模板额外初始化工具、引用与操作区块', async () => {
+    const fake = fakeApi();
+    const streamer = new CardStreamer({
+      api: fake.api,
+      message: inbound(),
+      cardTemplateId: 'tpl-2',
+      robotCode: 'robot-1',
+      layout: 'v2',
+    });
+    await streamer.start();
+
+    expect(fake.created[0]?.params).toMatchObject({
+      thinking_section: '正在思考…',
+      answer_section: '',
+      status_bar: '正在思考…',
+      tools_section: '',
+      citations_section: '',
+    });
+    expect(fake.created[0]?.params.actions_section).toContain('/stop');
+
+    streamer.handle({
+      type: 'tool_start',
+      toolName: 'current_time',
+      args: { timeZone: 'Asia/Shanghai' },
+    });
+    await settle();
+    expect(
+      fake.updates.find((update) => update.key === 'tools_section')?.content,
+    ).toContain('current_time');
   });
 });
