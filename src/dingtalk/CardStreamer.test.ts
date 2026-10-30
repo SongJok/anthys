@@ -102,6 +102,24 @@ describe('CardStreamer', () => {
     expect(fake.created[0]?.deliver.conversationType).toBe('2');
   });
 
+  it('DWS 群消息只有 openDingTalkId 时按群维度投递卡片', async () => {
+    const fake = fakeApi();
+    const streamer = new CardStreamer({
+      api: fake.api,
+      message: inbound({
+        conversationType: '2',
+        conversationId: 'cid-9',
+        senderStaffId: 'Dy5dflTlbmfSiPALBjB9ZumnAkn52BFAeg',
+        cardDeliverUserId: '',
+      }),
+      cardTemplateId: 'tpl-1',
+      robotCode: 'robot-1',
+    });
+    await streamer.start();
+    expect(fake.created[0]?.deliver.userId).toBe('');
+    expect(fake.created[0]?.spaceId).toBe('dtv1.card//IM_GROUP.cid-9');
+  });
+
   it('思维链增量按 250ms 节流刷新', async () => {
     const fake = fakeApi();
     const streamer = new CardStreamer({

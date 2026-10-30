@@ -57,6 +57,7 @@ import { CommandRouter, parseCommand } from './commands/CommandRouter.js';
 import { ToolRegistry, loadMcpServerConfigs } from './harness/ToolRegistry.js';
 import { GroupTranscriptBuffer } from './bystander/GroupTranscriptBuffer.js';
 import { CooldownLimiter } from './bystander/CooldownLimiter.js';
+import { DwsGroupMessageListener } from './bystander/DwsGroupMessageListener.js';
 import { BystanderPolicyProvider } from './bystander/BystanderPolicyProvider.js';
 import {
   BystanderTriageEngine,
@@ -254,6 +255,8 @@ async function main(): Promise<void> {
   const dbHandle = createDatabase(baseConfig.getDatabaseUrl());
   let toolRegistry: ToolRegistry | undefined;
   let gateway: StreamGateway | undefined;
+  let bystanderListener: DwsGroupMessageListener | undefined;
+  let bystanderListenTimer: ReturnType<typeof setInterval> | undefined;
   let leadership: PgAdvisoryLeadership | undefined;
   let adminServer: ReturnType<typeof startAdminServer> | undefined;
   let retentionService: DataRetentionService | undefined;
@@ -1287,6 +1290,51 @@ async function main(): Promise<void> {
       logger,
     });
 
+    /**
+     * 群聊非 @ 消息的统一入口：StreamGateway（能收到 @ 消息）与
+     * DWS 群消息长连接（补齐非 @ 消息）共用同一条旁听漏斗。
+     */
+    const handleBystanderMessage = async (
+      message: InboundMessage,
+    ): Promise<void> => {
+      // 群里不 @ 也可以使用 /stop 等控制指令
+      if (parseCommand(message.text)) {
+        await commandRouter.tryHandle(message);
+        return;
+      }
+      const groupPolicy = await policyProvider.getPolicy(
+        message.conversationId,
+      );
+      let decision: BystanderEvaluationResult;
+      try {
+        decision = await triage.evaluate(message, groupPolicy);
+      } catch (error) {
+        logger.warn(
+          {
+            messageId: message.messageId,
+            conversationId: message.conversationId,
+            error: errorText(error),
+          },
+          'bystander triage failed',
+        );
+        return;
+      }
+      logger.info(
+        {
+          messageId: message.messageId,
+          conversationId: message.conversationId,
+          source: message.rawPayload.source ?? 'stream',
+          action: decision.action,
+          triggerReason: decision.triggerReason,
+          confidence: decision.confidence,
+          rationale: decision.rationale,
+        },
+        'bystander evaluation finished',
+      );
+      if (decision.action !== 'PROACTIVE_REPLY') return;
+      await runProactiveTurn(message, decision);
+    };
+
     const gatewayOptions = () => ({
       logger: gatewayLogger,
       transcriptBuffer,
@@ -1310,43 +1358,7 @@ async function main(): Promise<void> {
         };
         await commandRouter.tryHandle(message);
       },
-      bystanderHandler: async (message: InboundMessage) => {
-        // 群里不 @ 也可以使用 /stop 等控制指令
-        if (parseCommand(message.text)) {
-          await commandRouter.tryHandle(message);
-          return;
-        }
-        const groupPolicy = await policyProvider.getPolicy(
-          message.conversationId,
-        );
-        let decision: BystanderEvaluationResult;
-        try {
-          decision = await triage.evaluate(message, groupPolicy);
-        } catch (error) {
-          logger.warn(
-            {
-              messageId: message.messageId,
-              conversationId: message.conversationId,
-              error: errorText(error),
-            },
-            'bystander triage failed',
-          );
-          return;
-        }
-        logger.info(
-          {
-            messageId: message.messageId,
-            conversationId: message.conversationId,
-            action: decision.action,
-            triggerReason: decision.triggerReason,
-            confidence: decision.confidence,
-            rationale: decision.rationale,
-          },
-          'bystander evaluation finished',
-        );
-        if (decision.action !== 'PROACTIVE_REPLY') return;
-        await runProactiveTurn(message, decision);
-      },
+      bystanderHandler: handleBystanderMessage,
     });
 
     const startGateway = async (): Promise<void> => {
@@ -1377,6 +1389,73 @@ async function main(): Promise<void> {
       await startGateway();
     };
 
+    const parseList = (raw: string | undefined): string[] =>
+      (raw ?? '')
+        .split(',')
+        .map((item) => item.trim())
+        .filter(Boolean);
+
+    /**
+     * 旁听需要订阅哪些群：环境变量指定的群 + 控制台显式开启了旁听的群策略。
+     * 只订阅长连接、按白名单本地过滤，避免把账号所在的所有群都送进漏斗。
+     */
+    const refreshBystanderListenGroups = async (): Promise<void> => {
+      const ids = new Set(parseList(process.env.BYSTANDER_LISTEN_GROUPS));
+      try {
+        for (const policy of await configCenter.listGroupPolicies()) {
+          if (policy.bystanderEnabled) ids.add(policy.conversationId);
+        }
+      } catch (error) {
+        logger.warn(
+          { error: errorText(error) },
+          'failed to load bystander group allowlist',
+        );
+      }
+      bystanderListener?.setAllowedConversations(ids);
+    };
+
+    const startBystanderListener = async (): Promise<void> => {
+      if (!envEnabled(process.env.BYSTANDER_LISTEN_ENABLED, true)) return;
+      if (bystanderListener) return;
+      const listener = new DwsGroupMessageListener({
+        binary: process.env.DWS_BINARY?.trim() || 'dws',
+        onMessage: handleBystanderMessage,
+        shouldIgnore: (messageId) => gateway?.hasSeen(messageId) === true,
+        ignoreSenders: [
+          ...parseList(process.env.BYSTANDER_LISTEN_IGNORE_SENDERS),
+          configCenter.getLLMConfig().persona.name,
+        ],
+        settleMs:
+          envSeconds(process.env.BYSTANDER_LISTEN_SETTLE_SECONDS, 3) * 1_000,
+        logger: harnessLogger,
+      });
+      bystanderListener = listener;
+      await refreshBystanderListenGroups();
+      listener.start();
+      if (listener.allowedCount === 0) {
+        logger.info(
+          {},
+          'no group opted in to bystander listening yet, DWS listener idles until a group policy enables it',
+        );
+      }
+      if (!bystanderListenTimer) {
+        bystanderListenTimer = setInterval(
+          () => void refreshBystanderListenGroups(),
+          envSeconds(process.env.BYSTANDER_LISTEN_REFRESH_SECONDS, 60) * 1_000,
+        );
+        bystanderListenTimer.unref?.();
+      }
+    };
+
+    const stopBystanderListener = (): void => {
+      if (bystanderListenTimer) {
+        clearInterval(bystanderListenTimer);
+        bystanderListenTimer = undefined;
+      }
+      bystanderListener?.stop();
+      bystanderListener = undefined;
+    };
+
     let configPoll: ReturnType<typeof setInterval> | undefined;
     if (clusterEnabled) {
       leadership = new PgAdvisoryLeadership({
@@ -1399,12 +1478,19 @@ async function main(): Promise<void> {
         logger: harnessLogger,
         onAcquired: async () => {
           await startGatewayIfLeader();
+          void startBystanderListener().catch((error) =>
+            logger.error(
+              { error: errorText(error) },
+              'dws group listener start failed',
+            ),
+          );
         },
         onLost: () => {
           streamConnected = false;
           metrics.set('agent_stream_connected', 0);
           gateway?.stop();
           gateway = undefined;
+          stopBystanderListener();
           runControl.stopAll();
           logger.warn({}, 'cluster leadership lost, stream stopped');
         },
@@ -1432,6 +1518,12 @@ async function main(): Promise<void> {
       );
     } else {
       await startGateway();
+      void startBystanderListener().catch((error) =>
+        logger.error(
+          { error: errorText(error) },
+          'dws group listener start failed',
+        ),
+      );
     }
     metrics.set('scheduler_enabled', 1);
     taskScheduler.start();
@@ -1463,6 +1555,7 @@ async function main(): Promise<void> {
       logger.info({}, 'default bystander policy applied');
     });
     configCenter.on('groupPolicy:changed', (event) => {
+      void refreshBystanderListenGroups();
       logger.info(
         { conversationId: event.conversationId, policy: event.after },
         'group policy applied',
@@ -1713,6 +1806,7 @@ async function main(): Promise<void> {
       await taskScheduler.stop();
       retentionService?.stop();
       gateway?.stop();
+      stopBystanderListener();
       await clusterSync?.flush().catch((error) => {
         logger.warn({ error: errorText(error) }, 'failed to flush cluster state');
       });

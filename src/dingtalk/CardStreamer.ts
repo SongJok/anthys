@@ -346,7 +346,9 @@ export class CardStreamer {
           deliver: {
             conversationType: this.options.message.conversationType,
             robotCode: this.options.robotCode,
-            userId: this.options.message.senderStaffId,
+            userId:
+              this.options.message.cardDeliverUserId ??
+              this.options.message.senderStaffId,
             conversationId: this.options.message.conversationId,
           },
         });

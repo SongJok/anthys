@@ -18,6 +18,11 @@ export interface InboundMessage {
   senderNick: string;
   isAtBot: boolean;
   text: string;
+  /**
+   * 卡片投递使用的 staffId；缺省回退 senderStaffId。
+   * DWS 群消息只有 openDingTalkId，不能投递卡片，置空后走群维度投递。
+   */
+  cardDeliverUserId?: string;
   attachments?: InboundAttachment[];
   rawPayload: Record<string, unknown>;
   timestamp: number;

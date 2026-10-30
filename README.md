@@ -94,7 +94,7 @@ flowchart LR
    > 应用需在权限管理中开通 `Card.Instance.Write`、`Card.Streaming.Write` 与 `qyapi_robot_sendmsg`，并把模板关联到该应用。
 
 3. 记录模板 ID，稍后填入 `DINGTALK_CARD_TEMPLATE_ID`。
-4. 将机器人加入目标群。群内 @ 机器人会正常应答；未 @ 的消息被静默旁听，命中条件才主动回复。
+4. 将机器人加入目标群。群内 @ 机器人会正常应答；非 @ 消息由 DWS 长连接旁听（见下文「群聊旁听与主动回复」），命中条件才主动回复。
 
 ### 安装依赖与初始化数据库
 
@@ -226,6 +226,11 @@ pnpm run db:seed      # 可选：预写入默认人设与模型配置，已有�
 | `BYSTANDER_CONFIDENCE_THRESHOLD` | `0.82` | 触发主动回复的最低置信度 |
 | `BYSTANDER_TRIGGER_TOPICS` | `线上故障,SQL查询,接口报错,发布排期` | 重点关注主题（逗号分隔） |
 | `BYSTANDER_DEBOUNCE_MS` | `8000` | 疑似提问后的防抢答等待窗口 |
+| `BYSTANDER_LISTEN_ENABLED` | `true` | 是否用 DWS 长连接补齐非 @ 群消息 |
+| `BYSTANDER_LISTEN_GROUPS` | 空 | 额外需要旁听的群 `openConversationId`（逗号分隔） |
+| `BYSTANDER_LISTEN_IGNORE_SENDERS` | 空 | 忽略的发送人展示名或 ID，通常填机器人自己的名字 |
+| `BYSTANDER_LISTEN_SETTLE_SECONDS` | `3` | 等 Stream 先处理 @ 消息的静默窗口（秒） |
+| `BYSTANDER_LISTEN_REFRESH_SECONDS` | `60` | 群白名单从 `bystander_policies` 重新加载的间隔（秒） |
 
 **用量配额与模型路由**
 
@@ -388,6 +393,14 @@ pnpm start     # 通过 tsx 直接运行 src/index.ts
 1. **规则预筛**：过滤表情、寒暄、确认短语；检查群是否处于冷却期、是否正忙于其他回答；用主题词做技术信号预筛。
 2. **防抢答窗口**：疑似提问后等待一段时间，若期间已有同事回复，则保持沉默。
 3. **模型判定**：对最近若干条消息做一次低温度、无工具、无思维链的结构化判定，只有 `PROACTIVE_REPLY` 且置信度达到阈值才唤醒智能体。
+
+**入站来源**：钉钉机器人回调只推送 @ 机器人的群消息，非 @ 消息不会到达 Stream，因此旁听额外接一路 DWS 个人事件长连接：
+
+- 启动时以 `dws event consume user_im_message_receive_group_all --flatten --ephemeral --format ndjson` 拉取当前账号收到的群消息，进程异常退出后按退避重连。
+- 需要 DWS 已登录（`/dws-login`），且该登录账号必须本身就在目标群里；这是平台限制下唯一能拿到非 @ 消息的途径。
+- 只旁听**显式开启**的群：`BYSTANDER_LISTEN_GROUPS` 指定的 `openConversationId`，加上控制台里 `bystander_policies` 中 `bystanderEnabled=true` 的群，白名单每分钟重新加载一次。
+- 收到消息后先等待 `BYSTANDER_LISTEN_SETTLE_SECONDS`，让 Stream 先处理 @ 消息；同一条 `messageId` 已被 Stream 处理则跳过，避免双重回复。
+- 富文本/卡片 JSON 与图片等非文本消息直接丢弃；机器人自己的发言通过 `BYSTANDER_LISTEN_IGNORE_SENDERS`（默认补充人设名）过滤，防止自问自答。
 
 每个群都可以单独覆盖默认策略：
 

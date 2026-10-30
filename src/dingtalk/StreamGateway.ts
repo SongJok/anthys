@@ -94,6 +94,11 @@ export class StreamGateway {
     this.started = false;
   }
 
+  /** 该 messageId 是否已由机器人回调链路处理（供 DWS 旁听链路去重） */
+  public hasSeen(messageId: string): boolean {
+    return this.seen.has(messageId);
+  }
+
   /** 同步 ACK 后异步处理，保证钉钉不会因处理耗时重推消息 */
   public onRawMessage(message: StreamCallbackMessage): void {
     const messageId = message.headers?.messageId ?? '';
