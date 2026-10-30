@@ -266,11 +266,13 @@ export class DrizzleMemoryStore
       .map((term) => term.trim())
       .filter((term) => term.length > 0);
     if (terms.length > 0) {
-      const keywordOverlap = sql`${semanticMemories.keywords} ?| ${terms}::text[]`;
+      const keywordConditions = terms.map(
+        (term) => sql`${semanticMemories.keywords} ? ${term}`,
+      );
       const textConditions = terms.map((term) =>
         ilike(semanticMemories.content, `%${term}%`),
       );
-      conditions.push(or(keywordOverlap, ...textConditions));
+      conditions.push(or(...keywordConditions, ...textConditions));
     }
 
     const where =
