@@ -353,6 +353,8 @@ export interface OpenApiCardApiOptions {
   clientId: string;
   clientSecret: string;
   getAccessToken: () => Promise<string>;
+  endpoint?: string;
+  protocol?: 'http' | 'https';
   logger?: CardLogger;
 }
 
@@ -409,7 +411,8 @@ export class OpenApiCardApi implements CardApi {
       new Config({
         accessKeyId: options.clientId,
         accessKeySecret: options.clientSecret,
-        endpoint: 'api.dingtalk.com',
+        endpoint: options.endpoint ?? 'api.dingtalk.com',
+        protocol: options.protocol ?? 'https',
       }),
     );
     this.sdk = {
