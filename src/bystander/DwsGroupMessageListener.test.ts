@@ -258,6 +258,32 @@ describe('DwsGroupMessageListener', () => {
     listener.stop();
   });
 
+  it('honours retry_after_seconds reported by dws', async () => {
+    vi.useFakeTimers();
+    const children: FakeChild[] = [];
+    const listener = new DwsGroupMessageListener({
+      onMessage: () => undefined,
+      settleMs: 0,
+      restartDelayMs: 100,
+      spawn: () => {
+        const child = new FakeChild();
+        children.push(child);
+        return child.asChild();
+      },
+      logger: noopLogger,
+    });
+    listener.start();
+
+    children[0]!.stderr.write('  "retry_after_seconds": 30,\n');
+    children[0]!.emit('exit', 1, null);
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(children).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(children).toHaveLength(2);
+    listener.stop();
+  });
+
   it('can refresh the allowed groups at runtime', async () => {
     const { listener, children, received } = setup({ allowed: [] });
     listener.start();

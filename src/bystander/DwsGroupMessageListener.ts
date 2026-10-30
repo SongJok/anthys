@@ -232,6 +232,7 @@ export class DwsGroupMessageListener {
   private child?: DwsGroupChildProcess;
   private restartTimer?: ReturnType<typeof setTimeout>;
   private restartDelay: number;
+  private retryAfterMs = 0;
   private started = false;
 
   constructor(private readonly options: DwsGroupMessageListenerOptions) {
@@ -367,8 +368,9 @@ export class DwsGroupMessageListener {
 
   private scheduleRestart(): void {
     if (!this.started || this.restartTimer) return;
-    const delay = this.restartDelay;
-    this.restartDelay = Math.min(this.maxRestartDelayMs, delay * 2);
+    const delay = Math.max(this.restartDelay, this.retryAfterMs);
+    this.retryAfterMs = 0;
+    this.restartDelay = Math.min(this.maxRestartDelayMs, this.restartDelay * 2);
     this.restartTimer = setTimeout(() => {
       this.restartTimer = undefined;
       this.launch();
@@ -381,10 +383,20 @@ export class DwsGroupMessageListener {
     if (!text) return;
     if (text.includes('[event] ready')) {
       this.restartDelay = this.restartDelayMs;
+      this.retryAfterMs = 0;
       this.logger?.info({ detail: text }, 'dws group listener ready');
       return;
     }
     if (text.includes('[event]')) return;
+    // dws 的错误是逐行 JSON，只保留可读的错误消息，避免刷屏
+    const retryAfter = /"retry_after_seconds"\s*:\s*"?(\d+)/u.exec(text);
+    if (retryAfter?.[1]) {
+      this.retryAfterMs = Math.min(
+        10 * 60_000,
+        Math.max(this.retryAfterMs, Number(retryAfter[1]) * 1_000),
+      );
+    }
+    if (!text.includes('"message"') && !text.includes('"cause"')) return;
     this.logger?.warn({ detail: text }, 'dws group listener stderr');
   }
 
