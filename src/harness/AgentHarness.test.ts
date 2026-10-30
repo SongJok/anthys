@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { AgentHarness } from './AgentHarness.js';
+import { AgentHarness, conversationTitleFor } from './AgentHarness.js';
 import { ContextAssembler } from '../memory/ContextAssembler.js';
 import { QuotaExceededError } from '../billing/UsageGuard.js';
 import type {
@@ -303,6 +303,18 @@ describe('AgentHarness', () => {
       'assistant',
       'user',
     ]);
+  });
+
+  it('群聊标题用群名、单聊用昵称，拿不到群名时不写标题', () => {
+    expect(
+      conversationTitleFor(
+        inbound({ conversationType: '2', conversationTitle: '研发大群' }),
+      ),
+    ).toBe('研发大群');
+    expect(conversationTitleFor(inbound({ conversationType: '2' }))).toBeUndefined();
+    expect(
+      conversationTitleFor(inbound({ conversationType: '1', senderNick: '张三' })),
+    ).toBe('张三');
   });
 
   it('配额用尽时直接回复提示且不调用模型', async () => {

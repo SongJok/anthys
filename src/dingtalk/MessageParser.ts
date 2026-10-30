@@ -4,6 +4,7 @@ interface RawRobotPayload {
   msgId?: unknown;
   conversationId?: unknown;
   conversationType?: unknown;
+  conversationTitle?: unknown;
   senderStaffId?: unknown;
   senderId?: unknown;
   senderNick?: unknown;
@@ -155,6 +156,9 @@ export function parseStreamMessage(
     isAtBot: detectAtBot(payload, conversationType),
     text,
     ...(attachments.length > 0 ? { attachments } : {}),
+    ...(asNonEmptyString(payload.conversationTitle)
+      ? { conversationTitle: asNonEmptyString(payload.conversationTitle)! }
+      : {}),
     rawPayload: raw as Record<string, unknown>,
     timestamp: Number.isFinite(createdAt) && createdAt > 0 ? createdAt : now(),
   };

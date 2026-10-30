@@ -52,6 +52,8 @@ export class DrizzleConversationRepository implements ConversationRepository {
         target: conversations.conversationKey,
         set: {
           conversationType: input.conversationType,
+          // 群名会随群设置变化，有值时才覆盖，避免旁听消息（无群名）把标题清空
+          ...(input.title ? { title: input.title } : {}),
           updatedAt: now,
         },
       })

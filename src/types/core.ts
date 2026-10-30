@@ -23,6 +23,8 @@ export interface InboundMessage {
    * DWS 群消息只有 openDingTalkId，不能投递卡片，置空后走群维度投递。
    */
   cardDeliverUserId?: string;
+  /** 群名称；仅机器人回调携带，DWS 个人事件没有该字段 */
+  conversationTitle?: string;
   attachments?: InboundAttachment[];
   rawPayload: Record<string, unknown>;
   timestamp: number;

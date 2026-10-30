@@ -107,6 +107,17 @@ export function conversationKeyFor(message: InboundMessage): string {
 }
 
 /**
+ * 会话标题：群聊用群名，单聊用对方昵称。
+ * 拿不到群名时返回 undefined，避免把发送人昵称存成群名。
+ */
+export function conversationTitleFor(
+  message: InboundMessage,
+): string | undefined {
+  if (message.conversationType === '1') return message.senderNick;
+  return message.conversationTitle;
+}
+
+/**
  * 连接钉钉入站消息、多轮记忆、上下文组装与 ReAct 引擎。
  * 群聊全量消息先入旁听缓冲；非 @ 消息由 BystanderTriageEngine 判定后，
  * 只有 PROACTIVE_REPLY 才通过 handleBystanderMessage 唤醒 ReAct。
@@ -146,7 +157,7 @@ export class AgentHarness {
     const conversation = await repository.ensureConversation({
       conversationKey: conversationKeyFor(message),
       conversationType: message.conversationType,
-      title: message.senderNick,
+      title: conversationTitleFor(message),
       metadata: {
         conversationId: message.conversationId,
         senderStaffId: message.senderStaffId,
@@ -285,7 +296,7 @@ export class AgentHarness {
     const conversation = await repository.ensureConversation({
       conversationKey: conversationKeyFor(message),
       conversationType: message.conversationType,
-      title: message.senderNick,
+      title: conversationTitleFor(message),
       metadata: {
         conversationId: message.conversationId,
         senderStaffId: message.senderStaffId,

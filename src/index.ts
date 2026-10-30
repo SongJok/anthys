@@ -38,6 +38,7 @@ import type { CardActionEvent } from './dingtalk/CardActions.js';
 import {
   AgentHarness,
   conversationKeyFor,
+  conversationTitleFor,
   type HarnessLogger,
 } from './harness/AgentHarness.js';
 import { RunControlRegistry } from './harness/RunControlRegistry.js';
@@ -795,7 +796,7 @@ async function main(): Promise<void> {
         const conversation = await repository.ensureConversation({
           conversationKey: conversationKeyFor(message),
           conversationType: message.conversationType,
-          title: message.senderNick,
+          title: conversationTitleFor(message),
           metadata: {
             conversationId: message.conversationId,
             senderStaffId: message.senderStaffId,

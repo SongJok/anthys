@@ -42,6 +42,17 @@ describe('parseStreamMessage', () => {
     expect(message?.text).toBe('帮我算一下 1+1');
   });
 
+  it('群聊消息带上群名，缺失时不留空字段', () => {
+    const withTitle = parseStreamMessage(
+      payload({ conversationTitle: '研发大群', isInAtList: true }),
+    );
+    expect(withTitle?.conversationTitle).toBe('研发大群');
+    expect(withTitle?.senderNick).toBe('张三');
+
+    const withoutTitle = parseStreamMessage(payload({ isInAtList: true }));
+    expect(withoutTitle).not.toHaveProperty('conversationTitle');
+  });
+
   it('群聊通过 atUsers 中的 chatbotUserId 识别 @', () => {
     const message = parseStreamMessage(
       payload({ atUsers: [{ dingtalkId: 'bot-1' }] }),
