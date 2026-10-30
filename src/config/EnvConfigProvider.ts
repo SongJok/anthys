@@ -69,9 +69,6 @@ export class EnvConfigProvider implements IConfigProvider {
       clientSecret: this.env.DINGTALK_CLIENT_SECRET ?? '',
       robotCode: this.env.DINGTALK_ROBOT_CODE ?? '',
       cardTemplateId: this.env.DINGTALK_CARD_TEMPLATE_ID ?? '',
-      cardStreamingApiUrl:
-        this.env.DINGTALK_CARD_STREAMING_API ??
-        'https://api.dingtalk.com/v1.0/card/streaming',
     };
   }
 

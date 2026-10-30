@@ -5,7 +5,6 @@ export interface DingTalkConfig {
   clientSecret: string;
   robotCode: string;
   cardTemplateId: string;
-  cardStreamingApiUrl: string;
 }
 
 export interface MemoryConfig {
