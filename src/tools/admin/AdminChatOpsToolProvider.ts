@@ -176,6 +176,7 @@ export class AdminChatOpsToolProvider implements IToolProvider {
   private manageMcpTool(): ToolDefinition {
     return {
       name: 'admin_manage_mcp_server',
+      risk: 'write',
       description:
         '启用/禁用指定企业 MCP 节点，或热重载连接；返回该节点最新发现的工具清单。',
       parametersJsonSchema: {
@@ -251,6 +252,7 @@ export class AdminChatOpsToolProvider implements IToolProvider {
   private updateLlmTool(): ToolDefinition {
     return {
       name: 'admin_update_llm_or_persona',
+      risk: 'write',
       description:
         '热切换主模型、调整温度/原生思维链、修改机器人人设 Prompt 与 ReAct 循环预算，无需重启。',
       parametersJsonSchema: {
@@ -382,6 +384,7 @@ export class AdminChatOpsToolProvider implements IToolProvider {
   private configureGroupTool(): ToolDefinition {
     return {
       name: 'admin_configure_group_bystander',
+      risk: 'write',
       description:
         '查询已接入群列表，开关指定群的旁听/非@自主回复，调整冷却时间等策略，或一键紧急静音。',
       parametersJsonSchema: {

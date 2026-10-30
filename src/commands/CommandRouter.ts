@@ -15,6 +15,10 @@ export interface CommandRuntime {
     messageId: string;
     text: string;
   }): Promise<void>;
+  /** 执行等待确认的写操作，返回给用户的执行结果 */
+  confirmAction(message: InboundMessage): Promise<string>;
+  /** 取消等待确认的写操作 */
+  cancelAction(conversationId: string): Promise<string>;
   reply(message: InboundMessage, text: string): Promise<void>;
 }
 
@@ -34,6 +38,8 @@ const HELP_TEXT = [
   '- `/trace` 查看最近一次执行轨迹摘要',
   '- `/mute` / `/unmute` 暂停或恢复本群旁听（管理员）',
   '- `/feedback <内容>` 提交对本次回答的反馈',
+  '- `/confirm` 执行等待确认的写操作',
+  '- `/cancel` 取消等待确认的写操作',
 ].join('\n');
 
 export function parseCommand(text: string): ParsedCommand | null {
@@ -116,6 +122,17 @@ export class CommandRouter {
           muted
             ? '已暂停本群旁听与主动回复，发送 /unmute 恢复。'
             : '已恢复本群旁听与主动回复。',
+        );
+        return true;
+      }
+      case 'confirm': {
+        await runtime.reply(message, await runtime.confirmAction(message));
+        return true;
+      }
+      case 'cancel': {
+        await runtime.reply(
+          message,
+          await runtime.cancelAction(message.conversationId),
         );
         return true;
       }

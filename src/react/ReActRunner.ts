@@ -11,10 +11,13 @@ import type {
   IToolProvider,
   RunResult,
   StreamCitation,
+  ToolApprovalDecision,
+  ToolApprovalRequest,
   ToolDefinition,
   ToolExecutionOutput,
   ToolSchema,
 } from '../types/core.js';
+import { extractCitations } from './citations.js';
 
 const FINAL_TURN_GRACE_MS = 30_000;
 const TOOL_OUTPUT_LIMIT = 4_000;
@@ -48,6 +51,11 @@ export interface ReActRunnerOptions {
   }) => Promise<string>;
   /** 是否把工具结果包裹为不可信内容，默认 true */
   markUntrustedOutput?: boolean;
+  /** 写操作确认：返回未放行时终止本轮并展示说明 */
+  approval?: (
+    request: ToolApprovalRequest,
+    context: ExecutionContext,
+  ) => Promise<ToolApprovalDecision>;
 }
 
 interface TurnResult {
@@ -68,6 +76,8 @@ interface ToolExecutionResult {
   content: string;
   summary: string;
   isError: boolean;
+  /** 被确认流程拦截，未真正执行 */
+  denied?: boolean;
   durationMs: number;
   truncated: boolean;
   datasetKey?: string;
@@ -281,6 +291,14 @@ export class ReActRunner implements AgentEngine {
             toolName: execution.name,
             content: this.buildToolMessage(execution.content),
           });
+        }
+
+        const denied = executions.find((execution) => execution.denied);
+        if (denied) {
+          answer += denied.content;
+          emit({ type: 'answer_delta', content: denied.content });
+          skipFinalTurn = true;
+          break;
         }
 
         const warnings: string[] = [];
@@ -514,6 +532,38 @@ export class ReActRunner implements AgentEngine {
       return base({ content, summary: truncate(content, TOOL_SUMMARY_LIMIT), isError: true });
     }
 
+    if (this.options.approval) {
+      let decision: ToolApprovalDecision;
+      try {
+        decision = await this.options.approval(
+          {
+            toolName: tool.name,
+            args: item.args,
+            ...(tool.risk ? { risk: tool.risk } : {}),
+            ...(tool.source ? { source: tool.source } : {}),
+            conversationId: context.conversationId,
+            senderStaffId: context.senderStaffId,
+          },
+          context,
+        );
+      } catch (error) {
+        decision = {
+          approved: false,
+          reason: `工具审批流程异常，已阻止执行：${error instanceof Error ? error.message : String(error)}`,
+        };
+      }
+      if (!decision.approved) {
+        const content =
+          decision.reason ?? '该操作需要用户确认后才能执行。';
+        return base({
+          content,
+          summary: truncate(content, TOOL_SUMMARY_LIMIT),
+          isError: true,
+          denied: true,
+        });
+      }
+    }
+
     const timeoutMs = this.options.toolTimeoutMs ?? DEFAULT_TOOL_TIMEOUT_MS;
     const toolController = new AbortController();
     const signal = context.signal
@@ -591,7 +641,9 @@ export class ReActRunner implements AgentEngine {
         isError: false,
         truncated,
         datasetKey: output.datasetKey,
-        citations: output.citations,
+        citations:
+          output.citations ??
+          extractCitations(output.text, call.function.name),
       });
     } catch (error) {
       execution.catch(() => undefined);

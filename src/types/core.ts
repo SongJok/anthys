@@ -155,6 +155,23 @@ export interface ToolExecutionOutput {
   summary?: string;
 }
 
+/** 写操作确认：调用方在工具执行前决定是否放行 */
+export interface ToolApprovalRequest {
+  toolName: string;
+  args: Record<string, unknown>;
+  /** 工具提供方声明的风险等级，未声明时由审批方按名称推断 */
+  risk?: 'read' | 'write' | 'destructive';
+  source?: string;
+  conversationId: string;
+  senderStaffId: string;
+}
+
+export interface ToolApprovalDecision {
+  approved: boolean;
+  /** 未放行时展示给用户的说明（含确认方式） */
+  reason?: string;
+}
+
 /**
  * 5. 统一工具提供方契约（供阶段二、阶段四无缝扩展）
  */

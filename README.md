@@ -191,6 +191,13 @@ pnpm run db:seed      # 可选：预写入默认人设与模型配置，已有�
 
 入站图片与文件会先按 `downloadCode` 换取下载地址，落盘到 `.workspace/attachments/<messageId>/`；启用视觉模型后，图片会附带一段文字描述再交给主模型。未启用时仅保留本地路径，可提示用户改用文字描述。
 
+**写操作确认**
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `TOOL_CONFIRMATION_ENABLED` | `true` | 是否要求写操作先经 `/confirm` 确认；关闭后全部工具直接执行 |
+| `TOOL_CONFIRMATION_TTL_SECONDS` | `300` | 待确认动作的有效期（秒） |
+
 **群聊旁听**
 
 | 变量 | 默认值 | 说明 |
@@ -273,6 +280,14 @@ pnpm start     # 通过 tsx 直接运行 src/index.ts
 - 模型可通过 `deliver_artifact` 工具把工作区内的文件回传为钉钉文件消息：先上传媒体换取 `media_id`，再按单聊/群聊接口发送；只允许白名单目录（`.workspace` 与 `ARTIFACT_ROOTS`），超限或越界会直接拒绝。
 - 入站附件下载失败不会丢弃整条消息：失败项会写进提示词，用户仍可收到基于现有信息的回答；指标 `agent_attachments_total` / `agent_attachment_failures_total` 可观察下载情况。
 
+### 写操作确认与引用来源
+
+- 命中写操作的工具（MCP 或 DWS 中声明为 `write` / `destructive`，或按工具名推断）不会直接执行：机器人先登记一次待确认动作，把参数与风险等级展示出来，并结束本轮回答。
+- 用户回复 `/confirm` 才真正执行，回复 `/cancel` 丢弃；确认请求 5 分钟（`TOOL_CONFIRMATION_TTL_SECONDS`）内有效，同一会话新请求会覆盖旧请求。
+- 待确认动作只允许发起人或管理员确认；确认时执行的是登记时缓存的参数，不会让模型重新生成一遍调用。
+- 设置 `TOOL_CONFIRMATION_ENABLED=false` 可关闭闸门，所有工具直接执行。
+- 工具输出中的 URL 会自动提取为「参考来源」：去重、保留前若干个，并随 `citation` 事件推送到卡片引用区与轨迹。
+
 ### 对话内命令
 
 在单聊或群里 @ 机器人发送以下命令（支持全角 `／`），不会触发模型推理：
@@ -287,6 +302,8 @@ pnpm start     # 通过 tsx 直接运行 src/index.ts
 | `/trace` | 查看最近一次回答的推理与工具轨迹 |
 | `/mute`、`/unmute` | 群内静音 / 恢复主动回复（仅管理员、仅群聊） |
 | `/feedback <内容>` | 对最近一次回答提交反馈，写入 `user_feedback` |
+| `/confirm` | 执行本会话待确认的写操作（仅发起人或管理员） |
+| `/cancel` | 取消本会话待确认的写操作 |
 
 同一会话的新问题会自动中止尚未完成的旧回答，避免并发写入同一张卡片。
 

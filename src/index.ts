@@ -35,6 +35,10 @@ import {
   type HarnessLogger,
 } from './harness/AgentHarness.js';
 import { RunControlRegistry } from './harness/RunControlRegistry.js';
+import {
+  createToolApprovalGate,
+  PendingActionStore,
+} from './harness/ToolApprovalGate.js';
 import { ModelRoutingEngine } from './harness/ModelRoutingEngine.js';
 import { UsageGuard } from './billing/UsageGuard.js';
 import { DrizzleUsageLedgerStore } from './db/usageSchema.js';
@@ -70,6 +74,7 @@ import type { ConsoleChatHandler } from './admin-api/chatStream.js';
 import type {
   AgentStreamEvent,
   ChatModel,
+  ExecutionContext,
   InboundMessage,
   LLMAndPersonaConfig,
   RunResult,
@@ -111,6 +116,25 @@ function envEnabled(raw: string | undefined, fallback: boolean): boolean {
 function envMegabytes(raw: string | undefined, fallbackMb: number): number {
   const mb = Number(raw);
   return (Number.isFinite(mb) && mb > 0 ? mb : fallbackMb) * 1024 * 1024;
+}
+
+async function runWithTimeout<T>(
+  task: Promise<T>,
+  timeoutMs: number,
+  label: string,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`${label} 超时（>${Math.round(timeoutMs / 1000)}s）`)),
+      timeoutMs,
+    );
+  });
+  try {
+    return await Promise.race([task, timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 /**
@@ -236,6 +260,16 @@ async function main(): Promise<void> {
       () => toolRegistry?.pool ?? null,
       harnessLogger,
     );
+    const pendingActions = new PendingActionStore({
+      ttlMs:
+        Math.max(30, Number(process.env.TOOL_CONFIRMATION_TTL_SECONDS ?? 300)) *
+        1000,
+    });
+    const resolveToolApproval = createToolApprovalGate({
+      store: pendingActions,
+      enabled: envEnabled(process.env.TOOL_CONFIRMATION_ENABLED, true),
+      logger: harnessLogger,
+    });
 
     const adminProvider = new AdminChatOpsToolProvider({
       configCenter,
@@ -335,6 +369,7 @@ async function main(): Promise<void> {
       temperature: configCenter.getLLMConfig().temperature,
       enableNativeReasoning:
         configCenter.getLLMConfig().enableNativeReasoning,
+      approval: resolveToolApproval,
     });
 
     const routedEngines = new Map<string, ReActRunner>();
@@ -348,6 +383,7 @@ async function main(): Promise<void> {
         policy: configCenter.getLoopPolicy(),
         temperature: llm.temperature,
         enableNativeReasoning: llm.enableNativeReasoning,
+        approval: resolveToolApproval,
       });
       routedEngines.set(model, runner);
       return runner;
@@ -568,6 +604,64 @@ async function main(): Promise<void> {
           content: input.text,
         });
         metrics.inc('agent_feedback_total');
+      },
+      confirmAction: async (message) => {
+        const action = pendingActions.peek(message.conversationId);
+        if (!action) {
+          return '没有待确认的操作，可能已过期或已被处理。';
+        }
+        const isRequester = action.requestedBy.staffId === message.senderStaffId;
+        if (!isRequester && !configCenter.isAdmin(message.senderStaffId)) {
+          return '只有发起人或管理员可以确认该操作。';
+        }
+        pendingActions.take(message.conversationId);
+        const registry = toolRegistry;
+        if (!registry) return '工具注册表尚未就绪，操作已取消。';
+        const ctx: ExecutionContext = {
+          conversationId: message.conversationId,
+          messageId: message.messageId,
+          senderStaffId: message.senderStaffId,
+          senderNick: message.senderNick,
+          conversationType: message.conversationType,
+          deadlineAt: Date.now() + 120_000,
+          now: Date.now,
+        };
+        const tool = (await registry.assembleTools(ctx)).find(
+          (item) => item.name === action.toolName,
+        );
+        if (!tool) {
+          metrics.inc('agent_tool_confirmations_total', { result: 'unavailable' });
+          return `工具 \`${action.toolName}\` 当前不可用，操作已取消。`;
+        }
+        try {
+          const output = await runWithTimeout(
+            tool.executeStructured
+              ? tool.executeStructured(action.args, ctx).then((result) =>
+                  typeof result === 'string' ? result : result.text,
+                )
+              : tool.execute(action.args, ctx),
+            120_000,
+            action.toolName,
+          );
+          metrics.inc('agent_tool_confirmations_total', { result: 'executed' });
+          const clipped =
+            output.length > 2_000 ? `${output.slice(0, 2_000)}…` : output;
+          return `已执行 \`${action.toolName}\`：\n${clipped}`;
+        } catch (error) {
+          metrics.inc('agent_tool_confirmations_total', { result: 'failed' });
+          return `执行 \`${action.toolName}\` 失败：${
+            error instanceof Error ? error.message : String(error)
+          }`;
+        }
+      },
+      cancelAction: async (conversationId) => {
+        const cancelled = pendingActions.cancel(conversationId);
+        metrics.inc('agent_tool_confirmations_total', {
+          result: cancelled ? 'cancelled' : 'none',
+        });
+        return cancelled
+          ? '已取消待确认的操作。'
+          : '没有待确认的操作。';
       },
       reply: replyTo,
     });

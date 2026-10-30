@@ -9,6 +9,7 @@ import type {
   DynamicLoopPolicy,
   ExecutionContext,
   IToolProvider,
+  ToolApprovalRequest,
   ToolDefinition,
 } from '../types/core.js';
 
@@ -440,6 +441,66 @@ describe('ReActRunner', () => {
     expect(result.usage.steps).toBe(1);
     expect(events.some((event) => event.type === 'tool_start')).toBe(false);
     expect(result.reasoning).toBe('这是简单问题。');
+  });
+
+  it('写操作未获确认时阻断执行并直接给出确认提示', async () => {
+    let executed = 0;
+    const provider: IToolProvider = {
+      providerName: 'risky',
+      getTools: async () => [
+        {
+          name: 'delete_user',
+          description: '删除用户',
+          risk: 'destructive',
+          parametersJsonSchema: { type: 'object', properties: {} },
+          execute: async () => {
+            executed += 1;
+            return 'deleted';
+          },
+        },
+      ],
+    };
+    const model = new ScriptedModel([
+      toolTurn([
+        { index: 0, id: 'd1', name: 'delete_user', args: { id: 'u-1' } },
+      ]),
+      [{ contentDelta: '模型不应有机会继续。' }, { finishReason: 'stop' }],
+    ]);
+    const approvals: ToolApprovalRequest[] = [];
+    const runner = new ReActRunner({
+      model,
+      toolProviders: [provider],
+      policy,
+      approval: async (request) => {
+        approvals.push(request);
+        return {
+          approved: false,
+          reason: '删除用户需要二次确认，发送 /confirm 在 60 秒内确认。',
+        };
+      },
+    });
+    const events: AgentStreamEvent[] = [];
+
+    const result = await runner.run({
+      messages: userMessages,
+      context: makeContext(),
+      emit: (event) => events.push(event),
+    });
+
+    expect(executed).toBe(0);
+    expect(approvals).toHaveLength(1);
+    expect(approvals[0]).toMatchObject({
+      toolName: 'delete_user',
+      risk: 'destructive',
+      args: { id: 'u-1' },
+      conversationId: 'conv-1',
+      senderStaffId: 'staff-1',
+    });
+    expect(model.requests).toHaveLength(1);
+    expect(result.answer).toContain('/confirm');
+    const toolEnd = events.find((event) => event.type === 'tool_end');
+    expect(toolEnd).toMatchObject({ toolName: 'delete_user', isError: true });
+    expect(events.at(-1)?.type).toBe('completed');
   });
 
   it('模型异常时发出 error 事件并向上抛出', async () => {

@@ -51,6 +51,8 @@ function runtime(overrides: Partial<CommandRuntime> = {}): {
     recordFeedback: async (input) => {
       calls.feedback.push(input);
     },
+    confirmAction: async () => '已执行写操作。',
+    cancelAction: async () => '已取消待确认的操作。',
     reply: async (_message, text) => {
       replies.push(text);
     },
@@ -129,6 +131,20 @@ describe('CommandRouter', () => {
       staffId: 'staff-1',
       text: '答案不准确',
     });
+  });
+
+  it('/confirm 与 /cancel 调用确认运行时', async () => {
+    const confirm = runtime({
+      confirmAction: async () => '已执行 `create_ticket`。',
+    });
+    await confirm.router.tryHandle(message({ text: '/confirm' }));
+    expect(confirm.replies[0]).toContain('已执行');
+
+    const cancel = runtime({
+      cancelAction: async () => '已取消待确认的操作。',
+    });
+    await cancel.router.tryHandle(message({ text: '/cancel' }));
+    expect(cancel.replies[0]).toContain('已取消');
   });
 
   it('未知指令给出帮助提示', async () => {
