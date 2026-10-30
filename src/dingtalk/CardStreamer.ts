@@ -127,6 +127,8 @@ export interface CardStreamerOptions {
   maxRetries?: number;
   /** 创建卡片重试次数，默认 0（不阻塞首包） */
   createRetries?: number;
+  /** 正文前缀（群聊回复时用于 @ 提问人），只作用在 answer_section */
+  mention?: string;
   /** 限流：默认每秒 4 次、突发 8 次 */
   rateLimitPerSecond?: number;
   rateLimitBurst?: number;
@@ -230,6 +232,7 @@ export class CardStreamer {
   private readonly maxRetries: number;
   private readonly createRetries: number;
   private readonly limiter: TokenBucket;
+  private readonly mention: string;
 
   private reasoning = '';
   private answer = '';
@@ -255,6 +258,7 @@ export class CardStreamer {
     this.updateTimeoutMs = options.updateTimeoutMs ?? 5_000;
     this.maxRetries = options.maxRetries ?? 2;
     this.createRetries = options.createRetries ?? 0;
+    this.mention = options.mention ?? '';
     this.limiter = new TokenBucket(
       options.rateLimitPerSecond ?? 4,
       options.rateLimitBurst ?? 8,
@@ -471,6 +475,11 @@ export class CardStreamer {
     return parts.join('\n\n');
   }
 
+  private answerText(): string {
+    if (!this.answer.trim()) return '';
+    return this.mention ? `${this.mention}${this.answer}` : this.answer;
+  }
+
   private toolsText(): string {
     if (this.toolLines.length === 0) return '';
     return `工具调用记录：\n${this.toolLines.join('\n')}`;
@@ -581,7 +590,7 @@ export class CardStreamer {
       this.dirtyCitations = false;
     }
     if (this.dirtyAnswer) {
-      this.enqueue(this.buildUpdate('answer_section', this.answer, {
+      this.enqueue(this.buildUpdate('answer_section', this.answerText(), {
         isFinalize: false,
         isError,
       }));
@@ -598,7 +607,8 @@ export class CardStreamer {
       this.enqueue(
         this.buildUpdate(
           'answer_section',
-          this.answer || '（本次没有生成正文，请重新提问或稍后再试）',
+          this.answerText() ||
+            `${this.mention}（本次没有生成正文，请重新提问或稍后再试）`,
           { isFinalize: true, isError },
         ),
       );

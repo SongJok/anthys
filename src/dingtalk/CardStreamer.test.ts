@@ -146,6 +146,31 @@ describe('CardStreamer', () => {
     });
   });
 
+  it('群聊回复在正文最前面点名提问人，思维链不受影响', async () => {
+    const fake = fakeApi();
+    const streamer = new CardStreamer({
+      api: fake.api,
+      message: inbound({ conversationType: '2', senderNick: '张三' }),
+      cardTemplateId: 'tpl-1',
+      robotCode: 'robot-1',
+      mention: '@张三\n',
+    });
+    await streamer.start();
+
+    expect(fake.created[0]?.params.answer_section).toBe('');
+    streamer.handle({ type: 'reasoning_delta', content: '先分析' });
+    streamer.handle({ type: 'answer_delta', content: '答案是 42' });
+    await vi.advanceTimersByTimeAsync(250);
+    await settle();
+
+    expect(
+      fake.updates.find((u) => u.key === 'answer_section')?.content,
+    ).toBe('@张三\n答案是 42');
+    expect(
+      fake.updates.find((u) => u.key === 'thinking_section')?.content,
+    ).toBe('先分析');
+  });
+
   it('tool_start / tool_end 立即刷新思考区块与状态角标', async () => {
     const fake = fakeApi();
     const streamer = new CardStreamer({

@@ -21,6 +21,11 @@ import {
   type CardLogger,
 } from './dingtalk/CardStreamer.js';
 import { StreamGateway, type StreamGatewayLogger } from './dingtalk/StreamGateway.js';
+import {
+  EmotionReplier,
+  OpenApiRobotEmotionApi,
+} from './dingtalk/EmotionReplier.js';
+import { replyMention } from './dingtalk/Mentions.js';
 import { sendTextFallback } from './dingtalk/TextFallback.js';
 import { DingTalkMediaSender } from './dingtalk/MediaSender.js';
 import { AttachmentStore } from './multimodal/AttachmentStore.js';
@@ -175,6 +180,7 @@ async function sendSessionWebhook(
   message: InboundMessage,
   text: string,
   logger: CardLogger,
+  mention = '',
 ): Promise<void> {
   const webhook = message.rawPayload.sessionWebhook;
   if (typeof webhook !== 'string' || !webhook) {
@@ -186,7 +192,7 @@ async function sendSessionWebhook(
   }
   const result = await sendTextFallback({
     webhook,
-    text,
+    text: mention ? `${mention}${text}` : text,
     logger,
   });
   if (result.ok) {
@@ -610,7 +616,10 @@ async function main(): Promise<void> {
       }),
     };
 
-    const createStreamer = (message: InboundMessage): CardStreamer => {
+    const createStreamer = (
+      message: InboundMessage,
+      options: { mention?: string } = {},
+    ): CardStreamer => {
       const dingtalk = configCenter.getDingTalkConfig();
       return new CardStreamer({
         api: cardApiRef.current,
@@ -618,8 +627,23 @@ async function main(): Promise<void> {
         cardTemplateId: dingtalk.cardTemplateId,
         robotCode: dingtalk.robotCode,
         logger: cardLogger,
+        ...(options.mention ? { mention: options.mention } : {}),
       });
     };
+
+    const emotionReplier = new EmotionReplier({
+      api: new OpenApiRobotEmotionApi({
+        clientId: configCenter.getDingTalkConfig().clientId,
+        clientSecret: configCenter.getDingTalkConfig().clientSecret,
+        getAccessToken,
+        logger: cardLogger,
+      }),
+      enabled: envEnabled(process.env.DINGTALK_BOT_EMOTION_ENABLED, true),
+      emotionName:
+        process.env.DINGTALK_BOT_EMOTION_NAME?.trim() || 'Like',
+      robotCode: () => configCenter.getDingTalkConfig().robotCode,
+      logger: cardLogger,
+    });
 
     const recordTrace = async (
       collector: TraceCollector,
@@ -644,13 +668,15 @@ async function main(): Promise<void> {
     const replyTo = async (
       message: InboundMessage,
       text: string,
+      proactive = false,
     ): Promise<void> => {
+      const mention = replyMention(message, proactive);
       const webhook = message.rawPayload.sessionWebhook;
       if (typeof webhook === 'string' && webhook) {
-        await sendSessionWebhook(message, text, cardLogger);
+        await sendSessionWebhook(message, text, cardLogger, mention);
         return;
       }
-      const streamer = createStreamer(message);
+      const streamer = createStreamer(message, { mention });
       await streamer.start();
       streamer.handle({ type: 'answer_delta', content: text });
       await streamer.finish();
@@ -850,24 +876,27 @@ async function main(): Promise<void> {
     async function runTurn(
       message: InboundMessage,
       proactive = false,
+      startedStreamer?: CardStreamer,
     ): Promise<void> {
       const run = runControl.begin(message);
       metrics.set('agent_active_runs', runControl.activeCount());
-      const streamer = createStreamer(message);
+      const mention = replyMention(message, proactive);
+      const streamer =
+        startedStreamer ?? createStreamer(message, { mention });
       const collector = new TraceCollector();
       const emit = makeEmit(collector, streamer);
-      await streamer.start();
+      if (!startedStreamer) await streamer.start();
       try {
         const result = await harness.handleMessage(message, {
           emit,
           signal: run.signal,
           proactive,
-          notify: async (text) => replyTo(message, text),
+          notify: async (text) => replyTo(message, text, proactive),
         });
         await streamer.finish();
         await recordTrace(collector, message, result, proactive);
         if (result && !streamer.isAvailable && result.answer) {
-          await sendSessionWebhook(message, result.answer, cardLogger);
+          await sendSessionWebhook(message, result.answer, cardLogger, mention);
         }
       } catch (error) {
         logger.error(
@@ -878,7 +907,12 @@ async function main(): Promise<void> {
         await streamer.finish();
         await recordTrace(collector, message, EMPTY_RESULT, proactive);
         if (!streamer.isAvailable) {
-          await sendSessionWebhook(message, FALLBACK_ERROR_TEXT, cardLogger);
+          await sendSessionWebhook(
+            message,
+            FALLBACK_ERROR_TEXT,
+            cardLogger,
+            mention,
+          );
         }
       } finally {
         run.finish();
@@ -888,41 +922,52 @@ async function main(): Promise<void> {
 
     async function handleIncoming(message: InboundMessage): Promise<void> {
       if (await commandRouter.tryHandle(message)) return;
-      let effective = message;
-      if (message.attachments && message.attachments.length > 0) {
-        try {
-          const enriched = await enrichInboundMessage(message, {
-            store: attachmentStore,
-            ...(visionDescriber ? { vision: visionDescriber } : {}),
-            logger: harnessLogger,
-          });
-          effective = enriched.message;
-          if (enriched.attachments.length > 0) {
-            metrics.inc(
-              'agent_attachments_total',
-              undefined,
-              enriched.attachments.length,
-            );
-          }
-          if (enriched.failed.length > 0) {
-            metrics.inc(
-              'agent_attachment_failures_total',
-              undefined,
-              enriched.failed.length,
-            );
-          }
-        } catch (error) {
-          logger.warn(
-            { messageId: message.messageId, error: errorText(error) },
-            'attachment enrichment failed, continue with raw message',
-          );
-        }
-      }
-      runControl.remember(effective);
-      metrics.inc('agent_messages_total', {
-        conversationType: effective.conversationType,
+      // 先建卡贴表情再解析附件，避免视觉理解耗时期间用户看不到任何反馈
+      emotionReplier.mark(message);
+      const streamer = createStreamer(message, {
+        mention: replyMention(message),
       });
-      await runTurn(effective);
+      const cardReady = streamer.start();
+      let effective = message;
+      try {
+        if (message.attachments && message.attachments.length > 0) {
+          try {
+            const enriched = await enrichInboundMessage(message, {
+              store: attachmentStore,
+              ...(visionDescriber ? { vision: visionDescriber } : {}),
+              logger: harnessLogger,
+            });
+            effective = enriched.message;
+            if (enriched.attachments.length > 0) {
+              metrics.inc(
+                'agent_attachments_total',
+                undefined,
+                enriched.attachments.length,
+              );
+            }
+            if (enriched.failed.length > 0) {
+              metrics.inc(
+                'agent_attachment_failures_total',
+                undefined,
+                enriched.failed.length,
+              );
+            }
+          } catch (error) {
+            logger.warn(
+              { messageId: message.messageId, error: errorText(error) },
+              'attachment enrichment failed, continue with raw message',
+            );
+          }
+        }
+        await cardReady;
+        runControl.remember(effective);
+        metrics.inc('agent_messages_total', {
+          conversationType: effective.conversationType,
+        });
+        await runTurn(effective, false, streamer);
+      } finally {
+        void emotionReplier.clear(message);
+      }
     }
 
     async function runProactiveTurn(
@@ -940,7 +985,7 @@ async function main(): Promise<void> {
           decision,
           emit,
           signal: run.signal,
-          notify: async (text) => replyTo(message, text),
+          notify: async (text) => replyTo(message, text, true),
         });
         await streamer.finish();
         await recordTrace(collector, message, result, true);
