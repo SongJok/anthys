@@ -76,6 +76,8 @@ export interface AgentHarnessOptions {
 export interface HandleMessageOptions {
   emit: (event: AgentStreamEvent) => void;
   signal?: AbortSignal;
+  /** 系统发起的主动播报（定时任务），影响用量归因与模型路由 */
+  proactive?: boolean;
 }
 
 export interface ProactiveHandleOptions {
@@ -176,12 +178,12 @@ export class AgentHarness {
         conversationType: message.conversationType,
         deadlineAt: startedAt + policy.maxWallTimeMs,
         now: this.now,
-        proactive: false,
+        proactive: handle.proactive ?? false,
       },
       emit: handle.emit,
       signal: handle.signal,
     });
-    await this.recordUsage(message, result, false);
+    await this.recordUsage(message, result, handle.proactive ?? false);
 
     await repository.appendMessage({
       conversationId: conversation.id,

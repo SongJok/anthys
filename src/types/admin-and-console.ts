@@ -49,6 +49,7 @@ export type AdminActionType =
   | 'UPDATE_MCP_POLICY'
   | 'UPDATE_GROUP_POLICY'
   | 'EMERGENCY_MUTE'
+  | 'UPDATE_SCHEDULES'
   | 'QUERY_STATS';
 
 /** 2. 管理员单聊管控审计记录契约 */
@@ -221,6 +222,60 @@ export interface UsageLedgerStore {
   }): Promise<number>;
   summarySince(sinceMs: number): Promise<UsageSummary>;
   purgeBefore(epochMs: number): Promise<number>;
+}
+
+/** 定时任务与主动播报 */
+export interface ScheduledTask {
+  id: string;
+  conversationId: string;
+  conversationType: '1' | '2';
+  title: string;
+  prompt: string;
+  /** 固定间隔，秒；与 cron 二选一 */
+  intervalSeconds: number | null;
+  /** 5 段 cron（Asia/Shanghai），与 intervalSeconds 二选一 */
+  cron: string | null;
+  enabled: boolean;
+  lastRunAt: string | null;
+  nextRunAt: string | null;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ScheduledTaskInput {
+  conversationId: string;
+  conversationType: '1' | '2';
+  title: string;
+  prompt: string;
+  intervalSeconds?: number | null;
+  cron?: string | null;
+  enabled?: boolean;
+  createdBy?: string;
+}
+
+export interface ScheduledTaskUpdate {
+  title?: string;
+  prompt?: string;
+  intervalSeconds?: number | null;
+  cron?: string | null;
+  enabled?: boolean;
+}
+
+export interface ScheduledTaskStore {
+  list(): Promise<ScheduledTask[]>;
+  listDue(atMs: number): Promise<ScheduledTask[]>;
+  create(
+    input: ScheduledTaskInput,
+    nextRunAtMs: number | null,
+  ): Promise<ScheduledTask>;
+  update(
+    id: string,
+    input: ScheduledTaskUpdate,
+    nextRunAtMs: number | null,
+  ): Promise<ScheduledTask>;
+  remove(id: string): Promise<boolean>;
+  markRun(id: string, lastRunAtMs: number, nextRunAtMs: number | null): Promise<void>;
 }
 
 /** 用户对回答的显式反馈（/feedback 指令） */

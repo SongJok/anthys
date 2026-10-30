@@ -22,6 +22,9 @@ import type {
   ReActTraceQuery,
   ReActTraceRecord,
   ReActTraceStore,
+  ScheduledTask,
+  ScheduledTaskInput,
+  ScheduledTaskUpdate,
   TraceDailyStats,
 } from '../types/admin-and-console.js';
 import type { EnterpriseMcpServerConfig } from '../types/mcp-and-sandbox.js';
@@ -191,6 +194,7 @@ interface TestContext {
   applied: EnterpriseMcpServerConfig[][];
   tested: string[];
   metrics: MetricsRegistry;
+  ranTasks: string[];
 }
 
 function headers(): Record<string, string> {
@@ -270,6 +274,48 @@ async function createTestContext(staticDir?: string): Promise<TestContext> {
   const tested: string[] = [];
   const metrics = new MetricsRegistry();
   metrics.set('agent_active_runs', 0);
+  const tasks: ScheduledTask[] = [];
+  const ranTasks: string[] = [];
+  const scheduledTasks = {
+    list: async () => tasks,
+    create: async (input: ScheduledTaskInput): Promise<ScheduledTask> => {
+      const task: ScheduledTask = {
+        id: `task-${tasks.length + 1}`,
+        conversationId: input.conversationId,
+        conversationType: input.conversationType,
+        title: input.title ?? '',
+        prompt: input.prompt,
+        intervalSeconds: input.intervalSeconds ?? null,
+        cron: input.cron ?? null,
+        enabled: input.enabled ?? true,
+        lastRunAt: null,
+        nextRunAt: new Date(NOW).toISOString(),
+        createdBy: input.createdBy ?? '',
+        createdAt: new Date(NOW).toISOString(),
+        updatedAt: new Date(NOW).toISOString(),
+      };
+      tasks.push(task);
+      return task;
+    },
+    update: async (
+      id: string,
+      input: ScheduledTaskUpdate,
+    ): Promise<ScheduledTask> => {
+      const task = tasks.find((item) => item.id === id);
+      if (!task) throw new Error('not found');
+      Object.assign(task, input, { updatedAt: new Date(NOW).toISOString() });
+      return task;
+    },
+    remove: async (id: string): Promise<boolean> => {
+      const index = tasks.findIndex((item) => item.id === id);
+      if (index < 0) return false;
+      tasks.splice(index, 1);
+      return true;
+    },
+    runNow: async (id: string): Promise<void> => {
+      ranTasks.push(id);
+    },
+  };
   const status = (): McpServerStatusView[] =>
     center.getMcpServers().map((server) => ({
       id: server.id,
@@ -331,6 +377,7 @@ async function createTestContext(staticDir?: string): Promise<TestContext> {
     metrics,
     readiness: async () => ({ ready: true }),
     feedback: { list: async () => [] },
+    scheduledTasks,
     usage: {
       summary: async (days = 1) => ({
         sinceMs: days * 1_000,
@@ -348,7 +395,7 @@ async function createTestContext(staticDir?: string): Promise<TestContext> {
     now: () => NOW,
   });
 
-  return { app, center, traces, applied, tested, metrics };
+  return { app, center, traces, applied, tested, metrics, ranTasks };
 }
 
 let ctx: TestContext;
@@ -780,6 +827,64 @@ describe('在线对话与可观测性接口', () => {
     const ready = await ctx.app.request('/readyz');
     expect(ready.status).toBe(200);
     expect((await body(ready)).ready).toBe(true);
+  });
+
+  it('定时任务支持创建、列表、更新、立即执行与删除', async () => {
+    const denied = await ctx.app.request('/api/v1/admin/scheduled-tasks', {
+      method: 'POST',
+    });
+    expect(denied.status).toBe(401);
+
+    const invalid = await ctx.app.request('/api/v1/admin/scheduled-tasks', {
+      method: 'POST',
+      headers: headers(),
+      body: JSON.stringify({ conversationId: 'cid-dev', prompt: '' }),
+    });
+    expect(invalid.status).toBe(400);
+
+    const created = await ctx.app.request('/api/v1/admin/scheduled-tasks', {
+      method: 'POST',
+      headers: headers(),
+      body: JSON.stringify({
+        conversationId: 'cid-dev',
+        conversationType: '2',
+        title: '每日巡检',
+        prompt: '汇总昨日错误日志',
+        intervalSeconds: 3600,
+        createdBy: 'admin-001',
+      }),
+    });
+    expect(created.status).toBe(200);
+    const task = (await body(created)).task as ScheduledTask;
+    expect(task.title).toBe('每日巡检');
+
+    const listed = await ctx.app.request('/api/v1/admin/scheduled-tasks', {
+      headers: headers(),
+    });
+    expect((await body(listed)).tasks).toHaveLength(1);
+
+    const updated = await ctx.app.request(
+      `/api/v1/admin/scheduled-tasks/${task.id}`,
+      {
+        method: 'PUT',
+        headers: headers(),
+        body: JSON.stringify({ enabled: false }),
+      },
+    );
+    expect((await body(updated)).task.enabled).toBe(false);
+
+    const ran = await ctx.app.request(
+      `/api/v1/admin/scheduled-tasks/${task.id}/run`,
+      { method: 'POST', headers: headers() },
+    );
+    expect(ran.status).toBe(200);
+    expect(ctx.ranTasks).toEqual([task.id]);
+
+    const removed = await ctx.app.request(
+      `/api/v1/admin/scheduled-tasks/${task.id}`,
+      { method: 'DELETE', headers: headers() },
+    );
+    expect((await body(removed)).removed).toBe(true);
   });
 
   it('用量汇总接口返回按员工与按群聚合', async () => {

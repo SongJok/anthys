@@ -8,6 +8,9 @@ import type { DynamicConfigCenter } from '../config/DynamicConfigCenter.js';
 import type {
   GroupDirectory,
   LlmSandboxTestResult,
+  ScheduledTask,
+  ScheduledTaskInput,
+  ScheduledTaskUpdate,
   UsageSummary,
   McpServerStatusView,
   McpServerTestResult,
@@ -65,6 +68,13 @@ export interface AdminApiOptions {
   };
   usage?: {
     summary(days?: number): Promise<UsageSummary>;
+  };
+  scheduledTasks?: {
+    list(): Promise<ScheduledTask[]>;
+    create(input: ScheduledTaskInput): Promise<ScheduledTask>;
+    update(id: string, input: ScheduledTaskUpdate): Promise<ScheduledTask>;
+    remove(id: string): Promise<boolean>;
+    runNow?(id: string): Promise<void>;
   };
 }
 
@@ -180,6 +190,69 @@ export function createAdminApp(options: AdminApiOptions): Hono {
       Number.isFinite(days) ? Math.min(90, Math.max(1, days)) : 1,
     );
     return c.json({ ok: true, summary });
+  });
+
+  admin.get('/scheduled-tasks', async (c) => {
+    if (!options.scheduledTasks) return c.json({ ok: true, tasks: [] });
+    return c.json({ ok: true, tasks: await options.scheduledTasks.list() });
+  });
+
+  admin.post('/scheduled-tasks', async (c) => {
+    if (!options.scheduledTasks) {
+      return c.json({ ok: false, error: '定时任务未启用' }, 503);
+    }
+    const input = (await c.req.json().catch(() => ({}))) as ScheduledTaskInput;
+    if (!input.conversationId?.trim() || !input.prompt?.trim()) {
+      return c.json({ ok: false, error: '缺少 conversationId 或 prompt' }, 400);
+    }
+    try {
+      const task = await options.scheduledTasks.create(input);
+      return c.json({ ok: true, task });
+    } catch (error) {
+      return c.json(
+        { ok: false, error: error instanceof Error ? error.message : String(error) },
+        400,
+      );
+    }
+  });
+
+  admin.put('/scheduled-tasks/:id', async (c) => {
+    if (!options.scheduledTasks) {
+      return c.json({ ok: false, error: '定时任务未启用' }, 503);
+    }
+    const input = (await c.req.json().catch(() => ({}))) as ScheduledTaskUpdate;
+    try {
+      const task = await options.scheduledTasks.update(c.req.param('id'), input);
+      return c.json({ ok: true, task });
+    } catch (error) {
+      return c.json(
+        { ok: false, error: error instanceof Error ? error.message : String(error) },
+        400,
+      );
+    }
+  });
+
+  admin.delete('/scheduled-tasks/:id', async (c) => {
+    if (!options.scheduledTasks) {
+      return c.json({ ok: false, error: '定时任务未启用' }, 503);
+    }
+    const removed = await options.scheduledTasks.remove(c.req.param('id'));
+    return c.json({ ok: true, removed });
+  });
+
+  admin.post('/scheduled-tasks/:id/run', async (c) => {
+    if (!options.scheduledTasks?.runNow) {
+      return c.json({ ok: false, error: '立即执行未启用' }, 503);
+    }
+    try {
+      await options.scheduledTasks.runNow(c.req.param('id'));
+      return c.json({ ok: true });
+    } catch (error) {
+      return c.json(
+        { ok: false, error: error instanceof Error ? error.message : String(error) },
+        400,
+      );
+    }
   });
 
   admin.post('/chat/tickets', (c) => {

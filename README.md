@@ -255,6 +255,15 @@ pnpm start     # 通过 tsx 直接运行 src/index.ts
 
 同一会话的新问题会自动中止尚未完成的旧回答，避免并发写入同一张卡片。
 
+### 定时任务与主动播报
+
+管理端可以创建定时任务，在指定单聊或群聊中按固定间隔或 cron 主动发起一轮回答，例如每天 9 点汇总昨日错误日志、每小时巡检一次线上状态。
+
+- 调度支持 `intervalSeconds`（最小 30 秒）或 5 段 cron（按 Asia/Shanghai 解释，支持 `*`、`*/n`、区间、列表，周日可写 `0` 或 `7`），二者只能选其一。
+- 到点后以「定时任务」身份走完整的 ReAct 链路：卡片流式输出、工具调用、记忆与用量记账与正常问答一致。
+- 单次失败不会阻塞其他任务，也不会在原定时间反复重试；失败原因写入日志，下一次仍按计划触发。
+- 支持「立即执行」用于验证配置，执行后同样推进下一次触发时间。
+
 ### 群聊旁听与主动回复
 
 机器人在群内的每一句话都会进入旁听缓冲，但绝大多数消息会在零 Token 的规则层被过滤，不会唤醒模型。是否主动回复由三级漏斗决定：
@@ -451,6 +460,9 @@ pnpm start     # 通过 tsx 直接运行 src/index.ts
 | GET | `/api/v1/chat/stream?ticket=&question=` | 浏览器在线对话流（SSE，事件与钉钉卡片同源） |
 | GET | `/feedback` | 用户反馈列表 |
 | GET | `/usage?days=1` | 用量汇总：总 Token、按员工与按群排名 |
+| GET / POST | `/scheduled-tasks` | 定时任务列表 / 创建 |
+| PUT / DELETE | `/scheduled-tasks/:id` | 更新 / 删除定时任务 |
+| POST | `/scheduled-tasks/:id/run` | 立即执行一次 |
 
 ---
 
@@ -479,6 +491,7 @@ pnpm start     # 通过 tsx 直接运行 src/index.ts
 | `admin_audit_logs` | 管理操作审计 |
 | `user_feedback` | 用户对回答的反馈（`/feedback` 命令） |
 | `usage_ledger` | 每次模型调用的 Token、模型、耗时与场景 |
+| `scheduled_tasks` | 定时主动播报任务与下次触发时间 |
 
 ---
 

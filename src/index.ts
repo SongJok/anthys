@@ -32,6 +32,11 @@ import { RunControlRegistry } from './harness/RunControlRegistry.js';
 import { ModelRoutingEngine } from './harness/ModelRoutingEngine.js';
 import { UsageGuard } from './billing/UsageGuard.js';
 import { DrizzleUsageLedgerStore } from './db/usageSchema.js';
+import { DrizzleScheduledTaskStore } from './db/schedulerSchema.js';
+import {
+  ScheduledTaskScheduler,
+  computeNextRun,
+} from './scheduler/ScheduledTaskScheduler.js';
 import { CommandRouter, parseCommand } from './commands/CommandRouter.js';
 import { ToolRegistry, loadMcpServerConfigs } from './harness/ToolRegistry.js';
 import { GroupTranscriptBuffer } from './bystander/GroupTranscriptBuffer.js';
@@ -65,6 +70,9 @@ import type {
 import type {
   LlmSandboxTestResult,
   McpServerTestResult,
+  ScheduledTask,
+  ScheduledTaskInput,
+  ScheduledTaskUpdate,
 } from './types/admin-and-console.js';
 import type { BystanderEvaluationResult } from './types/bystander-and-memory.js';
 import type { EnterpriseMcpServerConfig } from './types/mcp-and-sandbox.js';
@@ -272,6 +280,7 @@ async function main(): Promise<void> {
 
     const memoryStore = new DrizzleMemoryStore(dbHandle.db);
     const usageLedger = new DrizzleUsageLedgerStore(dbHandle.db);
+    const scheduledStore = new DrizzleScheduledTaskStore(dbHandle.db);
     const usageGuard = new UsageGuard({
       ledger: usageLedger,
       policy: () => configCenter.getUsagePolicy(),
@@ -477,7 +486,10 @@ async function main(): Promise<void> {
       reply: replyTo,
     });
 
-    async function runTurn(message: InboundMessage): Promise<void> {
+    async function runTurn(
+      message: InboundMessage,
+      proactive = false,
+    ): Promise<void> {
       const run = runControl.begin(message);
       metrics.set('agent_active_runs', runControl.activeCount());
       const streamer = createStreamer(message);
@@ -488,9 +500,10 @@ async function main(): Promise<void> {
         const result = await harness.handleMessage(message, {
           emit,
           signal: run.signal,
+          proactive,
         });
         await streamer.finish();
-        await recordTrace(collector, message, result, false);
+        await recordTrace(collector, message, result, proactive);
         if (result && !streamer.isAvailable && result.answer) {
           await sendSessionWebhook(message, result.answer, cardLogger);
         }
@@ -501,7 +514,7 @@ async function main(): Promise<void> {
         );
         streamer.handle({ type: 'error', message: FALLBACK_ERROR_TEXT });
         await streamer.finish();
-        await recordTrace(collector, message, EMPTY_RESULT, false);
+        await recordTrace(collector, message, EMPTY_RESULT, proactive);
         if (!streamer.isAvailable) {
           await sendSessionWebhook(message, FALLBACK_ERROR_TEXT, cardLogger);
         }
@@ -557,6 +570,138 @@ async function main(): Promise<void> {
         metrics.set('agent_active_runs', runControl.activeCount());
       }
     }
+
+    const executeScheduledTask = async (task: ScheduledTask): Promise<void> => {
+      const now = Date.now();
+      const message: InboundMessage = {
+        messageId: `scheduled_${task.id}_${now}`,
+        conversationId: task.conversationId,
+        conversationType: task.conversationType,
+        senderStaffId: task.createdBy || 'scheduler',
+        senderNick: '定时任务',
+        isAtBot: true,
+        text: task.prompt,
+        rawPayload: { source: 'scheduled_task', taskId: task.id },
+        timestamp: now,
+      };
+      logger.info(
+        { taskId: task.id, conversationId: task.conversationId },
+        'scheduled task triggered',
+      );
+      metrics.inc('scheduled_task_runs_total');
+      await runTurn(message, true);
+    };
+
+    const normalizeSchedule = (
+      input: ScheduledTaskInput | ScheduledTaskUpdate,
+      fallback?: ScheduledTask,
+    ): {
+      intervalSeconds: number | null;
+      cron: string | null;
+      enabled: boolean;
+    } => {
+      const intervalSeconds =
+        input.intervalSeconds !== undefined
+          ? input.intervalSeconds
+          : (fallback?.intervalSeconds ?? null);
+      const cron =
+        input.cron !== undefined ? input.cron?.trim() || null : (fallback?.cron ?? null);
+      const enabled = input.enabled ?? fallback?.enabled ?? true;
+      if ((intervalSeconds === null || intervalSeconds === undefined) && !cron) {
+        throw new Error('cron 与 intervalSeconds 至少配置一项');
+      }
+      if (intervalSeconds !== null && intervalSeconds !== undefined && cron) {
+        throw new Error('cron 与 intervalSeconds 只能二选一');
+      }
+      if (intervalSeconds !== null && intervalSeconds !== undefined && intervalSeconds < 30) {
+        throw new Error('intervalSeconds 不能小于 30 秒');
+      }
+      computeNextRun({ enabled, cron, intervalSeconds: intervalSeconds ?? null }, Date.now());
+      return { intervalSeconds: intervalSeconds ?? null, cron, enabled };
+    };
+
+    const scheduledApi = {
+      list: () => scheduledStore.list(),
+      create: async (input: ScheduledTaskInput): Promise<ScheduledTask> => {
+        if (!input.conversationId?.trim()) throw new Error('缺少 conversationId');
+        if (!input.prompt?.trim()) throw new Error('缺少 prompt');
+        const schedule = normalizeSchedule(input);
+        const task = await scheduledStore.create(
+          {
+            conversationId: input.conversationId.trim(),
+            conversationType: input.conversationType === '1' ? '1' : '2',
+            title: input.title?.trim() || '定时播报',
+            prompt: input.prompt.trim(),
+            ...schedule,
+            createdBy: input.createdBy?.trim() || 'admin-api',
+          },
+          computeNextRun(schedule, Date.now()),
+        );
+        await configCenter.recordAudit({
+          adminStaffId: 'admin-api',
+          adminNick: '管理控制台',
+          actionType: 'UPDATE_SCHEDULES',
+          beforeSnapshot: {},
+          afterSnapshot: { task },
+        });
+        return task;
+      },
+      update: async (
+        id: string,
+        input: ScheduledTaskUpdate,
+      ): Promise<ScheduledTask> => {
+        const current = (await scheduledStore.list()).find((item) => item.id === id);
+        if (!current) throw new Error(`未找到定时任务: ${id}`);
+        const schedule = normalizeSchedule(input, current);
+        const task = await scheduledStore.update(
+          id,
+          {
+            ...(input.title !== undefined ? { title: input.title.trim() } : {}),
+            ...(input.prompt !== undefined ? { prompt: input.prompt.trim() } : {}),
+            ...schedule,
+          },
+          computeNextRun(schedule, Date.now()),
+        );
+        await configCenter.recordAudit({
+          adminStaffId: 'admin-api',
+          adminNick: '管理控制台',
+          actionType: 'UPDATE_SCHEDULES',
+          beforeSnapshot: { task: current },
+          afterSnapshot: { task },
+        });
+        return task;
+      },
+      remove: async (id: string): Promise<boolean> => {
+        const current = (await scheduledStore.list()).find((item) => item.id === id);
+        const removed = await scheduledStore.remove(id);
+        if (removed) {
+          await configCenter.recordAudit({
+            adminStaffId: 'admin-api',
+            adminNick: '管理控制台',
+            actionType: 'UPDATE_SCHEDULES',
+            beforeSnapshot: { task: current ?? null },
+            afterSnapshot: {},
+          });
+        }
+        return removed;
+      },
+      runNow: async (id: string): Promise<void> => {
+        const current = (await scheduledStore.list()).find((item) => item.id === id);
+        if (!current) throw new Error(`未找到定时任务: ${id}`);
+        await executeScheduledTask(current);
+        await scheduledStore.markRun(
+          id,
+          Date.now(),
+          computeNextRun(current, Date.now()),
+        );
+      },
+    };
+
+    const taskScheduler = new ScheduledTaskScheduler({
+      store: scheduledStore,
+      execute: executeScheduledTask,
+      logger,
+    });
 
     const gatewayOptions = () => ({
       logger: gatewayLogger,
@@ -642,6 +787,8 @@ async function main(): Promise<void> {
     };
 
     await startGateway();
+    metrics.set('scheduler_enabled', 1);
+    taskScheduler.start();
 
     configCenter.on('llm:changed', (event) => {
       const next = event.after as LLMAndPersonaConfig;
@@ -846,6 +993,7 @@ async function main(): Promise<void> {
       dingtalkTester,
       chatStream: consoleChat,
       feedback: { list: (limit) => feedbackStore.list(limit) },
+      scheduledTasks: scheduledApi,
       usage: {
         summary: (days = 1) =>
           usageLedger.summarySince(Date.now() - days * 24 * 60 * 60 * 1_000),
@@ -894,6 +1042,7 @@ async function main(): Promise<void> {
       closing = true;
       logger.info({ signal }, 'shutting down');
       runControl.stopAll();
+      await taskScheduler.stop();
       gateway?.stop();
       await adminServer?.close().catch((error) => {
         logger.warn({ error: errorText(error) }, 'admin server close failed');
