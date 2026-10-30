@@ -70,6 +70,43 @@ describe('StreamGateway', () => {
     expect(client.disconnectCalls).toBe(1);
   });
 
+  it('共享去重命中时跳过处理', async () => {
+    const client = new FakeClient();
+    const handler = vi.fn(async () => undefined);
+    const claim = vi.fn(async () => false);
+    const gateway = new StreamGateway({
+      client,
+      handler,
+      dedupeStore: { claim },
+    });
+    await gateway.start();
+
+    await gateway.dispatch(payload(), 'msg-9');
+
+    expect(claim).toHaveBeenCalledWith('stream:msg-9', 600);
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it('共享去重异常时回退到本地去重', async () => {
+    const client = new FakeClient();
+    const handler = vi.fn(async () => undefined);
+    const claim = vi.fn(async () => {
+      throw new Error('db down');
+    });
+    const gateway = new StreamGateway({
+      client,
+      handler,
+      dedupeStore: { claim },
+    });
+    await gateway.start();
+
+    await gateway.dispatch(payload(), 'msg-10');
+    await gateway.dispatch(payload(), 'msg-10');
+
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(claim).toHaveBeenCalledTimes(1);
+  });
+
   it('收到回调先 ACK 再异步处理', async () => {
     const client = new FakeClient();
     const gate: { release?: () => void } = {};

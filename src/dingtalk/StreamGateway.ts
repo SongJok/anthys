@@ -43,6 +43,11 @@ export interface StreamGatewayOptions {
   now?: () => number;
   /** 已处理消息的去重窗口，默认 1000 条 */
   dedupeLimit?: number;
+  /** 多实例共享去重：原子领取 messageId，避免故障接管后重复回复 */
+  dedupeStore?: {
+    claim(key: string, ttlSeconds: number): Promise<boolean>;
+  };
+  dedupeTtlSeconds?: number;
 }
 
 /**
@@ -117,11 +122,19 @@ export class StreamGateway {
     data: string,
     messageId: string,
   ): Promise<void> {
-    if (messageId && this.seen.has(messageId)) {
-      this.options.logger?.info({ messageId }, 'duplicate card callback ignored');
-      return;
+    if (messageId) {
+      if (this.seen.has(messageId)) {
+        this.options.logger?.info({ messageId }, 'duplicate card callback ignored');
+        return;
+      }
+      this.remember(messageId);
+      if (
+        this.options.dedupeStore &&
+        !(await this.claimShared(`card:${messageId}`))
+      ) {
+        return;
+      }
     }
-    if (messageId) this.remember(messageId);
 
     const handler = this.options.cardActionHandler;
     if (!handler) return;
@@ -168,6 +181,7 @@ export class StreamGateway {
       return;
     }
     this.remember(messageId);
+    if (this.options.dedupeStore && !(await this.claimShared(messageId))) return;
 
     let payload: unknown;
     try {
@@ -236,5 +250,33 @@ export class StreamGateway {
     if (this.seen.size <= this.dedupeLimit) return;
     const oldest = this.seen.keys().next();
     if (!oldest.done) this.seen.delete(oldest.value);
+  }
+
+  /** 跨实例原子去重；未配置或无异常时直接放行 */
+  private async claimShared(key: string): Promise<boolean> {
+    const store = this.options.dedupeStore;
+    if (!store) return true;
+    try {
+      const claimed = await store.claim(
+        `stream:${key}`,
+        this.options.dedupeTtlSeconds ?? 600,
+      );
+      if (!claimed) {
+        this.options.logger?.info(
+          { messageId: key },
+          'message already handled by another instance',
+        );
+      }
+      return claimed;
+    } catch (error) {
+      this.options.logger?.warn(
+        {
+          messageId: key,
+          error: error instanceof Error ? error.message : String(error),
+        },
+        'shared dedupe unavailable, using local dedupe only',
+      );
+      return true;
+    }
   }
 }

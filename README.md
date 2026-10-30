@@ -223,6 +223,31 @@ pnpm run db:seed      # 可选：预写入默认人设与模型配置，已有�
 
 配额按 Asia/Shanghai 自然日切分。超出配额时，@ 消息直接收到配额提示且不再调用模型，主动回复则静默跳过。
 
+**规划器与子代理**
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `PLANNER_ENABLED` | `false` | 是否在长问题/工具较多时先产出 3–7 步计划再进入 ReAct 循环 |
+| `PLANNER_MIN_CHARS` | `80` | 触发规划的用户问题最小字符数 |
+| `PLANNER_MIN_TOOLS` | `8` | 触发规划的最小可用工具数（与字符数条件取或） |
+| `SUBAGENT_ENABLED` | `false` | 是否向模型暴露 `delegate_research`，派发只读子代理做专题检索 |
+| `SUBAGENT_TIMEOUT_SECONDS` | `90` | 单个子代理的墙钟上限（秒） |
+| `SUBAGENT_MAX_TOKENS` | `20000` | 单个子代理的 Token 预算 |
+
+规划器只产出步骤文本并注入系统提示，不额外占用工具调用；计划进度会在卡片轨迹中实时更新。子代理只能使用只读工具，拥有独立预算与超时，且不会触发写操作确认流程。
+
+**多实例部署（可选）**
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `CLUSTER_ENABLED` | `false` | 通过 PostgreSQL advisory lock 选主；仅 leader 消费 Stream，standby 只提供健康检查与管理端 |
+| `CLUSTER_LOCK_KEY` | `dingtalk-agent` | 选主锁名，同时用于共享状态表的命名空间 |
+| `CLUSTER_RETRY_SECONDS` | `5` | standby 重新抢主的间隔（秒） |
+| `CLUSTER_HEARTBEAT_SECONDS` | `10` | leader 续约心跳间隔（秒） |
+| `CLUSTER_CONFIG_POLL_SECONDS` | `30` | 从共享配置表拉取其他实例变更的间隔（秒） |
+
+启用集群后，去重、旁听冷却与群聊转录状态写入 `cluster_shared_state` 表，任一实例重启都不会丢失去重窗口和冷却时间。配置变更会落库，其他实例在下一轮轮询时按分区（`llm`/`loopPolicy`/`dingtalk`/`mcp`/`routes`）触发对应的热更新事件。数据库不可达时自动回退到进程内状态，单实例部署无需开启。
+
 **管理控制台与企业 MCP**
 
 | 变量 | 默认值 | 说明 |
@@ -544,6 +569,7 @@ pnpm start     # 通过 tsx 直接运行 src/index.ts
 | `user_feedback` | 用户对回答的反馈（`/feedback` 命令） |
 | `usage_ledger` | 每次模型调用的 Token、模型、耗时与场景 |
 | `scheduled_tasks` | 定时主动播报任务与下次触发时间 |
+| `cluster_shared_state` | 多实例共享的去重窗口、旁听冷却与群聊转录状态（仅集群模式写入） |
 
 ---
 

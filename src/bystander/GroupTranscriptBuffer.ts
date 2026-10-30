@@ -9,6 +9,13 @@ export interface GroupTranscriptBufferOptions {
   defaultWindowSize?: number;
   /** 最多同时跟踪多少个群，超出后淘汰最久未写入的群 */
   maxConversations?: number;
+  /** 缓冲变化回调，用于多实例共享状态持久化 */
+  onChange?: (conversationId: string) => void;
+}
+
+export interface GroupTranscriptSnapshot {
+  entries: TranscriptEntry[];
+  windowSize: number;
 }
 
 export interface FormattedTranscriptOptions {
@@ -57,6 +64,7 @@ export class GroupTranscriptBuffer {
   private readonly windows = new Map<string, number>();
   private readonly defaultWindowSize: number;
   private readonly maxConversations: number;
+  private readonly onChange?: (conversationId: string) => void;
 
   constructor(options: GroupTranscriptBufferOptions = {}) {
     this.defaultWindowSize = Math.max(
@@ -64,6 +72,7 @@ export class GroupTranscriptBuffer {
       options.defaultWindowSize ?? DEFAULT_SLIDING_WINDOW_SIZE,
     );
     this.maxConversations = Math.max(1, options.maxConversations ?? 500);
+    this.onChange = options.onChange;
   }
 
   public configure(conversationId: string, windowSize: number): void {
@@ -73,6 +82,7 @@ export class GroupTranscriptBuffer {
     if (list && list.length > size) {
       list.splice(0, list.length - size);
     }
+    this.onChange?.(conversationId);
   }
 
   public windowSize(conversationId: string): number {
@@ -101,6 +111,7 @@ export class GroupTranscriptBuffer {
     }
     this.entries.set(entry.conversationId, list);
     this.evictIfNeeded(entry.conversationId);
+    this.onChange?.(entry.conversationId);
     return true;
   }
 
@@ -143,6 +154,29 @@ export class GroupTranscriptBuffer {
   public clear(conversationId: string): void {
     this.entries.delete(conversationId);
     this.windows.delete(conversationId);
+    this.onChange?.(conversationId);
+  }
+
+  /** 供多实例共享状态导出/恢复最近窗口 */
+  public snapshot(conversationId: string): GroupTranscriptSnapshot {
+    return {
+      entries: this.recent(conversationId),
+      windowSize: this.windowSize(conversationId),
+    };
+  }
+
+  public restore(
+    conversationId: string,
+    snapshot: GroupTranscriptSnapshot,
+  ): void {
+    this.windows.set(
+      conversationId,
+      Math.max(1, Math.floor(snapshot.windowSize)),
+    );
+    const list = snapshot.entries.map((entry) => ({ ...entry }));
+    const size = this.windowSize(conversationId);
+    if (list.length > size) list.splice(0, list.length - size);
+    this.entries.set(conversationId, list);
   }
 
   public get conversationCount(): number {

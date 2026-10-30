@@ -50,6 +50,7 @@ import {
 import { CommandRouter, parseCommand } from './commands/CommandRouter.js';
 import { ToolRegistry, loadMcpServerConfigs } from './harness/ToolRegistry.js';
 import { GroupTranscriptBuffer } from './bystander/GroupTranscriptBuffer.js';
+import { CooldownLimiter } from './bystander/CooldownLimiter.js';
 import { BystanderPolicyProvider } from './bystander/BystanderPolicyProvider.js';
 import {
   BystanderTriageEngine,
@@ -66,6 +67,14 @@ import { DrizzleMemoryStore } from './db/memorySchema.js';
 import { OpenAIEmbeddingClient } from './memory/EmbeddingClient.js';
 import { createChatModel } from './react/createChatModel.js';
 import { ReActRunner } from './react/ReActRunner.js';
+import { createPlanner } from './react/Planner.js';
+import { SubagentToolProvider } from './react/SubagentToolProvider.js';
+import { ClusterStateSync } from './cluster/ClusterStateSync.js';
+import { PgAdvisoryLeadership } from './cluster/LeadershipLock.js';
+import {
+  PgSharedStateStore,
+  type SharedStateStore,
+} from './cluster/SharedStateStore.js';
 import { AdminChatOpsToolProvider } from './tools/admin/AdminChatOpsToolProvider.js';
 import { TraceCollector, createMcpAdminPort } from './admin-api/runtime.js';
 import { startAdminServer } from './admin-api/server.js';
@@ -116,6 +125,16 @@ function envEnabled(raw: string | undefined, fallback: boolean): boolean {
 function envMegabytes(raw: string | undefined, fallbackMb: number): number {
   const mb = Number(raw);
   return (Number.isFinite(mb) && mb > 0 ? mb : fallbackMb) * 1024 * 1024;
+}
+
+function envSeconds(raw: string | undefined, fallbackSeconds: number): number {
+  const seconds = Number(raw);
+  return Number.isFinite(seconds) && seconds > 0 ? seconds : fallbackSeconds;
+}
+
+function envCount(raw: string | undefined, fallback: number): number {
+  const value = Number(raw);
+  return Number.isFinite(value) && value >= 0 ? value : fallback;
 }
 
 async function runWithTimeout<T>(
@@ -200,6 +219,7 @@ async function main(): Promise<void> {
   const dbHandle = createDatabase(baseConfig.getDatabaseUrl());
   let toolRegistry: ToolRegistry | undefined;
   let gateway: StreamGateway | undefined;
+  let leadership: PgAdvisoryLeadership | undefined;
   let adminServer: ReturnType<typeof startAdminServer> | undefined;
   let streamConnected = false;
 
@@ -245,6 +265,19 @@ async function main(): Promise<void> {
     const groupDirectory = new DrizzleGroupDirectory(dbHandle.db);
     const runControl = new RunControlRegistry();
     const metrics = new MetricsRegistry();
+
+    const clusterEnabled = envEnabled(process.env.CLUSTER_ENABLED, false);
+    const sharedState: SharedStateStore | undefined = clusterEnabled
+      ? new PgSharedStateStore({
+          query: async <T>(text: string, values?: unknown[]) => {
+            const result = await dbHandle.pool.query(
+              text,
+              values as unknown[],
+            );
+            return { rows: result.rows as T[], rowCount: result.rowCount };
+          },
+        })
+      : undefined;
     let activeClient: DWClient | undefined;
     let cachedToken: { value: string; expiresAt: number } | null = null;
     const getAccessToken = async (): Promise<string> => {
@@ -362,6 +395,28 @@ async function main(): Promise<void> {
         modelRef.current.streamChat(request, signal),
     };
 
+    const planner = createPlanner({
+      model: chatModel,
+      enabled: envEnabled(process.env.PLANNER_ENABLED, false),
+      minQuestionChars: envCount(process.env.PLANNER_MIN_CHARS, 80),
+      minTools: envCount(process.env.PLANNER_MIN_TOOLS, 8),
+      logger: harnessLogger,
+    });
+    if (envEnabled(process.env.SUBAGENT_ENABLED, false)) {
+      let subagent: SubagentToolProvider | undefined;
+      subagent = new SubagentToolProvider({
+        model: chatModel,
+        providers: () => toolProviders.filter((provider) => provider !== subagent),
+        policy: () => configCenter.getLoopPolicy(),
+        timeoutMs:
+          envSeconds(process.env.SUBAGENT_TIMEOUT_SECONDS, 90) * 1_000,
+        maxTokens: envCount(process.env.SUBAGENT_MAX_TOKENS, 20_000),
+        logger: harnessLogger,
+      });
+      toolProviders.push(subagent);
+      logger.info({}, 'subagent delegation enabled');
+    }
+
     const engine = new ReActRunner({
       model: chatModel,
       toolProviders,
@@ -370,6 +425,7 @@ async function main(): Promise<void> {
       enableNativeReasoning:
         configCenter.getLLMConfig().enableNativeReasoning,
       approval: resolveToolApproval,
+      ...(planner ? { planner } : {}),
     });
 
     const routedEngines = new Map<string, ReActRunner>();
@@ -384,6 +440,7 @@ async function main(): Promise<void> {
         temperature: llm.temperature,
         enableNativeReasoning: llm.enableNativeReasoning,
         approval: resolveToolApproval,
+        ...(planner ? { planner } : {}),
       });
       routedEngines.set(model, runner);
       return runner;
@@ -402,9 +459,27 @@ async function main(): Promise<void> {
       ledger: usageLedger,
       policy: () => configCenter.getUsagePolicy(),
     });
+    let clusterSync: ClusterStateSync | undefined;
+    const scheduleSharedPersist = (conversationId: string): void => {
+      clusterSync?.schedulePersist(conversationId);
+    };
+    const cooldown = new CooldownLimiter(
+      sharedState ? { onChange: scheduleSharedPersist } : {},
+    );
     const transcriptBuffer = new GroupTranscriptBuffer({
       defaultWindowSize: bystanderConfig.slidingWindowSize,
+      ...(sharedState ? { onChange: scheduleSharedPersist } : {}),
     });
+    if (sharedState) {
+      clusterSync = new ClusterStateSync({
+        store: sharedState,
+        buffer: transcriptBuffer,
+        cooldown,
+        logger: harnessLogger,
+      });
+      await clusterSync.hydrate();
+      logger.info({}, 'shared cluster state hydrated');
+    }
     const policyProvider = new BystanderPolicyProvider({
       defaults: configCenter.getBystanderConfig(),
       store: memoryStore,
@@ -412,6 +487,7 @@ async function main(): Promise<void> {
     });
     const triage = new BystanderTriageEngine({
       buffer: transcriptBuffer,
+      cooldown,
       classifier: new LlmBystanderClassifier({
         model: chatModel,
         temperature: 0,
@@ -916,6 +992,7 @@ async function main(): Promise<void> {
     const gatewayOptions = () => ({
       logger: gatewayLogger,
       transcriptBuffer,
+      ...(sharedState ? { dedupeStore: sharedState } : {}),
       handler: handleIncoming,
       cardActionHandler: async (action: CardActionEvent) => {
         const message: InboundMessage = {
@@ -996,7 +1073,68 @@ async function main(): Promise<void> {
       metrics.set('agent_stream_connected', 1);
     };
 
-    await startGateway();
+    const startGatewayIfLeader = async (): Promise<void> => {
+      if (clusterEnabled && !leadership?.isLeader()) return;
+      if (gateway) return;
+      await startGateway();
+    };
+
+    let configPoll: ReturnType<typeof setInterval> | undefined;
+    if (clusterEnabled) {
+      leadership = new PgAdvisoryLeadership({
+        pool: {
+          connect: async () => {
+            const client = await dbHandle.pool.connect();
+            return {
+              query: async <T>(text: string, values?: unknown[]) => {
+                const result = await client.query(text, values as unknown[]);
+                return { rows: result.rows as T[] };
+              },
+              release: () => client.release(),
+            };
+          },
+        },
+        key: process.env.CLUSTER_LOCK_KEY ?? 'dingtalk-agent',
+        retryMs: envSeconds(process.env.CLUSTER_RETRY_SECONDS, 5) * 1_000,
+        heartbeatMs:
+          envSeconds(process.env.CLUSTER_HEARTBEAT_SECONDS, 10) * 1_000,
+        logger: harnessLogger,
+        onAcquired: async () => {
+          await startGatewayIfLeader();
+        },
+        onLost: () => {
+          streamConnected = false;
+          metrics.set('agent_stream_connected', 0);
+          gateway?.stop();
+          gateway = undefined;
+          runControl.stopAll();
+          logger.warn({}, 'cluster leadership lost, stream stopped');
+        },
+      });
+      leadership.start();
+      configPoll = setInterval(() => {
+        void configCenter.refresh().catch((error) => {
+          logger.warn(
+            { error: errorText(error) },
+            'failed to poll shared config',
+          );
+        });
+      }, envSeconds(process.env.CLUSTER_CONFIG_POLL_SECONDS, 30) * 1_000);
+      configPoll.unref?.();
+      logger.info(
+        {
+          lockKey: process.env.CLUSTER_LOCK_KEY ?? 'dingtalk-agent',
+          retrySeconds: envSeconds(process.env.CLUSTER_RETRY_SECONDS, 5),
+          heartbeatSeconds: envSeconds(
+            process.env.CLUSTER_HEARTBEAT_SECONDS,
+            10,
+          ),
+        },
+        'cluster mode enabled, waiting for leadership',
+      );
+    } else {
+      await startGateway();
+    }
     metrics.set('scheduler_enabled', 1);
     taskScheduler.start();
 
@@ -1038,7 +1176,8 @@ async function main(): Promise<void> {
         streamConnected = false;
         metrics.set('agent_stream_connected', 0);
         gateway?.stop();
-        void startGateway()
+        gateway = undefined;
+        void startGatewayIfLeader()
           .then(() => logger.info({}, 'stream gateway rebuilt'))
           .catch((error) =>
             logger.error({ error: errorText(error) }, 'stream gateway rebuild failed'),
@@ -1215,6 +1354,9 @@ async function main(): Promise<void> {
         } catch (error) {
           return { ready: false, detail: `数据库不可用：${errorText(error)}` };
         }
+        if (clusterEnabled && !leadership?.isLeader()) {
+          return { ready: true, detail: 'standby（本实例未持有 Stream 主锁）' };
+        }
         return streamConnected
           ? { ready: true }
           : { ready: false, detail: '钉钉 Stream 未连接' };
@@ -1251,9 +1393,14 @@ async function main(): Promise<void> {
       if (closing) return;
       closing = true;
       logger.info({ signal }, 'shutting down');
+      if (configPoll) clearInterval(configPoll);
+      await leadership?.stop();
       runControl.stopAll();
       await taskScheduler.stop();
       gateway?.stop();
+      await clusterSync?.flush().catch((error) => {
+        logger.warn({ error: errorText(error) }, 'failed to flush cluster state');
+      });
       await adminServer?.close().catch((error) => {
         logger.warn({ error: errorText(error) }, 'admin server close failed');
       });

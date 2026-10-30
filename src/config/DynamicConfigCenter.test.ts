@@ -220,6 +220,30 @@ describe('DynamicConfigCenter', () => {
     );
   });
 
+  it('refresh 拉取其他实例的配置并只发出变更分区', async () => {
+    const { center, store } = createCenter();
+    await center.init();
+    const scopes: string[] = [];
+    center.on('changed', (event) => scopes.push(event.scope));
+
+    await center.refresh();
+    expect(scopes).toEqual([]);
+
+    store.sections.llm = {
+      provider: 'openai-compatible',
+      baseUrl: 'https://api.deepseek.com/v1',
+      apiKey: 'sk-other-instance',
+      model: 'other-instance-model',
+      enableNativeReasoning: false,
+      temperature: 0.5,
+      persona: { name: '小钉', rolePrompt: '其他实例', speakingStyle: '简洁' },
+    };
+    await center.refresh();
+
+    expect(center.getLLMConfig().model).toBe('other-instance-model');
+    expect(scopes).toEqual(['llm']);
+  });
+
   it('updates loop policy, persona and MCP servers with validation', async () => {
     const { center, store } = createCenter();
     await center.init();

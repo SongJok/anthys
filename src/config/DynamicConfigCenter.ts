@@ -156,11 +156,27 @@ export class DynamicConfigCenter
     return this;
   }
 
-  /** 多实例部署时可主动拉取最新配置（不做广播，避免回路） */
+  /** 多实例部署时可主动拉取最新配置，并按分区发出变更事件（不做广播，避免回路） */
   public async refresh(): Promise<void> {
     if (!this.store) return;
+    const before = this.state;
     const sections = await this.store.loadAll();
-    this.state = this.mergeSections(this.buildDefaults(), sections);
+    const after = this.mergeSections(this.buildDefaults(), sections);
+    this.state = after;
+    const scopes = [
+      'dingtalk',
+      'llm',
+      'loopPolicy',
+      'mcpServers',
+      'mcpAccessPolicies',
+      'defaultBystanderPolicy',
+    ] as const satisfies readonly ConfigScope[];
+    for (const scope of scopes) {
+      if (JSON.stringify(before[scope]) === JSON.stringify(after[scope])) {
+        continue;
+      }
+      this.emitChange(scope, before[scope], after[scope]);
+    }
   }
 
   public isAdmin(staffId: string): boolean {

@@ -1,5 +1,7 @@
 export interface CooldownLimiterOptions {
   now?: () => number;
+  /** 冷却状态变化回调，用于多实例共享状态持久化 */
+  onChange?: (key: string) => void;
 }
 
 /**
@@ -9,9 +11,11 @@ export interface CooldownLimiterOptions {
 export class CooldownLimiter {
   private readonly lastRepliedAt = new Map<string, number>();
   private readonly now: () => number;
+  private readonly onChange?: (key: string) => void;
 
   constructor(options: CooldownLimiterOptions = {}) {
     this.now = options.now ?? Date.now;
+    this.onChange = options.onChange;
   }
 
   public isCoolingDown(key: string, cooldownSeconds: number): boolean {
@@ -28,6 +32,7 @@ export class CooldownLimiter {
 
   public markReplied(key: string, at: number = this.now()): void {
     this.lastRepliedAt.set(key, at);
+    this.onChange?.(key);
   }
 
   public lastReplied(key: string): number | undefined {
@@ -36,5 +41,11 @@ export class CooldownLimiter {
 
   public reset(key: string): void {
     this.lastRepliedAt.delete(key);
+    this.onChange?.(key);
+  }
+
+  /** 多实例接管时恢复最近一次主动回复时间 */
+  public restore(key: string, at: number): void {
+    this.lastRepliedAt.set(key, at);
   }
 }

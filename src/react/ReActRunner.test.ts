@@ -503,6 +503,56 @@ describe('ReActRunner', () => {
     expect(events.at(-1)?.type).toBe('completed');
   });
 
+  it('规划器产出计划并在工具轮后推进状态', async () => {
+    const model = new ScriptedModel([
+      toolTurn([{ index: 0, id: 'c1', name: 'current_time', args: {} }]),
+      [{ contentDelta: '时间已知。' }, { finishReason: 'stop' }],
+    ]);
+    const runner = new ReActRunner({
+      model,
+      toolProviders: [new BuiltinToolProvider()],
+      policy,
+      planner: async () => [
+        { id: 'step_1', text: '获取当前时间', status: 'pending' },
+        { id: 'step_2', text: '汇总结论', status: 'pending' },
+      ],
+    });
+    const events: AgentStreamEvent[] = [];
+
+    await runner.run({
+      messages: userMessages,
+      context: makeContext(),
+      emit: (event) => events.push(event),
+    });
+
+    const plans = events.filter((event) => event.type === 'plan');
+    expect(plans).toHaveLength(3);
+    expect(plans[0]).toMatchObject({
+      items: [
+        { text: '获取当前时间', status: 'pending' },
+        { text: '汇总结论', status: 'pending' },
+      ],
+    });
+    expect(plans[1]).toMatchObject({
+      items: [
+        { text: '获取当前时间', status: 'done' },
+        { text: '汇总结论', status: 'running' },
+      ],
+    });
+    expect(plans[2]).toMatchObject({
+      items: [
+        { text: '获取当前时间', status: 'done' },
+        { text: '汇总结论', status: 'done' },
+      ],
+    });
+    expect(
+      model.requests[0]?.messages.some(
+        (message) =>
+          message.role === 'system' && message.content.includes('执行计划'),
+      ),
+    ).toBe(true);
+  });
+
   it('模型异常时发出 error 事件并向上抛出', async () => {
     const model: ChatModel = {
       modelName: 'broken',

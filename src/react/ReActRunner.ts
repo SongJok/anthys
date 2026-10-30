@@ -9,6 +9,7 @@ import type {
   DynamicLoopPolicy,
   ExecutionContext,
   IToolProvider,
+  PlanItem,
   RunResult,
   StreamCitation,
   ToolApprovalDecision,
@@ -17,6 +18,12 @@ import type {
   ToolExecutionOutput,
   ToolSchema,
 } from '../types/core.js';
+import {
+  advancePlan,
+  finalizePlan,
+  renderPlanPrompt,
+  type Planner,
+} from './Planner.js';
 import { extractCitations } from './citations.js';
 
 const FINAL_TURN_GRACE_MS = 30_000;
@@ -56,6 +63,8 @@ export interface ReActRunnerOptions {
     request: ToolApprovalRequest,
     context: ExecutionContext,
   ) => Promise<ToolApprovalDecision>;
+  /** 复杂问题先规划再执行；返回 null 表示不需要计划 */
+  planner?: Planner;
 }
 
 interface TurnResult {
@@ -215,6 +224,24 @@ export class ReActRunner implements AgentEngine {
         if (fresh.length > 0) emit({ type: 'citation', citations: fresh });
       };
 
+      let planItems: PlanItem[] | null = null;
+      let planCursor = 0;
+      if (this.options.planner) {
+        try {
+          const planned = await this.options.planner({
+            messages: input.messages,
+            tools,
+          });
+          if (planned && planned.length > 0) {
+            planItems = planned;
+            emit({ type: 'plan', items: planned });
+            pushSystemOnce(messages, renderPlanPrompt(planned));
+          }
+        } catch {
+          // 规划失败不阻塞主链路，按无计划继续执行
+        }
+      }
+
       while (true) {
         if (runController.signal.aborted) {
           halted = '请求已取消。';
@@ -301,6 +328,12 @@ export class ReActRunner implements AgentEngine {
           break;
         }
 
+        if (planItems && planCursor < planItems.length) {
+          planCursor += 1;
+          planItems = advancePlan(planItems, planCursor);
+          emit({ type: 'plan', items: planItems });
+        }
+
         const warnings: string[] = [];
         let decision: LoopStepResult = { allowContinue: true };
         turn.toolCalls.forEach((call, index) => {
@@ -357,6 +390,11 @@ export class ReActRunner implements AgentEngine {
           reasoning += finalTurn.reasoning;
           totalTokens += finalTurn.tokens;
         }
+      }
+
+      if (planItems && !skipFinalTurn) {
+        planItems = finalizePlan(planItems);
+        emit({ type: 'plan', items: planItems });
       }
 
       if (stopped && !answer.trim()) {
