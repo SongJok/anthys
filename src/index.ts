@@ -29,6 +29,9 @@ import {
   type HarnessLogger,
 } from './harness/AgentHarness.js';
 import { RunControlRegistry } from './harness/RunControlRegistry.js';
+import { ModelRoutingEngine } from './harness/ModelRoutingEngine.js';
+import { UsageGuard } from './billing/UsageGuard.js';
+import { DrizzleUsageLedgerStore } from './db/usageSchema.js';
 import { CommandRouter, parseCommand } from './commands/CommandRouter.js';
 import { ToolRegistry, loadMcpServerConfigs } from './harness/ToolRegistry.js';
 import { GroupTranscriptBuffer } from './bystander/GroupTranscriptBuffer.js';
@@ -224,6 +227,7 @@ async function main(): Promise<void> {
       'tool registry ready',
     );
 
+    const toolProviders = toolRegistry.providers;
     const modelRef: { current: ChatModel } = {
       current: createChatModel(configCenter.getLLMConfig()),
     };
@@ -237,14 +241,41 @@ async function main(): Promise<void> {
 
     const engine = new ReActRunner({
       model: chatModel,
-      toolProviders: toolRegistry.providers,
+      toolProviders,
       policy: configCenter.getLoopPolicy(),
       temperature: configCenter.getLLMConfig().temperature,
       enableNativeReasoning:
         configCenter.getLLMConfig().enableNativeReasoning,
     });
 
+    const routedEngines = new Map<string, ReActRunner>();
+    const runnerForModel = (model: string): ReActRunner => {
+      const cached = routedEngines.get(model);
+      if (cached) return cached;
+      const llm = configCenter.getLLMConfig();
+      const runner = new ReActRunner({
+        model: createChatModel({ ...llm, model }),
+        toolProviders,
+        policy: configCenter.getLoopPolicy(),
+        temperature: llm.temperature,
+        enableNativeReasoning: llm.enableNativeReasoning,
+      });
+      routedEngines.set(model, runner);
+      return runner;
+    };
+    const routingEngine = new ModelRoutingEngine({
+      fallback: engine,
+      engineForModel: runnerForModel,
+      routing: () => configCenter.getModelRouting(),
+      isAdmin: (staffId) => configCenter.isAdmin(staffId),
+    });
+
     const memoryStore = new DrizzleMemoryStore(dbHandle.db);
+    const usageLedger = new DrizzleUsageLedgerStore(dbHandle.db);
+    const usageGuard = new UsageGuard({
+      ledger: usageLedger,
+      policy: () => configCenter.getUsagePolicy(),
+    });
     const transcriptBuffer = new GroupTranscriptBuffer({
       defaultWindowSize: bystanderConfig.slidingWindowSize,
     });
@@ -277,7 +308,7 @@ async function main(): Promise<void> {
     const personaRef = { ...configCenter.getLLMConfig().persona };
     const repository = new DrizzleConversationRepository(dbHandle.db);
     const harness = new AgentHarness({
-      engine,
+      engine: routingEngine,
       repository,
       assembler: new ContextAssembler({
         windowMessages: memoryConfig.windowMessages,
@@ -287,6 +318,7 @@ async function main(): Promise<void> {
       windowMessages: memoryConfig.windowMessages,
       logger: harnessLogger,
       memory: hierarchicalMemory,
+      usageGuard,
       bystander: {
         buffer: transcriptBuffer,
         triage,
@@ -614,6 +646,7 @@ async function main(): Promise<void> {
     configCenter.on('llm:changed', (event) => {
       const next = event.after as LLMAndPersonaConfig;
       modelRef.current = createChatModel(next);
+      routedEngines.clear();
       engine.updateTemperature(next.temperature);
       engine.updateNativeReasoning(next.enableNativeReasoning);
       Object.assign(personaRef, next.persona);
@@ -623,6 +656,7 @@ async function main(): Promise<void> {
       );
     });
     configCenter.on('loopPolicy:changed', (event) => {
+      routedEngines.clear();
       engine.updatePolicy(event.after as ReturnType<typeof configCenter.getLoopPolicy>);
       logger.info({ policy: event.after }, 'loop policy applied');
     });
@@ -812,6 +846,10 @@ async function main(): Promise<void> {
       dingtalkTester,
       chatStream: consoleChat,
       feedback: { list: (limit) => feedbackStore.list(limit) },
+      usage: {
+        summary: (days = 1) =>
+          usageLedger.summarySince(Date.now() - days * 24 * 60 * 60 * 1_000),
+      },
       metrics,
       readiness: async () => {
         try {

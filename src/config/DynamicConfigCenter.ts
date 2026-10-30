@@ -13,6 +13,8 @@ import type {
   EnterpriseBotSystemConfig,
   GroupBystanderPolicy,
   McpToolAccessPolicy,
+  ModelRoutingPolicy,
+  UsagePolicy,
 } from '../types/admin-and-console.js';
 import type {
   DynamicLoopPolicy,
@@ -214,6 +216,20 @@ export class DynamicConfigCenter
 
   public getMemoryConfig(): MemoryConfig {
     return this.defaults.getMemoryConfig();
+  }
+
+  public getUsagePolicy(): UsagePolicy {
+    return (
+      this.defaults.getUsagePolicy?.() ?? {
+        enabled: false,
+        dailyTokensPerUser: 0,
+        dailyTokensPerConversation: 0,
+      }
+    );
+  }
+
+  public getModelRouting(): ModelRoutingPolicy {
+    return this.defaults.getModelRouting?.() ?? {};
   }
 
   public getBystanderConfig(): BystanderConfig {

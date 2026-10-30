@@ -164,6 +164,65 @@ export interface ReActTraceStore {
   dailyStats(dayStartMs: number, dayEndMs: number): Promise<TraceDailyStats>;
 }
 
+/** 用量账本与配额 */
+export interface UsagePolicy {
+  enabled: boolean;
+  /** 单个员工每日 Token 上限，0 表示不限 */
+  dailyTokensPerUser: number;
+  /** 单个群每日 Token 上限，0 表示不限 */
+  dailyTokensPerConversation: number;
+}
+
+/** 按场景选择模型；空字符串表示沿用全局 llm.model */
+export interface ModelRoutingPolicy {
+  defaultModel?: string;
+  proactiveModel?: string;
+  adminModel?: string;
+}
+
+export interface UsageLedgerInput {
+  conversationId: string;
+  conversationType: '1' | '2';
+  senderStaffId: string;
+  senderNick: string;
+  model: string;
+  totalTokens: number;
+  steps: number;
+  durationMs: number;
+  proactive: boolean;
+}
+
+export interface UsageLedgerEntry extends UsageLedgerInput {
+  id: string;
+  createdAt: string;
+}
+
+export interface UsageBreakdownRow {
+  key: string;
+  label: string;
+  tokens: number;
+  turns: number;
+}
+
+export interface UsageSummary {
+  sinceMs: number;
+  totalTokens: number;
+  totalTurns: number;
+  byUser: UsageBreakdownRow[];
+  byConversation: UsageBreakdownRow[];
+}
+
+export interface UsageLedgerStore {
+  append(input: UsageLedgerInput): Promise<void>;
+  tokensSince(filter: {
+    sinceMs: number;
+    senderStaffId?: string;
+    conversationId?: string;
+  }): Promise<number>;
+  summarySince(sinceMs: number): Promise<UsageSummary>;
+  purgeBefore(epochMs: number): Promise<number>;
+}
+
 /** 用户对回答的显式反馈（/feedback 指令） */
 export interface UserFeedbackRecord {
   id: string;

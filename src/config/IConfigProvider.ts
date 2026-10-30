@@ -1,4 +1,8 @@
 import type { DynamicLoopPolicy, LLMAndPersonaConfig } from '../types/core.js';
+import type {
+  ModelRoutingPolicy,
+  UsagePolicy,
+} from '../types/admin-and-console.js';
 
 export interface DingTalkConfig {
   clientId: string;
@@ -35,6 +39,10 @@ export interface IConfigProvider {
   getDingTalkConfig(): DingTalkConfig;
   getMemoryConfig(): MemoryConfig;
   getBystanderConfig(): BystanderConfig;
+  /** 每日 Token 配额，默认关闭 */
+  getUsagePolicy?(): UsagePolicy;
+  /** 按场景选择模型，默认沿用全局模型 */
+  getModelRouting?(): ModelRoutingPolicy;
   getDatabaseUrl(): string;
   /** 校验启动必需配置，缺失时抛出可读错误 */
   assertReady(): void;

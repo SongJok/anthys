@@ -8,6 +8,7 @@ import type { DynamicConfigCenter } from '../config/DynamicConfigCenter.js';
 import type {
   GroupDirectory,
   LlmSandboxTestResult,
+  UsageSummary,
   McpServerStatusView,
   McpServerTestResult,
   ReActTraceStore,
@@ -61,6 +62,9 @@ export interface AdminApiOptions {
   ticketTtlMs?: number;
   feedback?: {
     list(limit?: number): Promise<unknown[]>;
+  };
+  usage?: {
+    summary(days?: number): Promise<UsageSummary>;
   };
 }
 
@@ -156,6 +160,26 @@ export function createAdminApp(options: AdminApiOptions): Hono {
       Number.isFinite(limit) ? limit : 50,
     );
     return c.json({ ok: true, items });
+  });
+
+  admin.get('/usage', async (c) => {
+    if (!options.usage) {
+      return c.json({
+        ok: true,
+        summary: {
+          sinceMs: 0,
+          totalTokens: 0,
+          totalTurns: 0,
+          byUser: [],
+          byConversation: [],
+        } satisfies UsageSummary,
+      });
+    }
+    const days = Number(c.req.query('days') ?? 1);
+    const summary = await options.usage.summary(
+      Number.isFinite(days) ? Math.min(90, Math.max(1, days)) : 1,
+    );
+    return c.json({ ok: true, summary });
   });
 
   admin.post('/chat/tickets', (c) => {

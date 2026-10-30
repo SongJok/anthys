@@ -21,7 +21,9 @@ import type {
   DynamicLoopPolicy,
   InboundMessage,
   RunResult,
+  RunUsage,
 } from '../types/core.js';
+import { QuotaExceededError } from '../billing/UsageGuard.js';
 
 export interface HarnessLogger {
   info(obj: Record<string, unknown>, msg: string): void;
@@ -50,6 +52,25 @@ export interface AgentHarnessOptions {
   bystander?: HarnessBystanderOptions;
   /** 压缩/摘要回看的历史消息上限，默认 200 */
   fullHistoryLimit?: number;
+  /** 每日 Token 配额与用量记账 */
+  usageGuard?: {
+    assertWithinQuota(input: {
+      senderStaffId: string;
+      conversationId: string;
+      conversationType: '1' | '2';
+    }): Promise<void>;
+    record(input: {
+      conversationId: string;
+      conversationType: '1' | '2';
+      senderStaffId: string;
+      senderNick: string;
+      model: string;
+      totalTokens: number;
+      steps: number;
+      durationMs: number;
+      proactive: boolean;
+    }): Promise<void>;
+  };
 }
 
 export interface HandleMessageOptions {
@@ -61,6 +82,10 @@ export interface ProactiveHandleOptions {
   decision: BystanderEvaluationResult;
   emit: (event: AgentStreamEvent) => void;
   signal?: AbortSignal;
+}
+
+function emptyUsage(): RunUsage {
+  return { totalTokens: 0, steps: 0, durationMs: 0 };
 }
 
 export function conversationKeyFor(message: InboundMessage): string {
@@ -94,6 +119,8 @@ export class AgentHarness {
     }
     const text = message.text.trim();
     if (!text) return null;
+    const quotaAnswer = await this.enforceQuota(message, handle.emit, false);
+    if (quotaAnswer) return quotaAnswer;
 
     const { repository, assembler, engine, policy, persona } = this.options;
     const conversation = await repository.ensureConversation({
@@ -149,10 +176,12 @@ export class AgentHarness {
         conversationType: message.conversationType,
         deadlineAt: startedAt + policy.maxWallTimeMs,
         now: this.now,
+        proactive: false,
       },
       emit: handle.emit,
       signal: handle.signal,
     });
+    await this.recordUsage(message, result, false);
 
     await repository.appendMessage({
       conversationId: conversation.id,
@@ -164,6 +193,7 @@ export class AgentHarness {
         messageId: message.messageId,
         steps: result.usage.steps,
         durationMs: result.usage.durationMs,
+        ...(result.model ? { model: result.model } : {}),
       },
     });
 
@@ -200,6 +230,7 @@ export class AgentHarness {
 
     const text = handle.decision.extractedQuery.trim() || message.text.trim();
     if (!text) return null;
+    if (await this.enforceQuota(message, handle.emit, true)) return null;
 
     const { repository, assembler, engine, policy, persona } = this.options;
     const policyConfig = await this.loadBystanderPolicy(message.conversationId);
@@ -279,10 +310,12 @@ export class AgentHarness {
         conversationType: message.conversationType,
         deadlineAt: startedAt + policy.maxWallTimeMs,
         now: this.now,
+        proactive: true,
       },
       emit: handle.emit,
       signal: handle.signal,
     });
+    await this.recordUsage(message, result, true);
 
     await repository.appendMessage({
       conversationId: conversation.id,
@@ -295,6 +328,7 @@ export class AgentHarness {
         proactive: true,
         steps: result.usage.steps,
         durationMs: result.usage.durationMs,
+        ...(result.model ? { model: result.model } : {}),
       },
     });
 
@@ -386,6 +420,74 @@ export class AgentHarness {
         'failed to load bystander policy, using defaults',
       );
       return undefined;
+    }
+  }
+
+  /**
+   * 主动回复超出配额时静默放弃，@ 消息则直接回复配额提示，避免白白调用模型。
+   */
+  private async enforceQuota(
+    message: InboundMessage,
+    emit: (event: AgentStreamEvent) => void,
+    proactive: boolean,
+  ): Promise<RunResult | null> {
+    const guard = this.options.usageGuard;
+    if (!guard) return null;
+    try {
+      await guard.assertWithinQuota({
+        senderStaffId: message.senderStaffId,
+        conversationId: message.conversationId,
+        conversationType: message.conversationType,
+      });
+      return null;
+    } catch (error) {
+      if (!(error instanceof QuotaExceededError)) throw error;
+      this.options.logger?.warn(
+        {
+          conversationId: message.conversationId,
+          senderStaffId: message.senderStaffId,
+          scope: error.scope,
+          used: error.used,
+          limit: error.limit,
+          proactive,
+        },
+        'daily token quota exceeded',
+      );
+      if (proactive) return { answer: '', reasoning: '', usage: emptyUsage() };
+      const answer = `${error.message}，配额将在次日 0 点（Asia/Shanghai）重置。`;
+      emit({ type: 'answer_delta', content: answer, final: true });
+      emit({ type: 'completed', usage: emptyUsage() });
+      return { answer, reasoning: '', usage: emptyUsage() };
+    }
+  }
+
+  private async recordUsage(
+    message: InboundMessage,
+    result: RunResult,
+    proactive: boolean,
+  ): Promise<void> {
+    const guard = this.options.usageGuard;
+    if (!guard) return;
+    try {
+      await guard.record({
+        conversationId: message.conversationId,
+        conversationType: message.conversationType,
+        senderStaffId: message.senderStaffId,
+        senderNick: message.senderNick,
+        model: result.model ?? 'unknown',
+        totalTokens: result.usage.totalTokens,
+        steps: result.usage.steps,
+        durationMs: result.usage.durationMs,
+        proactive,
+      });
+    } catch (error) {
+      this.options.logger?.warn(
+        {
+          messageId: message.messageId,
+          error: error instanceof Error ? error.message : String(error),
+        },
+        'failed to record token usage',
+      );
     }
   }
 

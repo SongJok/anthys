@@ -8,6 +8,10 @@ import type {
   IConfigProvider,
   MemoryConfig,
 } from './IConfigProvider.js';
+import type {
+  ModelRoutingPolicy,
+  UsagePolicy,
+} from '../types/admin-and-console.js';
 import {
   DEFAULT_COOLDOWN_SECONDS,
   DEFAULT_CONFIDENCE_THRESHOLD,
@@ -137,6 +141,32 @@ export class EnvConfigProvider implements IConfigProvider {
         0,
         parseNumber(this.env.BYSTANDER_DEBOUNCE_MS, 8_000),
       ),
+    };
+  }
+
+  getUsagePolicy(): UsagePolicy {
+    return {
+      enabled: parseBoolean(this.env.USAGE_QUOTA_ENABLED, false),
+      dailyTokensPerUser: Math.max(
+        0,
+        parseNumber(this.env.USAGE_DAILY_TOKENS_PER_USER, 0),
+      ),
+      dailyTokensPerConversation: Math.max(
+        0,
+        parseNumber(this.env.USAGE_DAILY_TOKENS_PER_CONVERSATION, 0),
+      ),
+    };
+  }
+
+  getModelRouting(): ModelRoutingPolicy {
+    const pick = (value: string | undefined): string | undefined => {
+      const model = value?.trim();
+      return model ? model : undefined;
+    };
+    return {
+      defaultModel: pick(this.env.LLM_ROUTE_DEFAULT_MODEL),
+      proactiveModel: pick(this.env.LLM_ROUTE_PROACTIVE_MODEL),
+      adminModel: pick(this.env.LLM_ROUTE_ADMIN_MODEL),
     };
   }
 

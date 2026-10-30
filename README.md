@@ -176,6 +176,19 @@ pnpm run db:seed      # 可选：预写入默认人设与模型配置，已有�
 | `BYSTANDER_TRIGGER_TOPICS` | `线上故障,SQL查询,接口报错,发布排期` | 重点关注主题（逗号分隔） |
 | `BYSTANDER_DEBOUNCE_MS` | `8000` | 疑似提问后的防抢答等待窗口 |
 
+**用量配额与模型路由**
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `USAGE_QUOTA_ENABLED` | `false` | 是否启用每日 Token 配额；用量流水始终记录 |
+| `USAGE_DAILY_TOKENS_PER_USER` | `0` | 单员工每自然日 Token 上限，`0` 表示不限 |
+| `USAGE_DAILY_TOKENS_PER_CONVERSATION` | `0` | 单群每自然日 Token 上限，`0` 表示不限 |
+| `LLM_ROUTE_DEFAULT_MODEL` | 空 | 默认场景改用指定模型；空则沿用 `LLM_MODEL` |
+| `LLM_ROUTE_PROACTIVE_MODEL` | 空 | 群聊主动回复使用的模型，可用于降低成本 |
+| `LLM_ROUTE_ADMIN_MODEL` | 空 | 管理员单聊使用的模型，可用于提升质量 |
+
+配额按 Asia/Shanghai 自然日切分。超出配额时，@ 消息直接收到配额提示且不再调用模型，主动回复则静默跳过。
+
 **管理控制台与企业 MCP**
 
 | 变量 | 默认值 | 说明 |
@@ -437,6 +450,7 @@ pnpm start     # 通过 tsx 直接运行 src/index.ts
 | POST | `/chat/tickets` | 换取一次性 SSE 票据（60 秒内有效、用后即焚） |
 | GET | `/api/v1/chat/stream?ticket=&question=` | 浏览器在线对话流（SSE，事件与钉钉卡片同源） |
 | GET | `/feedback` | 用户反馈列表 |
+| GET | `/usage?days=1` | 用量汇总：总 Token、按员工与按群排名 |
 
 ---
 
@@ -464,6 +478,7 @@ pnpm start     # 通过 tsx 直接运行 src/index.ts
 | `react_traces` | ReAct 执行轨迹 |
 | `admin_audit_logs` | 管理操作审计 |
 | `user_feedback` | 用户对回答的反馈（`/feedback` 命令） |
+| `usage_ledger` | 每次模型调用的 Token、模型、耗时与场景 |
 
 ---
 

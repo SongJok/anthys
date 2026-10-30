@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { AgentHarness } from './AgentHarness.js';
 import { ContextAssembler } from '../memory/ContextAssembler.js';
+import { QuotaExceededError } from '../billing/UsageGuard.js';
 import type {
   AppendMessageInput,
   ConversationRepository,
@@ -96,10 +97,14 @@ const persona = {
   speakingStyle: '简洁',
 };
 
-function createHarness(engine: AgentEngine) {
+function createHarness(
+  engine: AgentEngine,
+  usageGuard?: ConstructorParameters<typeof AgentHarness>[0]['usageGuard'],
+) {
   const { repository, conversations, rows } = createRepository();
   const harness = new AgentHarness({
     engine,
+    ...(usageGuard ? { usageGuard } : {}),
     repository,
     assembler: new ContextAssembler({ windowMessages: 20, now: () => 0 }),
     persona,
@@ -226,6 +231,43 @@ describe('AgentHarness', () => {
       'assistant',
       'user',
     ]);
+  });
+
+  it('配额用尽时直接回复提示且不调用模型', async () => {
+    const calls: { messages: unknown[] }[] = [];
+    const events: AgentStreamEvent[] = [];
+    const recorded: unknown[] = [];
+    let rejected = false;
+    const { harness, rows } = createHarness(scriptedEngine(calls), {
+      async assertWithinQuota() {
+        if (!rejected) {
+          rejected = true;
+          throw new QuotaExceededError('user', 1_000, 1_000);
+        }
+      },
+      async record(input) {
+        recorded.push(input);
+      },
+    });
+
+    const result = await harness.handleMessage(inbound(), {
+      emit: (event) => events.push(event),
+    });
+    expect(calls).toHaveLength(0);
+    expect(rows).toHaveLength(0);
+    expect(result?.answer).toContain('今日个人 Token 配额已用尽');
+    expect(events.some((event) => event.type === 'answer_delta')).toBe(true);
+
+    await harness.handleMessage(inbound({ messageId: 'msg-2' }), {
+      emit: (event) => events.push(event),
+    });
+    expect(calls).toHaveLength(1);
+    expect(recorded).toHaveLength(1);
+    expect(recorded[0]).toMatchObject({
+      senderStaffId: 'staff-1',
+      totalTokens: 12,
+      proactive: false,
+    });
   });
 
   it('引擎抛错时不写入助手消息并向上抛出', async () => {

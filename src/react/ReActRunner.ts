@@ -363,6 +363,7 @@ export class ReActRunner implements AgentEngine {
         reasoning,
         narration,
         citations,
+        model: this.options.model.modelName,
         usage,
       };
     } catch (error) {
@@ -378,7 +379,14 @@ export class ReActRunner implements AgentEngine {
           emit({ type: 'answer_delta', content: answer });
         }
         emit({ type: 'completed', usage });
-        return { answer, reasoning, narration, citations, usage };
+        return {
+          answer,
+          reasoning,
+          narration,
+          citations,
+          model: this.options.model.modelName,
+          usage,
+        };
       }
       const message = error instanceof Error ? error.message : String(error);
       emit({ type: 'error', message, retryable: !isAbortError(error) });

@@ -131,6 +131,8 @@ export interface ExecutionContext {
   now: () => number;
   /** 本次运行的中止信号（用户停止 / 超时 / 进程退出） */
   signal?: AbortSignal;
+  /** 是否为群聊主动回复，供模型路由与用量归因使用 */
+  proactive?: boolean;
 }
 
 /** 工具的结构化返回值：文本 + 引用 / 卸载信息 */
@@ -239,6 +241,8 @@ export interface RunResult {
   /** 带工具轮次中的过程说明（已被 answer_reset 移出正文） */
   narration?: string;
   citations?: StreamCitation[];
+  /** 实际执行本次推理的模型名（模型路由后可能不同于全局配置） */
+  model?: string;
   usage: RunUsage;
 }
 

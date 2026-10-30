@@ -331,6 +331,19 @@ async function createTestContext(staticDir?: string): Promise<TestContext> {
     metrics,
     readiness: async () => ({ ready: true }),
     feedback: { list: async () => [] },
+    usage: {
+      summary: async (days = 1) => ({
+        sinceMs: days * 1_000,
+        totalTokens: 120,
+        totalTurns: 2,
+        byUser: [
+          { key: 'u-1', label: '张三', tokens: 120, turns: 2 },
+        ],
+        byConversation: [
+          { key: 'cid-dev', label: 'cid-dev', tokens: 120, turns: 2 },
+        ],
+      }),
+    },
     ...(staticDir ? { staticDir } : {}),
     now: () => NOW,
   });
@@ -767,6 +780,20 @@ describe('在线对话与可观测性接口', () => {
     const ready = await ctx.app.request('/readyz');
     expect(ready.status).toBe(200);
     expect((await body(ready)).ready).toBe(true);
+  });
+
+  it('用量汇总接口返回按员工与按群聚合', async () => {
+    const denied = await ctx.app.request('/api/v1/admin/usage');
+    expect(denied.status).toBe(401);
+
+    const response = await ctx.app.request('/api/v1/admin/usage?days=7', {
+      headers: headers(),
+    });
+    expect(response.status).toBe(200);
+    const payload = await body(response);
+    expect(payload.summary.totalTokens).toBe(120);
+    expect(payload.summary.sinceMs).toBe(7_000);
+    expect(payload.summary.byUser[0].label).toBe('张三');
   });
 
   it('用户反馈接口在未接入存储时返回空列表', async () => {
