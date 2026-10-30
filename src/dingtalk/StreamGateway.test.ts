@@ -147,6 +147,18 @@ describe('StreamGateway', () => {
     expect(handler).not.toHaveBeenCalled();
   });
 
+  it('缺少 messageId 时不 ACK 也不处理', async () => {
+    const client = new FakeClient();
+    const handler = vi.fn(async () => undefined);
+    const gateway = new StreamGateway({ client, handler });
+    await gateway.start();
+
+    client.callback?.({ headers: { messageId: '' }, data: payload() });
+
+    expect(client.acks).toEqual([]);
+    expect(handler).not.toHaveBeenCalled();
+  });
+
   it('handler 抛错时不让 dispatch 失败', async () => {
     const client = new FakeClient();
     const gateway = new StreamGateway({

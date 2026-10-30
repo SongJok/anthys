@@ -67,6 +67,10 @@ export class StreamGateway {
   /** 同步 ACK 后异步处理，保证钉钉不会因处理耗时重推消息 */
   public onRawMessage(message: StreamCallbackMessage): void {
     const messageId = message.headers?.messageId ?? '';
+    if (!messageId) {
+      this.options.logger?.warn({}, 'stream message without messageId ignored');
+      return;
+    }
     this.options.client.socketCallBackResponse(messageId, {
       status: 'SUCCESS',
     });
