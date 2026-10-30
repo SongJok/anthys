@@ -10,6 +10,7 @@ export default defineConfig({
     './src/db/usageSchema.ts',
     './src/db/clusterSchema.ts',
     './src/db/governanceSchema.ts',
+    './src/db/glossarySchema.ts',
   ],
   out: './drizzle',
   dialect: 'postgresql',

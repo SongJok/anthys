@@ -253,3 +253,60 @@ export interface DeletionResult {
   deleted: Record<string, number>;
   attachmentsRemoved: number;
 }
+
+export type GlossaryTimeliness = 'long_term' | 'project' | 'retired';
+export type GlossarySensitivity = 'public' | 'team' | 'sensitive';
+
+export interface GlossaryTerm {
+  id: string;
+  standardName: string;
+  aliases: string[];
+  definition: string;
+  usageScenarios: string;
+  examples: string[];
+  misconceptions: string;
+  department: string;
+  timeliness: GlossaryTimeliness;
+  sensitivity: GlossarySensitivity;
+  docLinks: string[];
+  injectToPrompt: boolean;
+  promptPriority: number;
+  hitCount: number;
+  lastUpdatedAt: number;
+  createdAt: number;
+  updatedAt: number;
+  updatedBy: string;
+}
+
+export interface GlossaryStats {
+  total: number;
+  injected: number;
+  retired: number;
+  sensitive: number;
+  missingDefinition: number;
+  byTimeliness: Record<GlossaryTimeliness, number>;
+  bySensitivity: Record<GlossarySensitivity, number>;
+}
+
+export type GlossaryValidationSeverity = 'error' | 'warning' | 'info';
+
+export interface GlossaryValidationIssue {
+  termId: string;
+  standardName: string;
+  severity: GlossaryValidationSeverity;
+  field: string;
+  message: string;
+}
+
+export interface GlossaryValidationReport {
+  checked: number;
+  errors: number;
+  warnings: number;
+  infos: number;
+  issues: GlossaryValidationIssue[];
+}
+
+export interface GlossaryPromptPreview {
+  prompt: string;
+  terms: GlossaryTerm[];
+}

@@ -53,6 +53,7 @@ export type AdminActionType =
   | 'UPDATE_RETENTION'
   | 'PURGE_DATA'
   | 'DELETE_USER_DATA'
+  | 'UPDATE_GLOSSARY'
   | 'QUERY_STATS';
 
 /** 2. 管理员单聊管控审计记录契约 */

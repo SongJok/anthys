@@ -5,6 +5,12 @@ import type {
   DefaultGroupPolicy,
   DeletionResult,
   DingTalkConfig,
+  GlossaryPromptPreview,
+  GlossarySensitivity,
+  GlossaryStats,
+  GlossaryTerm,
+  GlossaryTimeliness,
+  GlossaryValidationReport,
   GroupPolicy,
   KnownGroup,
   LLMConfig,
@@ -190,6 +196,52 @@ export const api = {
     request<{ result: DeletionResult }>('/governance/delete-user', {
       method: 'POST',
       body: JSON.stringify({ staffId, confirm: true }),
+    }),
+
+  glossary: (params: {
+    query?: string;
+    department?: string;
+    timeliness?: GlossaryTimeliness;
+    sensitivity?: GlossarySensitivity;
+    onlyInjected?: boolean;
+    sort?: 'updated' | 'hits' | 'priority';
+    limit?: number;
+    offset?: number;
+  } = {}) => {
+    const search = new URLSearchParams();
+    if (params.query) search.set('query', params.query);
+    if (params.department) search.set('department', params.department);
+    if (params.timeliness) search.set('timeliness', params.timeliness);
+    if (params.sensitivity) search.set('sensitivity', params.sensitivity);
+    if (params.onlyInjected) search.set('onlyInjected', 'true');
+    if (params.sort) search.set('sort', params.sort);
+    if (params.limit !== undefined) search.set('limit', String(params.limit));
+    if (params.offset !== undefined) search.set('offset', String(params.offset));
+    const suffix = search.toString();
+    return request<{ terms: GlossaryTerm[]; total: number }>(
+      `/glossary${suffix ? `?${suffix}` : ''}`,
+    );
+  },
+  glossaryStats: () => request<{ stats: GlossaryStats }>('/glossary/stats'),
+  glossaryValidate: () =>
+    request<{ report: GlossaryValidationReport }>('/glossary/validate'),
+  glossaryPromptPreview: (limit?: number) =>
+    request<GlossaryPromptPreview>(
+      `/glossary/prompt-preview${limit ? `?limit=${limit}` : ''}`,
+    ),
+  createGlossary: (body: Partial<GlossaryTerm> & { standardName: string; definition: string }) =>
+    request<{ term: GlossaryTerm }>('/glossary', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  updateGlossary: (id: string, body: Partial<GlossaryTerm>) =>
+    request<{ term: GlossaryTerm }>(`/glossary/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
+  deleteGlossary: (id: string) =>
+    request<{ removed: boolean }>(`/glossary/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
     }),
 };
 

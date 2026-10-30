@@ -13,6 +13,8 @@ export interface BuildContextInput {
   userText: string;
   now?: () => number;
   memoryContext?: AssembledMemoryContext;
+  /** 术语库等额外系统指令，排在 persona 之后、三层记忆之前 */
+  extraSystemPrompt?: string;
   /** 群聊历史需要保留发言人，避免多个成员的话被当成同一个人 */
   groupChat?: boolean;
   /** 当前发言人的昵称，仅群聊使用 */
@@ -59,12 +61,17 @@ export class ContextAssembler {
       input.memoryContext?.personaSystemPrompt?.trim() ||
       buildSystemPrompt(input.persona, input.now ?? this.options.now);
     const memorySections = this.renderMemorySections(input.memoryContext);
+    const systemContent = [
+      basePrompt,
+      input.extraSystemPrompt?.trim(),
+      memorySections,
+    ]
+      .filter((section): section is string => Boolean(section))
+      .join('\n\n');
     const messages: ChatMessage[] = [
       {
         role: 'system',
-        content: memorySections
-          ? `${basePrompt}\n\n${memorySections}`
-          : basePrompt,
+        content: systemContent,
       },
     ];
 

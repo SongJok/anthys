@@ -15,6 +15,7 @@ import type {
   BystanderEvaluationResult,
   GroupBystanderPolicy,
 } from '../types/bystander-and-memory.js';
+import type { GlossaryContextProvider } from '../types/glossary.js';
 import type {
   AgentEngine,
   AgentStreamEvent,
@@ -54,6 +55,8 @@ export interface AgentHarnessOptions {
   logger?: HarnessLogger;
   memory?: HierarchicalMemoryManager;
   bystander?: HarnessBystanderOptions;
+  /** 术语知识库：高频注入 + 按问检索，命中后写入系统提示 */
+  glossary?: GlossaryContextProvider;
   /** 压缩/摘要回看的历史消息上限，默认 200 */
   fullHistoryLimit?: number;
   /** 每日 Token 配额与用量记账 */
@@ -160,12 +163,14 @@ export class AgentHarness {
       text,
       message.messageId,
     );
+    const glossaryPrompt = await this.buildGlossaryPrompt(message, text);
     const messages = assembler.build({
       persona,
       history,
       userText: text,
       now: this.now,
       memoryContext,
+      ...(glossaryPrompt ? { extraSystemPrompt: glossaryPrompt } : {}),
       groupChat: message.conversationType === '2',
       userSpeaker: message.senderNick,
     });
@@ -296,6 +301,7 @@ export class AgentHarness {
       conversation.id,
       text,
     );
+    const glossaryPrompt = await this.buildGlossaryPrompt(message, text);
     const proactiveInstruction = [
       '你正在钉钉群里主动提供帮助（并非被 @）。',
       '请结合群聊旁听记录核实问题，直接给出结论、关键依据与下一步建议。',
@@ -308,6 +314,7 @@ export class AgentHarness {
       userText: proactiveInstruction,
       now: this.now,
       memoryContext,
+      ...(glossaryPrompt ? { extraSystemPrompt: glossaryPrompt } : {}),
       groupChat: true,
       // 主动回复的 user 消息是系统指令，不使用成员昵称加前缀
     });
@@ -431,6 +438,31 @@ export class AgentHarness {
       activeTurnMessages: [{ role: 'user', content: userText }],
       semanticQuery: userText,
     });
+  }
+
+  private async buildGlossaryPrompt(
+    message: InboundMessage,
+    query: string,
+  ): Promise<string | undefined> {
+    const glossary = this.options.glossary;
+    if (!glossary) return undefined;
+    try {
+      const result = await glossary.buildContext({
+        conversationType: message.conversationType,
+        query,
+      });
+      const prompt = result.prompt.trim();
+      return prompt || undefined;
+    } catch (error) {
+      this.options.logger?.warn(
+        {
+          conversationId: message.conversationId,
+          error: error instanceof Error ? error.message : String(error),
+        },
+        'failed to build glossary prompt, continuing without it',
+      );
+      return undefined;
+    }
   }
 
   private async loadBystanderPolicy(

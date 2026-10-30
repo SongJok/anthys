@@ -17,8 +17,10 @@ import type {
   ReActTraceStore,
 } from '../types/admin-and-console.js';
 import type { EnterpriseMcpServerConfig } from '../types/mcp-and-sandbox.js';
+import type { GlossaryAdminPort } from '../types/glossary.js';
 import { createConfigRoutes } from './routes/configRoutes.js';
 import { createMcpRoutes } from './routes/mcpRoutes.js';
+import { createGlossaryRoutes } from './routes/glossaryRoutes.js';
 import { createGovernanceRoutes } from '../governance/governanceRoutes.js';
 import type { DataGovernancePort } from '../governance/DataRetention.js';
 import {
@@ -80,6 +82,8 @@ export interface AdminApiOptions {
   };
   /** 数据治理：保留期、清理与级联删除 */
   governance?: DataGovernancePort;
+  /** 术语知识库管理 */
+  glossary?: GlossaryAdminPort;
 }
 
 export interface AdminServerOptions extends AdminApiOptions {
@@ -171,6 +175,15 @@ export function createAdminApp(options: AdminApiOptions): Hono {
       '/',
       createGovernanceRoutes({
         governance: options.governance,
+        configCenter: options.configCenter,
+      }),
+    );
+  }
+  if (options.glossary) {
+    admin.route(
+      '/',
+      createGlossaryRoutes({
+        glossary: options.glossary,
         configCenter: options.configCenter,
       }),
     );

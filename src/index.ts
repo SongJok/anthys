@@ -70,6 +70,9 @@ import {
   LlmSemanticFactExtractor,
 } from './memory/HierarchicalMemoryManager.js';
 import { DrizzleMemoryStore } from './db/memorySchema.js';
+import { DrizzleGlossaryStore } from './db/glossarySchema.js';
+import { GlossaryService } from './glossary/GlossaryService.js';
+import { GlossaryToolProvider } from './tools/glossary/GlossaryToolProvider.js';
 import { OpenAIEmbeddingClient } from './memory/EmbeddingClient.js';
 import { createChatModel } from './react/createChatModel.js';
 import { ReActRunner } from './react/ReActRunner.js';
@@ -372,6 +375,32 @@ async function main(): Promise<void> {
     });
     dwsAuth = authManager;
 
+    const embeddingConfig = configCenter.getEmbeddingConfig();
+    const embeddingClient =
+      embeddingConfig?.enabled && embeddingConfig.apiKey
+        ? new OpenAIEmbeddingClient({
+            baseUrl: embeddingConfig.baseUrl,
+            apiKey: embeddingConfig.apiKey,
+            model: embeddingConfig.model,
+            dimensions: embeddingConfig.dimensions,
+          })
+        : undefined;
+    if (embeddingClient) {
+      logger.info(
+        { model: embeddingConfig?.model, dimensions: embeddingClient.dimensions },
+        'semantic memory embedding enabled',
+      );
+    }
+
+    const glossary = new GlossaryService({
+      store: new DrizzleGlossaryStore(dbHandle.db),
+      ...(embeddingClient ? { embedding: embeddingClient } : {}),
+      logger: harnessLogger,
+      promptEnabled: envEnabled(process.env.GLOSSARY_PROMPT_ENABLED, true),
+      promptLimit: envCount(process.env.GLOSSARY_PROMPT_LIMIT, 80),
+      retrievalLimit: envCount(process.env.GLOSSARY_RETRIEVAL_LIMIT, 4),
+    });
+
     toolRegistry = await ToolRegistry.create({
       mcpServers: configCenter.getMcpServers(),
       enableDws: configCenter.getSystemConfig().dingtalk.dwsCliEnabled,
@@ -408,6 +437,10 @@ async function main(): Promise<void> {
         ? { dwsBinary: process.env.DWS_BINARY.trim() }
         : {}),
       adminProvider,
+      glossaryProvider: new GlossaryToolProvider({
+        service: glossary,
+        logger: harnessLogger,
+      }),
       ...(artifactDeliveryEnabled
         ? {
             artifactProvider: (workspace) => {
@@ -603,22 +636,6 @@ async function main(): Promise<void> {
       debounceMs: bystanderConfig.debounceMs,
       logger: harnessLogger,
     });
-    const embeddingConfig = configCenter.getEmbeddingConfig();
-    const embeddingClient =
-      embeddingConfig?.enabled && embeddingConfig.apiKey
-        ? new OpenAIEmbeddingClient({
-            baseUrl: embeddingConfig.baseUrl,
-            apiKey: embeddingConfig.apiKey,
-            model: embeddingConfig.model,
-            dimensions: embeddingConfig.dimensions,
-          })
-        : undefined;
-    if (embeddingClient) {
-      logger.info(
-        { model: embeddingConfig?.model, dimensions: embeddingClient.dimensions },
-        'semantic memory embedding enabled',
-      );
-    }
     const hierarchicalMemory = new HierarchicalMemoryManager({
       summaryStore: memoryStore,
       semanticStore: memoryStore,
@@ -644,6 +661,7 @@ async function main(): Promise<void> {
       windowMessages: memoryConfig.windowMessages,
       logger: harnessLogger,
       memory: hierarchicalMemory,
+      glossary,
       usageGuard,
       bystander: {
         buffer: transcriptBuffer,
@@ -1614,6 +1632,7 @@ async function main(): Promise<void> {
       configCenter,
       traces: traceStore,
       groups: groupDirectory,
+      glossary,
       mcp: {
         status: () => mcpPort.status(),
         applyServers: async (servers) => {
@@ -1669,10 +1688,18 @@ async function main(): Promise<void> {
           configCenter.getBystanderConfig().confidenceThreshold,
         debounceMs: configCenter.getBystanderConfig().debounceMs,
         compressionThresholdTokens: memoryConfig.compressionThresholdTokens,
+        glossaryEmbeddingEnabled: Boolean(embeddingClient),
         adminApiPort: adminServer.port,
       },
       'dingtalk agent is ready',
     );
+
+    void glossary.backfillEmbeddings().catch((error) => {
+      logger.warn(
+        { error: errorText(error) },
+        'glossary embedding backfill failed',
+      );
+    });
 
     let closing = false;
     const shutdown = async (signal: string): Promise<void> => {

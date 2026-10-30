@@ -100,11 +100,13 @@ const persona = {
 function createHarness(
   engine: AgentEngine,
   usageGuard?: ConstructorParameters<typeof AgentHarness>[0]['usageGuard'],
+  glossary?: ConstructorParameters<typeof AgentHarness>[0]['glossary'],
 ) {
   const { repository, conversations, rows } = createRepository();
   const harness = new AgentHarness({
     engine,
     ...(usageGuard ? { usageGuard } : {}),
+    ...(glossary ? { glossary } : {}),
     repository,
     assembler: new ContextAssembler({ windowMessages: 20, now: () => 0 }),
     persona,
@@ -183,6 +185,48 @@ describe('AgentHarness', () => {
     expect(firstMessages[0]?.role).toBe('system');
     expect(firstMessages[0]?.content).toContain('小钉');
     expect(firstMessages.at(-1)).toEqual({ role: 'user', content: '现在几点？' });
+  });
+
+  it('把术语库上下文并入系统提示，异常时不影响主流程', async () => {
+    const calls: { messages: unknown[] }[] = [];
+    const inputs: Array<{ conversationType: string; query?: string }> = [];
+    const { harness } = createHarness(scriptedEngine(calls), undefined, {
+      async buildContext(input) {
+        inputs.push({
+          conversationType: input.conversationType,
+          ...(input.query !== undefined ? { query: input.query } : {}),
+        });
+        return {
+          prompt: '## 企业术语知识库\n- CQ：变更请求单',
+          injected: [],
+          retrieved: [],
+        };
+      },
+    });
+
+    await harness.handleMessage(inbound({ text: 'CQ 怎么提' }), {
+      emit: () => undefined,
+    });
+    const messages = calls[0]?.messages as Array<{ role: string; content: string }>;
+    expect(messages[0]?.content).toContain('## 企业术语知识库');
+    expect(messages[0]?.content).toContain('小钉');
+    expect(inputs[0]).toMatchObject({ conversationType: '1', query: 'CQ 怎么提' });
+
+    const failing: { messages: unknown[] }[] = [];
+    const { harness: brokenHarness } = createHarness(
+      scriptedEngine(failing),
+      undefined,
+      {
+        async buildContext() {
+          throw new Error('db down');
+        },
+      },
+    );
+    const result = await brokenHarness.handleMessage(inbound(), {
+      emit: () => undefined,
+    });
+    expect(result?.answer).toBe('现在是十点。');
+    expect(failing).toHaveLength(1);
   });
 
   it('明文写明 20 分钟以上任务时直接拒接，不调用模型也不写库', async () => {

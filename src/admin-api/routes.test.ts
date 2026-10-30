@@ -29,6 +29,19 @@ import type {
 } from '../types/admin-and-console.js';
 import type { EnterpriseMcpServerConfig } from '../types/mcp-and-sandbox.js';
 import type { GroupBystanderPolicy } from '../types/bystander-and-memory.js';
+import {
+  GlossaryConflictError,
+  GlossaryNotFoundError,
+  type GlossaryAdminPort,
+  type GlossaryListFilter,
+  type GlossaryListResult,
+  type GlossaryPromptPreview,
+  type GlossaryStats,
+  type GlossaryTerm,
+  type GlossaryTermInput,
+  type GlossaryTermPatch,
+  type GlossaryValidationReport,
+} from '../types/glossary.js';
 import { createAdminApp } from './server.js';
 import { MCP_SECRET_MASK } from './routes/mcpRoutes.js';
 import { MetricsRegistry } from './metrics.js';
@@ -75,6 +88,115 @@ class MemoryAuditStore {
   }
   async list(limit: number): Promise<AdminAuditLog[]> {
     return this.entries.slice(0, limit);
+  }
+}
+
+class FakeGlossary implements GlossaryAdminPort {
+  public readonly terms: GlossaryTerm[] = [];
+
+  async list(filter: GlossaryListFilter): Promise<GlossaryListResult> {
+    const query = filter.query?.trim().toLowerCase() ?? '';
+    const filtered = this.terms.filter((term) => {
+      if (filter.timeliness && term.timeliness !== filter.timeliness) return false;
+      if (filter.sensitivity && term.sensitivity !== filter.sensitivity) return false;
+      if (filter.onlyInjected && !term.injectToPrompt) return false;
+      if (!query) return true;
+      return [term.standardName, ...term.aliases, term.definition].some((field) =>
+        field.toLowerCase().includes(query),
+      );
+    });
+    const limit = filter.limit ?? 200;
+    const offset = filter.offset ?? 0;
+    return { total: filtered.length, terms: filtered.slice(offset, offset + limit) };
+  }
+
+  async get(id: string): Promise<GlossaryTerm | null> {
+    return this.terms.find((term) => term.id === id) ?? null;
+  }
+
+  async create(input: GlossaryTermInput, updatedBy: string): Promise<GlossaryTerm> {
+    if (this.terms.some((term) => term.standardName === input.standardName)) {
+      throw new GlossaryConflictError('标准名称已存在');
+    }
+    const term: GlossaryTerm = {
+      id: `glossary-${this.terms.length + 1}`,
+      standardName: input.standardName,
+      aliases: input.aliases ?? [],
+      definition: input.definition,
+      usageScenarios: input.usageScenarios ?? '',
+      examples: input.examples ?? [],
+      misconceptions: input.misconceptions ?? '',
+      department: input.department ?? '',
+      timeliness: input.timeliness ?? 'long_term',
+      sensitivity: input.sensitivity ?? 'team',
+      docLinks: input.docLinks ?? [],
+      injectToPrompt: input.injectToPrompt ?? true,
+      promptPriority: input.promptPriority ?? 0,
+      hitCount: 0,
+      lastUpdatedAt: NOW,
+      createdAt: NOW,
+      updatedAt: NOW,
+      updatedBy,
+    };
+    this.terms.push(term);
+    return term;
+  }
+
+  async update(
+    id: string,
+    patch: GlossaryTermPatch,
+    updatedBy: string,
+  ): Promise<GlossaryTerm> {
+    const index = this.terms.findIndex((term) => term.id === id);
+    if (index < 0) throw new GlossaryNotFoundError('未找到术语');
+    const next: GlossaryTerm = {
+      ...this.terms[index]!,
+      ...patch,
+      aliases: patch.aliases ?? this.terms[index]!.aliases,
+      examples: patch.examples ?? this.terms[index]!.examples,
+      docLinks: patch.docLinks ?? this.terms[index]!.docLinks,
+      updatedBy,
+      updatedAt: NOW,
+      lastUpdatedAt: NOW,
+    };
+    this.terms[index] = next;
+    return next;
+  }
+
+  async remove(id: string): Promise<boolean> {
+    const index = this.terms.findIndex((term) => term.id === id);
+    if (index < 0) return false;
+    this.terms.splice(index, 1);
+    return true;
+  }
+
+  async validate(): Promise<GlossaryValidationReport> {
+    return {
+      checked: this.terms.length,
+      errors: 0,
+      warnings: 0,
+      infos: 0,
+      issues: [],
+    };
+  }
+
+  async stats(): Promise<GlossaryStats> {
+    return {
+      total: this.terms.length,
+      injected: this.terms.filter((term) => term.injectToPrompt).length,
+      retired: this.terms.filter((term) => term.timeliness === 'retired').length,
+      sensitive: this.terms.filter((term) => term.sensitivity === 'sensitive')
+        .length,
+      missingDefinition: this.terms.filter((term) => !term.definition.trim())
+        .length,
+      byTimeliness: { long_term: 0, project: 0, retired: 0 },
+      bySensitivity: { public: 0, team: 0, sensitive: 0 },
+    };
+  }
+
+  async previewPrompt(limit?: number): Promise<GlossaryPromptPreview> {
+    const terms = this.terms.slice(0, limit ?? 80);
+    return { terms, prompt: `## 企业术语知识库（${terms.length}）` };
   }
 }
 
@@ -191,6 +313,7 @@ interface TestContext {
   app: Hono;
   center: DynamicConfigCenter;
   traces: FakeTraces;
+  glossary: FakeGlossary;
   applied: EnterpriseMcpServerConfig[][];
   tested: string[];
   metrics: MetricsRegistry;
@@ -213,6 +336,7 @@ async function body(response: Response): Promise<any> {
 
 async function createTestContext(staticDir?: string): Promise<TestContext> {
   const traces = new FakeTraces();
+  const glossary = new FakeGlossary();
   traces.records.push(
     {
       id: 'trace-1',
@@ -330,6 +454,7 @@ async function createTestContext(staticDir?: string): Promise<TestContext> {
     configCenter: center,
     traces,
     groups: new FakeGroups(),
+    glossary,
     mcp: {
       status,
       applyServers: async (servers) => {
@@ -395,7 +520,7 @@ async function createTestContext(staticDir?: string): Promise<TestContext> {
     now: () => NOW,
   });
 
-  return { app, center, traces, applied, tested, metrics, ranTasks };
+  return { app, center, traces, glossary, applied, tested, metrics, ranTasks };
 }
 
 let ctx: TestContext;
@@ -907,5 +1032,127 @@ describe('在线对话与可观测性接口', () => {
     });
     expect(response.status).toBe(200);
     expect((await body(response)).items).toEqual([]);
+  });
+});
+
+describe('术语知识库管理接口', () => {
+  it('未带 Token 时拒绝访问术语库', async () => {
+    const response = await ctx.app.request('/api/v1/admin/glossary');
+    expect(response.status).toBe(401);
+  });
+
+  it('完成术语的增删改查、校验与提示词预览', async () => {
+    const created = await ctx.app.request('/api/v1/admin/glossary', {
+      method: 'POST',
+      headers: headers(),
+      body: JSON.stringify({
+        standardName: 'CQ',
+        aliases: ['变更请求'],
+        definition: '变更请求单，用于线上变更审批',
+        usageScenarios: '上线前提交',
+        examples: ['这个改动先提个 CQ'],
+        misconceptions: '不是客服工单',
+        department: '研发效能',
+        timeliness: 'long_term',
+        sensitivity: 'team',
+        docLinks: ['https://docs.example.com/cq'],
+        promptPriority: 90,
+      }),
+    });
+    expect(created.status).toBe(200);
+    const createdBody = await body(created);
+    expect(createdBody.term.standardName).toBe('CQ');
+    expect(createdBody.term.aliases).toEqual(['变更请求']);
+
+    const listed = await ctx.app.request(
+      '/api/v1/admin/glossary?query=CQ&sort=priority',
+      { headers: headers() },
+    );
+    const listedBody = await body(listed);
+    expect(listedBody.total).toBe(1);
+    expect(listedBody.terms[0].id).toBe(createdBody.term.id);
+
+    const stats = await body(
+      await ctx.app.request('/api/v1/admin/glossary/stats', {
+        headers: headers(),
+      }),
+    );
+    expect(stats.stats.total).toBe(1);
+
+    const validation = await body(
+      await ctx.app.request('/api/v1/admin/glossary/validate', {
+        headers: headers(),
+      }),
+    );
+    expect(validation.report.checked).toBe(1);
+
+    const preview = await body(
+      await ctx.app.request('/api/v1/admin/glossary/prompt-preview?limit=5', {
+        headers: headers(),
+      }),
+    );
+    expect(preview.prompt).toContain('企业术语知识库');
+    expect(preview.terms).toHaveLength(1);
+
+    const updated = await ctx.app.request(
+      `/api/v1/admin/glossary/${createdBody.term.id}`,
+      {
+        method: 'PUT',
+        headers: headers(),
+        body: JSON.stringify({ sensitivity: 'sensitive', promptPriority: 10 }),
+      },
+    );
+    expect(updated.status).toBe(200);
+    expect((await body(updated)).term.sensitivity).toBe('sensitive');
+
+    const audit = await ctx.center.listAuditLogs(50);
+    const entries = audit.filter((item) => item.actionType === 'UPDATE_GLOSSARY');
+    expect(entries.length).toBeGreaterThanOrEqual(2);
+    expect(JSON.stringify(entries)).not.toContain('变更请求单，用于线上变更审批');
+    expect(entries[0]?.afterSnapshot).toMatchObject({ action: 'update' });
+
+    const removed = await ctx.app.request(
+      `/api/v1/admin/glossary/${createdBody.term.id}`,
+      { method: 'DELETE', headers: headers() },
+    );
+    expect(removed.status).toBe(200);
+    expect((await body(removed)).removed).toBe(true);
+
+    const missing = await ctx.app.request(
+      `/api/v1/admin/glossary/${createdBody.term.id}`,
+      { headers: headers() },
+    );
+    expect(missing.status).toBe(404);
+  });
+
+  it('重复名称返回 409，非法枚举返回 400', async () => {
+    const payload = {
+      standardName: 'PB 系统',
+      definition: '价格配置后台',
+    };
+    const first = await ctx.app.request('/api/v1/admin/glossary', {
+      method: 'POST',
+      headers: headers(),
+      body: JSON.stringify(payload),
+    });
+    expect(first.status).toBe(200);
+
+    const duplicate = await ctx.app.request('/api/v1/admin/glossary', {
+      method: 'POST',
+      headers: headers(),
+      body: JSON.stringify(payload),
+    });
+    expect(duplicate.status).toBe(409);
+
+    const invalid = await ctx.app.request('/api/v1/admin/glossary', {
+      method: 'POST',
+      headers: headers(),
+      body: JSON.stringify({
+        standardName: '非法时效',
+        definition: '测试',
+        timeliness: 'forever',
+      }),
+    });
+    expect(invalid.status).toBe(400);
   });
 });

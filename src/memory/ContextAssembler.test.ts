@@ -47,6 +47,23 @@ describe('ContextAssembler', () => {
     expect(messages[1]).toEqual({ role: 'user', content: '你好' });
   });
 
+  it('把术语库等额外系统提示合并到同一条 system 消息', () => {
+    const assembler = new ContextAssembler({ windowMessages: 20, now: fixedNow });
+    const messages = assembler.build({
+      persona,
+      history: [],
+      userText: 'CQ 是什么',
+      extraSystemPrompt: '## 企业术语知识库\n- CQ：变更请求单',
+    });
+
+    expect(messages).toHaveLength(2);
+    const system = messages[0]?.content ?? '';
+    expect(system).toContain('小钉');
+    expect(system).toContain('## 企业术语知识库');
+    expect(system).toContain('CQ：变更请求单');
+    expect(messages[1]).toEqual({ role: 'user', content: 'CQ 是什么' });
+  });
+
   it('按窗口截断历史并保持原有顺序', () => {
     const assembler = new ContextAssembler({
       windowMessages: 2,
