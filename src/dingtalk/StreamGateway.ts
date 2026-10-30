@@ -1,5 +1,7 @@
 import { TOPIC_ROBOT } from 'dingtalk-stream';
 import { parseStreamMessage } from './MessageParser.js';
+import { toTranscriptEntry } from '../bystander/GroupTranscriptBuffer.js';
+import type { GroupTranscriptBuffer } from '../bystander/GroupTranscriptBuffer.js';
 import type { InboundMessage } from '../types/core.js';
 
 export interface StreamCallbackMessage {
@@ -27,6 +29,13 @@ export interface StreamGatewayLogger {
 export interface StreamGatewayOptions {
   client: StreamClient;
   handler: (message: InboundMessage) => Promise<void>;
+  /**
+   * 群聊非@消息的旁听处理入口：由调用方判断是否主动插话。
+   * 未提供时保持旧行为（直接丢弃）。
+   */
+  bystanderHandler?: (message: InboundMessage) => Promise<void>;
+  /** 群聊旁听缓冲池，所有群消息（含@）都会先写入 */
+  transcriptBuffer?: GroupTranscriptBuffer;
   logger?: StreamGatewayLogger;
   now?: () => number;
   /** 已处理消息的去重窗口，默认 1000 条 */
@@ -35,7 +44,8 @@ export interface StreamGatewayOptions {
 
 /**
  * 钉钉 Stream 网关：收到回调后立即 ACK（防止钉钉 60s 内重试），
- * 再异步解析并交给 AgentHarness。群聊中未 @ 机器人的消息直接忽略。
+ * 再异步解析并交给 AgentHarness。群聊消息全部写入旁听缓冲，
+ * 未 @ 机器人的消息交给旁听引擎评估，@ 消息走主处理链路。
  */
 export class StreamGateway {
   private readonly seen = new Map<string, number>();
@@ -105,12 +115,12 @@ export class StreamGateway {
       this.options.logger?.info({ messageId }, 'non-text stream message ignored');
       return;
     }
-    if (message.conversationType === '2' && !message.isAtBot) {
-      this.options.logger?.info(
-        { messageId, conversationId: message.conversationId },
-        'group message without @bot ignored',
-      );
-      return;
+    if (message.conversationType === '2') {
+      this.options.transcriptBuffer?.append(toTranscriptEntry(message));
+      if (!message.isAtBot) {
+        await this.dispatchBystander(message);
+        return;
+      }
     }
 
     try {
@@ -123,6 +133,30 @@ export class StreamGateway {
           error: error instanceof Error ? error.stack ?? error.message : String(error),
         },
         'agent handler failed',
+      );
+    }
+  }
+
+  /** 非@群消息交由旁听引擎评估，异常不得影响后续消息处理 */
+  private async dispatchBystander(message: InboundMessage): Promise<void> {
+    const handler = this.options.bystanderHandler;
+    if (!handler) {
+      this.options.logger?.info(
+        { messageId: message.messageId, conversationId: message.conversationId },
+        'group message without @bot ignored',
+      );
+      return;
+    }
+    try {
+      await handler(message);
+    } catch (error) {
+      this.options.logger?.error(
+        {
+          messageId: message.messageId,
+          conversationId: message.conversationId,
+          error: error instanceof Error ? error.stack ?? error.message : String(error),
+        },
+        'bystander handler failed',
       );
     }
   }

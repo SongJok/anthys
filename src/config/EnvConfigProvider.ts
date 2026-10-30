@@ -4,9 +4,16 @@ import type {
 } from '../types/core.js';
 import type {
   DingTalkConfig,
+  BystanderConfig,
   IConfigProvider,
   MemoryConfig,
 } from './IConfigProvider.js';
+import {
+  DEFAULT_COOLDOWN_SECONDS,
+  DEFAULT_CONFIDENCE_THRESHOLD,
+  DEFAULT_SLIDING_WINDOW_SIZE,
+  DEFAULT_TRIGGER_TOPICS,
+} from '../types/bystander-and-memory.js';
 
 function parseNumber(value: string | undefined, fallback: number): number {
   if (value === undefined || value.trim() === '') return fallback;
@@ -77,6 +84,58 @@ export class EnvConfigProvider implements IConfigProvider {
       windowMessages: Math.max(
         1,
         parseNumber(this.env.MEMORY_WINDOW_MESSAGES, 20),
+      ),
+      compressionThresholdTokens: Math.max(
+        1,
+        parseNumber(this.env.MEMORY_COMPRESSION_THRESHOLD_TOKENS, 12_000),
+      ),
+      compressionRatio: Math.min(
+        0.9,
+        Math.max(0.1, parseNumber(this.env.MEMORY_COMPRESSION_RATIO, 0.6)),
+      ),
+      semanticLimit: Math.max(1, parseNumber(this.env.MEMORY_SEMANTIC_LIMIT, 6)),
+    };
+  }
+
+  getBystanderConfig(): BystanderConfig {
+    const topics = (this.env.BYSTANDER_TRIGGER_TOPICS ?? '')
+      .split(',')
+      .map((topic) => topic.trim())
+      .filter(Boolean);
+    return {
+      bystanderEnabled: parseBoolean(this.env.BYSTANDER_ENABLED, true),
+      proactiveReplyEnabled: parseBoolean(
+        this.env.BYSTANDER_PROACTIVE_REPLY,
+        true,
+      ),
+      slidingWindowSize: Math.max(
+        1,
+        parseNumber(
+          this.env.BYSTANDER_SLIDING_WINDOW_SIZE,
+          DEFAULT_SLIDING_WINDOW_SIZE,
+        ),
+      ),
+      cooldownSeconds: Math.max(
+        0,
+        parseNumber(
+          this.env.BYSTANDER_COOLDOWN_SECONDS,
+          DEFAULT_COOLDOWN_SECONDS,
+        ),
+      ),
+      confidenceThreshold: Math.min(
+        1,
+        Math.max(
+          0,
+          parseNumber(
+            this.env.BYSTANDER_CONFIDENCE_THRESHOLD,
+            DEFAULT_CONFIDENCE_THRESHOLD,
+          ),
+        ),
+      ),
+      triggerTopics: topics.length > 0 ? topics : [...DEFAULT_TRIGGER_TOPICS],
+      debounceMs: Math.max(
+        0,
+        parseNumber(this.env.BYSTANDER_DEBOUNCE_MS, 8_000),
       ),
     };
   }

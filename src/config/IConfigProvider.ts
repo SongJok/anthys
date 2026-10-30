@@ -9,6 +9,24 @@ export interface DingTalkConfig {
 
 export interface MemoryConfig {
   windowMessages: number;
+  /** 触发情景记忆压缩的单会话上下文 Token 阈值 */
+  compressionThresholdTokens: number;
+  /** 每次压缩覆盖的对话比例，默认 0.6 */
+  compressionRatio: number;
+  /** 语义记忆单次召回条数 */
+  semanticLimit: number;
+}
+
+/** 群聊旁听与主动回复的全局默认值，可被数据库策略覆盖 */
+export interface BystanderConfig {
+  bystanderEnabled: boolean;
+  proactiveReplyEnabled: boolean;
+  slidingWindowSize: number;
+  cooldownSeconds: number;
+  confidenceThreshold: number;
+  triggerTopics: string[];
+  /** 疑似提问后的防抢答等待窗口，默认 8000ms */
+  debounceMs: number;
 }
 
 export interface IConfigProvider {
@@ -16,6 +34,7 @@ export interface IConfigProvider {
   getLoopPolicy(): DynamicLoopPolicy;
   getDingTalkConfig(): DingTalkConfig;
   getMemoryConfig(): MemoryConfig;
+  getBystanderConfig(): BystanderConfig;
   getDatabaseUrl(): string;
   /** 校验启动必需配置，缺失时抛出可读错误 */
   assertReady(): void;

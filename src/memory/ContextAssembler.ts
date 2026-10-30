@@ -1,4 +1,5 @@
 import type { ChatMessage, StoredMessage } from '../types/core.js';
+import type { AssembledMemoryContext } from '../types/bystander-and-memory.js';
 
 export interface PersonaInput {
   name: string;
@@ -11,6 +12,7 @@ export interface BuildContextInput {
   history: StoredMessage[];
   userText: string;
   now?: () => number;
+  memoryContext?: AssembledMemoryContext;
 }
 
 const TOOL_GUIDANCE = [
@@ -48,10 +50,16 @@ export class ContextAssembler {
   ) {}
 
   public build(input: BuildContextInput): ChatMessage[] {
+    const basePrompt =
+      input.memoryContext?.personaSystemPrompt?.trim() ||
+      buildSystemPrompt(input.persona, input.now ?? this.options.now);
+    const memorySections = this.renderMemorySections(input.memoryContext);
     const messages: ChatMessage[] = [
       {
         role: 'system',
-        content: buildSystemPrompt(input.persona, input.now ?? this.options.now),
+        content: memorySections
+          ? `${basePrompt}\n\n${memorySections}`
+          : basePrompt,
       },
     ];
 
@@ -70,5 +78,31 @@ export class ContextAssembler {
 
     messages.push({ role: 'user', content: input.userText });
     return messages;
+  }
+
+  private renderMemorySections(
+    memory: AssembledMemoryContext | undefined,
+  ): string {
+    if (!memory) return '';
+    const sections: string[] = [];
+    if (memory.userSemanticProfile.trim()) {
+      sections.push(
+        '【发言人与团队画像】',
+        memory.userSemanticProfile.trim(),
+      );
+    }
+    if (memory.groupRecentTranscript.trim()) {
+      sections.push(
+        '【群聊旁听记录（最近，含发言人/时间）】',
+        memory.groupRecentTranscript.trim(),
+        '回答 @ 追问时可结合以上群聊背景，无需让用户重复描述。',
+      );
+    }
+    if (memory.episodicSummary.trim()) {
+      sections.push('【历史会话摘要】', memory.episodicSummary.trim());
+    }
+    return sections.length > 0
+      ? ['## 三层记忆上下文', ...sections].join('\n')
+      : '';
   }
 }
