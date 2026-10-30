@@ -1298,6 +1298,23 @@ async function main(): Promise<void> {
     const handleBystanderMessage = async (
       message: InboundMessage,
     ): Promise<void> => {
+      // 旁听消息不进入 ReAct，但控制台的「最近活跃」要反映真实群消息
+      try {
+        await repository.ensureConversation({
+          conversationKey: conversationKeyFor(message),
+          conversationType: message.conversationType,
+          title: conversationTitleFor(message),
+          metadata: {
+            conversationId: message.conversationId,
+            senderStaffId: message.senderStaffId,
+          },
+        });
+      } catch (error) {
+        logger.warn(
+          { conversationId: message.conversationId, error: errorText(error) },
+          'failed to record group activity',
+        );
+      }
       // 群里不 @ 也可以使用 /stop 等控制指令
       if (parseCommand(message.text)) {
         await commandRouter.tryHandle(message);

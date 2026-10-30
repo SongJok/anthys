@@ -403,25 +403,67 @@ export class DrizzleGroupDirectory {
       .where(eq(conversations.conversationType, '2'))
       .orderBy(desc(conversations.updatedAt));
     const policies = await this.db.select().from(bystanderPolicies);
-    const policyByGroup = new Map(
-      policies.map((row) => [row.conversationId, row]),
+    return mergeKnownGroups(
+      rows.flatMap((row) => {
+        const metadata = row.metadata as { conversationId?: unknown };
+        return typeof metadata.conversationId === 'string'
+          ? [
+              {
+                conversationId: metadata.conversationId,
+                title: row.title,
+                lastActiveAt: row.updatedAt.getTime(),
+              },
+            ]
+          : [];
+      }),
+      policies.map(toGroupPolicy),
     );
-    const groups: KnownGroup[] = [];
-    for (const row of rows) {
-      const metadata = row.metadata as { conversationId?: unknown };
-      if (typeof metadata.conversationId !== 'string') continue;
-      const policy = policyByGroup.get(metadata.conversationId);
-      groups.push({
-        conversationId: metadata.conversationId,
-        title: row.title,
-        conversationType: '2',
-        bystanderEnabled: policy?.bystanderEnabled ?? null,
-        proactiveReplyEnabled: policy?.proactiveReplyEnabled ?? null,
-        lastActiveAt: row.updatedAt.getTime(),
-      });
-    }
-    return groups;
   }
+}
+
+/**
+ * 合并「见过的群」与「配过策略的群」：
+ * 只配了策略还没收到过消息的群也要能出现在控制台里，否则无法再编辑或关闭。
+ */
+export function mergeKnownGroups(
+  conversationsSeen: Array<{
+    conversationId: string;
+    title: string | null;
+    lastActiveAt: number | null;
+  }>,
+  policies: GroupBystanderPolicy[],
+): KnownGroup[] {
+  const policyByGroup = new Map(
+    policies.map((policy) => [policy.conversationId, policy]),
+  );
+  const seen = new Set<string>();
+  const groups: KnownGroup[] = [];
+  for (const row of conversationsSeen) {
+    if (seen.has(row.conversationId)) continue;
+    seen.add(row.conversationId);
+    const policy = policyByGroup.get(row.conversationId);
+    groups.push({
+      conversationId: row.conversationId,
+      title: row.title,
+      conversationType: '2',
+      bystanderEnabled: policy?.bystanderEnabled ?? null,
+      proactiveReplyEnabled: policy?.proactiveReplyEnabled ?? null,
+      lastActiveAt: row.lastActiveAt,
+    });
+  }
+  for (const policy of policies) {
+    if (seen.has(policy.conversationId)) continue;
+    seen.add(policy.conversationId);
+    groups.push({
+      conversationId: policy.conversationId,
+      title: null,
+      conversationType: '2',
+      bystanderEnabled: policy.bystanderEnabled,
+      proactiveReplyEnabled: policy.proactiveReplyEnabled,
+      lastActiveAt: null,
+    });
+  }
+  return groups;
 }
 
 /** 用户反馈：/feedback 指令落库，供运营复盘与评测集沉淀 */
