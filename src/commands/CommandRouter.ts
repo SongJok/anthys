@@ -7,6 +7,10 @@ export interface CommandRuntime {
   resetConversation(message: InboundMessage): Promise<void>;
   status(): Promise<string> | string;
   lastTrace(conversationId: string): Promise<string>;
+  /** DWS CLI 授权状态（管理员） */
+  dwsStatus(): Promise<string> | string;
+  /** 发起 DWS 设备码重新授权（管理员） */
+  dwsLogin(message: InboundMessage): Promise<string>;
   setMuted(conversationId: string, muted: boolean): Promise<void>;
   recordFeedback(input: {
     conversationId: string;
@@ -36,6 +40,8 @@ const HELP_TEXT = [
   '- `/retry` 重试上一条问题',
   '- `/reset` 清空本会话上下文',
   '- `/trace` 查看最近一次执行轨迹摘要',
+  '- `/dws-status` 查看 DWS 授权状态（管理员）',
+  '- `/dws-login` 重新发起 DWS 设备授权（管理员）',
   '- `/mute` / `/unmute` 暂停或恢复本群旁听（管理员）',
   '- `/feedback <内容>` 提交对本次回答的反馈',
   '- `/confirm` 执行等待确认的写操作',
@@ -105,6 +111,19 @@ export class CommandRouter {
       case 'trace':
         await runtime.reply(message, await runtime.lastTrace(message.conversationId));
         return true;
+      case 'dws-status':
+      case 'dws-login': {
+        if (!runtime.isAdmin(message.senderStaffId)) {
+          await runtime.reply(message, '只有管理员可以查看或重新发起 DWS 授权。');
+          return true;
+        }
+        const text =
+          command.name === 'dws-login'
+            ? await runtime.dwsLogin(message)
+            : await runtime.dwsStatus();
+        await runtime.reply(message, text);
+        return true;
+      }
       case 'mute':
       case 'unmute': {
         if (message.conversationType !== '2') {

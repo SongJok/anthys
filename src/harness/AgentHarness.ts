@@ -78,12 +78,15 @@ export interface HandleMessageOptions {
   signal?: AbortSignal;
   /** 系统发起的主动播报（定时任务），影响用量归因与模型路由 */
   proactive?: boolean;
+  /** 工具需要用户干预时向会话追加提醒（如重新授权） */
+  notify?: (text: string) => Promise<void> | void;
 }
 
 export interface ProactiveHandleOptions {
   decision: BystanderEvaluationResult;
   emit: (event: AgentStreamEvent) => void;
   signal?: AbortSignal;
+  notify?: (text: string) => Promise<void> | void;
 }
 
 function emptyUsage(): RunUsage {
@@ -179,6 +182,7 @@ export class AgentHarness {
         deadlineAt: startedAt + policy.maxWallTimeMs,
         now: this.now,
         proactive: handle.proactive ?? false,
+        ...(handle.notify ? { notify: handle.notify } : {}),
       },
       emit: handle.emit,
       signal: handle.signal,
@@ -313,6 +317,7 @@ export class AgentHarness {
         deadlineAt: startedAt + policy.maxWallTimeMs,
         now: this.now,
         proactive: true,
+        ...(handle.notify ? { notify: handle.notify } : {}),
       },
       emit: handle.emit,
       signal: handle.signal,

@@ -45,6 +45,8 @@ function runtime(overrides: Partial<CommandRuntime> = {}): {
     },
     status: () => '模型：openai / gpt-4o',
     lastTrace: async () => '最近一次执行：刚刚',
+    dwsStatus: () => 'DWS 授权：已授权',
+    dwsLogin: async () => '已发起 DWS 设备授权。',
     setMuted: async (cid, muted) => {
       calls.mute.push([cid, muted]);
     },
@@ -151,5 +153,20 @@ describe('CommandRouter', () => {
     const { router, replies } = runtime();
     await router.tryHandle(message({ text: '/deploy' }));
     expect(replies[0]).toContain('/help');
+  });
+
+  it('/dws-status 与 /dws-login 仅管理员可用', async () => {
+    const denied = runtime({ isAdmin: () => false });
+    await denied.router.tryHandle(message({ text: '/dws-status' }));
+    expect(denied.replies[0]).toContain('只有管理员');
+
+    const allowed = runtime({
+      dwsStatus: () => 'DWS 授权：已授权',
+      dwsLogin: async () => '已发起 DWS 设备授权，授权码：HVSD-BJVT',
+    });
+    await allowed.router.tryHandle(message({ text: '/dws-status' }));
+    await allowed.router.tryHandle(message({ text: '/dws-login' }));
+    expect(allowed.replies[0]).toContain('已授权');
+    expect(allowed.replies[1]).toContain('HVSD-BJVT');
   });
 });

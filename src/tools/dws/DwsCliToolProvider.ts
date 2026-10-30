@@ -10,11 +10,14 @@ import {
   type DwsDomain,
   type DwsRunResult,
 } from './DwsCliRunner.js';
+import type { DwsAuthManager, DwsAuthStatus } from './DwsAuthManager.js';
 
 const DOC_TARGETS = ['doc', 'wiki'] as const;
 const DOC_ACTIONS = ['search', 'read', 'list', 'get'] as const;
 const ORG_RESOURCES = ['contact', 'calendar', 'todo', 'approval'] as const;
 const ORG_ACTIONS = ['search', 'get', 'list', 'self', 'today', 'freebusy'] as const;
+const AUTH_FAILURE_HINT =
+  /登录|授权|auth|token|expired|unauth|401|403|未登录|过期|失效/i;
 
 type DocTarget = (typeof DOC_TARGETS)[number];
 type DocAction = (typeof DOC_ACTIONS)[number];
@@ -23,6 +26,11 @@ type OrgAction = (typeof ORG_ACTIONS)[number];
 
 export interface DwsCliToolProviderOptions {
   runner?: DwsCliRunner;
+  /** 授权过期时触发提醒与设备码登录 */
+  auth?: DwsAuthManager;
+  /** 管理员判定；只有管理员可以发起重新授权 */
+  isAdmin?: (staffId: string) => boolean;
+  now?: () => number;
 }
 
 function requireString(
@@ -90,9 +98,17 @@ function formatResult(
 export class DwsCliToolProvider implements IToolProvider {
   public readonly providerName = 'dws';
   private readonly runner: DwsCliRunner;
+  private readonly auth?: DwsAuthManager;
+  private readonly isAdmin: (staffId: string) => boolean;
+  private readonly now: () => number;
+  /** 同一会话 2 分钟内只提示一次，避免同轮多次工具调用重复弹消息 */
+  private readonly lastNoticeAt = new Map<string, number>();
 
   constructor(options: DwsCliToolProviderOptions = {}) {
     this.runner = options.runner ?? new DwsCliRunner();
+    this.auth = options.auth;
+    this.isAdmin = options.isAdmin ?? (() => false);
+    this.now = options.now ?? Date.now;
   }
 
   public async getTools(_ctx: ExecutionContext): Promise<ToolDefinition[]> {
@@ -104,7 +120,13 @@ export class DwsCliToolProvider implements IToolProvider {
     request: DwsCommandRequest,
     page: number,
   ): Promise<string> {
-    const remaining = ctx.deadlineAt - ctx.now();
+    if (ctx.deadlineAt - this.now() <= 0) {
+      throw new Error('执行已超时，无法调用 DWS');
+    }
+    const gate = await this.checkAuthorization(ctx);
+    if (gate) return gate;
+
+    const remaining = ctx.deadlineAt - this.now();
     if (remaining <= 0) {
       throw new Error('执行已超时，无法调用 DWS');
     }
@@ -112,7 +134,98 @@ export class DwsCliToolProvider implements IToolProvider {
       page,
       timeoutMs: Math.min(15_000, remaining),
     });
+    if (result.exitCode !== 0 && this.auth && AUTH_FAILURE_HINT.test(result.stderr)) {
+      const status = await this.auth.status({ force: true });
+      if (status.state === 'expired') {
+        return this.authorizationPrompt(ctx, status);
+      }
+    }
     return formatResult(request, result);
+  }
+
+  private async checkAuthorization(
+    ctx: ExecutionContext,
+  ): Promise<string | null> {
+    if (!this.auth) return null;
+    const status = await this.auth.status();
+    if (status.state !== 'expired') return null;
+    return this.authorizationPrompt(ctx, status);
+  }
+
+  /**
+   * DWS 授权过期时：管理员直接发起设备码登录并把链接推给当前会话；
+   * 非管理员提示联系管理员。两种情况都会登记“登录成功后自动续跑”。
+   */
+  private async authorizationPrompt(
+    ctx: ExecutionContext,
+    status: DwsAuthStatus,
+  ): Promise<string> {
+    const auth = this.auth!;
+    const admin = this.isAdmin(ctx.senderStaffId);
+    let ticket = auth.activeLogin();
+    let startError: string | undefined;
+    if (admin && !ticket) {
+      try {
+        ticket = await auth.startLogin({ startedBy: ctx.senderStaffId });
+      } catch (error) {
+        startError = error instanceof Error ? error.message : String(error);
+      }
+    }
+    auth.markPending(ctx.conversationId, { resume: true });
+
+    let text: string;
+    if (!admin) {
+      text =
+        'DWS 授权已过期，暂时无法查询企业文档与组织数据。请联系管理员发送 /dws-login 完成重新授权，授权成功后我会自动继续刚才的问题。';
+    } else if (ticket) {
+      text = [
+        'DWS 授权已过期，需要重新授权后才能继续查询企业数据。',
+        '请在钉钉中打开以下链接完成授权（15 分钟内有效）：',
+        ticket.verifyUrl,
+        `授权码：${ticket.userCode}`,
+        '授权完成后我会自动继续刚才的问题。',
+      ].join('\n');
+    } else {
+      text = `DWS 授权已过期，自动发起重新授权失败：${startError ?? '未知原因'}。请稍后发送 /dws-login 重试。`;
+    }
+
+    if (ctx.notify) {
+      const now = this.now();
+      const lastAt = this.lastNoticeAt.get(ctx.conversationId) ?? 0;
+      if (now - lastAt >= 120_000) {
+        try {
+          await ctx.notify(text);
+          this.lastNoticeAt.set(ctx.conversationId, now);
+          if (this.lastNoticeAt.size > 200) {
+            for (const [key, at] of this.lastNoticeAt) {
+              if (now - at > 600_000) this.lastNoticeAt.delete(key);
+            }
+          }
+        } catch {
+          // 通知失败不应阻断工具返回
+        }
+      }
+    }
+
+    return JSON.stringify({
+      ok: false,
+      authRequired: true,
+      authState: status.state,
+      ...(status.message ? { reason: status.message } : {}),
+      ...(ticket
+        ? {
+            loginUrl: ticket.verifyUrl,
+            userCode: ticket.userCode,
+            expiresInSeconds: Math.max(
+              0,
+              Math.ceil((ticket.expiresAt - this.now()) / 1000),
+            ),
+          }
+        : {}),
+      instruction: admin
+        ? 'DWS 授权已过期，已向用户发送重新授权链接与授权码。不要重复调用 DWS 工具；直接简要说明需要用户完成授权，授权成功后系统会自动继续。'
+        : 'DWS 授权已过期且当前用户不是管理员，已提示其联系管理员。不要重复调用 DWS 工具；告知用户等待管理员完成授权，授权成功后系统会自动继续。',
+    });
   }
 
   private docTool(): ToolDefinition {

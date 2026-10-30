@@ -75,6 +75,7 @@ import {
   type SharedStateStore,
 } from './cluster/SharedStateStore.js';
 import { AdminChatOpsToolProvider } from './tools/admin/AdminChatOpsToolProvider.js';
+import { DwsAuthManager } from './tools/dws/DwsAuthManager.js';
 import { TraceCollector, createMcpAdminPort } from './admin-api/runtime.js';
 import { startAdminServer } from './admin-api/server.js';
 import { MetricsRegistry } from './admin-api/metrics.js';
@@ -236,6 +237,7 @@ async function main(): Promise<void> {
   let leadership: PgAdvisoryLeadership | undefined;
   let adminServer: ReturnType<typeof startAdminServer> | undefined;
   let retentionService: DataRetentionService | undefined;
+  let dwsAuth: DwsAuthManager | undefined;
   let streamConnected = false;
 
   try {
@@ -339,9 +341,20 @@ async function main(): Promise<void> {
       maxBytes: artifactMaxBytes,
     });
 
+    const authManager = new DwsAuthManager({
+      binary: process.env.DWS_BINARY?.trim() || 'dws',
+      logger: harnessLogger,
+    });
+    dwsAuth = authManager;
+
     toolRegistry = await ToolRegistry.create({
       mcpServers: configCenter.getMcpServers(),
       enableDws: configCenter.getSystemConfig().dingtalk.dwsCliEnabled,
+      dwsAuth: authManager,
+      dwsIsAdmin: (staffId) => configCenter.isAdmin(staffId),
+      ...(process.env.DWS_BINARY?.trim()
+        ? { dwsBinary: process.env.DWS_BINARY.trim() }
+        : {}),
       adminProvider,
       ...(artifactDeliveryEnabled
         ? {
@@ -708,6 +721,55 @@ async function main(): Promise<void> {
           `答案摘要：${latest.answer.slice(0, 200)}`,
         ].join('\n');
       },
+      dwsStatus: async () => {
+        const status = await authManager.status({ force: true });
+        const label =
+          status.state === 'authenticated'
+            ? '已授权'
+            : status.state === 'expired'
+              ? '已过期，需要重新授权'
+              : '不可用';
+        return [
+          `DWS 授权：${label}`,
+          ...(status.userName
+            ? [
+                `账号：${status.userName}${
+                  status.corpName ? ` @ ${status.corpName}` : ''
+                }`,
+              ]
+            : []),
+          ...(status.expiresAt ? [`访问令牌到期：${status.expiresAt}`] : []),
+          ...(status.refreshExpiresAt
+            ? [`刷新令牌到期：${status.refreshExpiresAt}`]
+            : []),
+          ...(status.message ? [`说明：${status.message}`] : []),
+        ].join('\n');
+      },
+      dwsLogin: async (message) => {
+        const current = await authManager.status({ force: true });
+        if (current.state === 'authenticated') {
+          return 'DWS 授权当前有效，无需重新登录。';
+        }
+        let ticket = authManager.activeLogin();
+        if (!ticket) {
+          try {
+            ticket = await authManager.startLogin({
+              startedBy: message.senderStaffId,
+            });
+          } catch (error) {
+            const reason =
+              error instanceof Error ? error.message : String(error);
+            return `发起 DWS 授权失败：${reason}`;
+          }
+        }
+        authManager.markPending(message.conversationId, { resume: false });
+        return [
+          '已发起 DWS 设备授权，请在钉钉中打开以下链接完成授权（15 分钟内有效）：',
+          ticket.verifyUrl,
+          `授权码：${ticket.userCode}`,
+          '授权完成后我会在这里通知你。',
+        ].join('\n');
+      },
       setMuted: async (conversationId, muted) => {
         await configCenter.updateGroupPolicy(conversationId, {
           bystanderEnabled: !muted,
@@ -800,6 +862,7 @@ async function main(): Promise<void> {
           emit,
           signal: run.signal,
           proactive,
+          notify: async (text) => replyTo(message, text),
         });
         await streamer.finish();
         await recordTrace(collector, message, result, proactive);
@@ -877,6 +940,7 @@ async function main(): Promise<void> {
           decision,
           emit,
           signal: run.signal,
+          notify: async (text) => replyTo(message, text),
         });
         await streamer.finish();
         await recordTrace(collector, message, result, true);
@@ -899,6 +963,59 @@ async function main(): Promise<void> {
         metrics.set('agent_active_runs', runControl.activeCount());
       }
     }
+
+    authManager.on('login-success', ({ staffId, status }) => {
+      const pending = authManager.takePending();
+      logger.info(
+        { staffId, user: status.userName, pending: pending.length },
+        'dws authorization restored',
+      );
+      for (const entry of pending) {
+        const last = runControl.lastMessage(entry.conversationId);
+        if (!last) continue;
+        if (!entry.resume) {
+          void replyTo(
+            last,
+            `DWS 授权已恢复${status.userName ? `（${status.userName}）` : ''}，可以继续使用 DWS 查询。`,
+          ).catch((error) =>
+            logger.warn(
+              { error: errorText(error) },
+              'dws resume notice failed',
+            ),
+          );
+          continue;
+        }
+        void (async () => {
+          await replyTo(last, 'DWS 授权已恢复，正在继续刚才的问题…');
+          await handleIncoming(last);
+        })().catch((error) =>
+          logger.warn(
+            {
+              conversationId: entry.conversationId,
+              error: errorText(error),
+            },
+            'dws resume failed',
+          ),
+        );
+      }
+    });
+    authManager.on('login-failed', ({ staffId, reason }) => {
+      const pending = authManager.takePending();
+      logger.warn(
+        { staffId, reason, pending: pending.length },
+        'dws authorization not restored',
+      );
+      for (const entry of pending) {
+        const last = runControl.lastMessage(entry.conversationId);
+        if (!last) continue;
+        void replyTo(
+          last,
+          `DWS 重新授权未完成：${reason}。发送 /dws-login 可重试。`,
+        ).catch((error) =>
+          logger.warn({ error: errorText(error) }, 'dws failure notice failed'),
+        );
+      }
+    });
 
     const executeScheduledTask = async (task: ScheduledTask): Promise<void> => {
       const now = Date.now();
@@ -1443,6 +1560,7 @@ async function main(): Promise<void> {
       if (configPoll) clearInterval(configPoll);
       await leadership?.stop();
       runControl.stopAll();
+      dwsAuth?.dispose();
       await taskScheduler.stop();
       retentionService?.stop();
       gateway?.stop();

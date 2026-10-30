@@ -143,6 +143,8 @@ export interface ExecutionContext {
   signal?: AbortSignal;
   /** 是否为群聊主动回复，供模型路由与用量归因使用 */
   proactive?: boolean;
+  /** 运行中向当前会话追加一条文本提醒（工具需要用户干预时使用） */
+  notify?: (text: string) => Promise<void> | void;
 }
 
 /** 工具的结构化返回值：文本 + 引用 / 卸载信息 */

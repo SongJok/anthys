@@ -9,6 +9,7 @@ import { BuiltinToolProvider } from '../react/BuiltinTools.js';
 import { expandEnvPlaceholder } from '../config/envPlaceholder.js';
 import { DwsCliRunner } from '../tools/dws/DwsCliRunner.js';
 import { DwsCliToolProvider } from '../tools/dws/DwsCliToolProvider.js';
+import type { DwsAuthManager } from '../tools/dws/DwsAuthManager.js';
 import {
   IsolatedSandbox,
   type IsolatedSandboxOptions,
@@ -52,6 +53,12 @@ export interface ToolRegistryOptions {
   enableDws?: boolean;
   enableSandbox?: boolean;
   dwsRunner?: DwsCliRunner;
+  /** DWS 授权状态与设备码登录（缺省时不检测授权） */
+  dwsAuth?: DwsAuthManager;
+  /** 只有管理员可以触发 DWS 重新授权 */
+  dwsIsAdmin?: (staffId: string) => boolean;
+  /** dws 可执行文件路径，默认读取 DWS_BINARY 或 PATH 中的 dws */
+  dwsBinary?: string;
   sandbox?: IsolatedSandbox;
   sandboxOptions?: IsolatedSandboxOptions;
   /** 管理员单聊工具（内部自带上下文隔离），仅在管理员单聊时返回工具 */
@@ -214,7 +221,7 @@ export class ToolRegistry {
     workspace: WorkspacePaths,
     pool: McpClientPool | null,
     dwsProvider: IToolProvider | null,
-    private readonly dwsRunner?: DwsCliRunner,
+    private readonly createDwsProvider: () => IToolProvider,
   ) {
     this.providers = providers;
     this.workspace = workspace;
@@ -266,10 +273,19 @@ export class ToolRegistry {
       );
     }
     let dwsProvider: IToolProvider | null = null;
-    if (options.enableDws ?? envFlag(env, 'DWS_CLI_ENABLED', true)) {
-      dwsProvider = new DwsCliToolProvider({
-        ...(options.dwsRunner ? { runner: options.dwsRunner } : {}),
+    const createDwsProvider = (): IToolProvider =>
+      new DwsCliToolProvider({
+        runner:
+          options.dwsRunner ??
+          new DwsCliRunner({
+            binary: options.dwsBinary ?? env.DWS_BINARY ?? 'dws',
+            env,
+          }),
+        ...(options.dwsAuth ? { auth: options.dwsAuth } : {}),
+        ...(options.dwsIsAdmin ? { isAdmin: options.dwsIsAdmin } : {}),
       });
+    if (options.enableDws ?? envFlag(env, 'DWS_CLI_ENABLED', true)) {
+      dwsProvider = createDwsProvider();
       providers.push(dwsProvider);
     }
     if (options.enableSandbox ?? envFlag(env, 'SANDBOX_ENABLED', true)) {
@@ -296,7 +312,7 @@ export class ToolRegistry {
       workspace,
       pool,
       dwsProvider,
-      options.dwsRunner,
+      createDwsProvider,
     );
   }
 
@@ -324,9 +340,7 @@ export class ToolRegistry {
   public setDwsEnabled(enabled: boolean): void {
     if (enabled) {
       if (this.dwsProvider) return;
-      this.dwsProvider = new DwsCliToolProvider({
-        ...(this.dwsRunner ? { runner: this.dwsRunner } : {}),
-      });
+      this.dwsProvider = this.createDwsProvider();
       this.providers.push(this.dwsProvider);
       return;
     }
