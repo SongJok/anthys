@@ -27,6 +27,7 @@ import type {
 import type { EnterpriseMcpServerConfig } from '../types/mcp-and-sandbox.js';
 import type { GroupBystanderPolicy } from '../types/bystander-and-memory.js';
 import { createAdminApp } from './server.js';
+import { MCP_SECRET_MASK } from './routes/mcpRoutes.js';
 
 const TOKEN = 'test-token';
 const NOW = new Date('2026-10-30T10:00:00Z').getTime();
@@ -504,6 +505,68 @@ describe('企业 MCP 管理接口', () => {
       headers: headers(),
     });
     expect(missing.status).toBe(404);
+  });
+
+  it('读取 MCP 节点时掩码密钥，更新时回传占位符保留原值', async () => {
+    const created = await ctx.app.request('/api/v1/admin/mcp-servers', {
+      method: 'POST',
+      headers: headers(),
+      body: JSON.stringify({
+        id: 'secret-node',
+        name: '密钥节点',
+        domain: 'general',
+        transport: 'sse',
+        endpointOrCommand: 'https://secret.example.com/sse',
+        envOrHeaders: { authorization: 'Bearer super-secret' },
+      }),
+    });
+    expect(created.status).toBe(200);
+    expect((await body(created)).server.envOrHeaders.authorization).toBe(
+      MCP_SECRET_MASK,
+    );
+
+    const listed = await body(
+      await ctx.app.request('/api/v1/admin/mcp-servers', {
+        headers: headers(),
+      }),
+    );
+    const listedNode = listed.servers.find(
+      (item: { id: string }) => item.id === 'secret-node',
+    );
+    expect(listedNode.envOrHeaders.authorization).toBe(MCP_SECRET_MASK);
+
+    const maskedCreate = await ctx.app.request('/api/v1/admin/mcp-servers', {
+      method: 'POST',
+      headers: headers(),
+      body: JSON.stringify({
+        id: 'masked-node',
+        domain: 'general',
+        transport: 'sse',
+        endpointOrCommand: 'https://masked.example.com/sse',
+        envOrHeaders: { authorization: MCP_SECRET_MASK },
+      }),
+    });
+    expect(maskedCreate.status).toBe(400);
+
+    const updated = await ctx.app.request(
+      '/api/v1/admin/mcp-servers/secret-node',
+      {
+        method: 'PUT',
+        headers: headers(),
+        body: JSON.stringify({ envOrHeaders: { authorization: MCP_SECRET_MASK } }),
+      },
+    );
+    expect(updated.status).toBe(200);
+    const stored = ctx.center
+      .getMcpServers()
+      .find((server) => server.id === 'secret-node');
+    expect(stored?.envOrHeaders?.authorization).toBe('Bearer super-secret');
+
+    const deleted = await ctx.app.request(
+      '/api/v1/admin/mcp-servers/secret-node',
+      { method: 'DELETE', headers: headers() },
+    );
+    expect(deleted.status).toBe(200);
   });
 
   it('维护按群/角色的 MCP 工具访问策略', async () => {

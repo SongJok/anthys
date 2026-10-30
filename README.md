@@ -1,19 +1,22 @@
-# 钉钉智能体（阶段三）
+# 钉钉智能体（阶段四）
 
-钉钉 Stream 模式机器人：单聊与群聊 @ 机器人时，通过 AI 卡片流式输出原生思维链与 Markdown 正文；群内全量旁听并在高优故障/技术求助时主动回复，配合工作记忆、情景摘要与语义画像三层记忆。
+钉钉 Stream 模式机器人：单聊与群聊 @ 机器人时，通过 AI 卡片流式输出原生思维链与 Markdown 正文；群内全量旁听并在高优故障/技术求助时主动回复，配合工作记忆、情景摘要与语义画像三层记忆。所有配置可通过管理员钉钉单聊或 Web 管理控制台在线调整，毫秒级热生效，无需重启进程。
 
 ## 架构
 
 ```
 src/
-├── config/      环境变量与 IConfigProvider
+├── config/      环境变量、IConfigProvider 与 DynamicConfigCenter（PostgreSQL + 内存缓存 + EventEmitter）
+├── admin-api/   Hono 管理 REST API（/api/v1/admin/*）与 web-console 静态托管
 ├── dingtalk/    Stream 网关、消息解析器、AI 卡片流式渲染器与节流器
 ├── bystander/   群聊旁听缓冲、三级旁听漏斗、冷却限流与群级策略
-├── harness/     AgentHarness（消息 → 记忆 → 上下文 → 引擎）与 DynamicLoopGuard
+├── harness/     AgentHarness（消息 → 记忆 → 上下文 → 引擎）、ToolRegistry 与 DynamicLoopGuard
 ├── react/       ReActRunner、内置工具、OpenAI/Anthropic 流式模型适配
+├── tools/       企业 MCP、DWS CLI、隔离沙盒与管理员 ChatOps 工具源
 ├── memory/      PostgreSQL 会话仓库、三层记忆管理与上下文组装
-├── db/          Drizzle Schema、连接与 Seed
+├── db/          Drizzle Schema（会话、记忆、动态配置与审计）、连接与 Seed
 └── index.ts     启动入口
+web-console/     React 19 + Vite + TypeScript + TailwindCSS + Ant Design 管理控制台
 ```
 
 处理链路：
@@ -53,15 +56,42 @@ cp .env.example .env
 
 psql "$DATABASE_URL" -c "CREATE EXTENSION IF NOT EXISTS vector;"  # 语义记忆向量列
 pnpm install
-pnpm run db:push      # 创建 conversations / messages / agent_configs
-                      # 以及 conversation_summaries / semantic_memories / bystander_policies
+pnpm run db:push      # 创建 conversations / messages / agent_configs / conversation_summaries
+                      # / semantic_memories / bystander_policies / sys_configs
+                      # / admin_audit_logs / react_traces
 pnpm run db:seed      # 写入默认人设与大模型配置（已有行不覆盖）
+pnpm build            # 构建 web-console 并编译服务端；控制台由后端静态托管
 pnpm start            # 或 pnpm dev（watch 模式）
 ```
+
+`pnpm start` 会同时启动 Stream 客户端与管理 API（默认 `http://localhost:8787`）。未执行 `pnpm build` 时后端仍可启动，但 `/` 不会返回控制台页面。
 
 - 人设与大模型参数优先读取数据库 `agent_configs`，缺失时回退 `.env`；`LLM_API_KEY` 只从环境变量读取，不落库。
 - `pnpm start` 会先执行配置校验，缺少必需变量时直接退出并列出缺失项。
 - 进程退出时断开 Stream 连接、等待后台记忆维护任务并关闭数据库连接池。
+
+## 管理控制台与管理员单聊（ChatOps）
+
+控制台（`http://localhost:8787/`）提供六个页面：
+
+- **运行大盘**：Stream 连接、今日对话轮次与 Token、MCP 节点健康、各群旁听统计、最近管理审计。
+- **钉钉企业配置**：AppKey / AppSecret（掩码回显，留空表示不改）、RobotCode、AI 卡片模板 ID、管理员 StaffId 白名单、DWS CLI 开关、发送测试卡片。
+- **大模型与人设**：模型渠道、Base URL / 模型 / API Key、原生思维链、采样温度、ReAct 循环预算（耗时 / Token / 同工具连续调用 / 收敛自检）、人设与语气，支持沙盒对话测试。
+- **企业 MCP**：节点增删改查、一键连通性测试并浏览已发现工具 Schema、按群 / 角色控制工具调用权限。
+- **群聊旁听策略**：全局默认与按群覆盖、一键紧急静音。
+- **ReAct 审计轨迹**：分页查看每一步原生思维链、工具入参 / 耗时、沙盒输出与最终回答。
+
+管理员在钉钉单聊中会额外获得四个高危工具：`admin_inspect_system_status`、`admin_manage_mcp_server`、`admin_update_llm_or_persona`、`admin_configure_group_bystander`。仅当 `conversationType === '1'` 且发送人命中管理员白名单时才挂载；普通员工与群聊环境下这些工具物理不可见。
+
+| 环境变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `ADMIN_API_TOKEN` | 空 | 管理 API Bearer Token；留空表示本地不校验 |
+| `ADMIN_PORT` | `8787` | 管理 API 与静态控制台端口 |
+| `ADMIN_STAFF_IDS` | 空 | 允许使用 `admin_*` 工具的管理员 StaffId（逗号分隔） |
+| `DWS_CLI_ENABLED` | `false` | 是否加载 DWS CLI 工具源（可在线切换） |
+| `MCP_SERVERS_CONFIG` | `config/mcp-servers.json` | 首次启动的 MCP 节点定义，之后以 `sys_configs` 为准 |
+
+所有改动持久化到 `sys_configs`，并通过 `<scope>:changed` 事件热应用到 Stream 网关、MCP 连接池与 ReAct 引擎。Web 与 ChatOps 两条通道都会写入 `admin_audit_logs`，密钥与 MCP 凭据只记录掩码。
 
 ## 群聊旁听与非 @ 自主回复
 
@@ -106,12 +136,14 @@ pnpm run typecheck
 pnpm test
 ```
 
-覆盖内容：动态预算与重复调用拦截、上下文窗口、ReAct 流式事件与多步工具、内置工具边界、消息解析、群聊 @ 过滤、Stream ACK/去重、卡片三区块节流与收尾、AgentHarness 多轮持久化；群聊旁听缓冲裁剪与多群隔离、三级漏斗（闲聊静默/报错主动触发/防抢答/冷却/置信度）、群聊旁听→主动回复→@ 追问携带上下文的完整链路、长对话摘要归档与画像/术语召回。
+覆盖内容：动态预算与重复调用拦截、上下文窗口、ReAct 流式事件与多步工具、内置工具边界、消息解析、群聊 @ 过滤、Stream ACK/去重、卡片三区块节流与收尾、AgentHarness 多轮持久化；群聊旁听缓冲裁剪与多群隔离、三级漏斗（闲聊静默/报错主动触发/防抢答/冷却/置信度）、群聊旁听→主动回复→@ 追问携带上下文的完整链路、长对话摘要归档与画像/术语召回；动态配置热更新广播、管理员单聊工具的上下文权限隔离、管理 REST 接口 CRUD 与 MCP 凭据掩码回显。
 
 真实钉钉与真实模型链路的端到端验收需要有效的企业应用凭据、卡片模板与 LLM Key；本仓库的自动化测试不访问外部网络。`src/harness/ToolRegistry.test.ts` 与 `src/tools/sandbox/IsolatedSandbox.test.ts` 依赖 `isolated-vm` 原生构建，缺失本机 ABI 构建时会跳过用例。
 
-## 阶段三边界
+## 阶段四边界
 
-- 旁听开关与冷却阈值由环境变量和数据库 `bystander_policies` 管理；尚未提供前端可视化或管理员单聊动态调整指令。
+- 动态配置持久化在 PostgreSQL `sys_configs`，进程重启后自动恢复；数据库不可用时回退 `.env` 默认值。
+- 管理员单聊口令由 ReAct 自主选择 `admin_*` 工具执行，权限边界完全依赖 `conversationType` 与 StaffId 白名单，不额外解析自然语言意图。
 - 群聊旁听缓冲保存在进程内存，重启后由新消息重新积累；情景摘要与语义记忆持久化在 PostgreSQL。
-- 不提供前端页面。
+- `ReAct 审计轨迹` 仅展示经 `react_traces` 落库的调用；未产生消息时为空。
+- 前端为单页应用，生产构建产物由后端静态托管，单容器即可部署；不含前端单测。

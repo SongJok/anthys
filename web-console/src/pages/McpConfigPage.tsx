@@ -438,7 +438,11 @@ export default function McpConfigPage() {
           <Form.Item label="启动参数（仅 stdio）" name="args">
             <Select mode="tags" placeholder="输入参数后回车" />
           </Form.Item>
-          <Form.Item label="环境变量 / Headers（每行 KEY=VALUE）" name="envText">
+          <Form.Item
+            label="环境变量 / Headers（每行 KEY=VALUE）"
+            name="envText"
+            extra="已保存的密钥以 ******** 回显，保持原样即不修改；改成新值会立即生效。"
+          >
             <Input.TextArea rows={3} placeholder="Authorization=Bearer ${MCP_TOKEN}" />
           </Form.Item>
           <Form.Item label="启用" name="enabled" valuePropName="checked">

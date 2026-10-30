@@ -144,6 +144,45 @@ function serverSnapshot(servers: readonly EnterpriseMcpServerConfig[]) {
   }));
 }
 
+/** 管理端读取时用占位符替代真实密钥；回传该占位符表示保持原值 */
+export const MCP_SECRET_MASK = '********';
+
+function maskServers(
+  servers: readonly EnterpriseMcpServerConfig[],
+): EnterpriseMcpServerConfig[] {
+  return servers.map((server) =>
+    server.envOrHeaders
+      ? {
+          ...server,
+          envOrHeaders: Object.fromEntries(
+            Object.keys(server.envOrHeaders).map((key) => [key, MCP_SECRET_MASK]),
+          ),
+        }
+      : { ...server },
+  );
+}
+
+function restoreMaskedEnv(
+  server: EnterpriseMcpServerConfig,
+  existing: EnterpriseMcpServerConfig,
+): EnterpriseMcpServerConfig {
+  if (!server.envOrHeaders) return server;
+  const merged: Record<string, string> = {};
+  for (const [key, value] of Object.entries(server.envOrHeaders)) {
+    if (value === MCP_SECRET_MASK) {
+      const previous = existing.envOrHeaders?.[key];
+      if (previous !== undefined) merged[key] = previous;
+      continue;
+    }
+    merged[key] = value;
+  }
+  const next = { ...server };
+  delete next.envOrHeaders;
+  return Object.keys(merged).length > 0
+    ? { ...next, envOrHeaders: merged }
+    : next;
+}
+
 /** 企业 MCP 管理路由：增删改查、连通性测试与工具级访问策略 */
 export function createMcpRoutes(deps: McpRouteDeps): Hono {
   const app = new Hono();
@@ -153,7 +192,7 @@ export function createMcpRoutes(deps: McpRouteDeps): Hono {
   app.get('/mcp-servers', (c) =>
     c.json({
       ok: true,
-      servers: deps.configCenter.getMcpServers(),
+      servers: maskServers(deps.configCenter.getMcpServers()),
       status: deps.status(),
     }),
   );
@@ -161,6 +200,14 @@ export function createMcpRoutes(deps: McpRouteDeps): Hono {
   app.post('/mcp-servers', async (c) => {
     const body = await readJsonBody(c);
     const server = readServerBody(body);
+    if (
+      server.envOrHeaders &&
+      Object.values(server.envOrHeaders).includes(MCP_SECRET_MASK)
+    ) {
+      throw new HTTPException(400, {
+        message: '新建 MCP 节点时 envOrHeaders 不能使用掩码占位符',
+      });
+    }
     if (
       deps.configCenter.getMcpServers().some((item) => item.id === server.id)
     ) {
@@ -178,7 +225,12 @@ export function createMcpRoutes(deps: McpRouteDeps): Hono {
       { action: 'create', servers: serverSnapshot(servers.filter((item) => item.id !== server.id)) },
       { action: 'create', servers: serverSnapshot(servers) },
     );
-    return c.json({ ok: true, server, servers: deps.configCenter.getMcpServers() });
+    const masked = maskServers(deps.configCenter.getMcpServers());
+    return c.json({
+      ok: true,
+      server: masked.find((item) => item.id === server.id),
+      servers: masked,
+    });
   });
 
   app.put('/mcp-servers/:id', async (c) => {
@@ -190,12 +242,15 @@ export function createMcpRoutes(deps: McpRouteDeps): Hono {
       throw new HTTPException(404, { message: `未知 MCP Server: ${id}` });
     }
     const body = await readJsonBody(c);
-    const server = readServerBody(
-      {
-        ...existing,
-        ...body,
-      },
-      id,
+    const server = restoreMaskedEnv(
+      readServerBody(
+        {
+          ...existing,
+          ...body,
+        },
+        id,
+      ),
+      existing,
     );
     await deps.configCenter.upsertMcpServer(server, actor(c));
     await deps.applyServers(deps.configCenter.getMcpServers());
@@ -206,7 +261,12 @@ export function createMcpRoutes(deps: McpRouteDeps): Hono {
       { action: 'update', servers: serverSnapshot([existing]) },
       { action: 'update', servers: serverSnapshot([server]) },
     );
-    return c.json({ ok: true, server, servers: deps.configCenter.getMcpServers() });
+    const masked = maskServers(deps.configCenter.getMcpServers());
+    return c.json({
+      ok: true,
+      server: masked.find((item) => item.id === server.id),
+      servers: masked,
+    });
   });
 
   app.delete('/mcp-servers/:id', async (c) => {
@@ -226,7 +286,10 @@ export function createMcpRoutes(deps: McpRouteDeps): Hono {
       { action: 'delete', servers: serverSnapshot([existing]) },
       { action: 'delete', servers: serverSnapshot(deps.configCenter.getMcpServers()) },
     );
-    return c.json({ ok: true, servers: deps.configCenter.getMcpServers() });
+    return c.json({
+      ok: true,
+      servers: maskServers(deps.configCenter.getMcpServers()),
+    });
   });
 
   app.post('/mcp-servers/:id/test', async (c) => {
