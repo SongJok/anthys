@@ -128,6 +128,8 @@ export interface CardStreamerOptions {
   maxContentChars?: number;
   /** ai 布局下思考过程最多展示的字符数（保留最新的尾部），默认 600 */
   thinkingChars?: number;
+  /** ai 布局是否展示具体思维链，默认关闭，只保留状态角标 */
+  showThinking?: boolean;
   /** 单次 streamingUpdate 超时，默认 5s */
   updateTimeoutMs?: number;
   /** 失败重试次数，默认 2 */
@@ -258,6 +260,7 @@ export class CardStreamer {
   private readonly contentKey: string;
   private readonly maxContentChars: number;
   private readonly thinkingChars: number;
+  private readonly showThinking: boolean;
   private readonly updateTimeoutMs: number;
   private readonly maxRetries: number;
   private readonly createRetries: number;
@@ -290,6 +293,7 @@ export class CardStreamer {
     this.contentKey = options.contentKey?.trim() || 'content';
     this.maxContentChars = Math.max(400, options.maxContentChars ?? 2_400);
     this.thinkingChars = Math.max(80, options.thinkingChars ?? 600);
+    this.showThinking = options.showThinking ?? this.layout !== 'ai';
     this.updateTimeoutMs = options.updateTimeoutMs ?? 5_000;
     this.maxRetries = options.maxRetries ?? 2;
     this.createRetries = options.createRetries ?? 0;
@@ -415,8 +419,8 @@ export class CardStreamer {
       }
       case 'citation': {
         this.citations = [...this.citations, ...event.citations];
-        this.dirtyCitations = this.layout === 'v2';
-        if (this.layout !== 'v2') this.dirtyThinking = true;
+        this.dirtyCitations = this.layout !== 'v1';
+        if (this.layout === 'v1') this.dirtyThinking = true;
         this.throttler.push(1);
         return;
       }
@@ -520,21 +524,33 @@ export class CardStreamer {
     return this.mention ? `${this.mention}${this.answer}` : this.answer;
   }
 
-  /** ai 布局：状态、思考、答案合成一份 Markdown，超出上限的答案交给文本兜底 */
+  /** ai 布局：状态 + 答案（+ 参考来源）合成一份 Markdown，超出上限的答案交给文本兜底 */
   private contentDocument(finalize: boolean): {
     text: string;
     overflow: string;
   } {
-    const status = this.status.trim() ? `> ${this.status.trim()}` : '';
-    const thinking = this.thinkingBlock();
-    const head = [status, thinking].filter(Boolean).join('\n\n');
+    const prefixParts: string[] = [];
+    if (this.status.trim()) prefixParts.push(`> ${this.status.trim()}`);
+    if (this.showThinking) {
+      const thinking = this.thinkingBlock();
+      if (thinking) prefixParts.push(thinking);
+    }
+    const prefix = prefixParts.join('\n\n');
+    const sources =
+      this.citations.length > 0 ? `参考来源：\n${this.citationsText()}` : '';
     const answer =
       this.answerText() ||
       (finalize
         ? `${this.mention}（本次没有生成正文，请重新提问或稍后再试）`
         : '');
     const marker = '…（内容较长，剩余部分随后发送）';
-    const budget = this.maxContentChars - head.length - (answer ? 2 : 0);
+    const separators =
+      (prefix && answer ? 2 : 0) + (answer && sources ? 2 : 0);
+    const budget =
+      this.maxContentChars -
+      prefix.length -
+      sources.length -
+      separators;
     let shown = answer;
     let overflow = '';
     if (answer && budget > 0) {
@@ -546,7 +562,7 @@ export class CardStreamer {
       }
     }
     return {
-      text: [head, shown].filter(Boolean).join('\n\n'),
+      text: [prefix, shown, sources].filter(Boolean).join('\n\n'),
       overflow,
     };
   }
@@ -667,12 +683,12 @@ export class CardStreamer {
       return;
     }
     if (this.layout === 'ai') {
+      // 关闭思维链时，思考与工具细节不进入 content，只随状态角标反映进度
       const dirty =
-        this.dirtyThinking ||
         this.dirtyAnswer ||
         this.dirtyStatus ||
-        this.dirtyTools ||
-        this.dirtyCitations;
+        this.dirtyCitations ||
+        (this.showThinking && this.dirtyThinking);
       if (dirty || isFinalize) {
         const document = this.contentDocument(isFinalize);
         if (isFinalize) this.overflowAnswer = document.overflow;

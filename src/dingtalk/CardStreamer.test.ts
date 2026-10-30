@@ -459,7 +459,7 @@ describe('CardStreamer', () => {
       expect(fake.created[0]?.params).toEqual({ content: '正在思考…' });
     });
 
-    it('把状态、思考与工具轨迹合成一份 content', async () => {
+    it('默认只展示状态角标与答案，隐藏思维链与工具细节', async () => {
       const fake = fakeApi();
       const streamer = new CardStreamer({
         api: fake.api,
@@ -482,14 +482,98 @@ describe('CardStreamer', () => {
         summary: '2026-10-30 10:00',
         isError: false,
       });
+      streamer.handle({ type: 'answer_delta', content: '现在 10 点' });
+      await vi.advanceTimersByTimeAsync(250);
       await settle();
 
       const last = fake.updates.at(-1);
       expect(last?.key).toBe('content');
       expect(last?.content).toContain('> 工具 current_time 已完成');
+      expect(last?.content).toContain('现在 10 点');
+      expect(last?.content).not.toContain('思考过程');
+      expect(last?.content).not.toContain('需要查时间');
+      expect(last?.content).not.toContain('2026-10-30 10:00');
+    });
+
+    it('仅思考增量时不刷新 content，避免无意义请求', async () => {
+      const fake = fakeApi();
+      const streamer = new CardStreamer({
+        api: fake.api,
+        message: inbound(),
+        cardTemplateId: 'tpl-ai',
+        robotCode: 'robot-1',
+        layout: 'ai',
+      });
+      await streamer.start();
+
+      streamer.handle({ type: 'reasoning_delta', content: '内心独白' });
+      await vi.advanceTimersByTimeAsync(250);
+      await settle();
+
+      expect(fake.updates).toHaveLength(0);
+    });
+
+    it('showThinking 开启时把思考与工具轨迹写入 content', async () => {
+      const fake = fakeApi();
+      const streamer = new CardStreamer({
+        api: fake.api,
+        message: inbound(),
+        cardTemplateId: 'tpl-ai',
+        robotCode: 'robot-1',
+        layout: 'ai',
+        showThinking: true,
+      });
+      await streamer.start();
+
+      streamer.handle({ type: 'reasoning_delta', content: '需要查时间' });
+      streamer.handle({
+        type: 'tool_start',
+        toolName: 'current_time',
+        args: { timeZone: 'Asia/Shanghai' },
+      });
+      streamer.handle({
+        type: 'tool_end',
+        toolName: 'current_time',
+        summary: '2026-10-30 10:00',
+        isError: false,
+      });
+      await settle();
+
+      const last = fake.updates.at(-1);
+      expect(last?.key).toBe('content');
       expect(last?.content).toContain('思考过程');
       expect(last?.content).toContain('需要查时间');
       expect(last?.content).toContain('2026-10-30 10:00');
+    });
+
+    it('参考来源在答案之后展示', async () => {
+      const fake = fakeApi();
+      const streamer = new CardStreamer({
+        api: fake.api,
+        message: inbound(),
+        cardTemplateId: 'tpl-ai',
+        robotCode: 'robot-1',
+        layout: 'ai',
+      });
+      await streamer.start();
+
+      streamer.handle({
+        type: 'citation',
+        citations: [
+          { index: 1, title: '部署手册', url: 'https://example.com/doc' },
+        ],
+      });
+      streamer.handle({ type: 'answer_delta', content: '按手册执行' });
+      await vi.advanceTimersByTimeAsync(250);
+      await settle();
+
+      const last = fake.updates.at(-1);
+      const content = last?.content ?? '';
+      expect(content).toContain('参考来源：');
+      expect(content).toContain('[部署手册](https://example.com/doc)');
+      expect(content.indexOf('按手册执行')).toBeLessThan(
+        content.indexOf('参考来源：'),
+      );
     });
 
     it('正文写入 content 并带上群聊提及前缀', async () => {

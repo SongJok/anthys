@@ -639,6 +639,12 @@ async function main(): Promise<void> {
         ...(process.env.DINGTALK_CARD_CONTENT_KEY?.trim()
           ? { contentKey: process.env.DINGTALK_CARD_CONTENT_KEY.trim() }
           : {}),
+        ...(process.env.DINGTALK_CARD_SHOW_THINKING?.trim()
+          ? {
+              showThinking:
+                process.env.DINGTALK_CARD_SHOW_THINKING.trim() === 'true',
+            }
+          : {}),
         ...(options.mention ? { mention: options.mention } : {}),
       });
     };
