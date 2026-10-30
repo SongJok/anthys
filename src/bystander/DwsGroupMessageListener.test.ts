@@ -92,6 +92,13 @@ describe('parseDwsGroupEvent', () => {
       }),
     ).toBeNull();
   });
+
+  it('accepts structured text content', () => {
+    expect(
+      parseDwsGroupEvent({ ...FLAT_MESSAGE, content: { text: '集群内存告警' } })
+        ?.content,
+    ).toBe('集群内存告警');
+  });
 });
 
 describe('toInboundMessage', () => {

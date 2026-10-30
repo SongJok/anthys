@@ -101,6 +101,13 @@ function pickNumber(
   return undefined;
 }
 
+/** 正文既可能是纯文本，也可能是 `{content|text|title}` 结构 */
+function pickContent(value: unknown): string | undefined {
+  if (typeof value === 'string') return value.trim() ? value : undefined;
+  const obj = asRecord(value);
+  return obj ? pickString(obj, ['content', 'text', 'title']) : undefined;
+}
+
 /** 富文本/卡片正文是 JSON 载荷，交给 LLM 只会污染上下文，直接跳过 */
 function looksLikeJsonPayload(text: string): boolean {
   const trimmed = text.trim();
@@ -156,7 +163,7 @@ export function parseDwsGroupEvent(raw: unknown): DwsGroupEventFields | null {
   ]);
   if (!messageId || !conversationId) return null;
 
-  const content = pickString(fields, ['content', 'text']);
+  const content = pickContent(fields.content) ?? pickContent(fields.text);
   if (!content || looksLikeJsonPayload(content)) return null;
 
   const senderOpenId =
