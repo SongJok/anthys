@@ -1743,6 +1743,7 @@ async function main(): Promise<void> {
       configCenter,
       traces: traceStore,
       groups: groupDirectory,
+      listeningGroups: () => bystanderListener?.allowedConversations ?? [],
       glossary,
       mcp: {
         status: () => mcpPort.status(),

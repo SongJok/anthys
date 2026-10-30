@@ -321,6 +321,11 @@ export class DwsGroupMessageListener {
     return this.allowed.size;
   }
 
+  /** 当前真正订阅的群（白名单 ∪ 开启旁听的群策略） */
+  public get allowedConversations(): string[] {
+    return [...this.allowed];
+  }
+
   private buildArgs(): string[] {
     return [
       'event',

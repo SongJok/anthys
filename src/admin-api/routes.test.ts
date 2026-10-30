@@ -251,6 +251,14 @@ class FakeGroups implements GroupDirectory {
         proactiveReplyEnabled: true,
         lastActiveAt: NOW,
       },
+      {
+        conversationId: 'cid-quiet',
+        title: '安静群',
+        conversationType: '2',
+        bystanderEnabled: true,
+        proactiveReplyEnabled: true,
+        lastActiveAt: NOW,
+      },
     ];
   }
 }
@@ -454,6 +462,7 @@ async function createTestContext(staticDir?: string): Promise<TestContext> {
     configCenter: center,
     traces,
     groups: new FakeGroups(),
+    listeningGroups: () => ['cid-dev'],
     glossary,
     mcp: {
       status,
@@ -841,6 +850,11 @@ describe('群策略、轨迹与审计大盘', () => {
     });
     const groupsBody = await body(groups);
     expect(groupsBody.groups[0].policy.cooldownSeconds).toBe(180);
+    expect(groupsBody.groups[0].listening).toBe(true);
+    expect(groupsBody.groups[0].policyOverridden).toBe(false);
+    // 全局默认旁听开启不代表在监听：未订阅的群必须显式标记
+    expect(groupsBody.groups[1].policy.bystanderEnabled).toBe(true);
+    expect(groupsBody.groups[1].listening).toBe(false);
 
     const put = await ctx.app.request(
       '/api/v1/admin/groups/cid-dev/policy',

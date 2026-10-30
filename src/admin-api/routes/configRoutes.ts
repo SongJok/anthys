@@ -15,6 +15,8 @@ export interface ConfigRouteDeps {
   configCenter: DynamicConfigCenter;
   traces: ReActTraceStore;
   groups: GroupDirectory;
+  /** 当前已订阅旁听长连接的群；缺省时按“未订阅”展示 */
+  listeningGroups?: () => Iterable<string>;
   mcpStatus?: () => McpServerStatusView[];
   /** Web 控制台在线调试人设：返回真实模型回答 */
   llmTester?: (input: {
@@ -353,11 +355,16 @@ export function createConfigRoutes(deps: ConfigRouteDeps): Hono {
       policies.map((policy) => [policy.conversationId, policy]),
     );
     const defaults = deps.configCenter.getSystemConfig().defaultBystanderPolicy;
+    const listening = new Set(deps.listeningGroups?.() ?? []);
     return c.json({
       ok: true,
       defaults,
       groups: list.map((group) => ({
         ...group,
+        // 只有真正订阅了长连接的群才会收到非 @ 消息；
+        // 全局默认只决定判定阈值，不代表该群在监听
+        listening: listening.has(group.conversationId),
+        policyOverridden: policyMap.has(group.conversationId),
         policy: policyMap.get(group.conversationId) ?? {
           conversationId: group.conversationId,
           ...defaults,

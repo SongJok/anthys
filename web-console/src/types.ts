@@ -108,6 +108,10 @@ export interface KnownGroup {
   bystanderEnabled: boolean | null;
   proactiveReplyEnabled: boolean | null;
   lastActiveAt: number | null;
+  /** 是否已订阅旁听长连接（决定能否收到非 @ 消息） */
+  listening?: boolean;
+  /** 该群是否有独立策略行；false 表示用全局默认 */
+  policyOverridden?: boolean;
   policy?: GroupPolicy;
 }
 

@@ -13,6 +13,7 @@ import {
   Switch,
   Table,
   Tag,
+  Tooltip,
   message,
 } from 'antd';
 import { api } from '../api';
@@ -157,12 +158,33 @@ export default function GroupsPage() {
             {
               title: '旁听',
               key: 'bystander',
-              render: (_, row) =>
-                (row.policy?.bystanderEnabled ?? defaults?.bystanderEnabled) ? (
-                  <Tag color="green">开启</Tag>
-                ) : (
-                  <Tag>关闭</Tag>
-                ),
+              render: (_, row) => {
+                const enabled =
+                  row.policy?.bystanderEnabled ?? defaults?.bystanderEnabled ?? false;
+                const listening = row.listening === true;
+                if (enabled && listening) {
+                  return (
+                    <Tooltip title="已订阅长连接，群内非 @ 消息会进入旁听判定">
+                      <Tag color="green">生效</Tag>
+                    </Tooltip>
+                  );
+                }
+                if (enabled && !listening) {
+                  return (
+                    <Tooltip title="策略显示开启（全局默认或群配置），但该群未订阅长连接，收不到非 @ 消息。在「配置策略」里保存一次并保持开启即可订阅">
+                      <Tag color="orange">未订阅</Tag>
+                    </Tooltip>
+                  );
+                }
+                if (!enabled && listening) {
+                  return (
+                    <Tooltip title="该群由 BYSTANDER_LISTEN_GROUPS 订阅，但群策略关闭了旁听，非 @ 消息会被判定丢弃">
+                      <Tag color="blue">策略关闭</Tag>
+                    </Tooltip>
+                  );
+                }
+                return <Tag>关闭</Tag>;
+              },
             },
             {
               title: '非@主动回复',
@@ -207,6 +229,15 @@ export default function GroupsPage() {
         onOk={() => void form.submit()}
         okText="保存并热更新"
       >
+        {modal.group && modal.group.listening !== true ? (
+          <Alert
+            type="warning"
+            showIcon
+            style={{ marginBottom: 12 }}
+            message="该群尚未订阅旁听长连接"
+            description="全局默认只提供判定参数；把「开启旁听」保存为开启后，该群才会加入监听白名单并立即生效。"
+          />
+        ) : null}
         <Form form={form} layout="vertical" onFinish={save}>
           <Form.Item label="开启旁听" name="bystanderEnabled" valuePropName="checked">
             <Switch />

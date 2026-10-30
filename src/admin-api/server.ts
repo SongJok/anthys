@@ -40,6 +40,8 @@ export interface AdminApiOptions {
   configCenter: DynamicConfigCenter;
   traces: ReActTraceStore;
   groups: GroupDirectory;
+  /** 当前已订阅旁听长连接的群 */
+  listeningGroups?: () => Iterable<string>;
   mcp: {
     status(): McpServerStatusView[];
     applyServers(servers: EnterpriseMcpServerConfig[]): Promise<unknown>;
@@ -151,6 +153,9 @@ export function createAdminApp(options: AdminApiOptions): Hono {
       configCenter: options.configCenter,
       traces: options.traces,
       groups: options.groups,
+      ...(options.listeningGroups
+        ? { listeningGroups: options.listeningGroups }
+        : {}),
       mcpStatus: () => options.mcp.status(),
       ...(options.llmTester ? { llmTester: options.llmTester } : {}),
       ...(options.dingtalkTester
