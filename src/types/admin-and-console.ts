@@ -50,6 +50,9 @@ export type AdminActionType =
   | 'UPDATE_GROUP_POLICY'
   | 'EMERGENCY_MUTE'
   | 'UPDATE_SCHEDULES'
+  | 'UPDATE_RETENTION'
+  | 'PURGE_DATA'
+  | 'DELETE_USER_DATA'
   | 'QUERY_STATS';
 
 /** 2. 管理员单聊管控审计记录契约 */

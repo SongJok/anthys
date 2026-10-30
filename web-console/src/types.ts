@@ -186,6 +186,9 @@ export interface AuditLog {
     | 'UPDATE_MCP_POLICY'
     | 'UPDATE_GROUP_POLICY'
     | 'EMERGENCY_MUTE'
+    | 'UPDATE_RETENTION'
+    | 'PURGE_DATA'
+    | 'DELETE_USER_DATA'
     | 'QUERY_STATS';
   beforeSnapshot: Record<string, unknown>;
   afterSnapshot: Record<string, unknown>;
@@ -212,4 +215,41 @@ export interface LlmTestResult {
   answer: string;
   reasoning: string;
   usage: { totalTokens: number; durationMs: number };
+}
+
+export type RetentionKind =
+  | 'messages'
+  | 'summaries'
+  | 'traces'
+  | 'audit'
+  | 'usage'
+  | 'attachments';
+
+export interface RetentionPolicy {
+  messagesDays: number;
+  tracesDays: number;
+  attachmentsHours: number;
+  auditDays: number;
+  usageDays: number;
+}
+
+export interface RetentionStats {
+  policy: RetentionPolicy;
+  now: number;
+  totals: Record<RetentionKind, number>;
+  expired: Record<RetentionKind, number>;
+  attachmentBytes: number;
+}
+
+export interface CleanupResult {
+  dryRun: boolean;
+  startedAt: number;
+  finishedAt: number;
+  deleted: Record<RetentionKind, number>;
+}
+
+export interface DeletionResult {
+  target: string;
+  deleted: Record<string, number>;
+  attachmentsRemoved: number;
 }

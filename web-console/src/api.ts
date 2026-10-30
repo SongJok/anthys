@@ -1,7 +1,9 @@
 import type {
   AuditLog,
+  CleanupResult,
   DashboardPayload,
   DefaultGroupPolicy,
+  DeletionResult,
   DingTalkConfig,
   GroupPolicy,
   KnownGroup,
@@ -12,6 +14,8 @@ import type {
   McpServerConfig,
   McpServerStatus,
   McpTestResult,
+  RetentionPolicy,
+  RetentionStats,
   StreamStatus,
   TracePage,
 } from './types';
@@ -164,6 +168,28 @@ export const api = {
   createChatTicket: () =>
     request<{ ticket: string; expiresAt: number }>('/chat/tickets', {
       method: 'POST',
+    }),
+
+  governance: () => request<RetentionStats>('/governance'),
+  updateRetention: (body: Partial<RetentionPolicy>) =>
+    request<{ policy: RetentionPolicy }>('/governance/retention', {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
+  cleanupData: (dryRun: boolean) =>
+    request<{ result: CleanupResult }>('/governance/cleanup', {
+      method: 'POST',
+      body: JSON.stringify({ dryRun }),
+    }),
+  deleteConversationData: (conversationId: string) =>
+    request<{ result: DeletionResult }>('/governance/delete-conversation', {
+      method: 'POST',
+      body: JSON.stringify({ conversationId, confirm: true }),
+    }),
+  deleteUserData: (staffId: string) =>
+    request<{ result: DeletionResult }>('/governance/delete-user', {
+      method: 'POST',
+      body: JSON.stringify({ staffId, confirm: true }),
     }),
 };
 

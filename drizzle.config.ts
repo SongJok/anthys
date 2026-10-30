@@ -9,6 +9,7 @@ export default defineConfig({
     './src/db/schedulerSchema.ts',
     './src/db/usageSchema.ts',
     './src/db/clusterSchema.ts',
+    './src/db/governanceSchema.ts',
   ],
   out: './drizzle',
   dialect: 'postgresql',

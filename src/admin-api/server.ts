@@ -19,6 +19,8 @@ import type {
 import type { EnterpriseMcpServerConfig } from '../types/mcp-and-sandbox.js';
 import { createConfigRoutes } from './routes/configRoutes.js';
 import { createMcpRoutes } from './routes/mcpRoutes.js';
+import { createGovernanceRoutes } from '../governance/governanceRoutes.js';
+import type { DataGovernancePort } from '../governance/DataRetention.js';
 import {
   handleChatStream,
   OneTimeTicketStore,
@@ -76,6 +78,8 @@ export interface AdminApiOptions {
     remove(id: string): Promise<boolean>;
     runNow?(id: string): Promise<void>;
   };
+  /** 数据治理：保留期、清理与级联删除 */
+  governance?: DataGovernancePort;
 }
 
 export interface AdminServerOptions extends AdminApiOptions {
@@ -162,6 +166,15 @@ export function createAdminApp(options: AdminApiOptions): Hono {
         : {}),
     }),
   );
+  if (options.governance) {
+    admin.route(
+      '/',
+      createGovernanceRoutes({
+        governance: options.governance,
+        configCenter: options.configCenter,
+      }),
+    );
+  }
 
   admin.get('/feedback', async (c) => {
     if (!options.feedback) return c.json({ ok: true, items: [] });

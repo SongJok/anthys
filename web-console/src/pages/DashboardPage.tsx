@@ -24,6 +24,9 @@ const ACTION_LABEL: Record<AuditLog['actionType'], string> = {
   UPDATE_MCP_POLICY: '更新工具权限',
   UPDATE_GROUP_POLICY: '更新群策略',
   EMERGENCY_MUTE: '紧急静音',
+  UPDATE_RETENTION: '更新保留策略',
+  PURGE_DATA: '清理过期数据',
+  DELETE_USER_DATA: '删除用户数据',
   QUERY_STATS: '查询统计',
 };
 

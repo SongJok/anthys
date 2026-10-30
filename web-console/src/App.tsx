@@ -13,6 +13,7 @@ import {
   ApiOutlined,
   BranchesOutlined,
   DashboardOutlined,
+  DatabaseOutlined,
   MessageOutlined,
   RobotOutlined,
   SettingOutlined,
@@ -26,6 +27,7 @@ import McpConfigPage from './pages/McpConfigPage';
 import GroupsPage from './pages/GroupsPage';
 import TracesPage from './pages/TracesPage';
 import ChatPage from './pages/ChatPage';
+import DataGovernancePage from './pages/DataGovernancePage';
 
 const { Header, Sider, Content } = Layout;
 
@@ -37,6 +39,7 @@ const MENU = [
   { key: 'mcp', icon: <ApiOutlined />, label: '企业 MCP' },
   { key: 'groups', icon: <TeamOutlined />, label: '群聊旁听策略' },
   { key: 'traces', icon: <BranchesOutlined />, label: 'ReAct 审计轨迹' },
+  { key: 'governance', icon: <DatabaseOutlined />, label: '数据治理' },
 ];
 
 const PAGE_TITLES: Record<string, string> = {
@@ -47,6 +50,7 @@ const PAGE_TITLES: Record<string, string> = {
   mcp: '企业内部 MCP 配置',
   groups: '群聊旁听与主动回复策略',
   traces: 'ReAct 全链路审计',
+  governance: '数据治理与脱敏',
 };
 
 export default function App() {
@@ -100,6 +104,7 @@ export default function App() {
           {active === 'mcp' && <McpConfigPage />}
           {active === 'groups' && <GroupsPage />}
           {active === 'traces' && <TracesPage />}
+          {active === 'governance' && <DataGovernancePage />}
         </Content>
       </Layout>
 

@@ -248,6 +248,21 @@ pnpm run db:seed      # 可选：预写入默认人设与模型配置，已有�
 
 启用集群后，去重、旁听冷却与群聊转录状态写入 `cluster_shared_state` 表，任一实例重启都不会丢失去重窗口和冷却时间。配置变更会落库，其他实例在下一轮轮询时按分区（`llm`/`loopPolicy`/`dingtalk`/`mcp`/`routes`）触发对应的热更新事件。数据库不可达时自动回退到进程内状态，单实例部署无需开启。
 
+**数据治理与脱敏**
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `DATA_REDACTION_ENABLED` | `true` | 日志与 ReAct 轨迹落库前脱敏手机号、邮箱、身份证号与常见密钥格式 |
+| `RETENTION_MESSAGES_DAYS` | `180` | 会话消息与情景摘要保留天数 |
+| `RETENTION_TRACES_DAYS` | `90` | ReAct 轨迹保留天数 |
+| `RETENTION_ATTACHMENTS_HOURS` | `24` | 入站附件目录保留小时数 |
+| `RETENTION_AUDIT_DAYS` | `365` | 管理审计日志保留天数 |
+| `RETENTION_USAGE_DAYS` | `365` | 用量流水保留天数 |
+| `DATA_CLEANUP_INTERVAL_SECONDS` | `86400` | 定时清理间隔；集群模式下仅 leader 执行 |
+| `DATA_CLEANUP_DRY_RUN` | `false` | 定时清理只统计不删除，适合上线前观察 |
+
+保留期可在控制台「数据治理」页调整，调整后写入 `governance_settings`，重启后仍生效。手动清理默认 dry-run，确认后再执行删除；按会话或员工级联删除会同步清理消息、摘要、轨迹、用量、反馈、旁听策略、定时任务与对应附件目录，并要求显式 `confirm`，操作会写入管理审计。日志脱敏覆盖普通文本参数与结构化对象字段；如需排障保留原文，可临时设置 `DATA_REDACTION_ENABLED=false`。
+
 **管理控制台与企业 MCP**
 
 | 变量 | 默认值 | 说明 |
@@ -461,7 +476,7 @@ pnpm start     # 通过 tsx 直接运行 src/index.ts
 
 ## 管理控制台
 
-控制台与机器人同进程提供，默认地址 `http://<host>:8787/`，共七个页面：
+控制台与机器人同进程提供，默认地址 `http://<host>:8787/`，共八个页面：
 
 | 页面 | 可以做什么 |
 | --- | --- |
@@ -472,6 +487,7 @@ pnpm start     # 通过 tsx 直接运行 src/index.ts
 | **企业 MCP** | 增删改查节点、启停并热应用、一键连通性测试并浏览工具 Schema、维护按群 / 角色的工具权限 |
 | **群聊旁听策略** | 查看全局默认策略、按群覆盖旁听与主动回复参数、一键紧急静音 |
 | **ReAct 审计轨迹** | 按群过滤并分页查看每次回答的思维链、工具入参、耗时、沙盒输出与最终答案 |
+| **数据治理** | 调整各表保留期、查看超期行数与附件占用、先 dry-run 再清理，以及按会话 / 员工级联删除 |
 
 使用说明：
 
@@ -540,6 +556,11 @@ pnpm start     # 通过 tsx 直接运行 src/index.ts
 | GET / POST | `/scheduled-tasks` | 定时任务列表 / 创建 |
 | PUT / DELETE | `/scheduled-tasks/:id` | 更新 / 删除定时任务 |
 | POST | `/scheduled-tasks/:id/run` | 立即执行一次 |
+| GET | `/governance` | 保留策略、各表行数与超期行数、附件占用 |
+| PUT | `/governance/retention` | 更新保留期（落库，重启后仍生效） |
+| POST | `/governance/cleanup` | 清理过期数据，默认 `dryRun: true` |
+| POST | `/governance/delete-conversation` | 按会话级联删除（需 `confirm: true`） |
+| POST | `/governance/delete-user` | 按员工级联删除（需 `confirm: true`） |
 
 ---
 
@@ -553,6 +574,7 @@ pnpm start     # 通过 tsx 直接运行 src/index.ts
 | 代码执行 | 沙盒无网络、只读文件系统、内存与时长受限 |
 | 群内行为 | 旁听不响应、主动回复受冷却与置信度双重限制，支持一键静音 |
 | 审计 | 每次配置变更记录操作人、动作类型、变更前后快照与时间 |
+| 脱敏与保留 | 日志/轨迹默认掩码手机号、邮箱、身份证号与密钥；各表按保留期定时清理，支持按会话/员工级联删除 |
 | 数据存储 | 会话、记忆与动态配置存于 PostgreSQL；密钥不会通过接口或审计明文回传 |
 
 主要数据表：
@@ -570,6 +592,7 @@ pnpm start     # 通过 tsx 直接运行 src/index.ts
 | `usage_ledger` | 每次模型调用的 Token、模型、耗时与场景 |
 | `scheduled_tasks` | 定时主动播报任务与下次触发时间 |
 | `cluster_shared_state` | 多实例共享的去重窗口、旁听冷却与群聊转录状态（仅集群模式写入） |
+| `governance_settings` | 管理端调整的保留期策略（覆盖 env 默认值） |
 
 ---
 

@@ -1,6 +1,5 @@
 import 'dotenv/config';
 import { resolve } from 'node:path';
-import pino from 'pino';
 import { DWClient } from 'dingtalk-stream';
 import { EnvConfigProvider } from './config/EnvConfigProvider.js';
 import type { IConfigProvider } from './config/IConfigProvider.js';
@@ -79,6 +78,17 @@ import { AdminChatOpsToolProvider } from './tools/admin/AdminChatOpsToolProvider
 import { TraceCollector, createMcpAdminPort } from './admin-api/runtime.js';
 import { startAdminServer } from './admin-api/server.js';
 import { MetricsRegistry } from './admin-api/metrics.js';
+import { createRedactingLogger } from './governance/logger.js';
+import { redactTraceRecord } from './governance/redaction.js';
+import {
+  DataRetentionService,
+  resolveRetentionPolicy,
+} from './governance/DataRetention.js';
+import {
+  PgRetentionStore,
+  loadGovernanceSetting,
+  saveGovernanceSetting,
+} from './db/governanceSchema.js';
 import type { ConsoleChatHandler } from './admin-api/chatStream.js';
 import type {
   AgentStreamEvent,
@@ -207,7 +217,11 @@ async function main(): Promise<void> {
     return;
   }
 
-  const logger = pino({ level: process.env.LOG_LEVEL ?? 'info' });
+  const redactionEnabled = envEnabled(process.env.DATA_REDACTION_ENABLED, true);
+  const logger = createRedactingLogger({
+    level: process.env.LOG_LEVEL ?? 'info',
+    redact: redactionEnabled,
+  });
   const harnessLogger: HarnessLogger = {
     info: (obj, msg) => logger.info(obj, msg),
     warn: (obj, msg) => logger.warn(obj, msg),
@@ -221,6 +235,7 @@ async function main(): Promise<void> {
   let gateway: StreamGateway | undefined;
   let leadership: PgAdvisoryLeadership | undefined;
   let adminServer: ReturnType<typeof startAdminServer> | undefined;
+  let retentionService: DataRetentionService | undefined;
   let streamConnected = false;
 
   try {
@@ -361,13 +376,40 @@ async function main(): Promise<void> {
     );
 
     const toolProviders = toolRegistry.providers;
+    const attachmentDir = resolve(toolRegistry.workspace.hostDir, 'attachments');
     const attachmentStore = new AttachmentStore({
-      rootDir: resolve(toolRegistry.workspace.hostDir, 'attachments'),
+      rootDir: attachmentDir,
       robotCode: () => configCenter.getDingTalkConfig().robotCode,
       getAccessToken,
       logger: harnessLogger,
       maxBytes: envMegabytes(process.env.ATTACHMENT_MAX_MB, 20),
     });
+    retentionService = await new DataRetentionService({
+      store: new PgRetentionStore(
+        {
+          query: async <T>(text: string, values?: unknown[]) => {
+            const result = await dbHandle.pool.query(
+              text,
+              values as unknown[],
+            );
+            return { rows: result.rows as T[], rowCount: result.rowCount };
+          },
+        },
+        {
+          load: () => loadGovernanceSetting(dbHandle.db),
+          save: (value) => saveGovernanceSetting(dbHandle.db, value),
+        },
+      ),
+      policy: resolveRetentionPolicy(process.env),
+      attachmentsDir: attachmentDir,
+      logger: harnessLogger,
+      canRun: () => !clusterEnabled || Boolean(leadership?.isLeader()),
+      scheduledDryRun: envEnabled(process.env.DATA_CLEANUP_DRY_RUN, false),
+    }).init();
+    logger.info(
+      { policy: retentionService.getPolicy(), redaction: redactionEnabled },
+      'data governance ready',
+    );
     const visionConfig = configCenter.getVisionConfig?.();
     const visionDescriber =
       visionConfig?.enabled && visionConfig.apiKey
@@ -574,8 +616,9 @@ async function main(): Promise<void> {
     ): Promise<void> => {
       if (!result) return;
       try {
+        const record = collector.build({ message, result, proactive });
         await traceStore.append(
-          collector.build({ message, result, proactive }),
+          redactionEnabled ? redactTraceRecord(record) : record,
         );
       } catch (error) {
         logger.warn(
@@ -1137,6 +1180,9 @@ async function main(): Promise<void> {
     }
     metrics.set('scheduler_enabled', 1);
     taskScheduler.start();
+    retentionService.start(
+      envSeconds(process.env.DATA_CLEANUP_INTERVAL_SECONDS, 86_400) * 1_000,
+    );
 
     configCenter.on('llm:changed', (event) => {
       const next = event.after as LLMAndPersonaConfig;
@@ -1347,6 +1393,7 @@ async function main(): Promise<void> {
         summary: (days = 1) =>
           usageLedger.summarySince(Date.now() - days * 24 * 60 * 60 * 1_000),
       },
+      governance: retentionService,
       metrics,
       readiness: async () => {
         try {
@@ -1397,6 +1444,7 @@ async function main(): Promise<void> {
       await leadership?.stop();
       runControl.stopAll();
       await taskScheduler.stop();
+      retentionService?.stop();
       gateway?.stop();
       await clusterSync?.flush().catch((error) => {
         logger.warn({ error: errorText(error) }, 'failed to flush cluster state');
