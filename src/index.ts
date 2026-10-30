@@ -25,7 +25,7 @@ import {
   EmotionReplier,
   OpenApiRobotEmotionApi,
 } from './dingtalk/EmotionReplier.js';
-import { replyMention } from './dingtalk/Mentions.js';
+import { replyMention, webhookMention } from './dingtalk/Mentions.js';
 import { sendTextFallback } from './dingtalk/TextFallback.js';
 import { DingTalkMediaSender } from './dingtalk/MediaSender.js';
 import { AttachmentStore } from './multimodal/AttachmentStore.js';
@@ -180,7 +180,7 @@ async function sendSessionWebhook(
   message: InboundMessage,
   text: string,
   logger: CardLogger,
-  mention = '',
+  options: { mention?: boolean } = {},
 ): Promise<void> {
   const webhook = message.rawPayload.sessionWebhook;
   if (typeof webhook !== 'string' || !webhook) {
@@ -190,9 +190,13 @@ async function sendSessionWebhook(
     );
     return;
   }
+  const at = options.mention
+    ? webhookMention(message)
+    : { text: '', atUserIds: [] };
   const result = await sendTextFallback({
     webhook,
-    text: mention ? `${mention}${text}` : text,
+    text: `${at.text}${text}`,
+    ...(at.atUserIds.length > 0 ? { atUserIds: at.atUserIds } : {}),
     logger,
   });
   if (result.ok) {
@@ -621,12 +625,20 @@ async function main(): Promise<void> {
       options: { mention?: string } = {},
     ): CardStreamer => {
       const dingtalk = configCenter.getDingTalkConfig();
+      const layout = process.env.DINGTALK_CARD_LAYOUT?.trim();
       return new CardStreamer({
         api: cardApiRef.current,
         message,
         cardTemplateId: dingtalk.cardTemplateId,
         robotCode: dingtalk.robotCode,
         logger: cardLogger,
+        layout:
+          layout === 'v1' || layout === 'v2' || layout === 'ai'
+            ? layout
+            : 'ai',
+        ...(process.env.DINGTALK_CARD_CONTENT_KEY?.trim()
+          ? { contentKey: process.env.DINGTALK_CARD_CONTENT_KEY.trim() }
+          : {}),
         ...(options.mention ? { mention: options.mention } : {}),
       });
     };
@@ -670,13 +682,16 @@ async function main(): Promise<void> {
       text: string,
       proactive = false,
     ): Promise<void> => {
-      const mention = replyMention(message, proactive);
       const webhook = message.rawPayload.sessionWebhook;
       if (typeof webhook === 'string' && webhook) {
-        await sendSessionWebhook(message, text, cardLogger, mention);
+        await sendSessionWebhook(message, text, cardLogger, {
+          mention: !proactive,
+        });
         return;
       }
-      const streamer = createStreamer(message, { mention });
+      const streamer = createStreamer(message, {
+        mention: replyMention(message, proactive),
+      });
       await streamer.start();
       streamer.handle({ type: 'answer_delta', content: text });
       await streamer.finish();
@@ -894,9 +909,17 @@ async function main(): Promise<void> {
           notify: async (text) => replyTo(message, text, proactive),
         });
         await streamer.finish();
+        const overflow = streamer.takeOverflowAnswer();
+        if (overflow) {
+          await sendSessionWebhook(message, overflow, cardLogger, {
+            mention: !proactive,
+          });
+        }
         await recordTrace(collector, message, result, proactive);
         if (result && !streamer.isAvailable && result.answer) {
-          await sendSessionWebhook(message, result.answer, cardLogger, mention);
+          await sendSessionWebhook(message, result.answer, cardLogger, {
+            mention: !proactive,
+          });
         }
       } catch (error) {
         logger.error(
@@ -911,7 +934,7 @@ async function main(): Promise<void> {
             message,
             FALLBACK_ERROR_TEXT,
             cardLogger,
-            mention,
+            { mention: !proactive },
           );
         }
       } finally {
@@ -988,6 +1011,10 @@ async function main(): Promise<void> {
           notify: async (text) => replyTo(message, text, true),
         });
         await streamer.finish();
+        const overflow = streamer.takeOverflowAnswer();
+        if (overflow) {
+          await sendSessionWebhook(message, overflow, cardLogger);
+        }
         await recordTrace(collector, message, result, true);
         if (result && !streamer.isAvailable && result.answer) {
           await sendSessionWebhook(message, result.answer, cardLogger);

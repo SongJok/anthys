@@ -83,13 +83,14 @@ flowchart LR
 ### 钉钉侧准备
 
 1. 在钉钉开放平台创建企业内部应用，启用机器人，记录 **AppKey**、**AppSecret** 与 **RobotCode**（通常与 AppKey 相同）。
-2. 在钉钉卡片平台创建 **AI 卡片模板**，模板变量必须包含以下三个：
+2. 在钉钉卡片平台创建 **AI 卡片模板**（卡片模板场景必须选 **「AI 卡片」**），模板内需要一个用于流式输出的 **Markdown 变量**，默认名 `content`：
 
    | 变量 | 用途 |
    | --- | --- |
-   | `thinking_section` | 折叠区：原生思维链与工具调用轨迹（Markdown） |
-   | `answer_section` | 正文区（Markdown） |
-   | `status_bar` | 状态角标（纯文本，建议渲染在标题栏或底部） |
+   | `content` | 卡片正文：状态角标、思考过程、工具轨迹与答案按顺序实时写入 |
+
+   > 钉钉的流式更新接口（`PUT /v1.0/card/streaming`）只对 AI 卡片模板的 `content` 字段生效；写入 `thinking_section` / `answer_section` / `status_bar` 等自定义变量会返回 `500 未知错误`，卡片会停在「处理中」。如模板的内容字段另有命名，通过 `DINGTALK_CARD_CONTENT_KEY` 指定。
+   > 应用需在权限管理中开通 `Card.Instance.Write`、`Card.Streaming.Write` 与 `qyapi_robot_sendmsg`，并把模板关联到该应用。
 
 3. 记录模板 ID，稍后填入 `DINGTALK_CARD_TEMPLATE_ID`。
 4. 将机器人加入目标群。群内 @ 机器人会正常应答；未 @ 的消息被静默旁听，命中条件才主动回复。
@@ -130,7 +131,9 @@ pnpm run db:seed      # 可选：预写入默认人设与模型配置，已有�
 | `DINGTALK_CLIENT_ID` | 必填 | 企业内部应用 AppKey |
 | `DINGTALK_CLIENT_SECRET` | 必填 | 应用 AppSecret |
 | `DINGTALK_ROBOT_CODE` | 必填 | 机器人编码，通常等于 AppKey |
-| `DINGTALK_CARD_TEMPLATE_ID` | 必填 | AI 卡片模板 ID，模板需包含三个变量（见上） |
+| `DINGTALK_CARD_TEMPLATE_ID` | 必填 | AI 卡片模板 ID（场景必须为「AI 卡片」，见上） |
+| `DINGTALK_CARD_LAYOUT` | `ai` | 卡片布局：`ai` 单 `content` 流式字段；`v1`/`v2` 多变量模板 |
+| `DINGTALK_CARD_CONTENT_KEY` | `content` | `ai` 布局下的流式字段名，需与模板变量一致 |
 | `DINGTALK_BOT_EMOTION_ENABLED` | `true` | 处理问题期间在用户消息上贴表情，回答交付后撤回 |
 | `DINGTALK_BOT_EMOTION_NAME` | `Like` | 贴的表情名（钉钉表情列表英文文案，`Like` 即「赞」） |
 
@@ -309,11 +312,12 @@ pnpm start     # 通过 tsx 直接运行 src/index.ts
 
 - 单聊与群聊 @ 机器人走同一套回答链路，回答过程实时写入一张 AI 卡片。
 - 收到消息后先投递占位卡片（`正在思考…`）再开始解析附件与推理，附件较多时用户也能立刻看到反馈；同时机器人在原消息上贴一个表情，回答交付后自动撤回。
-- 群聊被 @ 提问时，回复正文第一行先点名提问人（`@昵称`）再给答案，卡片与文本兜底一致；卡片投递本身仍带 `atUserIds`。群内主动插话、定时播报不点名。
-- 卡片分三个区域：可折叠的思维链与工具轨迹、Markdown 正文、状态角标（思考中 / 调用工具 / 已完成）。
+- 群聊被 @ 提问时，回复正文第一行先点名提问人（`@昵称`）再给答案；卡片投递本身带 `atUserIds`，文本兜底则用 `@userId` + `at.atUserIds` 组成真实提及。群内主动插话、定时播报不点名。
+- 卡片使用 AI 卡片模板的 `content` 单字段流式输出：状态角标、思考过程、工具轨迹与答案按顺序合成一份 Markdown 写入，收尾时带 `isFinalize` 让卡片从「处理中」切到「完成」，答案就在第一张卡片里，不会再发一条重复消息。
+- 单条卡片内容控制在约 2400 字符内（超出部分回答收尾后由文本兜底补发），避免钉钉单 block 超长导致卡片渲染空白。
 - 流式刷新按「最新值合并 + 单飞」提交，QPS 由令牌桶兜底，并带超时与指数退避重试，长回答不会刷屏或把钉钉接口打满。
 - 过程性说明与最终答案分离：模型在调用工具前的铺垫先作为正文输出，一旦进入工具轮次即通过 `answer_reset` 移入思维链，正文只保留最终结论。
-- 卡片模板支持 v2 布局：除思维链与正文外，额外渲染工具时间线、引用来源与操作区（发送 `/stop`、`/retry`）。
+- 旧的多变量模板仍可通过 `DINGTALK_CARD_LAYOUT=v1|v2` 启用：分别渲染思维链/正文/状态角标，或额外渲染工具时间线、引用来源与操作区（发送 `/stop`、`/retry`）。
 - 工具返回超过阈值时做头尾保留截断；来自外部 MCP 的内容会包裹为 `<untrusted_tool_output>`，提示模型按数据处理而非按指令执行。
 - 关闭原生思维链后，卡片仅展示正文与工具轨迹。
 - 卡片创建失败，或正文/收尾更新重试耗尽时，自动降级为 `sessionWebhook` 文本回复：长答案按 1500 字符分片并标注「（i/n）」，单片失败按指数退避重试，单片仍失败也会继续发送剩余分片，保证用户至少收到部分内容。
@@ -634,6 +638,7 @@ pnpm start     # 通过 tsx 直接运行 src/index.ts
 | 群里不主动回复 | 检查群策略开关、冷却时间、置信度阈值，以及是否处于防抢答窗口 |
 | 卡片没有思维链 | 关闭了原生思维链，或所用模型不返回推理内容 |
 | 卡片没刷新但收到了纯文本答案 | 卡片接口/模板异常触发降级，查看日志中 `card answer delivery unrecoverable` 与 `text fallback` 记录 |
+| 卡片一直停在「处理中」，答案另发一条消息 | 日志 `streamingUpdate failed` 若为 `500 未知错误`，多为模板不是「AI 卡片」场景或模板没有 `content` 变量；按上文重新创建模板或调整 `DINGTALK_CARD_CONTENT_KEY` |
 | 消息上没有出现处理中表情 | 应用未开通机器人表情权限，日志中会有 `reply emotion failed`；可置 `DINGTALK_BOT_EMOTION_ENABLED=false` 关闭 |
 | 审计轨迹为空 | 还没有产生过 ReAct 调用；先让机器人回答一次问题 |
 | DWS 查询报错 | 本机 `dws` 登录态过期：管理员发送 `/dws-login` 扫码授权；授权完成后机器人会自动重跑原问题 |

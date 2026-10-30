@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { replyMention } from './Mentions.js';
+import { replyMention, webhookMention } from './Mentions.js';
 import type { InboundMessage } from '../types/core.js';
 
 function inbound(overrides: Partial<InboundMessage> = {}): InboundMessage {
@@ -36,5 +36,25 @@ describe('replyMention', () => {
 
   it('压平昵称中的换行，避免打乱 Markdown 结构', () => {
     expect(replyMention(inbound({ senderNick: '张\n  三' }))).toBe('@张 三\n');
+  });
+});
+
+describe('webhookMention', () => {
+  it('群聊回复时使用 @userId 并声明 atUserIds', () => {
+    expect(webhookMention(inbound())).toEqual({
+      text: '@staff-1\n',
+      atUserIds: ['staff-1'],
+    });
+  });
+
+  it('单聊与主动回复不带提及', () => {
+    expect(webhookMention(inbound({ conversationType: '1' }))).toEqual({
+      text: '',
+      atUserIds: [],
+    });
+    expect(webhookMention(inbound(), true)).toEqual({
+      text: '',
+      atUserIds: [],
+    });
   });
 });

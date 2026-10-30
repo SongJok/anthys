@@ -41,6 +41,8 @@ export interface TextFallbackInput {
   webhook: string;
   text: string;
   title?: string;
+  /** 需要真实 @ 的用户；markdown 正文里还需包含 @userId 才能被客户端识别 */
+  atUserIds?: string[];
   fetchImpl?: typeof fetch;
   logger?: TextFallbackLogger;
   maxRetries?: number;
@@ -73,6 +75,7 @@ export async function sendTextFallback(
   const maxRetries = Math.max(0, input.maxRetries ?? 2);
   const retryDelayMs = input.retryDelayMs ?? 300;
   const title = input.title ?? '智能助手';
+  const atUserIds = (input.atUserIds ?? []).filter((id) => id.trim());
   let failed = 0;
 
   for (const [index, chunk] of chunks.entries()) {
@@ -86,6 +89,9 @@ export async function sendTextFallback(
           body: JSON.stringify({
             msgtype: 'markdown',
             markdown: { title, text: `${prefix}${chunk}` },
+            ...(atUserIds.length > 0
+              ? { at: { atUserIds, isAtAll: false } }
+              : {}),
           }),
           signal: AbortSignal.timeout(input.timeoutMs ?? 5_000),
         });

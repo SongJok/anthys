@@ -76,4 +76,34 @@ describe('sendTextFallback', () => {
     expect(result.ok).toBe(false);
     expect(result.error).toContain('1/2');
   });
+
+  it('携带 atUserIds 时附带真实提及字段', async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    await sendTextFallback({
+      webhook: 'https://example.com/hook',
+      text: '@staff-1 你好',
+      atUserIds: ['staff-1'],
+      fetchImpl: (async (_url: string | URL | Request, init?: RequestInit) => {
+        bodies.push(JSON.parse(String(init?.body)));
+        return new Response('{}', { status: 200 });
+      }) as typeof fetch,
+    });
+    expect(bodies[0]).toMatchObject({
+      msgtype: 'markdown',
+      at: { atUserIds: ['staff-1'], isAtAll: false },
+    });
+  });
+
+  it('没有 atUserIds 时不发送 at 字段', async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    await sendTextFallback({
+      webhook: 'https://example.com/hook',
+      text: '你好',
+      fetchImpl: (async (_url: string | URL | Request, init?: RequestInit) => {
+        bodies.push(JSON.parse(String(init?.body)));
+        return new Response('{}', { status: 200 });
+      }) as typeof fetch,
+    });
+    expect(bodies[0]).not.toHaveProperty('at');
+  });
 });

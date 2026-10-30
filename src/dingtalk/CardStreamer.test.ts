@@ -443,4 +443,120 @@ describe('CardStreamer', () => {
       fake.updates.find((update) => update.key === 'tools_section')?.content,
     ).toContain('current_time');
   });
+
+  describe('ai 布局（单 content 流式字段）', () => {
+    it('只初始化 content 字段作为思考占位', async () => {
+      const fake = fakeApi();
+      const streamer = new CardStreamer({
+        api: fake.api,
+        message: inbound(),
+        cardTemplateId: 'tpl-ai',
+        robotCode: 'robot-1',
+        layout: 'ai',
+      });
+      await streamer.start();
+
+      expect(fake.created[0]?.params).toEqual({ content: '正在思考…' });
+    });
+
+    it('把状态、思考与工具轨迹合成一份 content', async () => {
+      const fake = fakeApi();
+      const streamer = new CardStreamer({
+        api: fake.api,
+        message: inbound(),
+        cardTemplateId: 'tpl-ai',
+        robotCode: 'robot-1',
+        layout: 'ai',
+      });
+      await streamer.start();
+
+      streamer.handle({ type: 'reasoning_delta', content: '需要查时间' });
+      streamer.handle({
+        type: 'tool_start',
+        toolName: 'current_time',
+        args: { timeZone: 'Asia/Shanghai' },
+      });
+      streamer.handle({
+        type: 'tool_end',
+        toolName: 'current_time',
+        summary: '2026-10-30 10:00',
+        isError: false,
+      });
+      await settle();
+
+      const last = fake.updates.at(-1);
+      expect(last?.key).toBe('content');
+      expect(last?.content).toContain('> 工具 current_time 已完成');
+      expect(last?.content).toContain('思考过程');
+      expect(last?.content).toContain('需要查时间');
+      expect(last?.content).toContain('2026-10-30 10:00');
+    });
+
+    it('正文写入 content 并带上群聊提及前缀', async () => {
+      const fake = fakeApi();
+      const streamer = new CardStreamer({
+        api: fake.api,
+        message: inbound({ conversationType: '2' }),
+        cardTemplateId: 'tpl-ai',
+        robotCode: 'robot-1',
+        layout: 'ai',
+        mention: '@张三\n',
+      });
+      await streamer.start();
+
+      streamer.handle({ type: 'answer_delta', content: '答'.repeat(80) });
+      await settle();
+
+      const update = fake.updates.at(-1);
+      expect(update?.key).toBe('content');
+      expect(update?.content).toContain(`@张三\n${'答'.repeat(80)}`);
+    });
+
+    it('completed 后以 isFinalize 收尾，卡片离开处理中', async () => {
+      const fake = fakeApi();
+      const streamer = new CardStreamer({
+        api: fake.api,
+        message: inbound(),
+        cardTemplateId: 'tpl-ai',
+        robotCode: 'robot-1',
+        layout: 'ai',
+      });
+      await streamer.start();
+
+      streamer.handle({ type: 'answer_delta', content: '最终答案' });
+      streamer.handle({
+        type: 'completed',
+        usage: { totalTokens: 99, steps: 2, durationMs: 1_500 },
+      });
+      await streamer.finish();
+
+      const finals = fake.updates.filter((update) => update.isFinalize);
+      expect(finals).toHaveLength(1);
+      expect(finals[0]).toMatchObject({ key: 'content', isError: false });
+      expect(finals[0]?.content).toContain('已完成');
+      expect(finals[0]?.content).toContain('最终答案');
+    });
+
+    it('超出卡片容量的答案截断并保留溢出文本', async () => {
+      const fake = fakeApi();
+      const streamer = new CardStreamer({
+        api: fake.api,
+        message: inbound(),
+        cardTemplateId: 'tpl-ai',
+        robotCode: 'robot-1',
+        layout: 'ai',
+        maxContentChars: 400,
+      });
+      await streamer.start();
+
+      streamer.handle({ type: 'answer_delta', content: '答'.repeat(600) });
+      await streamer.finish();
+
+      const final = fake.updates.find((update) => update.isFinalize);
+      expect(final?.content).toContain('剩余部分随后发送');
+      expect(Array.from(final?.content ?? '').length).toBeLessThanOrEqual(400);
+      expect(streamer.takeOverflowAnswer()).toBe('答'.repeat(225));
+      expect(streamer.takeOverflowAnswer()).toBe('');
+    });
+  });
 });

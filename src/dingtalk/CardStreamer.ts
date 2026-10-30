@@ -13,14 +13,19 @@ export type CardBlockKey =
   | 'status_bar'
   | 'tools_section'
   | 'citations_section'
-  | 'actions_section';
+  | 'actions_section'
+  | 'content';
 
-export type CardLayout = 'v1' | 'v2';
+/**
+ * ai：AI 卡片模板只支持单字段流式输出，状态/思考/答案合成一份 Markdown 写入 content；
+ * v1/v2：多变量模板，分别写入 thinking_section / answer_section 等区块。
+ */
+export type CardLayout = 'ai' | 'v1' | 'v2';
 
 export interface CardUpdate {
   outTrackId: string;
   guid: string;
-  key: CardBlockKey;
+  key: string;
   content: string;
   isFull: boolean;
   isFinalize: boolean;
@@ -31,11 +36,7 @@ export interface CardCreateInput {
   cardTemplateId: string;
   outTrackId: string;
   spaceId: string;
-  params: Record<string, string> & {
-    thinking_section: string;
-    answer_section: string;
-    status_bar: string;
-  };
+  params: Record<string, string>;
   deliver: {
     conversationType: '1' | '2';
     robotCode: string;
@@ -119,8 +120,14 @@ export interface CardStreamerOptions {
   intervalMs?: number;
   maxChars?: number;
   logger?: CardLogger;
-  /** v1 为三区块模板；v2 追加 tools/citations/actions 区块 */
+  /** ai 为单 content 流式模板（默认用于 AI 卡片）；v1 三区块模板；v2 追加 tools/citations/actions 区块 */
   layout?: CardLayout;
+  /** ai 布局下流式写入的模板变量名，默认 content */
+  contentKey?: string;
+  /** ai 布局下卡片正文上限字符数，超出部分留给文本兜底，默认 2400 */
+  maxContentChars?: number;
+  /** ai 布局下思考过程最多展示的字符数（保留最新的尾部），默认 600 */
+  thinkingChars?: number;
   /** 单次 streamingUpdate 超时，默认 5s */
   updateTimeoutMs?: number;
   /** 失败重试次数，默认 2 */
@@ -145,6 +152,22 @@ function safeJson(value: unknown): string {
   } catch {
     return String(value);
   }
+}
+
+function errorDetail(error: unknown): Record<string, unknown> | undefined {
+  if (!error || typeof error !== 'object') return undefined;
+  const typed = error as Record<string, unknown>;
+  const data =
+    typed.data && typeof typed.data === 'object'
+      ? (typed.data as Record<string, unknown>)
+      : undefined;
+  return {
+    code: typed.code,
+    statusCode: typed.statusCode,
+    description: typed.description,
+    requestId: data?.requestid ?? data?.requestId ?? data?.RequestId,
+    body: data ? safeJson(data) : undefined,
+  };
 }
 
 function sleep(ms: number): Promise<void> {
@@ -214,9 +237,13 @@ class TokenBucket {
 }
 
 /**
- * 把 AgentStreamEvent 渲染为 AI 卡片：
- * thinking_section（原生思维链 + 过程说明 + 工具轨迹）、answer_section（最终答案）、
- * status_bar（状态角标）；v2 模板额外使用 tools_section / citations_section / actions_section。
+ * 把 AgentStreamEvent 渲染为 AI 卡片。
+ *
+ * ai 布局（默认用于钉钉 AI 卡片）：模板只暴露一个流式字段 content，
+ * 状态角标、思考过程、工具轨迹与答案合成一份 Markdown 顺序写入；
+ * 收尾时带 isFinalize 让卡片从「处理中/输入中」切换到「完成」。
+ *
+ * v1/v2 布局：多变量模板，分别写入 thinking_section / answer_section 等区块。
  *
  * 刷新策略为「最新值合并 + 单飞」：同一区块只保留最新内容，
  * 网络慢时不会积压历史快照，也不会在结束后继续回放旧内容。
@@ -228,6 +255,9 @@ export class CardStreamer {
   private readonly api: CardApi;
   private readonly logger?: CardLogger;
   private readonly layout: CardLayout;
+  private readonly contentKey: string;
+  private readonly maxContentChars: number;
+  private readonly thinkingChars: number;
   private readonly updateTimeoutMs: number;
   private readonly maxRetries: number;
   private readonly createRetries: number;
@@ -236,6 +266,7 @@ export class CardStreamer {
 
   private reasoning = '';
   private answer = '';
+  private overflowAnswer = '';
   private status = '正在思考…';
   private readonly toolLines: string[] = [];
   private planItems: PlanItem[] = [];
@@ -248,13 +279,16 @@ export class CardStreamer {
   private dirtyCitations = false;
   private available = false;
   private finalizePromise: Promise<void> | null = null;
-  private pending = new Map<CardBlockKey, CardUpdate>();
+  private pending = new Map<string, CardUpdate>();
   private queue: Promise<void> = Promise.resolve();
 
   constructor(private readonly options: CardStreamerOptions) {
     this.api = options.api;
     this.logger = options.logger;
     this.layout = options.layout ?? 'v1';
+    this.contentKey = options.contentKey?.trim() || 'content';
+    this.maxContentChars = Math.max(400, options.maxContentChars ?? 2_400);
+    this.thinkingChars = Math.max(80, options.thinkingChars ?? 600);
     this.updateTimeoutMs = options.updateTimeoutMs ?? 5_000;
     this.maxRetries = options.maxRetries ?? 2;
     this.createRetries = options.createRetries ?? 0;
@@ -283,11 +317,14 @@ export class CardStreamer {
   }
 
   public async start(): Promise<void> {
-    const params: CardCreateInput['params'] = {
-      thinking_section: '正在思考…',
-      answer_section: '',
-      status_bar: this.status,
-    };
+    const params: Record<string, string> =
+      this.layout === 'ai'
+        ? { [this.contentKey]: '正在思考…' }
+        : {
+            thinking_section: '正在思考…',
+            answer_section: '',
+            status_bar: this.status,
+          };
     if (this.layout === 'v2') {
       params.tools_section = '';
       params.citations_section = '';
@@ -394,7 +431,7 @@ export class CardStreamer {
         this.toolLines.push(line);
         this.activeTools.set(event.toolName, (this.activeTools.get(event.toolName) ?? 0) + 1);
         this.status = `正在调用工具 ${event.toolName}`;
-        this.dirtyThinking = this.layout === 'v1';
+        this.dirtyThinking = this.layout !== 'v2';
         this.dirtyTools = this.layout === 'v2';
         this.dirtyStatus = true;
         this.throttler.cancel();
@@ -415,7 +452,7 @@ export class CardStreamer {
         if (active <= 0) this.activeTools.delete(event.toolName);
         else this.activeTools.set(event.toolName, active);
         this.status = `工具 ${event.toolName} ${event.isError ? '执行失败' : '已完成'}`;
-        this.dirtyThinking = this.layout === 'v1';
+        this.dirtyThinking = this.layout !== 'v2';
         this.dirtyTools = this.layout === 'v2';
         this.dirtyStatus = true;
         this.flushDirty(false, false);
@@ -434,7 +471,7 @@ export class CardStreamer {
       case 'error': {
         this.toolLines.push(`- 处理出错：${event.message}`);
         this.status = event.retryable === false ? '处理失败' : '处理失败';
-        this.dirtyThinking = this.layout === 'v1';
+        this.dirtyThinking = this.layout !== 'v2';
         this.dirtyTools = this.layout === 'v2';
         this.dirtyStatus = true;
         this.throttler.cancel();
@@ -469,7 +506,7 @@ export class CardStreamer {
     const parts: string[] = [];
     const base = this.reasoningText();
     if (base) parts.push(base);
-    if (this.toolLines.length > 0 && this.layout === 'v1') {
+    if (this.toolLines.length > 0 && this.layout !== 'v2') {
       parts.push(`工具调用记录：\n${this.toolLines.join('\n')}`);
     }
     return parts.join('\n\n');
@@ -478,6 +515,59 @@ export class CardStreamer {
   private answerText(): string {
     if (!this.answer.trim()) return '';
     return this.mention ? `${this.mention}${this.answer}` : this.answer;
+  }
+
+  /** ai 布局：状态、思考、答案合成一份 Markdown，超出上限的答案交给文本兜底 */
+  private contentDocument(finalize: boolean): {
+    text: string;
+    overflow: string;
+  } {
+    const status = this.status.trim() ? `> ${this.status.trim()}` : '';
+    const thinking = this.thinkingBlock();
+    const head = [status, thinking].filter(Boolean).join('\n\n');
+    const answer =
+      this.answerText() ||
+      (finalize
+        ? `${this.mention}（本次没有生成正文，请重新提问或稍后再试）`
+        : '');
+    const marker = '…（内容较长，剩余部分随后发送）';
+    const budget = this.maxContentChars - head.length - (answer ? 2 : 0);
+    let shown = answer;
+    let overflow = '';
+    if (answer && budget > 0) {
+      const chars = Array.from(answer);
+      if (chars.length > budget) {
+        const cut = Math.max(0, budget - Array.from(marker).length);
+        shown = `${chars.slice(0, cut).join('')}${marker}`;
+        overflow = chars.slice(cut).join('');
+      }
+    }
+    return {
+      text: [head, shown].filter(Boolean).join('\n\n'),
+      overflow,
+    };
+  }
+
+  private thinkingBlock(): string {
+    const text = this.thinkingText().trim();
+    if (!text) return '';
+    const chars = Array.from(text);
+    const limited =
+      chars.length > this.thinkingChars
+        ? `…${chars.slice(-this.thinkingChars).join('')}`
+        : text;
+    const quoted = limited
+      .split('\n')
+      .map((line) => `> ${line}`)
+      .join('\n');
+    return `**思考过程**\n\n${quoted}`;
+  }
+
+  /** 超出卡片容量、尚未送达的答案正文 */
+  public takeOverflowAnswer(): string {
+    const overflow = this.overflowAnswer;
+    this.overflowAnswer = '';
+    return overflow;
   }
 
   private toolsText(): string {
@@ -540,11 +630,12 @@ export class CardStreamer {
               outTrackId: this.outTrackId,
               key: update.key,
               error: errorMessage(error),
+              detail: errorDetail(error),
             },
             'streamingUpdate failed',
           );
           // 正文或收尾更新彻底失败时卡片已无法交付答案，交由调用方走文本兜底
-          if (update.isFinalize || update.key === 'answer_section') {
+          if (update.isFinalize || update.key === this.answerKey) {
             this.available = false;
             this.pending.clear();
             this.logger?.warn(
@@ -559,8 +650,36 @@ export class CardStreamer {
     }
   }
 
+  private get answerKey(): string {
+    return this.layout === 'ai' ? this.contentKey : 'answer_section';
+  }
+
   private flushDirty(isFinalize: boolean, isError: boolean): void {
     if (!this.available) {
+      this.dirtyThinking = false;
+      this.dirtyAnswer = false;
+      this.dirtyStatus = false;
+      this.dirtyTools = false;
+      this.dirtyCitations = false;
+      return;
+    }
+    if (this.layout === 'ai') {
+      const dirty =
+        this.dirtyThinking ||
+        this.dirtyAnswer ||
+        this.dirtyStatus ||
+        this.dirtyTools ||
+        this.dirtyCitations;
+      if (dirty || isFinalize) {
+        const document = this.contentDocument(isFinalize);
+        if (isFinalize) this.overflowAnswer = document.overflow;
+        this.enqueue(
+          this.buildUpdate(this.contentKey, document.text, {
+            isFinalize,
+            isError,
+          }),
+        );
+      }
       this.dirtyThinking = false;
       this.dirtyAnswer = false;
       this.dirtyStatus = false;
@@ -616,7 +735,7 @@ export class CardStreamer {
   }
 
   private buildUpdate(
-    key: CardBlockKey,
+    key: string,
     content: string,
     flags: { isFinalize: boolean; isError: boolean },
   ): CardUpdate {
