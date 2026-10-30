@@ -1,4 +1,5 @@
 import { existsSync } from 'node:fs';
+import { timingSafeEqual } from 'node:crypto';
 import { Hono } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 import { serve } from '@hono/node-server';
@@ -14,6 +15,13 @@ import type {
 import type { EnterpriseMcpServerConfig } from '../types/mcp-and-sandbox.js';
 import { createConfigRoutes } from './routes/configRoutes.js';
 import { createMcpRoutes } from './routes/mcpRoutes.js';
+import {
+  handleChatStream,
+  OneTimeTicketStore,
+  type ChatStreamDeps,
+  type ConsoleChatHandler,
+} from './chatStream.js';
+import type { MetricsRegistry } from './metrics.js';
 
 export interface AdminApiLogger {
   info(obj: Record<string, unknown>, msg: string): void;
@@ -43,6 +51,17 @@ export interface AdminApiOptions {
   staticDir?: string;
   logger?: AdminApiLogger;
   now?: () => number;
+  /** 控制台 SSE 在线对话 */
+  chatStream?: ConsoleChatHandler;
+  /** 就绪探针：数据库 / Stream 连接状态 */
+  readiness?: () =>
+    | { ready: boolean; detail?: string }
+    | Promise<{ ready: boolean; detail?: string }>;
+  metrics?: MetricsRegistry;
+  ticketTtlMs?: number;
+  feedback?: {
+    list(limit?: number): Promise<unknown[]>;
+  };
 }
 
 export interface AdminServerOptions extends AdminApiOptions {
@@ -51,17 +70,46 @@ export interface AdminServerOptions extends AdminApiOptions {
 }
 
 /** 组装管理后台 Hono 应用（REST API + SPA 静态托管） */
+function safeEqual(input: string, expected: string): boolean {
+  const left = Buffer.from(input);
+  const right = Buffer.from(expected);
+  return left.length === right.length && timingSafeEqual(left, right);
+}
+
+function isAuthorized(
+  authorization: string | undefined,
+  queryToken: string | undefined,
+  token: string,
+): boolean {
+  if (!token) return true;
+  const bearer = authorization?.startsWith('Bearer ')
+    ? authorization.slice(7)
+    : '';
+  if (bearer && safeEqual(bearer, token)) return true;
+  return Boolean(queryToken) && safeEqual(queryToken ?? '', token);
+}
+
 export function createAdminApp(options: AdminApiOptions): Hono {
   const logger = options.logger;
   const app = new Hono();
   const token = (options.authToken ?? process.env.ADMIN_API_TOKEN ?? '').trim();
+  const tickets = new OneTimeTicketStore(
+    options.ticketTtlMs ?? 60_000,
+    options.now ?? Date.now,
+  );
+  const chatDeps: ChatStreamDeps = {
+    tickets,
+    ...(options.chatStream ? { chatStream: options.chatStream } : {}),
+    ...(options.metrics ? { metrics: options.metrics } : {}),
+    ...(logger ? { logger } : {}),
+  };
 
   const admin = new Hono();
   if (token) {
     admin.use('*', async (c, next) => {
-      const header = c.req.header('authorization') ?? '';
+      const header = c.req.header('authorization');
       const queryToken = c.req.query('token');
-      if (header !== `Bearer ${token}` && queryToken !== token) {
+      if (!isAuthorized(header, queryToken, token)) {
         throw new HTTPException(401, {
           message: '未授权：ADMIN_API_TOKEN 校验失败',
         });
@@ -101,7 +149,65 @@ export function createAdminApp(options: AdminApiOptions): Hono {
     }),
   );
 
+  admin.get('/feedback', async (c) => {
+    if (!options.feedback) return c.json({ ok: true, items: [] });
+    const limit = Number(c.req.query('limit') ?? 50);
+    const items = await options.feedback.list(
+      Number.isFinite(limit) ? limit : 50,
+    );
+    return c.json({ ok: true, items });
+  });
+
+  admin.post('/chat/tickets', (c) => {
+    if (!options.chatStream) {
+      return c.json({ ok: false, error: '在线对话未启用' }, 503);
+    }
+    const ticket = tickets.issue();
+    options.metrics?.inc('console_ticket_total');
+    return c.json({ ok: true, ...ticket });
+  });
+
   app.get('/health', (c) => c.json({ ok: true, service: 'admin-console' }));
+  app.get('/healthz', (c) => c.json({ ok: true, service: 'admin-console' }));
+
+  app.get('/readyz', async (c) => {
+    if (!options.readiness) {
+      return c.json({ ok: true, ready: true });
+    }
+    try {
+      const result = await options.readiness();
+      return c.json(
+        { ok: result.ready, ready: result.ready, ...(result.detail ? { detail: result.detail } : {}) },
+        result.ready ? 200 : 503,
+      );
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      return c.json({ ok: false, ready: false, detail }, 503);
+    }
+  });
+
+  app.get('/metrics', (c) => {
+    if (
+      !isAuthorized(
+        c.req.header('authorization'),
+        c.req.query('token'),
+        token,
+      )
+    ) {
+      return c.json({ ok: false, error: '未授权' }, 401);
+    }
+    if (!options.metrics) {
+      return c.text('# metrics disabled\n', 200, {
+        'content-type': 'text/plain; version=0.0.4',
+      });
+    }
+    return c.text(options.metrics.render(), 200, {
+      'content-type': 'text/plain; version=0.0.4; charset=utf-8',
+    });
+  });
+
+  app.get('/api/v1/chat/stream', (c) => handleChatStream(c, chatDeps));
+
   app.route('/api/v1/admin', admin);
   app.all('/api/*', (c) =>
     c.json({ ok: false, error: `未找到接口: ${c.req.path}` }, 404),

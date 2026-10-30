@@ -1,4 +1,5 @@
-import { TOPIC_ROBOT } from 'dingtalk-stream';
+import { TOPIC_CARD, TOPIC_ROBOT } from 'dingtalk-stream';
+import { parseCardAction, type CardActionEvent } from './CardActions.js';
 import { parseStreamMessage } from './MessageParser.js';
 import { toTranscriptEntry } from '../bystander/GroupTranscriptBuffer.js';
 import type { GroupTranscriptBuffer } from '../bystander/GroupTranscriptBuffer.js';
@@ -36,6 +37,8 @@ export interface StreamGatewayOptions {
   bystanderHandler?: (message: InboundMessage) => Promise<void>;
   /** 群聊旁听缓冲池，所有群消息（含@）都会先写入 */
   transcriptBuffer?: GroupTranscriptBuffer;
+  /** 互动卡片按钮 / 快捷操作回调 */
+  cardActionHandler?: (action: CardActionEvent) => Promise<void>;
   logger?: StreamGatewayLogger;
   now?: () => number;
   /** 已处理消息的去重窗口，默认 1000 条 */
@@ -63,9 +66,21 @@ export class StreamGateway {
     this.options.client.registerCallbackListener(TOPIC_ROBOT, (message) => {
       this.onRawMessage(message);
     });
+    if (this.options.cardActionHandler) {
+      this.options.client.registerCallbackListener(TOPIC_CARD, (message) => {
+        this.onRawCardMessage(message);
+      });
+    }
     await this.options.client.connect();
     this.started = true;
-    this.options.logger?.info({ topic: TOPIC_ROBOT }, 'stream gateway started');
+    this.options.logger?.info(
+      {
+        topics: this.options.cardActionHandler
+          ? [TOPIC_ROBOT, TOPIC_CARD]
+          : [TOPIC_ROBOT],
+      },
+      'stream gateway started',
+    );
   }
 
   public stop(): void {
@@ -85,6 +100,61 @@ export class StreamGateway {
       status: 'SUCCESS',
     });
     void this.dispatch(message.data, messageId);
+  }
+
+  /** 卡片回调：同样先 ACK 再异步分发，解析失败只记日志 */
+  public onRawCardMessage(message: StreamCallbackMessage): void {
+    const messageId = message.headers?.messageId ?? '';
+    if (messageId) {
+      this.options.client.socketCallBackResponse(messageId, {
+        status: 'SUCCESS',
+      });
+    }
+    void this.dispatchCardAction(message.data, messageId);
+  }
+
+  public async dispatchCardAction(
+    data: string,
+    messageId: string,
+  ): Promise<void> {
+    if (messageId && this.seen.has(messageId)) {
+      this.options.logger?.info({ messageId }, 'duplicate card callback ignored');
+      return;
+    }
+    if (messageId) this.remember(messageId);
+
+    const handler = this.options.cardActionHandler;
+    if (!handler) return;
+    let payload: unknown;
+    try {
+      payload = JSON.parse(data);
+    } catch (error) {
+      this.options.logger?.warn(
+        {
+          messageId,
+          error: error instanceof Error ? error.message : String(error),
+        },
+        'invalid card callback payload',
+      );
+      return;
+    }
+    const action = parseCardAction(payload);
+    if (!action) {
+      this.options.logger?.info({ messageId }, 'unrecognized card action ignored');
+      return;
+    }
+    try {
+      await handler(action);
+    } catch (error) {
+      this.options.logger?.error(
+        {
+          messageId,
+          actionId: action.actionId,
+          error: error instanceof Error ? error.stack ?? error.message : String(error),
+        },
+        'card action handler failed',
+      );
+    }
   }
 
   /** 测试与复用入口：解析一条原始 data 字符串 */

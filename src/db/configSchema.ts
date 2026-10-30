@@ -18,9 +18,12 @@ import type {
   AdminAuditLog,
   ConfigScope,
   EnterpriseBotSystemConfig,
+  FeedbackStore,
   GroupBystanderPolicy,
   GroupTraceStat,
   KnownGroup,
+  UserFeedbackInput,
+  UserFeedbackRecord,
   McpToolAccessPolicy,
   ReActTracePage,
   ReActTraceQuery,
@@ -418,5 +421,67 @@ export class DrizzleGroupDirectory {
       });
     }
     return groups;
+  }
+}
+
+/** 用户反馈：/feedback 指令落库，供运营复盘与评测集沉淀 */
+export const userFeedback = pgTable(
+  'user_feedback',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    conversationId: text('conversation_id').notNull(),
+    messageId: text('message_id').notNull().default(''),
+    senderStaffId: text('sender_staff_id').notNull().default(''),
+    senderNick: text('sender_nick').notNull().default(''),
+    content: text('content').notNull().default(''),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [index('user_feedback_created_idx').on(table.createdAt)],
+);
+
+export class DrizzleFeedbackStore implements FeedbackStore {
+  constructor(private readonly db: Database) {}
+
+  public async append(input: UserFeedbackInput): Promise<UserFeedbackRecord> {
+    const rows = await this.db
+      .insert(userFeedback)
+      .values({
+        conversationId: input.conversationId,
+        messageId: input.messageId,
+        senderStaffId: input.senderStaffId,
+        senderNick: input.senderNick,
+        content: input.content,
+      })
+      .returning();
+    const row = rows[0];
+    if (!row) throw new Error('failed to persist feedback');
+    return {
+      id: row.id,
+      conversationId: row.conversationId,
+      messageId: row.messageId,
+      senderStaffId: row.senderStaffId,
+      senderNick: row.senderNick,
+      content: row.content,
+      createdAt: row.createdAt.toISOString(),
+    };
+  }
+
+  public async list(limit = 100): Promise<UserFeedbackRecord[]> {
+    const rows = await this.db
+      .select()
+      .from(userFeedback)
+      .orderBy(desc(userFeedback.createdAt))
+      .limit(Math.min(500, Math.max(1, limit)));
+    return rows.map((row) => ({
+      id: row.id,
+      conversationId: row.conversationId,
+      messageId: row.messageId,
+      senderStaffId: row.senderStaffId,
+      senderNick: row.senderNick,
+      content: row.content,
+      createdAt: row.createdAt.toISOString(),
+    }));
   }
 }

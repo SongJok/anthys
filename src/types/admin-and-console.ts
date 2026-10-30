@@ -164,6 +164,30 @@ export interface ReActTraceStore {
   dailyStats(dayStartMs: number, dayEndMs: number): Promise<TraceDailyStats>;
 }
 
+/** 用户对回答的显式反馈（/feedback 指令） */
+export interface UserFeedbackRecord {
+  id: string;
+  conversationId: string;
+  messageId: string;
+  senderStaffId: string;
+  senderNick: string;
+  content: string;
+  createdAt: string;
+}
+
+export interface UserFeedbackInput {
+  conversationId: string;
+  messageId: string;
+  senderStaffId: string;
+  senderNick: string;
+  content: string;
+}
+
+export interface FeedbackStore {
+  append(input: UserFeedbackInput): Promise<UserFeedbackRecord>;
+  list(limit?: number): Promise<UserFeedbackRecord[]>;
+}
+
 /** 已接入的钉钉群（用于 ChatOps 群列表与 Web 策略页） */
 export interface KnownGroup {
   conversationId: string;

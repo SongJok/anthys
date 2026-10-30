@@ -13,6 +13,10 @@ export interface BuildContextInput {
   userText: string;
   now?: () => number;
   memoryContext?: AssembledMemoryContext;
+  /** 群聊历史需要保留发言人，避免多个成员的话被当成同一个人 */
+  groupChat?: boolean;
+  /** 当前发言人的昵称，仅群聊使用 */
+  userSpeaker?: string;
 }
 
 const TOOL_GUIDANCE = [
@@ -67,7 +71,9 @@ export class ContextAssembler {
     const history = input.history.slice(-window);
     for (const item of history) {
       if (item.role === 'user') {
-        messages.push({ role: 'user', content: item.content });
+        const speaker =
+          input.groupChat && item.senderNick ? `${item.senderNick}：` : '';
+        messages.push({ role: 'user', content: `${speaker}${item.content}` });
         continue;
       }
       messages.push({
@@ -76,7 +82,9 @@ export class ContextAssembler {
       });
     }
 
-    messages.push({ role: 'user', content: input.userText });
+    const speaker =
+      input.groupChat && input.userSpeaker ? `${input.userSpeaker}：` : '';
+    messages.push({ role: 'user', content: `${speaker}${input.userText}` });
     return messages;
   }
 

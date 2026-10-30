@@ -16,6 +16,9 @@ import type { ReActTrace, ReActTraceStep, TracePage } from '../types';
 
 const STEP_LABEL: Record<ReActTraceStep['type'], string> = {
   reasoning: '原生思维链',
+  narration: '过程说明',
+  plan: '计划',
+  citation: '引用来源',
   tool: 'MCP 工具调用',
   sandbox: '沙盒执行',
   answer: '最终回答',
@@ -23,6 +26,9 @@ const STEP_LABEL: Record<ReActTraceStep['type'], string> = {
 
 const STEP_COLOR: Record<ReActTraceStep['type'], string> = {
   reasoning: 'geekblue',
+  narration: 'cyan',
+  plan: 'gold',
+  citation: 'magenta',
   tool: 'blue',
   sandbox: 'purple',
   answer: 'green',

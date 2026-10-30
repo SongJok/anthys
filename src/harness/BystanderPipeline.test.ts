@@ -96,6 +96,13 @@ function createRepository(): {
           createdAt: row.createdAt,
         }));
     },
+    async clearMessages(conversationId: string): Promise<number> {
+      const before = rows.length;
+      for (let index = rows.length - 1; index >= 0; index -= 1) {
+        if (rows[index]?.conversationId === conversationId) rows.splice(index, 1);
+      }
+      return before - rows.length;
+    },
   };
 
   return { repository, conversations, rows };
@@ -447,9 +454,14 @@ describe('群聊旁听与非 @ 自主回复主链路', () => {
     expect(messages[0]?.content).toContain('王五你看下这个报错堆栈');
     expect(messages.at(-1)).toEqual({
       role: 'user',
-      content: '按刚才大家讨论的报错现象帮我查一下日志',
+      content: '李四：按刚才大家讨论的报错现象帮我查一下日志',
     });
     expect(rows).toHaveLength(2);
-    expect(rows[0]?.metadata).toEqual({ messageId: 'm-3' });
+    expect(rows[0]?.metadata).toEqual({
+      messageId: 'm-3',
+      senderStaffId: 'staff-li',
+      senderNick: '李四',
+      conversationType: '2',
+    });
   });
 });

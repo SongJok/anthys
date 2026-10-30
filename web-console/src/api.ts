@@ -160,4 +160,20 @@ export const api = {
   },
   auditLogs: (limit = 50) =>
     request<{ logs: AuditLog[] }>(`/audit-logs?limit=${limit}`),
+
+  createChatTicket: () =>
+    request<{ ticket: string; expiresAt: number }>('/chat/tickets', {
+      method: 'POST',
+    }),
 };
+
+/** EventSource 无法携带 Authorize 头，改用一次性票据订阅 SSE */
+export function chatStreamUrl(
+  ticket: string,
+  question: string,
+  systemPrompt?: string,
+): string {
+  const search = new URLSearchParams({ ticket, question });
+  if (systemPrompt?.trim()) search.set('systemPrompt', systemPrompt.trim());
+  return `/api/v1/chat/stream?${search.toString()}`;
+}

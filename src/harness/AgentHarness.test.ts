@@ -63,6 +63,13 @@ function createRepository(): {
           createdAt: row.createdAt,
         }));
     },
+    async clearMessages(conversationId: string): Promise<number> {
+      const before = rows.length;
+      for (let index = rows.length - 1; index >= 0; index -= 1) {
+        if (rows[index]?.conversationId === conversationId) rows.splice(index, 1);
+      }
+      return before - rows.length;
+    },
   };
 
   return { repository, conversations, rows };

@@ -122,13 +122,20 @@ export class AgentHarness {
       userText: text,
       now: this.now,
       memoryContext,
+      groupChat: message.conversationType === '2',
+      userSpeaker: message.senderNick,
     });
 
     await repository.appendMessage({
       conversationId: conversation.id,
       role: 'user',
       content: text,
-      metadata: { messageId: message.messageId },
+      metadata: {
+        messageId: message.messageId,
+        senderStaffId: message.senderStaffId,
+        senderNick: message.senderNick,
+        conversationType: message.conversationType,
+      },
     });
 
     const startedAt = this.now();
@@ -242,6 +249,8 @@ export class AgentHarness {
       userText: proactiveInstruction,
       now: this.now,
       memoryContext,
+      groupChat: true,
+      // 主动回复的 user 消息是系统指令，不使用成员昵称加前缀
     });
 
     await repository.appendMessage({
@@ -250,6 +259,9 @@ export class AgentHarness {
       content: text,
       metadata: {
         messageId: message.messageId,
+        senderStaffId: message.senderStaffId,
+        senderNick: message.senderNick,
+        conversationType: message.conversationType,
         proactive: true,
         triggerReason: handle.decision.triggerReason,
         confidence: handle.decision.confidence,

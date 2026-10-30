@@ -89,6 +89,52 @@ describe('ContextAssembler', () => {
     ]);
   });
 
+  it('群聊场景为历史与当前发言加上发言人前缀', () => {
+    const assembler = new ContextAssembler({ windowMessages: 20, now: fixedNow });
+    const messages = assembler.build({
+      persona,
+      groupChat: true,
+      userSpeaker: '李四',
+      history: [
+        {
+          id: 'u1',
+          role: 'user',
+          content: '部署失败了吗',
+          senderNick: '张三',
+          reasoning: null,
+          createdAt: 0,
+        },
+        historyMessage('a1', 'assistant', '正在排查'),
+      ],
+      userText: '看下日志',
+    });
+
+    expect(messages[1]).toEqual({ role: 'user', content: '张三：部署失败了吗' });
+    expect(messages[2]).toEqual({ role: 'assistant', content: '正在排查' });
+    expect(messages[3]).toEqual({ role: 'user', content: '李四：看下日志' });
+  });
+
+  it('单聊场景不添加发言人前缀', () => {
+    const assembler = new ContextAssembler({ windowMessages: 20, now: fixedNow });
+    const messages = assembler.build({
+      persona,
+      userSpeaker: '李四',
+      history: [
+        {
+          id: 'u1',
+          role: 'user',
+          content: '部署失败了吗',
+          senderNick: '张三',
+          reasoning: null,
+          createdAt: 0,
+        },
+      ],
+      userText: '看下日志',
+    });
+    expect(messages[1]).toEqual({ role: 'user', content: '部署失败了吗' });
+    expect(messages[2]).toEqual({ role: 'user', content: '看下日志' });
+  });
+
   it('不把 assistant 的内部思维链注入后续上下文', () => {
     const assembler = new ContextAssembler({ windowMessages: 20, now: fixedNow });
     const messages = assembler.build({

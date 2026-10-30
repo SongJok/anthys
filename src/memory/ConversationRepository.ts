@@ -29,6 +29,8 @@ export interface ConversationRepository {
     conversationId: string,
     limit: number,
   ): Promise<StoredMessage[]>;
+  /** 清空某个会话的短期上下文，返回删除条数 */
+  clearMessages(conversationId: string): Promise<number>;
 }
 
 export class DrizzleConversationRepository implements ConversationRepository {
@@ -105,12 +107,26 @@ export class DrizzleConversationRepository implements ConversationRepository {
       .orderBy(desc(messages.createdAt))
       .limit(Math.max(1, limit));
 
-    return rows.reverse().map((row) => ({
-      id: row.id,
-      role: row.role as 'user' | 'assistant',
-      content: row.content,
-      reasoning: row.reasoning,
-      createdAt: row.createdAt.getTime(),
-    }));
+    return rows.reverse().map((row) => {
+      const metadata = (row.metadata ?? {}) as Record<string, unknown>;
+      return {
+        id: row.id,
+        role: row.role as 'user' | 'assistant',
+        content: row.content,
+        reasoning: row.reasoning,
+        createdAt: row.createdAt.getTime(),
+        senderNick:
+          typeof metadata.senderNick === 'string' ? metadata.senderNick : null,
+        metadata,
+      };
+    });
+  }
+
+  public async clearMessages(conversationId: string): Promise<number> {
+    const rows = await this.db
+      .delete(messages)
+      .where(eq(messages.conversationId, conversationId))
+      .returning({ id: messages.id });
+    return rows.length;
   }
 }

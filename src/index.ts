@@ -10,6 +10,7 @@ import { seedAgentConfigs, loadLLMOverrides, applyLLMOverrides } from './db/seed
 import {
   DrizzleAdminAuditStore,
   DrizzleConfigStore,
+  DrizzleFeedbackStore,
   DrizzleGroupDirectory,
   DrizzleGroupPolicyStore,
   DrizzleReActTraceStore,
@@ -21,7 +22,14 @@ import {
   type CardLogger,
 } from './dingtalk/CardStreamer.js';
 import { StreamGateway, type StreamGatewayLogger } from './dingtalk/StreamGateway.js';
-import { AgentHarness, type HarnessLogger } from './harness/AgentHarness.js';
+import type { CardActionEvent } from './dingtalk/CardActions.js';
+import {
+  AgentHarness,
+  conversationKeyFor,
+  type HarnessLogger,
+} from './harness/AgentHarness.js';
+import { RunControlRegistry } from './harness/RunControlRegistry.js';
+import { CommandRouter, parseCommand } from './commands/CommandRouter.js';
 import { ToolRegistry, loadMcpServerConfigs } from './harness/ToolRegistry.js';
 import { GroupTranscriptBuffer } from './bystander/GroupTranscriptBuffer.js';
 import { BystanderPolicyProvider } from './bystander/BystanderPolicyProvider.js';
@@ -42,7 +50,10 @@ import { ReActRunner } from './react/ReActRunner.js';
 import { AdminChatOpsToolProvider } from './tools/admin/AdminChatOpsToolProvider.js';
 import { TraceCollector, createMcpAdminPort } from './admin-api/runtime.js';
 import { startAdminServer } from './admin-api/server.js';
+import { MetricsRegistry } from './admin-api/metrics.js';
+import type { ConsoleChatHandler } from './admin-api/chatStream.js';
 import type {
+  AgentStreamEvent,
   ChatModel,
   InboundMessage,
   LLMAndPersonaConfig,
@@ -52,6 +63,7 @@ import type {
   LlmSandboxTestResult,
   McpServerTestResult,
 } from './types/admin-and-console.js';
+import type { BystanderEvaluationResult } from './types/bystander-and-memory.js';
 import type { EnterpriseMcpServerConfig } from './types/mcp-and-sandbox.js';
 
 const FALLBACK_ERROR_TEXT = '抱歉，处理这条消息时出现异常，请稍后重试。';
@@ -175,7 +187,10 @@ async function main(): Promise<void> {
     configCenter.assertReady();
 
     const traceStore = new DrizzleReActTraceStore(dbHandle.db);
+    const feedbackStore = new DrizzleFeedbackStore(dbHandle.db);
     const groupDirectory = new DrizzleGroupDirectory(dbHandle.db);
+    const runControl = new RunControlRegistry();
+    const metrics = new MetricsRegistry();
     const mcpPort = createMcpAdminPort(
       () => toolRegistry?.pool ?? null,
       harnessLogger,
@@ -260,9 +275,10 @@ async function main(): Promise<void> {
     });
 
     const personaRef = { ...configCenter.getLLMConfig().persona };
+    const repository = new DrizzleConversationRepository(dbHandle.db);
     const harness = new AgentHarness({
       engine,
-      repository: new DrizzleConversationRepository(dbHandle.db),
+      repository,
       assembler: new ContextAssembler({
         windowMessages: memoryConfig.windowMessages,
       }),
@@ -330,42 +346,218 @@ async function main(): Promise<void> {
       }
     };
 
+    const replyTo = async (
+      message: InboundMessage,
+      text: string,
+    ): Promise<void> => {
+      const webhook = message.rawPayload.sessionWebhook;
+      if (typeof webhook === 'string' && webhook) {
+        await sendSessionWebhook(message, text, cardLogger);
+        return;
+      }
+      const streamer = createStreamer(message);
+      await streamer.start();
+      streamer.handle({ type: 'answer_delta', content: text });
+      await streamer.finish();
+    };
+
+    const makeEmit = (
+      collector: TraceCollector,
+      streamer: CardStreamer,
+    ): ((event: AgentStreamEvent) => void) => {
+      return (event) => {
+        collector.handle(event);
+        streamer.handle(event);
+        metrics.inc('agent_events_total', { type: event.type });
+        if (event.type === 'tool_start') metrics.inc('agent_tool_calls_total');
+        if (event.type === 'error') metrics.inc('agent_errors_total');
+        if (event.type === 'completed') {
+          metrics.inc('agent_tokens_total', undefined, event.usage.totalTokens);
+        }
+      };
+    };
+
+    const commandRouter = new CommandRouter({
+      isAdmin: (staffId) => configCenter.isAdmin(staffId),
+      stopRun: (conversationId) => runControl.stop(conversationId),
+      retryLast: async (conversationId) => {
+        const last = runControl.lastMessage(conversationId);
+        if (!last) return 'none';
+        void handleIncoming(last);
+        return 'started';
+      },
+      resetConversation: async (message) => {
+        const conversation = await repository.ensureConversation({
+          conversationKey: conversationKeyFor(message),
+          conversationType: message.conversationType,
+          title: message.senderNick,
+          metadata: {
+            conversationId: message.conversationId,
+            senderStaffId: message.senderStaffId,
+          },
+        });
+        await repository.clearMessages(conversation.id);
+      },
+      status: () => {
+        const llm = configCenter.getLLMConfig();
+        return [
+          `模型：${llm.provider} / ${llm.model}`,
+          `进行中的回答：${runControl.activeCount()}`,
+          `Stream：${streamConnected ? '已连接' : '未连接'}`,
+          `运行时长：${Math.floor(process.uptime() / 60)} 分钟`,
+        ].join('\n');
+      },
+      lastTrace: async (conversationId) => {
+        const page = await traceStore.query({
+          page: 1,
+          pageSize: 1,
+          conversationId,
+        });
+        const latest = page.items[0];
+        if (!latest) return '本会话暂无执行轨迹。';
+        const at = new Date(latest.createdAt).toLocaleString('zh-CN', {
+          timeZone: 'Asia/Shanghai',
+          hour12: false,
+        });
+        return [
+          `最近一次执行：${at}`,
+          `问题：${latest.question.slice(0, 120)}`,
+          `步骤：${latest.stepCount} · tokens：${latest.totalTokens} · 耗时：${(latest.durationMs / 1000).toFixed(1)}s`,
+          `答案摘要：${latest.answer.slice(0, 200)}`,
+        ].join('\n');
+      },
+      setMuted: async (conversationId, muted) => {
+        await configCenter.updateGroupPolicy(conversationId, {
+          bystanderEnabled: !muted,
+          proactiveReplyEnabled: !muted,
+        });
+      },
+      recordFeedback: async (input) => {
+        await feedbackStore.append({
+          conversationId: input.conversationId,
+          messageId: input.messageId,
+          senderStaffId: input.staffId,
+          senderNick: input.nick,
+          content: input.text,
+        });
+        metrics.inc('agent_feedback_total');
+      },
+      reply: replyTo,
+    });
+
+    async function runTurn(message: InboundMessage): Promise<void> {
+      const run = runControl.begin(message);
+      metrics.set('agent_active_runs', runControl.activeCount());
+      const streamer = createStreamer(message);
+      const collector = new TraceCollector();
+      const emit = makeEmit(collector, streamer);
+      await streamer.start();
+      try {
+        const result = await harness.handleMessage(message, {
+          emit,
+          signal: run.signal,
+        });
+        await streamer.finish();
+        await recordTrace(collector, message, result, false);
+        if (result && !streamer.isAvailable && result.answer) {
+          await sendSessionWebhook(message, result.answer, cardLogger);
+        }
+      } catch (error) {
+        logger.error(
+          { messageId: message.messageId, error: errorText(error) },
+          'turn failed',
+        );
+        streamer.handle({ type: 'error', message: FALLBACK_ERROR_TEXT });
+        await streamer.finish();
+        await recordTrace(collector, message, EMPTY_RESULT, false);
+        if (!streamer.isAvailable) {
+          await sendSessionWebhook(message, FALLBACK_ERROR_TEXT, cardLogger);
+        }
+      } finally {
+        run.finish();
+        metrics.set('agent_active_runs', runControl.activeCount());
+      }
+    }
+
+    async function handleIncoming(message: InboundMessage): Promise<void> {
+      if (await commandRouter.tryHandle(message)) return;
+      runControl.remember(message);
+      metrics.inc('agent_messages_total', {
+        conversationType: message.conversationType,
+      });
+      await runTurn(message);
+    }
+
+    async function runProactiveTurn(
+      message: InboundMessage,
+      decision: BystanderEvaluationResult,
+    ): Promise<void> {
+      const run = runControl.begin(message);
+      metrics.set('agent_active_runs', runControl.activeCount());
+      const streamer = createStreamer(message);
+      const collector = new TraceCollector();
+      const emit = makeEmit(collector, streamer);
+      await streamer.start();
+      try {
+        const result = await harness.handleBystanderMessage(message, {
+          decision,
+          emit,
+          signal: run.signal,
+        });
+        await streamer.finish();
+        await recordTrace(collector, message, result, true);
+        if (result && !streamer.isAvailable && result.answer) {
+          await sendSessionWebhook(message, result.answer, cardLogger);
+        }
+      } catch (error) {
+        logger.error(
+          { messageId: message.messageId, error: errorText(error) },
+          'proactive turn failed',
+        );
+        streamer.handle({ type: 'error', message: FALLBACK_ERROR_TEXT });
+        await streamer.finish();
+        await recordTrace(collector, message, EMPTY_RESULT, true);
+        if (!streamer.isAvailable) {
+          await sendSessionWebhook(message, FALLBACK_ERROR_TEXT, cardLogger);
+        }
+      } finally {
+        run.finish();
+        metrics.set('agent_active_runs', runControl.activeCount());
+      }
+    }
+
     const gatewayOptions = () => ({
       logger: gatewayLogger,
       transcriptBuffer,
-      handler: async (message: InboundMessage) => {
-        const streamer = createStreamer(message);
-        const collector = new TraceCollector();
-        const emit = (event: Parameters<typeof collector.handle>[0]) => {
-          collector.handle(event);
-          streamer.handle(event);
+      handler: handleIncoming,
+      cardActionHandler: async (action: CardActionEvent) => {
+        const message: InboundMessage = {
+          messageId: `card_${action.actionId}_${action.outTrackId || action.conversationId}_${Date.now()}`,
+          conversationId: action.conversationId,
+          conversationType: action.conversationType,
+          senderStaffId: action.userId || `card_user_${action.conversationId}`,
+          senderNick: action.nick ?? '卡片用户',
+          isAtBot: true,
+          text: action.command,
+          rawPayload: {
+            source: 'card_action',
+            actionId: action.actionId,
+            outTrackId: action.outTrackId,
+          },
+          timestamp: Date.now(),
         };
-        await streamer.start();
-        try {
-          const result = await harness.handleMessage(message, { emit });
-          await streamer.finish();
-          await recordTrace(collector, message, result, false);
-          if (result && !streamer.isAvailable && result.answer) {
-            await sendSessionWebhook(message, result.answer, cardLogger);
-          }
-        } catch (error) {
-          logger.error(
-            { messageId: message.messageId, error: errorText(error) },
-            'turn failed',
-          );
-          streamer.handle({ type: 'error', message: FALLBACK_ERROR_TEXT });
-          await streamer.finish();
-          await recordTrace(collector, message, EMPTY_RESULT, false);
-          if (!streamer.isAvailable) {
-            await sendSessionWebhook(message, FALLBACK_ERROR_TEXT, cardLogger);
-          }
-        }
+        await commandRouter.tryHandle(message);
       },
       bystanderHandler: async (message: InboundMessage) => {
+        // 群里不 @ 也可以使用 /stop 等控制指令
+        if (parseCommand(message.text)) {
+          await commandRouter.tryHandle(message);
+          return;
+        }
         const groupPolicy = await policyProvider.getPolicy(
           message.conversationId,
         );
-        let decision;
+        let decision: BystanderEvaluationResult;
         try {
           decision = await triage.evaluate(message, groupPolicy);
         } catch (error) {
@@ -391,36 +583,7 @@ async function main(): Promise<void> {
           'bystander evaluation finished',
         );
         if (decision.action !== 'PROACTIVE_REPLY') return;
-
-        const streamer = createStreamer(message);
-        const collector = new TraceCollector();
-        const emit = (event: Parameters<typeof collector.handle>[0]) => {
-          collector.handle(event);
-          streamer.handle(event);
-        };
-        await streamer.start();
-        try {
-          const result = await harness.handleBystanderMessage(message, {
-            decision,
-            emit,
-          });
-          await streamer.finish();
-          await recordTrace(collector, message, result, true);
-          if (result && !streamer.isAvailable && result.answer) {
-            await sendSessionWebhook(message, result.answer, cardLogger);
-          }
-        } catch (error) {
-          logger.error(
-            { messageId: message.messageId, error: errorText(error) },
-            'proactive turn failed',
-          );
-          streamer.handle({ type: 'error', message: FALLBACK_ERROR_TEXT });
-          await streamer.finish();
-          await recordTrace(collector, message, EMPTY_RESULT, true);
-          if (!streamer.isAvailable) {
-            await sendSessionWebhook(message, FALLBACK_ERROR_TEXT, cardLogger);
-          }
-        }
+        await runProactiveTurn(message, decision);
       },
     });
 
@@ -443,6 +606,7 @@ async function main(): Promise<void> {
       await next.start();
       gateway = next;
       streamConnected = true;
+      metrics.set('agent_stream_connected', 1);
     };
 
     await startGateway();
@@ -481,6 +645,7 @@ async function main(): Promise<void> {
         previous.clientSecret !== next.clientSecret;
       if (credentialsChanged) {
         streamConnected = false;
+        metrics.set('agent_stream_connected', 0);
         gateway?.stop();
         void startGateway()
           .then(() => logger.info({}, 'stream gateway rebuilt'))
@@ -570,6 +735,66 @@ async function main(): Promise<void> {
       },
     };
 
+    const consoleChat: ConsoleChatHandler = async (input, emit) => {
+      const startedAt = Date.now();
+      const turnId = `console_${startedAt}`;
+      const current = configCenter.getLLMConfig();
+      emit({ type: 'turn_start', turnId, step: 1 });
+      let totalTokens = 0;
+      metrics.inc('console_chat_turns_total');
+      try {
+        const stream = modelRef.current.streamChat(
+          {
+            messages: [
+              {
+                role: 'system',
+                content: input.systemPrompt ?? current.persona.rolePrompt,
+              },
+              { role: 'user', content: input.question },
+            ],
+            tools: [],
+            toolChoice: 'none',
+            temperature: current.temperature,
+            enableNativeReasoning: current.enableNativeReasoning,
+          },
+          input.signal,
+        );
+        for await (const chunk of stream) {
+          if (chunk.reasoningDelta) {
+            emit({
+              type: 'reasoning_delta',
+              content: chunk.reasoningDelta,
+              turnId,
+            });
+          }
+          if (chunk.contentDelta) {
+            emit({ type: 'answer_delta', content: chunk.contentDelta, turnId });
+          }
+          if (chunk.usage?.totalTokens) {
+            totalTokens = chunk.usage.totalTokens;
+          }
+        }
+        emit({
+          type: 'completed',
+          usage: { totalTokens, steps: 1, durationMs: Date.now() - startedAt },
+        });
+      } catch (error) {
+        if (input.signal?.aborted) {
+          emit({
+            type: 'completed',
+            usage: {
+              totalTokens,
+              steps: 1,
+              durationMs: Date.now() - startedAt,
+              stopped: true,
+            },
+          });
+          return;
+        }
+        throw error;
+      }
+    };
+
     adminServer = startAdminServer({
       configCenter,
       traces: traceStore,
@@ -585,6 +810,19 @@ async function main(): Promise<void> {
       },
       llmTester,
       dingtalkTester,
+      chatStream: consoleChat,
+      feedback: { list: (limit) => feedbackStore.list(limit) },
+      metrics,
+      readiness: async () => {
+        try {
+          await dbHandle.pool.query('select 1');
+        } catch (error) {
+          return { ready: false, detail: `数据库不可用：${errorText(error)}` };
+        }
+        return streamConnected
+          ? { ready: true }
+          : { ready: false, detail: '钉钉 Stream 未连接' };
+      },
       staticDir: resolve(process.cwd(), 'web-console/dist'),
       authToken: process.env.ADMIN_API_TOKEN,
       logger: harnessLogger,
@@ -617,6 +855,7 @@ async function main(): Promise<void> {
       if (closing) return;
       closing = true;
       logger.info({ signal }, 'shutting down');
+      runControl.stopAll();
       gateway?.stop();
       await adminServer?.close().catch((error) => {
         logger.warn({ error: errorText(error) }, 'admin server close failed');

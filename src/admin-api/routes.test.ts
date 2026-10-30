@@ -28,6 +28,7 @@ import type { EnterpriseMcpServerConfig } from '../types/mcp-and-sandbox.js';
 import type { GroupBystanderPolicy } from '../types/bystander-and-memory.js';
 import { createAdminApp } from './server.js';
 import { MCP_SECRET_MASK } from './routes/mcpRoutes.js';
+import { MetricsRegistry } from './metrics.js';
 
 const TOKEN = 'test-token';
 const NOW = new Date('2026-10-30T10:00:00Z').getTime();
@@ -189,6 +190,7 @@ interface TestContext {
   traces: FakeTraces;
   applied: EnterpriseMcpServerConfig[][];
   tested: string[];
+  metrics: MetricsRegistry;
 }
 
 function headers(): Record<string, string> {
@@ -266,6 +268,8 @@ async function createTestContext(staticDir?: string): Promise<TestContext> {
 
   const applied: EnterpriseMcpServerConfig[][] = [];
   const tested: string[] = [];
+  const metrics = new MetricsRegistry();
+  metrics.set('agent_active_runs', 0);
   const status = (): McpServerStatusView[] =>
     center.getMcpServers().map((server) => ({
       id: server.id,
@@ -311,11 +315,27 @@ async function createTestContext(staticDir?: string): Promise<TestContext> {
       sendTestCard: async () => ({ ok: true }),
     },
     authToken: TOKEN,
+    chatStream: async ({ question }, emit) => {
+      emit({ type: 'turn_start', turnId: 'console-1', step: 1 });
+      emit({
+        type: 'answer_delta',
+        turnId: 'console-1',
+        content: `收到：${question}`,
+        final: true,
+      });
+      emit({
+        type: 'completed',
+        usage: { totalTokens: 10, steps: 1, durationMs: 5 },
+      });
+    },
+    metrics,
+    readiness: async () => ({ ready: true }),
+    feedback: { list: async () => [] },
     ...(staticDir ? { staticDir } : {}),
     now: () => NOW,
   });
 
-  return { app, center, traces, applied, tested };
+  return { app, center, traces, applied, tested, metrics };
 }
 
 let ctx: TestContext;
@@ -683,5 +703,77 @@ describe('群策略、轨迹与审计大盘', () => {
     expect(dashBody.today.totalTokens).toBe(5_000);
     expect(dashBody.mcpServers).toHaveLength(1);
     expect(dashBody.system.llm.apiKey).not.toContain('sk-env-secret-key');
+  });
+});
+
+describe('在线对话与可观测性接口', () => {
+  it('换取一次性 SSE 票据后流式返回回答，票据不可复用', async () => {
+    const unauth = await ctx.app.request('/api/v1/admin/chat/tickets', {
+      method: 'POST',
+    });
+    expect(unauth.status).toBe(401);
+
+    const issued = await ctx.app.request('/api/v1/admin/chat/tickets', {
+      method: 'POST',
+      headers: headers(),
+    });
+    expect(issued.status).toBe(200);
+    const ticketBody = await body(issued);
+    expect(typeof ticketBody.ticket).toBe('string');
+    expect(ticketBody.expiresAt).toBeGreaterThan(NOW);
+
+    const stream = await ctx.app.request(
+      `/api/v1/chat/stream?ticket=${ticketBody.ticket}&question=${encodeURIComponent('你好')}`,
+    );
+    expect(stream.status).toBe(200);
+    const text = await stream.text();
+    expect(text).toContain('turn_start');
+    expect(text).toContain('收到：你好');
+    expect(text).toContain('event: done');
+    expect(ctx.metrics.get('console_chat_total')).toBe(1);
+
+    const replay = await ctx.app.request(
+      `/api/v1/chat/stream?ticket=${ticketBody.ticket}&question=again`,
+    );
+    expect(replay.status).toBe(401);
+  });
+
+  it('缺少票据或问题参数时拒绝订阅', async () => {
+    const noTicket = await ctx.app.request('/api/v1/chat/stream?question=hi');
+    expect(noTicket.status).toBe(401);
+
+    const issued = await body(
+      await ctx.app.request('/api/v1/admin/chat/tickets', {
+        method: 'POST',
+        headers: headers(),
+      }),
+    );
+    const noQuestion = await ctx.app.request(
+      `/api/v1/chat/stream?ticket=${issued.ticket}`,
+    );
+    expect(noQuestion.status).toBe(400);
+  });
+
+  it('指标接口鉴权后输出 Prometheus 文本，就绪探针返回 ready', async () => {
+    const denied = await ctx.app.request('/metrics');
+    expect(denied.status).toBe(401);
+
+    const metrics = await ctx.app.request('/metrics', { headers: headers() });
+    expect(metrics.status).toBe(200);
+    const text = await metrics.text();
+    expect(text).toContain('dingtalk_agent_metrics');
+    expect(text).toContain('agent_active_runs 0');
+
+    const ready = await ctx.app.request('/readyz');
+    expect(ready.status).toBe(200);
+    expect((await body(ready)).ready).toBe(true);
+  });
+
+  it('用户反馈接口在未接入存储时返回空列表', async () => {
+    const response = await ctx.app.request('/api/v1/admin/feedback', {
+      headers: headers(),
+    });
+    expect(response.status).toBe(200);
+    expect((await body(response)).items).toEqual([]);
   });
 });

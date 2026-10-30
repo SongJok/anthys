@@ -124,9 +124,24 @@ export interface TraceDailyStats {
   byGroup: GroupTraceStat[];
 }
 
+export interface ChatToolCall {
+  id: string;
+  name: string;
+  status: 'running' | 'done' | 'failed';
+  detail?: string;
+  durationMs?: number;
+}
+
+export interface ChatTurnUsage {
+  totalTokens: number;
+  steps: number;
+  durationMs: number;
+  stopped?: boolean;
+}
+
 export interface ReActTraceStep {
   index: number;
-  type: 'reasoning' | 'tool' | 'sandbox' | 'answer';
+  type: 'reasoning' | 'narration' | 'plan' | 'citation' | 'tool' | 'sandbox' | 'answer';
   content?: string;
   toolName?: string;
   arguments?: Record<string, unknown>;

@@ -13,6 +13,7 @@ import {
   ApiOutlined,
   BranchesOutlined,
   DashboardOutlined,
+  MessageOutlined,
   RobotOutlined,
   SettingOutlined,
   TeamOutlined,
@@ -24,11 +25,13 @@ import LlmPersonaPage from './pages/LlmPersonaPage';
 import McpConfigPage from './pages/McpConfigPage';
 import GroupsPage from './pages/GroupsPage';
 import TracesPage from './pages/TracesPage';
+import ChatPage from './pages/ChatPage';
 
 const { Header, Sider, Content } = Layout;
 
 const MENU = [
   { key: 'dashboard', icon: <DashboardOutlined />, label: '运行大盘' },
+  { key: 'chat', icon: <MessageOutlined />, label: '在线对话' },
   { key: 'dingtalk', icon: <SettingOutlined />, label: '钉钉企业配置' },
   { key: 'llm', icon: <RobotOutlined />, label: '大模型与人设' },
   { key: 'mcp', icon: <ApiOutlined />, label: '企业 MCP' },
@@ -38,6 +41,7 @@ const MENU = [
 
 const PAGE_TITLES: Record<string, string> = {
   dashboard: '运行大盘',
+  chat: '在线对话（SSE 流式）',
   dingtalk: '钉钉企业配置',
   llm: '大模型与人设配置',
   mcp: '企业内部 MCP 配置',
@@ -90,6 +94,7 @@ export default function App() {
         </Header>
         <Content style={{ padding: 24 }}>
           {active === 'dashboard' && <DashboardPage />}
+          {active === 'chat' && <ChatPage />}
           {active === 'dingtalk' && <SystemSettingsPage />}
           {active === 'llm' && <LlmPersonaPage />}
           {active === 'mcp' && <McpConfigPage />}

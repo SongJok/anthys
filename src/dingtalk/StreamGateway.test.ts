@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { TOPIC_ROBOT } from 'dingtalk-stream';
+import { TOPIC_CARD, TOPIC_ROBOT } from 'dingtalk-stream';
 import {
   StreamGateway,
   type StreamCallbackMessage,
@@ -10,6 +10,10 @@ import type { InboundMessage } from '../types/core.js';
 class FakeClient implements StreamClient {
   public callback: ((message: StreamCallbackMessage) => void) | null = null;
   public topic: string | null = null;
+  public callbacks = new Map<
+    string,
+    (message: StreamCallbackMessage) => void
+  >();
   public acks: Array<[string, unknown]> = [];
   public connectCalls = 0;
   public disconnectCalls = 0;
@@ -20,6 +24,7 @@ class FakeClient implements StreamClient {
   ): unknown {
     this.topic = topic;
     this.callback = callback;
+    this.callbacks.set(topic, callback);
     return this;
   }
 
@@ -168,5 +173,59 @@ describe('StreamGateway', () => {
       },
     });
     await expect(gateway.dispatch(payload(), 'msg-err')).resolves.toBeUndefined();
+  });
+
+  it('注册卡片回调并把按钮动作转成指令', async () => {
+    const client = new FakeClient();
+    const actions: Array<{ command: string; conversationId: string }> = [];
+    const gateway = new StreamGateway({
+      client,
+      handler: async () => undefined,
+      cardActionHandler: async (action) => {
+        actions.push(action);
+      },
+    });
+    await gateway.start();
+    expect(client.callbacks.has(TOPIC_CARD)).toBe(true);
+
+    const cardCallback = client.callbacks.get(TOPIC_CARD);
+    cardCallback?.({
+      headers: { messageId: 'card-1' },
+      data: JSON.stringify({
+        type: 'actionCallback',
+        data: {
+          outTrackId: 'track-1',
+          conversationId: 'cid-1',
+          conversationType: 2,
+          userId: 'staff-1',
+          cardPrivateData: { actionIds: ['stop'] },
+        },
+      }),
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(client.acks).toContainEqual(['card-1', { status: 'SUCCESS' }]);
+    expect(actions[0]).toMatchObject({
+      command: '/stop',
+      conversationId: 'cid-1',
+      conversationType: '2',
+    });
+  });
+
+  it('未识别的卡片动作被忽略', async () => {
+    const client = new FakeClient();
+    const handler = vi.fn(async () => undefined);
+    const gateway = new StreamGateway({
+      client,
+      handler: async () => undefined,
+      cardActionHandler: handler,
+    });
+    await gateway.dispatchCardAction(
+      JSON.stringify({
+        data: { conversationId: 'cid-1', cardPrivateData: { actionIds: ['unknown'] } },
+      }),
+      'card-2',
+    );
+    expect(handler).not.toHaveBeenCalled();
   });
 });
