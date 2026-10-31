@@ -63,6 +63,7 @@ function fakeIdentity(options: FakeIdentityOptions = {}): {
   identity: DwsIdentityService;
   calls: {
     runs: DwsCommandRequest[];
+    ensureReadConsent: number;
     startLogin: number;
     pending: Array<{ staffId: string; conversationId: string }>;
   };
@@ -71,6 +72,7 @@ function fakeIdentity(options: FakeIdentityOptions = {}): {
   const states = [...(options.states ?? [record ? 'authenticated' : 'unbound'])];
   const calls = {
     runs: [] as DwsCommandRequest[],
+    ensureReadConsent: 0,
     startLogin: 0,
     pending: [] as Array<{ staffId: string; conversationId: string }>,
   };
@@ -98,6 +100,10 @@ function fakeIdentity(options: FakeIdentityOptions = {}): {
   const service = {
     getRecord: async () => record,
     status,
+    ensureReadConsent: async () => {
+      calls.ensureReadConsent += 1;
+      return record ?? identityRecord({ profile: null, corpId: null, dwsUserId: null });
+    },
     startLogin: async () => {
       calls.startLogin += 1;
       if (options.startFails) throw new Error('无法启动授权进程');
@@ -182,7 +188,7 @@ async function runCalendarCreate(
 }
 
 describe('DwsCliToolProvider 每员工独立身份闸门', () => {
-  it('未同意授权的单聊用户收到引导并提示模型不要声称已查询', async () => {
+  it('未授权时自动记录只读同意发起登录并让用户直接点链接授权', async () => {
     const { identity, calls } = fakeIdentity();
     const provider = new DwsCliToolProvider({ identity });
     const { ctx, notes } = context();
@@ -191,18 +197,28 @@ describe('DwsCliToolProvider 每员工独立身份闸门', () => {
       ok: boolean;
       authRequired: boolean;
       identityRequired: boolean;
-      consentRequired: boolean;
+      readConsentRecorded: boolean;
+      loginUrl: string;
+      userCode: string;
       instruction: string;
     };
 
     expect(calls.runs).toHaveLength(0);
+    expect(calls.ensureReadConsent).toBe(1);
+    expect(calls.startLogin).toBe(1);
+    expect(calls.pending).toEqual([
+      { staffId: 'staff-1', conversationId: 'conv-1' },
+    ]);
     expect(output.ok).toBe(false);
     expect(output.authRequired).toBe(true);
     expect(output.identityRequired).toBe(true);
-    expect(output.consentRequired).toBe(true);
-    expect(output.instruction).toContain('/dws-consent');
+    expect(output.readConsentRecorded).toBe(true);
+    expect(output.userCode).toBe('HVSD-BJVT');
+    expect(output.loginUrl).toContain('user_code=HVSD-BJVT');
+    expect(output.instruction).not.toContain('/dws-consent');
     expect(notes).toHaveLength(1);
-    expect(notes[0]).toContain('/dws-consent');
+    expect(notes[0]).toContain('HVSD-BJVT');
+    expect(notes[0]).not.toContain('/dws-login');
   });
 
   it('授权过期时在单聊自动发起本人设备码登录', async () => {
@@ -244,26 +260,91 @@ describe('DwsCliToolProvider 每员工独立身份闸门', () => {
     expect(notes).toHaveLength(1);
   });
 
-  it('群聊过期不发起登录，只提示私聊授权', async () => {
+  it('群聊授权过期时自动发起登录并只私聊发送链接', async () => {
     const { identity, calls } = fakeIdentity({
       record: identityRecord(),
       states: ['expired'],
     });
-    const provider = new DwsCliToolProvider({ identity });
+    const privateNotes: string[] = [];
+    const provider = new DwsCliToolProvider({
+      identity,
+      personalNotifier: (staffId, text) => {
+        privateNotes.push(`${staffId}|${text}`);
+        return true;
+      },
+    });
     const { ctx, notes } = context({ conversationType: '2' });
 
     const output = JSON.parse(await runDocTool(provider, ctx)) as {
       authRequired: boolean;
       loginUrl?: string;
+      userCode?: string;
+      authorizationSentPrivately: boolean;
       instruction: string;
     };
 
-    expect(calls.startLogin).toBe(0);
-    expect(calls.pending).toHaveLength(0);
+    expect(calls.startLogin).toBe(1);
+    expect(calls.pending).toEqual([
+      { staffId: 'staff-1', conversationId: 'conv-1' },
+    ]);
     expect(output.authRequired).toBe(true);
     expect(output.loginUrl).toBeUndefined();
-    expect(output.instruction).toContain('群聊');
+    expect(output.userCode).toBeUndefined();
+    expect(output.authorizationSentPrivately).toBe(true);
+    expect(output.instruction).toContain('私聊');
+    expect(output.instruction).not.toContain('/dws-login');
+    expect(privateNotes).toHaveLength(1);
+    expect(privateNotes[0]).toContain('staff-1|');
+    expect(privateNotes[0]).toContain('HVSD-BJVT');
     expect(notes).toHaveLength(0);
+  });
+
+  it('群聊重复触发时不重复私聊发送链接', async () => {
+    const { identity } = fakeIdentity({
+      record: identityRecord(),
+      states: ['expired'],
+    });
+    const privateNotes: string[] = [];
+    const provider = new DwsCliToolProvider({
+      identity,
+      personalNotifier: (_staffId, text) => {
+        privateNotes.push(text);
+        return true;
+      },
+    });
+    const { ctx } = context({ conversationType: '2' });
+
+    await runDocTool(provider, ctx);
+    const output = JSON.parse(await runDocTool(provider, ctx)) as {
+      authorizationSentPrivately: boolean;
+    };
+    expect(privateNotes).toHaveLength(1);
+    expect(output.authorizationSentPrivately).toBe(true);
+  });
+
+  it('群聊且无法私聊时不回传授权链接或命令', async () => {
+    const { identity, calls } = fakeIdentity({
+      record: identityRecord(),
+      states: ['expired'],
+    });
+    const provider = new DwsCliToolProvider({ identity });
+    const { ctx } = context({ conversationType: '2' });
+
+    const output = JSON.parse(await runDocTool(provider, ctx)) as {
+      authRequired: boolean;
+      loginUrl?: string;
+      userCode?: string;
+      authorizationSentPrivately: boolean;
+      instruction: string;
+    };
+
+    expect(calls.startLogin).toBe(1);
+    expect(output.authRequired).toBe(true);
+    expect(output.loginUrl).toBeUndefined();
+    expect(output.userCode).toBeUndefined();
+    expect(output.authorizationSentPrivately).toBe(false);
+    expect(output.instruction).not.toContain('/dws-login');
+    expect(output.instruction).not.toContain('HVSD-BJVT');
   });
 
   it('授权有效时使用本人身份执行只读工具', async () => {

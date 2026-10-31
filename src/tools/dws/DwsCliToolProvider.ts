@@ -66,6 +66,11 @@ export interface DwsCliToolProviderOptions {
   runner?: DwsCliRunner;
   /** 每员工独立身份；配置后所有调用强制使用提问人自己的 profile */
   identity?: DwsIdentityService;
+  /** 群聊里把授权链接私聊推给提问人，避免在群里暴露授权码 */
+  personalNotifier?: (
+    staffId: string,
+    text: string,
+  ) => Promise<boolean> | boolean;
   /** 检测到应用权限缺失时主动通知管理员 */
   permissionNotifier?: DwsPermissionNotifier;
   now?: () => number;
@@ -232,6 +237,7 @@ export class DwsCliToolProvider implements IToolProvider {
   public readonly providerName = 'dws';
   private readonly runner: DwsCliRunner;
   private readonly identity?: DwsIdentityService;
+  private readonly personalNotifier?: DwsCliToolProviderOptions['personalNotifier'];
   private readonly permissionNotifier?: DwsPermissionNotifier;
   private readonly now: () => number;
   /** 同一会话 2 分钟内只提示一次，避免同轮多次工具调用重复弹消息 */
@@ -242,6 +248,7 @@ export class DwsCliToolProvider implements IToolProvider {
   constructor(options: DwsCliToolProviderOptions = {}) {
     this.runner = options.runner ?? new DwsCliRunner();
     this.identity = options.identity;
+    this.personalNotifier = options.personalNotifier;
     this.permissionNotifier = options.permissionNotifier;
     this.now = options.now ?? Date.now;
   }
@@ -338,8 +345,8 @@ export class DwsCliToolProvider implements IToolProvider {
   }
 
   /**
-   * 未授权 / 授权过期时引导完成“本人”的设备码授权。
-   * 群聊里只提示去单聊，绝不把授权链接或管理员令牌用于他人。
+   * 令牌缺失或过期时不再让用户记命令：机器人自动记录只读同意并
+   * 发起本人设备码登录，用户只需打开链接授权。群聊里链接只私聊发送。
    */
   private async identityPrompt(
     ctx: ExecutionContext,
@@ -349,72 +356,99 @@ export class DwsCliToolProvider implements IToolProvider {
   ): Promise<string> {
     const identity = this.identity!;
     const singleChat = ctx.conversationType === '1';
+    const consentCurrent = record?.consentVersion === DWS_CONSENT_VERSION;
+    let autoConsentRecorded = false;
     let ticket: { verifyUrl: string; userCode: string; expiresAt: number } | null =
       null;
-    let startError: string | undefined;
-    if (reason === 'expired' && singleChat) {
-      try {
-        const active = await identity.startLogin(ctx.senderStaffId);
-        ticket = {
-          verifyUrl: active.verifyUrl,
-          userCode: active.userCode,
-          expiresAt: active.expiresAt,
-        };
-        identity.markPending(ctx.senderStaffId, ctx.conversationId, {
-          resume: true,
-        });
-      } catch (error) {
-        startError = error instanceof Error ? error.message : String(error);
+    let failure: string | undefined;
+
+    try {
+      if (!consentCurrent) {
+        await identity.ensureReadConsent(ctx.senderStaffId);
+        autoConsentRecorded = true;
       }
+      const active = await identity.startLogin(ctx.senderStaffId);
+      ticket = {
+        verifyUrl: active.verifyUrl,
+        userCode: active.userCode,
+        expiresAt: active.expiresAt,
+      };
+      identity.markPending(ctx.senderStaffId, ctx.conversationId, {
+        resume: true,
+      });
+    } catch (error) {
+      failure = error instanceof Error ? error.message : String(error);
     }
 
-    let text: string;
-    if (reason === 'unbound') {
-      text = record
-        ? '你已同意个人 DWS 授权，但还没有完成登录。请在单聊发送 /dws-login 完成设备码授权后再试。'
-        : '当前钉钉账号还没有独立的 DWS 授权。请在单聊发送 /dws-consent 查看授权范围，同意后发送 /dws-login 完成设备码授权。机器人不会再用管理员账号代替你查询。';
-    } else if (!singleChat) {
-      text =
-        '你的个人 DWS 授权已过期。请在机器人的单聊中发送 /dws-login 完成重新授权，然后再 @ 我查询。';
-    } else if (ticket) {
-      text = [
-        '你的个人 DWS 授权已过期，需要重新授权后才能继续。',
-        '请在钉钉中打开以下链接完成授权（15 分钟内有效）：',
-        ticket.verifyUrl,
-        `授权码：${ticket.userCode}`,
-        '授权完成后我会自动继续刚才的问题。',
-      ].join('\n');
-    } else {
-      text = `个人 DWS 授权已过期，自动发起重新授权失败：${startError ?? '未知原因'}。请稍后发送 /dws-login 重试。`;
-    }
+    const intro =
+      reason === 'expired'
+        ? '你的钉钉授权已过期，需要你本人重新授权后才能继续查询。'
+        : autoConsentRecorded
+          ? '首次查询你的钉钉数据前，需要你本人完成一次授权。'
+          : '你还未完成钉钉授权，需要你本人授权后才能查询你的数据。';
+    const text = ticket
+      ? [
+          intro,
+          '授权范围：日程、待办、审批、通讯录、文档与知识库的只读查询；不会代替你创建或修改任何数据。',
+          '请在 15 分钟内打开以下链接完成授权：',
+          ticket.verifyUrl,
+          `授权码：${ticket.userCode}`,
+          '授权完成后我会自动继续刚才的问题。',
+        ].join('\n')
+      : `${intro}我尝试自动发起授权但失败了${failure ? `（${failure}）` : ''}，请稍后再试。`;
 
-    const shouldNotify = Boolean(ctx.notify) && singleChat;
-    if (shouldNotify && ctx.notify) {
+    // 单聊直接发；群聊只私聊给提问人，避免授权码出现在群里
+    let delivered = false;
+    if (ticket) {
       const now = this.now();
-      const lastAt = this.lastNoticeAt.get(ctx.conversationId) ?? 0;
-      if (now - lastAt >= 120_000) {
-        try {
-          await ctx.notify(text);
-          this.lastNoticeAt.set(ctx.conversationId, now);
-          if (this.lastNoticeAt.size > 200) {
-            for (const [key, at] of this.lastNoticeAt) {
-              if (now - at > 600_000) this.lastNoticeAt.delete(key);
-            }
+      const noticeKey = singleChat
+        ? ctx.conversationId
+        : `dm:${ctx.senderStaffId}`;
+      const lastAt = this.lastNoticeAt.get(noticeKey) ?? 0;
+      if (now - lastAt < 120_000) {
+        delivered = true;
+      } else if (singleChat) {
+        if (ctx.notify) {
+          try {
+            await ctx.notify(text);
+            delivered = true;
+          } catch {
+            // 通知失败不应阻断工具返回
           }
+        }
+      } else if (this.personalNotifier) {
+        try {
+          delivered = await this.personalNotifier(ctx.senderStaffId, text);
         } catch {
-          // 通知失败不应阻断工具返回
+          delivered = false;
+        }
+      }
+      if (delivered) {
+        this.lastNoticeAt.set(noticeKey, now);
+        if (this.lastNoticeAt.size > 200) {
+          for (const [key, at] of this.lastNoticeAt) {
+            if (now - at > 600_000) this.lastNoticeAt.delete(key);
+          }
         }
       }
     }
+
+    const instruction = ticket
+      ? singleChat
+        ? '个人 DWS 授权缺失或已过期。已把授权链接和授权码发给用户；不要重复调用 DWS 工具，也不要声称已查询到数据。简短提醒用户打开链接完成授权，授权成功后系统会自动继续刚才的问题。'
+        : delivered
+          ? '个人 DWS 授权缺失或已过期，已把授权链接私聊发送给提问人。不要重复调用 DWS 工具；在群里只说明已私聊发送授权链接、请其打开完成授权，不要在群里复述链接或授权码。'
+          : '个人 DWS 授权缺失或已过期，但无法私聊发送授权链接。不要重复调用 DWS 工具；只简短告知用户授权未完成、稍后再试。'
+      : '个人 DWS 授权缺失或已过期，且自动发起授权失败。不要重复调用 DWS 工具；只简短告知用户稍后再试。';
 
     return JSON.stringify({
       ok: false,
       authRequired: true,
       identityRequired: reason === 'unbound',
-      consentRequired: !record,
       authState: status?.state ?? 'unbound',
       ...(status?.message ? { reason: status.message } : {}),
-      ...(ticket
+      ...(autoConsentRecorded ? { readConsentRecorded: true } : {}),
+      ...(singleChat && ticket
         ? {
             loginUrl: ticket.verifyUrl,
             userCode: ticket.userCode,
@@ -424,12 +458,9 @@ export class DwsCliToolProvider implements IToolProvider {
             ),
           }
         : {}),
-      instruction:
-        reason === 'unbound'
-          ? '当前用户尚未完成个人 DWS 授权。已提示其私聊完成 /dws-consent 与 /dws-login。不要重复调用 DWS 工具，也不要声称已查询到数据。'
-          : singleChat
-            ? '个人 DWS 授权已过期，已向用户发送重新授权链接与授权码。不要重复调用 DWS 工具；直接简要说明需要用户完成授权，授权成功后系统会自动继续。'
-            : '个人 DWS 授权已过期且当前在群聊，已提示用户私聊完成授权。不要重复调用 DWS 工具。',
+      ...(!singleChat ? { authorizationSentPrivately: delivered } : {}),
+      ...(failure ? { loginError: failure } : {}),
+      instruction,
     });
   }
 

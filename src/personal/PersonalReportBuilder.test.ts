@@ -189,7 +189,8 @@ describe('PersonalReportBuilder', () => {
     });
 
     expect(report.ok).toBe(false);
-    expect(report.text).toContain('/dws-consent');
+    expect(report.text).toContain('授权链接');
+    expect(report.text).not.toContain('/dws-consent');
     expect(runner.calls).toHaveLength(0);
   });
 

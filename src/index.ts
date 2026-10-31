@@ -510,6 +510,16 @@ async function main(): Promise<void> {
       mcpServers: configCenter.getMcpServers(),
       enableDws: configCenter.getSystemConfig().dingtalk.dwsCliEnabled,
       dwsIdentity: identityService,
+      dwsPersonalNotifier: async (staffId, text) => {
+        const result = await adminTextSender.send([staffId], text);
+        if (!result.ok) {
+          logger.warn(
+            { staffId, failed: result.failed.length },
+            'dws authorization link private delivery failed',
+          );
+        }
+        return result.ok;
+      },
       dwsPermissionNotifier: async (notice) => {
         const admins = configCenter
           .getSystemConfig()

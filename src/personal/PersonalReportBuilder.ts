@@ -290,8 +290,8 @@ export class PersonalReportBuilder {
         return {
           text:
             status.state === 'unbound'
-              ? '还没有完成个人 DWS 授权，暂时无法生成简报。请在单聊发送 /dws-consent 查看授权范围，同意后发送 /dws-login 完成设备码授权。'
-              : '个人 DWS 授权当前不可用，暂时无法生成简报。请在单聊发送 /dws-login 重新授权后再试。',
+              ? '还没有完成个人 DWS 授权，暂时无法生成简报。下次在单聊向我提问任意钉钉相关问题时，我会直接把授权链接发给你，点开完成授权即可。'
+              : '个人 DWS 授权当前不可用，暂时无法生成简报。下次在单聊向我提问钉钉相关问题时，我会重新发起授权。',
           ok: false,
           errors: [status.message ?? '个人 DWS 授权不可用'],
         };
@@ -552,7 +552,7 @@ export class PersonalReportBuilder {
     if (errors.length > 0) {
       lines.push('', '【数据提示】');
       lines.push(...errors.map((item) => `- ${item}`));
-      lines.push('可发送 /dws-status 检查 DWS 授权状态。');
+      lines.push('如需检查授权，可在单聊直接问我你的授权状态。');
     }
 
     lines.push('', '数据来源：钉钉日程 / 待办 / 审批（本人授权的 DWS 账号）');

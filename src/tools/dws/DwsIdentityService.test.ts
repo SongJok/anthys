@@ -234,6 +234,29 @@ describe('DwsIdentityService', () => {
     });
   });
 
+  it('自动续同意只记录只读范围并清除旧写权限', async () => {
+    const { service: instance, store } = service();
+    const first = await instance.ensureReadConsent('staff-1');
+    expect(first.consentVersion).toBe(1);
+    expect(first.scopes.every((scope) => scope.endsWith('.read'))).toBe(true);
+    expect(first.writeEnabled).toBe(false);
+    const again = await instance.ensureReadConsent('staff-1');
+    expect(again.consentedAt).toBe(first.consentedAt);
+
+    await store.upsertConsent({
+      staffId: 'staff-2',
+      consentVersion: 0,
+      scopes: ['calendar.write'],
+      consentedAt: new Date(0).toISOString(),
+      homeDir: 'u-0123456789abcdef01234567',
+    });
+    await store.setWriteEnabled('staff-2', true);
+    const refreshed = await instance.ensureReadConsent('staff-2');
+    expect(refreshed.consentVersion).toBe(1);
+    expect(refreshed.writeEnabled).toBe(false);
+    expect(refreshed.scopes).not.toContain('calendar.write');
+  });
+
   it('设备码登录后校验 userId 一致并绑定', async () => {
     const { service: instance, store, spawnCalls } = service();
     await instance.recordConsent('staff-1');

@@ -346,6 +346,27 @@ export class DwsIdentityService extends EventEmitter {
     return record;
   }
 
+  /**
+   * 令牌问题自动触发：静默记录当前版本的只读同意，用户无需发送指令。
+   * 写操作仍需显式授权；旧版本同意里的写权限不随自动续同意继承。
+   */
+  public async ensureReadConsent(staffId: string): Promise<DwsIdentityRecord> {
+    const existing = await this.store.get(staffId);
+    if (existing?.consentVersion === DWS_CONSENT_VERSION) return existing;
+    let record = await this.store.upsertConsent({
+      staffId,
+      consentVersion: DWS_CONSENT_VERSION,
+      scopes: [...DWS_READ_SCOPES],
+      consentedAt: new Date(this.now()).toISOString(),
+      homeDir: this.homeName(staffId),
+    });
+    if (existing?.writeEnabled) {
+      record = await this.store.setWriteEnabled(staffId, false);
+    }
+    this.invalidate(staffId);
+    return record;
+  }
+
   public async setWriteEnabled(
     staffId: string,
     enabled: boolean,

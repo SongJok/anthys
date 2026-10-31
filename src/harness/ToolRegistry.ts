@@ -58,6 +58,11 @@ export interface ToolRegistryOptions {
   dwsIdentity?: DwsIdentityService;
   /** DWS 应用权限缺失时主动通知管理员 */
   dwsPermissionNotifier?: DwsPermissionNotifier;
+  /** 群聊里把 DWS 授权链接私聊推给提问人 */
+  dwsPersonalNotifier?: (
+    staffId: string,
+    text: string,
+  ) => Promise<boolean> | boolean;
   /** dws 可执行文件路径，默认读取 DWS_BINARY 或 PATH 中的 dws */
   dwsBinary?: string;
   sandbox?: IsolatedSandbox;
@@ -292,6 +297,9 @@ export class ToolRegistry {
             env,
           }),
         ...(options.dwsIdentity ? { identity: options.dwsIdentity } : {}),
+        ...(options.dwsPersonalNotifier
+          ? { personalNotifier: options.dwsPersonalNotifier }
+          : {}),
         ...(options.dwsPermissionNotifier
           ? { permissionNotifier: options.dwsPermissionNotifier }
           : {}),
