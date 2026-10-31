@@ -1,0 +1,41 @@
+[Unit]
+Description=Anthys DingTalk Agent (Stream bot + admin console)
+Documentation=https://github.com/SongJok/anthys
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=anthys
+Group=anthys
+WorkingDirectory=/opt/anthys/app
+
+# 应用自身用 dotenv 读取 WorkingDirectory 下的 .env；
+# 若不希望 .env 被进程读取，可改为在此声明 EnvironmentFile=/opt/anthys/app/.env
+Environment=TZ=Asia/Shanghai
+Environment=NODE_ENV=production
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+# 若 pnpm 装在别处（如 nvm 的 /home/anthys/.nvm/versions/node/*/bin），
+# 把下面的 ExecStart 换成该 pnpm 的绝对路径，否则 systemd 找不到命令
+ExecStart=/usr/bin/env pnpm start
+
+Restart=always
+RestartSec=10
+# 回答最长可跑 15 分钟（LOOP_MAX_WALL_TIME_MS），SIGTERM 后给足收尾时间
+TimeoutStopSec=30
+KillSignal=SIGTERM
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=dingtalk-agent
+
+# 基础加固：除工作目录与 .state 外不写系统目录
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=/opt/anthys/app/.workspace /opt/anthys/app/.state
+
+[Install]
+WantedBy=multi-user.target

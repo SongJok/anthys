@@ -345,6 +345,42 @@ pnpm start     # 通过 tsx 直接运行 src/index.ts
 3. 在钉钉单聊或群里 @ 机器人问一个简单问题，确认卡片先显示「正在思考…」、随后流式渲染正文并切到「已完成」；也可先在「大模型与人设」页发起沙盒对话，快速验证模型连通性。
 4. 在群里发一条非 @ 的技术求助，确认机器人按策略主动回复；再发一条闲聊，确认保持安静。
 
+### 阿里云 ECS 部署（单机 + 自建 PostgreSQL）
+
+`deploy/` 目录提供可直接执行的脚本，适用于 Ubuntu 24.04 / Alibaba Cloud Linux 3：
+
+| 文件 | 作用 |
+| --- | --- |
+| `deploy/install-system-deps.sh` | 安装 Node 24、pnpm、构建工具链、PostgreSQL 16 + pgvector、Docker |
+| `deploy/init-database.sh` | 创建数据库角色与库，启用 `vector` 扩展 |
+| `deploy/.env.production.example` | 生产环境变量模板 |
+| `deploy/dingtalk-agent.service` | systemd 常驻单元 |
+| `deploy/nginx.conf` | 控制台反向代理（含来源 IP 限制与 SSE 配置） |
+| `deploy/deploy.sh` | 幂等部署：拉代码 → 装依赖 → 构建 → 建表 → 重启 → 健康检查 |
+
+首次部署顺序：
+
+```bash
+sudo bash deploy/install-system-deps.sh
+sudo bash deploy/init-database.sh                 # 打印生成的 DATABASE_URL
+sudo useradd -m -s /bin/bash anthys 2>/dev/null || true
+sudo -u anthys git clone git@github.com:SongJok/anthys.git /opt/anthys/app
+sudo cp deploy/.env.production.example /opt/anthys/app/.env
+sudo chown anthys:anthys /opt/anthys/app/.env && sudo chmod 600 /opt/anthys/app/.env
+# 填好 .env 后建表
+sudo -u anthys pnpm -C /opt/anthys/app run db:push
+sudo -u anthys pnpm -C /opt/anthys/app install && sudo -u anthys pnpm -C /opt/anthys/app/web-console install
+sudo -u anthys pnpm -C /opt/anthys/app build
+sudo cp deploy/dingtalk-agent.service /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl enable --now dingtalk-agent
+sudo cp deploy/nginx.conf /etc/nginx/conf.d/ && sudo nginx -t && sudo systemctl reload nginx
+```
+
+后续升级只需 `sudo bash deploy/deploy.sh`。
+
+> 钉钉 Stream 模式是出站长连接，服务器无需为机器人开放公网入站端口；只有管理控制台需要对外暴露，请用安全组与 Nginx 双重限制来源 IP。
+> 依赖安装**不要加 `--prod`**：启动脚本使用的 `tsx` 在 devDependencies 中。`isolated-vm` 需要现场编译，故依赖脚本会安装 `build-essential` 与 `python3`。
+
 ---
 
 ## 功能说明
