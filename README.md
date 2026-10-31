@@ -181,7 +181,7 @@ pnpm run db:seed      # 可选：预写入默认人设与模型配置，已有�
 | `LOOP_MAX_TOTAL_TOKENS` | `120000` | 单轮回答的 Token 上限，超出即拒接并停止 |
 | `LOOP_MAX_CONSECUTIVE_SAME_TOOL` | `2` | 同一工具同参数连续调用上限 |
 | `LOOP_CONVERGENCE_CHECK` | `true` | 是否启用信息收敛自检 |
-| `TOOL_TIMEOUT_SECONDS` | `120` | 单次工具调用（含 MCP）的最长等待；实际还受 `config/mcp-servers.json` 的 `timeoutMs`（默认 180 秒）约束 |
+| `TOOL_TIMEOUT_SECONDS` | `300` | 单次工具调用（含 MCP）的最长等待；实际还受 `config/mcp-servers.json` 的 `timeoutMs`（默认 480 秒）约束 |
 
 **记忆**
 

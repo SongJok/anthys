@@ -9,7 +9,7 @@
       "envOrHeaders": {
         "authorization": "Bearer ${ENTERPRISE_MCP_TOKEN}"
       },
-      "timeoutMs": 180000,
+      "timeoutMs": 480000,
       "maxResultChars": 16000
     }
   ]

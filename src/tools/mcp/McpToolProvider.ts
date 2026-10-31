@@ -214,7 +214,7 @@ export class McpToolProvider implements IToolProvider {
         const result = await this.options.pool.callTool(
           descriptor.namespacedName,
           args,
-          { stepId },
+          { stepId, ...(ctx.signal ? { signal: ctx.signal } : {}) },
         );
         if (result.isError) {
           throw new Error(result.text || `MCP 工具 ${descriptor.originalName} 返回错误`);

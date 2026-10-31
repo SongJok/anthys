@@ -703,9 +703,9 @@ async function main(): Promise<void> {
       logger.info({}, 'subagent delegation enabled');
     }
 
-    // 企业 MCP 普遍较慢，单次工具等待默认 120 秒（MCP 自身 180 秒上限之内）
+    // 企业 MCP 普遍较慢，单次工具等待默认 300 秒（MCP 自身 480 秒上限之内）
     const toolTimeoutMs =
-      envSeconds(process.env.TOOL_TIMEOUT_SECONDS, 120) * 1_000;
+      envSeconds(process.env.TOOL_TIMEOUT_SECONDS, 300) * 1_000;
     const engine = new ReActRunner({
       model: chatModel,
       toolProviders,
