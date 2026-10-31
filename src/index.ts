@@ -388,7 +388,10 @@ async function main(): Promise<void> {
       request: ToolApprovalRequest,
       context: ExecutionContext,
     ): Promise<ToolApprovalDecision> => {
-      if (request.source === 'dws') {
+      const dwsWrite =
+        request.source === 'dws' &&
+        (request.risk === 'write' || request.risk === 'destructive');
+      if (dwsWrite) {
         const prompt = await toolRegistry?.dwsAuthorizationPrompt(context, true);
         if (prompt) return { approved: false, reason: prompt };
       }
