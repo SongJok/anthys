@@ -91,6 +91,13 @@ import {
 import { AdminChatOpsToolProvider } from './tools/admin/AdminChatOpsToolProvider.js';
 import { DwsAuthManager } from './tools/dws/DwsAuthManager.js';
 import { DwsCliRunner } from './tools/dws/DwsCliRunner.js';
+import {
+  DWS_CONSENT_VERSION,
+  DwsIdentityError,
+  DwsIdentityService,
+  formatDwsConsentText,
+} from './tools/dws/DwsIdentityService.js';
+import { DrizzleDwsIdentityStore } from './db/dwsIdentitySchema.js';
 import { PersonalReportBuilder } from './personal/PersonalReportBuilder.js';
 import { PersonalAssistantService } from './personal/PersonalAssistantService.js';
 import { PersonalAssistantToolProvider } from './tools/personal/PersonalAssistantToolProvider.js';
@@ -286,6 +293,7 @@ async function main(): Promise<void> {
   let adminServer: ReturnType<typeof startAdminServer> | undefined;
   let retentionService: DataRetentionService | undefined;
   let dwsAuth: DwsAuthManager | undefined;
+  let dwsIdentity: DwsIdentityService | undefined;
   let streamConnected = false;
 
   try {
@@ -399,9 +407,22 @@ async function main(): Promise<void> {
       logger: harnessLogger,
     });
     const scheduledStore = new DrizzleScheduledTaskStore(dbHandle.db);
+    const identityService = new DwsIdentityService({
+      store: new DrizzleDwsIdentityStore(dbHandle.db),
+      binary: process.env.DWS_BINARY?.trim() || 'dws',
+      logger: harnessLogger,
+      ...(process.env.DWS_CORP_ID?.trim()
+        ? { corpId: process.env.DWS_CORP_ID.trim() }
+        : {}),
+      ...(process.env.DWS_PROFILE_ROOT?.trim()
+        ? { profileRoot: resolve(process.cwd(), process.env.DWS_PROFILE_ROOT.trim()) }
+        : {}),
+    });
+    dwsIdentity = identityService;
     const personalAssistant = new PersonalAssistantService({
       store: scheduledStore,
       report: new PersonalReportBuilder({
+        identity: identityService,
         runner: new DwsCliRunner({
           binary: process.env.DWS_BINARY?.trim() || 'dws',
           timeoutMs: 20_000,
@@ -410,6 +431,7 @@ async function main(): Promise<void> {
       }),
     });
 
+    // 系统级身份仅用于旁听等基础设施能力，业务查询一律走员工本人身份
     const authManager = new DwsAuthManager({
       binary: process.env.DWS_BINARY?.trim() || 'dws',
       logger: harnessLogger,
@@ -487,8 +509,7 @@ async function main(): Promise<void> {
     toolRegistry = await ToolRegistry.create({
       mcpServers: configCenter.getMcpServers(),
       enableDws: configCenter.getSystemConfig().dingtalk.dwsCliEnabled,
-      dwsAuth: authManager,
-      dwsIsAdmin: (staffId) => configCenter.isAdmin(staffId),
+      dwsIdentity: identityService,
       dwsPermissionNotifier: async (notice) => {
         const admins = configCenter
           .getSystemConfig()
@@ -923,7 +944,129 @@ async function main(): Promise<void> {
           `答案摘要：${latest.answer.slice(0, 200)}`,
         ].join('\n');
       },
-      dwsStatus: async () => {
+      dwsStatus: async (message) => {
+        const status = await identityService.status(message.senderStaffId, {
+          force: true,
+        });
+        const label =
+          status.state === 'authenticated'
+            ? '已授权'
+            : status.state === 'expired'
+              ? '已过期，需要重新授权'
+              : status.state === 'unbound'
+                ? status.record
+                  ? status.record.consentVersion === DWS_CONSENT_VERSION
+                    ? '已同意，尚未完成设备授权'
+                    : '授权范围已更新，需要重新同意'
+                  : '尚未同意授权'
+                : '不可用';
+        const record = status.record;
+        return [
+          `本人 DWS 授权：${label}`,
+          ...(record?.userName
+            ? [
+                `账号：${record.userName}${
+                  record.corpName ? ` @ ${record.corpName}` : ''
+                }`,
+              ]
+            : []),
+          ...(record?.profile ? [`profile：${record.profile}`] : []),
+          ...(record ? [`授权范围：${record.writeEnabled ? '只读 + 写操作' : '仅只读'}`] : []),
+          ...(status.token?.expiresAt
+            ? [`访问令牌到期：${status.token.expiresAt}`]
+            : []),
+          ...(status.token?.refreshExpiresAt
+            ? [`刷新令牌到期：${status.token.refreshExpiresAt}`]
+            : []),
+          ...(status.message ? [`说明：${status.message}`] : []),
+          ...(status.state !== 'authenticated'
+            ? ['发送 /dws-consent 查看授权范围，同意后发送 /dws-login 完成设备码授权。']
+            : []),
+        ].join('\n');
+      },
+      dwsLogin: async (message) => {
+        const current = await identityService.status(message.senderStaffId, {
+          force: true,
+        });
+        if (current.state === 'authenticated') {
+          return `本人 DWS 授权当前有效${
+            current.record?.userName ? `（${current.record.userName}）` : ''
+          }，无需重新登录。如需切换到其他账号或撤销授权，先发送 /dws-logout 或 /dws-consent revoke。`;
+        }
+        let ticket;
+        try {
+          ticket = await identityService.startLogin(message.senderStaffId);
+        } catch (error) {
+          if (error instanceof DwsIdentityError && error.code === 'consent-required') {
+            return '请先发送 /dws-consent 查看授权范围，再发送 /dws-consent agree 表示同意。';
+          }
+          const reason =
+            error instanceof Error ? error.message : String(error);
+          return `发起本人 DWS 授权失败：${reason}`;
+        }
+        identityService.markPending(message.senderStaffId, message.conversationId, {
+          resume: false,
+        });
+        return [
+          '已发起本人 DWS 设备授权，请在钉钉中打开以下链接完成授权（15 分钟内有效）：',
+          ticket.verifyUrl,
+          `授权码：${ticket.userCode}`,
+          '请务必使用你本人的钉钉账号完成授权，授权完成后我会在这里通知你。',
+        ].join('\n');
+      },
+      dwsConsent: async (message, args) => {
+        const action = args[0]?.toLowerCase();
+        if (!action || action === 'show') {
+          return formatDwsConsentText(
+            await identityService.getRecord(message.senderStaffId),
+          );
+        }
+        if (action === 'agree') {
+          const record = await identityService.recordConsent(
+            message.senderStaffId,
+          );
+          return [
+            '已记录你对 DWS 只读授权范围的同意（日程、待办、审批、通讯录、文档 / 知识库）。',
+            '下一步请在单聊发送 /dws-login 完成设备码授权。',
+            record.writeEnabled
+              ? ''
+              : '如需允许我代你创建或修改日程、待办、审批，可再发送 /dws-consent write。',
+          ]
+            .filter(Boolean)
+            .join('\n');
+        }
+        if (action === 'write' || action === 'read') {
+          try {
+            await identityService.setWriteEnabled(
+              message.senderStaffId,
+              action === 'write',
+            );
+          } catch (error) {
+            if (
+              error instanceof DwsIdentityError &&
+              error.code === 'consent-required'
+            ) {
+              return '请先发送 /dws-consent agree 同意只读授权范围。';
+            }
+            throw error;
+          }
+          return action === 'write'
+            ? '已额外授权写操作：可以代你创建或修改日程、待办、审批。发送 /dws-consent read 可改回只读。'
+            : '已改回只读授权：后续不会再代你执行写操作。';
+        }
+        if (action === 'revoke') {
+          await identityService.revokeConsent(message.senderStaffId);
+          return '已撤销 DWS 授权同意，并清除本机绑定的加密凭据目录。如需再次使用，请重新发送 /dws-consent agree 并完成 /dws-login。';
+        }
+        return '用法：/dws-consent、/dws-consent agree、/dws-consent write、/dws-consent read、/dws-consent revoke';
+      },
+      dwsLogout: async (message) => {
+        const cleared = await identityService.logout(message.senderStaffId);
+        return cleared
+          ? '已清除你本机的 DWS 登录态，授权同意记录仍保留。如需重新授权，发送 /dws-login；如需彻底撤销同意，发送 /dws-consent revoke。'
+          : '当前没有可清除的 DWS 登录态。如需撤销同意记录，发送 /dws-consent revoke。';
+      },
+      dwsSystemStatus: async () => {
         const status = await authManager.status({ force: true });
         const label =
           status.state === 'authenticated'
@@ -932,7 +1075,7 @@ async function main(): Promise<void> {
               ? '已过期，需要重新授权'
               : '不可用';
         return [
-          `DWS 授权：${label}`,
+          `系统级 DWS 授权（仅用于旁听等基础设施）：${label}`,
           ...(status.userName
             ? [
                 `账号：${status.userName}${
@@ -947,10 +1090,10 @@ async function main(): Promise<void> {
           ...(status.message ? [`说明：${status.message}`] : []),
         ].join('\n');
       },
-      dwsLogin: async (message) => {
+      dwsSystemLogin: async (message) => {
         const current = await authManager.status({ force: true });
         if (current.state === 'authenticated') {
-          return 'DWS 授权当前有效，无需重新登录。';
+          return '系统级 DWS 授权当前有效，无需重新登录。员工个人业务请让他们自行 /dws-login。';
         }
         let ticket = authManager.activeLogin();
         if (!ticket) {
@@ -961,12 +1104,12 @@ async function main(): Promise<void> {
           } catch (error) {
             const reason =
               error instanceof Error ? error.message : String(error);
-            return `发起 DWS 授权失败：${reason}`;
+            return `发起系统级 DWS 授权失败：${reason}`;
           }
         }
         authManager.markPending(message.conversationId, { resume: false });
         return [
-          '已发起 DWS 设备授权，请在钉钉中打开以下链接完成授权（15 分钟内有效）：',
+          '已发起系统级 DWS 设备授权（仅用于旁听等基础设施），请在钉钉中打开以下链接完成授权（15 分钟内有效）：',
           ticket.verifyUrl,
           `授权码：${ticket.userCode}`,
           '授权完成后我会在这里通知你。',
@@ -1250,6 +1393,66 @@ async function main(): Promise<void> {
           `DWS 重新授权未完成：${reason}。发送 /dws-login 可重试。`,
         ).catch((error) =>
           logger.warn({ error: errorText(error) }, 'dws failure notice failed'),
+        );
+      }
+    });
+
+    identityService.on('login-success', ({ staffId, status }) => {
+      const pending = identityService.takePending(staffId);
+      logger.info(
+        {
+          staffId,
+          user: status.record?.userName,
+          profile: status.record?.profile,
+          pending: pending.length,
+        },
+        'personal dws identity linked',
+      );
+      for (const entry of pending) {
+        const last = runControl.lastMessage(entry.conversationId);
+        if (!last || last.senderStaffId !== staffId) continue;
+        if (!entry.resume) {
+          void replyTo(
+            last,
+            `本人 DWS 授权已完成${
+              status.record?.userName ? `（${status.record.userName}）` : ''
+            }，可以继续使用 DWS 查询。`,
+          ).catch((error) =>
+            logger.warn(
+              { error: errorText(error) },
+              'personal dws notice failed',
+            ),
+          );
+          continue;
+        }
+        void (async () => {
+          await replyTo(last, '本人 DWS 授权已完成，正在继续刚才的问题…');
+          await handleIncoming(last);
+        })().catch((error) =>
+          logger.warn(
+            {
+              conversationId: entry.conversationId,
+              error: errorText(error),
+            },
+            'personal dws resume failed',
+          ),
+        );
+      }
+    });
+    identityService.on('login-failed', ({ staffId, reason }) => {
+      const pending = identityService.takePending(staffId);
+      logger.warn(
+        { staffId, reason, pending: pending.length },
+        'personal dws identity not linked',
+      );
+      for (const entry of pending) {
+        const last = runControl.lastMessage(entry.conversationId);
+        if (!last || last.senderStaffId !== staffId) continue;
+        void replyTo(
+          last,
+          `本人 DWS 授权未完成：${reason}。发送 /dws-consent 查看授权范围后，再发送 /dws-login 重试。`,
+        ).catch((error) =>
+          logger.warn({ error: errorText(error) }, 'personal dws failure notice failed'),
         );
       }
     });
@@ -1971,6 +2174,7 @@ async function main(): Promise<void> {
       await leadership?.stop();
       runControl.stopAll();
       dwsAuth?.dispose();
+      dwsIdentity?.dispose();
       await taskScheduler.stop();
       retentionService?.stop();
       gateway?.stop();

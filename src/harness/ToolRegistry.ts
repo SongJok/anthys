@@ -9,7 +9,7 @@ import { BuiltinToolProvider } from '../react/BuiltinTools.js';
 import { expandEnvPlaceholder } from '../config/envPlaceholder.js';
 import { DwsCliRunner } from '../tools/dws/DwsCliRunner.js';
 import { DwsCliToolProvider } from '../tools/dws/DwsCliToolProvider.js';
-import type { DwsAuthManager } from '../tools/dws/DwsAuthManager.js';
+import type { DwsIdentityService } from '../tools/dws/DwsIdentityService.js';
 import type { DwsPermissionNotifier } from '../tools/dws/DwsPermissionNotice.js';
 import {
   IsolatedSandbox,
@@ -54,10 +54,8 @@ export interface ToolRegistryOptions {
   enableDws?: boolean;
   enableSandbox?: boolean;
   dwsRunner?: DwsCliRunner;
-  /** DWS 授权状态与设备码登录（缺省时不检测授权） */
-  dwsAuth?: DwsAuthManager;
-  /** 只有管理员可以触发 DWS 重新授权 */
-  dwsIsAdmin?: (staffId: string) => boolean;
+  /** 每员工独立 DWS 身份（同意 + 设备码登录 + 独立 home）；缺省时不校验身份 */
+  dwsIdentity?: DwsIdentityService;
   /** DWS 应用权限缺失时主动通知管理员 */
   dwsPermissionNotifier?: DwsPermissionNotifier;
   /** dws 可执行文件路径，默认读取 DWS_BINARY 或 PATH 中的 dws */
@@ -293,8 +291,7 @@ export class ToolRegistry {
             binary: options.dwsBinary ?? env.DWS_BINARY ?? 'dws',
             env,
           }),
-        ...(options.dwsAuth ? { auth: options.dwsAuth } : {}),
-        ...(options.dwsIsAdmin ? { isAdmin: options.dwsIsAdmin } : {}),
+        ...(options.dwsIdentity ? { identity: options.dwsIdentity } : {}),
         ...(options.dwsPermissionNotifier
           ? { permissionNotifier: options.dwsPermissionNotifier }
           : {}),

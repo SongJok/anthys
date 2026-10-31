@@ -184,6 +184,36 @@ describe('buildDwsArgs 白名单与参数校验', () => {
       }),
     ).toThrow('非法的 DWS 子命令');
   });
+
+  it('追加并校验每员工 profile，拒绝非法 profile', () => {
+    expect(
+      buildDwsArgs(
+        {
+          domain: 'calendar',
+          subcommand: '+today',
+          flags: {},
+          operatorStaffId: 'staff-001',
+        },
+        'ding-corp:staff-001',
+      ),
+    ).toEqual([
+      'calendar',
+      '+today',
+      '--profile',
+      'ding-corp:staff-001',
+    ]);
+    expect(() =>
+      buildDwsArgs(
+        {
+          domain: 'calendar',
+          subcommand: '+today',
+          flags: {},
+          operatorStaffId: 'staff-001',
+        },
+        'bad profile; rm -rf /',
+      ),
+    ).toThrow('非法的 DWS profile');
+  });
 });
 
 describe('DwsCliRunner', () => {

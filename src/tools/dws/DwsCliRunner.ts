@@ -80,6 +80,10 @@ export interface DwsRunOptions {
   page?: number;
   timeoutMs?: number;
   signal?: AbortSignal;
+  /** 覆盖进程环境，用于按员工隔离的 DWS home */
+  env?: NodeJS.ProcessEnv;
+  /** 一次性指定 DWS profile（corpId:userId），不持久切换默认账号 */
+  profile?: string;
 }
 
 export interface DwsRunResult {
@@ -98,8 +102,13 @@ function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+const PROFILE_PATTERN = /^[A-Za-z0-9_-]+:[A-Za-z0-9_-]+$/;
+
 /** 把布尔/数字/字符串 flag 安全转换为 argv；绝不经过 shell 拼接。 */
-export function buildDwsArgs(request: DwsCommandRequest): string[] {
+export function buildDwsArgs(
+  request: DwsCommandRequest,
+  profile?: string,
+): string[] {
   if (!DOMAINS.includes(request.domain)) {
     throw new Error(`不支持的 DWS 域: ${String(request.domain)}`);
   }
@@ -145,6 +154,12 @@ export function buildDwsArgs(request: DwsCommandRequest): string[] {
     }
     args.push(`--${key}`, text);
   }
+  if (profile !== undefined) {
+    if (!PROFILE_PATTERN.test(profile)) {
+      throw new Error(`非法的 DWS profile: "${profile}"`);
+    }
+    args.push('--profile', profile);
+  }
   return args;
 }
 
@@ -171,9 +186,12 @@ export class DwsCliRunner {
   }
 
   /** 身份透传：当前员工的 StaffId 通过环境变量交给 DWS CLI。 */
-  public buildEnv(operatorStaffId: string): NodeJS.ProcessEnv {
+  public buildEnv(
+    operatorStaffId: string,
+    base?: NodeJS.ProcessEnv,
+  ): NodeJS.ProcessEnv {
     return {
-      ...this.env,
+      ...(base ?? this.env),
       DWS_OPERATOR_STAFF_ID: operatorStaffId,
       DWS_OPERATOR_ID: operatorStaffId,
     };
@@ -183,11 +201,11 @@ export class DwsCliRunner {
     request: DwsCommandRequest,
     options: DwsRunOptions = {},
   ): Promise<DwsRunResult> {
-    const args = buildDwsArgs(request);
+    const args = buildDwsArgs(request, options.profile);
     const timeoutMs = options.timeoutMs ?? this.timeoutMs;
     const execution = await this.execute(
       args,
-      this.buildEnv(request.operatorStaffId),
+      this.buildEnv(request.operatorStaffId, options.env),
       timeoutMs,
       options.signal,
     );

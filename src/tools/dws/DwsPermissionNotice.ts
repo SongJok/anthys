@@ -118,7 +118,7 @@ export function formatDwsPermissionNotice(
     '1) 钉钉开放平台 → 企业内部应用 → 权限管理，搜索并开通上述权限点；',
     `2) 或用 CLI：dws dev app list 找到 unifiedAppId → dws dev app permission list --unified-app-id <ID> --keyword ${guide.keyword} → dws dev app permission add --unified-app-id <ID> --scope-values <权限点>；`,
     '3) 若权限点 requiredApproval=true，需按版本生效：version create → check-approval → publish → version status；',
-    '4) 权限生效后重新授权：管理员在机器人单聊发送 /dws-login；',
+    '4) 权限生效后，由用户本人在机器人单聊发送 /dws-login 刷新个人授权；',
     '5) 暂不开放写能力时：管理控制台 →「钉钉企业配置」关闭 DWS 开关，或设置 DWS_CLI_ENABLED=false。',
   ].join('\n');
 }
@@ -135,6 +135,6 @@ export function formatDwsPermissionInstruction(
   return [
     `机器人缺少「${guide.label}」，${adminNotified ? '已主动通知管理员' : '通知管理员失败，请在回答中提醒用户联系管理员'}。`,
     '不要重复调用该工具，也不要编造操作结果。',
-    `请向用户说明：当前机器人没有该操作权限，管理员开通 ${scopes} 并重新授权（/dws-login）后即可使用；如果暂时不需要写能力，可以继续用查询类工具帮用户确认信息。`,
+    `请向用户说明：当前机器人没有该操作权限，管理员开通 ${scopes} 后，请用户在单聊发送 /dws-login 刷新个人授权即可使用；如果暂时不需要写能力，可以继续用查询类工具帮用户确认信息。`,
   ].join('');
 }

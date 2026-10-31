@@ -1,5 +1,6 @@
 import type { DwsCommandRequest } from '../types/mcp-and-sandbox.js';
 import { DwsCliRunner } from '../tools/dws/DwsCliRunner.js';
+import type { DwsIdentityService } from '../tools/dws/DwsIdentityService.js';
 
 export type PersonalReportKind =
   | 'daily_report'
@@ -20,6 +21,8 @@ export interface PersonalReportResult {
 
 export interface PersonalReportBuilderOptions {
   runner?: DwsCliRunner;
+  /** 配置后所有查询强制使用报告所属员工自己的 DWS 身份 */
+  identity?: DwsIdentityService;
   /** 单条 DWS 查询超时，默认 20 秒 */
   timeoutMs?: number;
 }
@@ -266,12 +269,14 @@ function todoLine(todo: TodoItem): string {
 /** 用钉钉日程/待办/审批生成确定性的个人工作简报，不经过模型。 */
 export class PersonalReportBuilder {
   private readonly runner: DwsCliRunner;
+  private readonly identity?: DwsIdentityService;
   private readonly timeoutMs: number;
 
   constructor(options: PersonalReportBuilderOptions = {}) {
     this.runner =
       options.runner ??
       new DwsCliRunner({ timeoutMs: 20_000, maxOutputChars: 2_000_000 });
+    this.identity = options.identity;
     this.timeoutMs = options.timeoutMs ?? 20_000;
   }
 
@@ -279,6 +284,19 @@ export class PersonalReportBuilder {
     const now = request.now ?? Date.now();
     const errors: string[] = [];
     const kind = request.kind;
+    if (this.identity) {
+      const status = await this.identity.status(request.operatorStaffId);
+      if (status.state !== 'authenticated') {
+        return {
+          text:
+            status.state === 'unbound'
+              ? '还没有完成个人 DWS 授权，暂时无法生成简报。请在单聊发送 /dws-consent 查看授权范围，同意后发送 /dws-login 完成设备码授权。'
+              : '个人 DWS 授权当前不可用，暂时无法生成简报。请在单聊发送 /dws-login 重新授权后再试。',
+          ok: false,
+          errors: [status.message ?? '个人 DWS 授权不可用'],
+        };
+      }
+    }
     const todayStart = startOfShanghaiDay(now);
     const todayEnd = todayStart + DAY_MS - 1_000;
     const tomorrowStart = todayStart + DAY_MS;
@@ -397,10 +415,17 @@ export class PersonalReportBuilder {
     flags: DwsCommandRequest['flags'],
     operatorStaffId: string,
   ): Promise<Record<string, unknown>> {
-    const result = await this.runner.run(
-      { domain, subcommand, flags, operatorStaffId },
-      { timeoutMs: this.timeoutMs },
-    );
+    const request: DwsCommandRequest = {
+      domain,
+      subcommand,
+      flags,
+      operatorStaffId,
+    };
+    const result = this.identity
+      ? await this.identity.run(operatorStaffId, request, {
+          timeoutMs: this.timeoutMs,
+        })
+      : await this.runner.run(request, { timeoutMs: this.timeoutMs });
     if (result.timedOut) {
       throw new Error('查询超时');
     }
@@ -530,7 +555,7 @@ export class PersonalReportBuilder {
       lines.push('可发送 /dws-status 检查 DWS 授权状态。');
     }
 
-    lines.push('', '数据来源：钉钉日程 / 待办 / 审批（当前 DWS 授权账号）');
+    lines.push('', '数据来源：钉钉日程 / 待办 / 审批（本人授权的 DWS 账号）');
     return lines.join('\n');
   }
 }

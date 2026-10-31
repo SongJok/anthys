@@ -165,6 +165,67 @@ describe('PersonalReportBuilder', () => {
     expect(report.text).toContain('【待办】未完成 2 项');
   });
 
+  it('未完成个人授权时直接提示，不借用其他账号查询', async () => {
+    const runner = new FakeRunner();
+    const identity = {
+      status: async () => ({
+        state: 'unbound',
+        record: null,
+        token: null,
+        message: '尚未同意个人 DWS 授权',
+        checkedAt: NOW,
+      }),
+      run: async () => {
+        throw new Error('不应执行');
+      },
+    };
+    const report = await new PersonalReportBuilder({
+      runner: runner as unknown as DwsCliRunner,
+      identity: identity as never,
+    }).build({
+      kind: 'daily_report',
+      operatorStaffId: 'staff-1',
+      now: NOW,
+    });
+
+    expect(report.ok).toBe(false);
+    expect(report.text).toContain('/dws-consent');
+    expect(runner.calls).toHaveLength(0);
+  });
+
+  it('配置身份服务后通过本人身份执行查询', async () => {
+    const runner = new FakeRunner();
+    const identityCalls: string[] = [];
+    const identity = {
+      status: async () => ({
+        state: 'authenticated',
+        record: null,
+        token: null,
+        checkedAt: NOW,
+      }),
+      run: async (staffId: string, request: Parameters<FakeRunner['run']>[0]) => {
+        identityCalls.push(`${staffId}:${request.domain}`);
+        return runner.run(request);
+      },
+    };
+    const report = await new PersonalReportBuilder({
+      runner: runner as unknown as DwsCliRunner,
+      identity: identity as never,
+    }).build({
+      kind: 'daily_report',
+      operatorStaffId: 'staff-1',
+      now: NOW,
+    });
+
+    expect(report.ok).toBe(true);
+    expect(identityCalls).toEqual([
+      'staff-1:calendar',
+      'staff-1:calendar',
+      'staff-1:todo',
+      'staff-1:approval',
+    ]);
+  });
+
   it('空数据给出明确占位', async () => {
     const runner = new FakeRunner(() => result(JSON.stringify({ result: {} })));
     const report = await builder(runner).build({

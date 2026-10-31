@@ -47,8 +47,12 @@ function runtime(overrides: Partial<CommandRuntime> = {}): {
     },
     status: () => '模型：openai / gpt-4o',
     lastTrace: async () => '最近一次执行：刚刚',
-    dwsStatus: () => 'DWS 授权：已授权',
-    dwsLogin: async () => '已发起 DWS 设备授权。',
+    dwsStatus: () => '本人 DWS 授权：已授权',
+    dwsLogin: async () => '已发起本人 DWS 设备授权。',
+    dwsConsent: async () => '当前状态：尚未同意',
+    dwsLogout: async () => '已清除你本机的 DWS 登录态。',
+    dwsSystemStatus: () => '系统级 DWS 授权：已授权',
+    dwsSystemLogin: async () => '已发起系统级 DWS 设备授权。',
     setMuted: async (cid, muted) => {
       calls.mute.push([cid, muted]);
     },
@@ -175,18 +179,38 @@ describe('CommandRouter', () => {
     expect(replies[0]).toContain('/help');
   });
 
-  it('/dws-status 与 /dws-login 仅管理员可用', async () => {
+  it('/dws-status 人人可用，/dws-login 仅单聊，系统级授权仅管理员', async () => {
+    const user = runtime({
+      isAdmin: () => false,
+      dwsStatus: () => '本人 DWS 授权：尚未同意授权',
+    });
+    await user.router.tryHandle(message({ text: '/dws-status' }));
+    expect(user.replies[0]).toContain('本人 DWS 授权');
+
+    await user.router.tryHandle(
+      message({ text: '/dws-login', conversationType: '2' }),
+    );
+    expect(user.replies[1]).toContain('单聊');
+
     const denied = runtime({ isAdmin: () => false });
-    await denied.router.tryHandle(message({ text: '/dws-status' }));
+    await denied.router.tryHandle(message({ text: '/dws-system' }));
+    await denied.router.tryHandle(message({ text: '/dws-system-login' }));
     expect(denied.replies[0]).toContain('只有管理员');
+    expect(denied.replies[1]).toContain('只有管理员');
 
     const allowed = runtime({
-      dwsStatus: () => 'DWS 授权：已授权',
-      dwsLogin: async () => '已发起 DWS 设备授权，授权码：HVSD-BJVT',
+      dwsLogin: async () => '已发起本人 DWS 设备授权，授权码：HVSD-BJVT',
+      dwsConsent: async () => '已记录同意',
+      dwsLogout: async () => '已清除登录态',
+      dwsSystemStatus: () => '系统级 DWS 授权：已授权',
     });
-    await allowed.router.tryHandle(message({ text: '/dws-status' }));
     await allowed.router.tryHandle(message({ text: '/dws-login' }));
-    expect(allowed.replies[0]).toContain('已授权');
-    expect(allowed.replies[1]).toContain('HVSD-BJVT');
+    await allowed.router.tryHandle(message({ text: '/dws-consent agree' }));
+    await allowed.router.tryHandle(message({ text: '/dws-logout' }));
+    await allowed.router.tryHandle(message({ text: '/dws-system' }));
+    expect(allowed.replies[0]).toContain('HVSD-BJVT');
+    expect(allowed.replies[1]).toContain('同意');
+    expect(allowed.replies[2]).toContain('清除');
+    expect(allowed.replies[3]).toContain('系统级');
   });
 });

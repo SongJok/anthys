@@ -7,10 +7,18 @@ export interface CommandRuntime {
   resetConversation(message: InboundMessage): Promise<void>;
   status(): Promise<string> | string;
   lastTrace(conversationId: string): Promise<string>;
-  /** DWS CLI 授权状态（管理员） */
-  dwsStatus(): Promise<string> | string;
-  /** 发起 DWS 设备码重新授权（管理员） */
+  /** 本人 DWS 身份授权状态 */
+  dwsStatus(message: InboundMessage): Promise<string> | string;
+  /** 发起本人 DWS 设备码授权（仅单聊） */
   dwsLogin(message: InboundMessage): Promise<string>;
+  /** 查看/同意/调整本人 DWS 授权范围（仅单聊） */
+  dwsConsent(message: InboundMessage, args: string[]): Promise<string>;
+  /** 清除本人本机 DWS 登录态（仅单聊） */
+  dwsLogout(message: InboundMessage): Promise<string>;
+  /** 系统级 DWS 授权状态（管理员，仅用于旁听等基础设施） */
+  dwsSystemStatus(): Promise<string> | string;
+  /** 重新发起系统级 DWS 授权（管理员） */
+  dwsSystemLogin(message: InboundMessage): Promise<string>;
   setMuted(conversationId: string, muted: boolean): Promise<void>;
   recordFeedback(input: {
     conversationId: string;
@@ -44,8 +52,12 @@ const HELP_TEXT = [
   '- `/retry` 重试上一条问题',
   '- `/reset` 清空本会话上下文',
   '- `/trace` 查看最近一次执行轨迹摘要',
-  '- `/dws-status` 查看 DWS 授权状态（管理员）',
-  '- `/dws-login` 重新发起 DWS 设备授权（管理员）',
+  '- `/dws-status` 查看本人 DWS 授权状态',
+  '- `/dws-consent` 查看并同意本人 DWS 授权范围（单聊）',
+  '- `/dws-login` 发起本人 DWS 设备授权（单聊）',
+  '- `/dws-logout` 清除本人本机 DWS 登录态（单聊）',
+  '- `/dws-system` 查看系统级 DWS 授权状态（管理员）',
+  '- `/dws-system-login` 重新发起系统级 DWS 授权（管理员）',
   '- `/mute` / `/unmute` 暂停或恢复本群旁听（管理员）',
   '- `/feedback <内容>` 提交对本次回答的反馈',
   '- `/confirm` 执行等待确认的写操作',
@@ -118,15 +130,37 @@ export class CommandRouter {
         await runtime.reply(message, await runtime.lastTrace(message.conversationId));
         return true;
       case 'dws-status':
-      case 'dws-login': {
-        if (!runtime.isAdmin(message.senderStaffId)) {
-          await runtime.reply(message, '只有管理员可以查看或重新发起 DWS 授权。');
+        await runtime.reply(message, await runtime.dwsStatus(message));
+        return true;
+      case 'dws-consent':
+      case 'dws-login':
+      case 'dws-logout': {
+        if (message.conversationType !== '1') {
+          await runtime.reply(
+            message,
+            '个人 DWS 授权只能在与机器人的单聊中操作，避免把授权信息发到群里。',
+          );
           return true;
         }
         const text =
-          command.name === 'dws-login'
-            ? await runtime.dwsLogin(message)
-            : await runtime.dwsStatus();
+          command.name === 'dws-consent'
+            ? await runtime.dwsConsent(message, command.args)
+            : command.name === 'dws-login'
+              ? await runtime.dwsLogin(message)
+              : await runtime.dwsLogout(message);
+        await runtime.reply(message, text);
+        return true;
+      }
+      case 'dws-system':
+      case 'dws-system-login': {
+        if (!runtime.isAdmin(message.senderStaffId)) {
+          await runtime.reply(message, '只有管理员可以查看或重新发起系统级 DWS 授权。');
+          return true;
+        }
+        const text =
+          command.name === 'dws-system-login'
+            ? await runtime.dwsSystemLogin(message)
+            : await runtime.dwsSystemStatus();
         await runtime.reply(message, text);
         return true;
       }

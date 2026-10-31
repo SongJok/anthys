@@ -8,7 +8,13 @@ import {
   DwsCliRunner,
   type DwsRunResult,
 } from './DwsCliRunner.js';
-import type { DwsAuthManager, DwsAuthStatus } from './DwsAuthManager.js';
+import {
+  DWS_CONSENT_VERSION,
+  DwsIdentityError,
+  type DwsIdentityService,
+  type DwsIdentityStatus,
+} from './DwsIdentityService.js';
+import type { DwsIdentityRecord } from '../../types/dws-identity.js';
 import {
   DWS_PERMISSION_GUIDES,
   formatDwsPermissionInstruction,
@@ -58,10 +64,8 @@ type OrgAction = (typeof ORG_ACTIONS)[number];
 
 export interface DwsCliToolProviderOptions {
   runner?: DwsCliRunner;
-  /** 授权过期时触发提醒与设备码登录 */
-  auth?: DwsAuthManager;
-  /** 管理员判定；只有管理员可以发起重新授权 */
-  isAdmin?: (staffId: string) => boolean;
+  /** 每员工独立身份；配置后所有调用强制使用提问人自己的 profile */
+  identity?: DwsIdentityService;
   /** 检测到应用权限缺失时主动通知管理员 */
   permissionNotifier?: DwsPermissionNotifier;
   now?: () => number;
@@ -227,8 +231,7 @@ function deptsFlag(deptIds: number[] | undefined): string | undefined {
 export class DwsCliToolProvider implements IToolProvider {
   public readonly providerName = 'dws';
   private readonly runner: DwsCliRunner;
-  private readonly auth?: DwsAuthManager;
-  private readonly isAdmin: (staffId: string) => boolean;
+  private readonly identity?: DwsIdentityService;
   private readonly permissionNotifier?: DwsPermissionNotifier;
   private readonly now: () => number;
   /** 同一会话 2 分钟内只提示一次，避免同轮多次工具调用重复弹消息 */
@@ -238,8 +241,7 @@ export class DwsCliToolProvider implements IToolProvider {
 
   constructor(options: DwsCliToolProviderOptions = {}) {
     this.runner = options.runner ?? new DwsCliRunner();
-    this.auth = options.auth;
-    this.isAdmin = options.isAdmin ?? (() => false);
+    this.identity = options.identity;
     this.permissionNotifier = options.permissionNotifier;
     this.now = options.now ?? Date.now;
   }
@@ -261,29 +263,66 @@ export class DwsCliToolProvider implements IToolProvider {
     toolName: string,
     request: DwsCommandRequest,
     page: number,
+    write = false,
   ): Promise<string> {
     if (ctx.deadlineAt - this.now() <= 0) {
       throw new Error('执行已超时，无法调用 DWS');
     }
-    const gate = await this.checkAuthorization(ctx);
-    if (gate) return gate;
+    const identity = this.identity;
+    if (identity) {
+      const record = await identity.getRecord(ctx.senderStaffId);
+      const consentOk = record?.consentVersion === DWS_CONSENT_VERSION;
+      if (!record?.profile || !consentOk) {
+        return this.identityPrompt(
+          ctx,
+          consentOk ? record : null,
+          'unbound',
+        );
+      }
+      if (write && !record.writeEnabled) {
+        return JSON.stringify({
+          ok: false,
+          writeConsentRequired: true,
+          instruction:
+            '当前个人 DWS 授权仅允许只读。若需要代你创建或修改日程、待办、审批，请先在单聊发送 /dws-consent write 明确授权写操作后重试。不要重复调用写工具。',
+        });
+      }
+      const status = await identity.status(ctx.senderStaffId);
+      if (status.state === 'expired') {
+        return this.identityPrompt(ctx, record, 'expired', status);
+      }
+    }
 
     const remaining = ctx.deadlineAt - this.now();
     if (remaining <= 0) {
       throw new Error('执行已超时，无法调用 DWS');
     }
-    const result = await this.runner.run(request, {
-      page,
-      timeoutMs: Math.min(15_000, remaining),
-    });
+    let result: DwsRunResult;
+    try {
+      result = identity
+        ? await identity.run(ctx.senderStaffId, request, {
+            page,
+            timeoutMs: Math.min(15_000, remaining),
+          })
+        : await this.runner.run(request, {
+            page,
+            timeoutMs: Math.min(15_000, remaining),
+          });
+    } catch (error) {
+      if (identity && error instanceof DwsIdentityError) {
+        const record = await identity.getRecord(ctx.senderStaffId);
+        return this.identityPrompt(ctx, record, 'unbound');
+      }
+      throw error;
+    }
     if (
       result.exitCode !== 0 &&
-      this.auth &&
-      AUTH_FAILURE_HINT.test(`${result.stdout}\n${result.stderr}`)
+      identity &&
+      identity.isAuthFailure(`${result.stdout}\n${result.stderr}`)
     ) {
-      const status = await this.auth.status({ force: true });
+      const status = await identity.status(ctx.senderStaffId, { force: true });
       if (status.state === 'expired') {
-        return this.authorizationPrompt(ctx, status);
+        return this.identityPrompt(ctx, status.record, 'expired', status);
       }
     }
     if (
@@ -298,53 +337,59 @@ export class DwsCliToolProvider implements IToolProvider {
     return formatResult(request, result);
   }
 
-  private async checkAuthorization(
-    ctx: ExecutionContext,
-  ): Promise<string | null> {
-    if (!this.auth) return null;
-    const status = await this.auth.status();
-    if (status.state !== 'expired') return null;
-    return this.authorizationPrompt(ctx, status);
-  }
-
   /**
-   * DWS 授权过期时：管理员直接发起设备码登录并把链接推给当前会话；
-   * 非管理员提示联系管理员。两种情况都会登记“登录成功后自动续跑”。
+   * 未授权 / 授权过期时引导完成“本人”的设备码授权。
+   * 群聊里只提示去单聊，绝不把授权链接或管理员令牌用于他人。
    */
-  private async authorizationPrompt(
+  private async identityPrompt(
     ctx: ExecutionContext,
-    status: DwsAuthStatus,
+    record: DwsIdentityRecord | null,
+    reason: 'unbound' | 'expired',
+    status?: DwsIdentityStatus,
   ): Promise<string> {
-    const auth = this.auth!;
-    const admin = this.isAdmin(ctx.senderStaffId);
-    let ticket = auth.activeLogin();
+    const identity = this.identity!;
+    const singleChat = ctx.conversationType === '1';
+    let ticket: { verifyUrl: string; userCode: string; expiresAt: number } | null =
+      null;
     let startError: string | undefined;
-    if (admin && !ticket) {
+    if (reason === 'expired' && singleChat) {
       try {
-        ticket = await auth.startLogin({ startedBy: ctx.senderStaffId });
+        const active = await identity.startLogin(ctx.senderStaffId);
+        ticket = {
+          verifyUrl: active.verifyUrl,
+          userCode: active.userCode,
+          expiresAt: active.expiresAt,
+        };
+        identity.markPending(ctx.senderStaffId, ctx.conversationId, {
+          resume: true,
+        });
       } catch (error) {
         startError = error instanceof Error ? error.message : String(error);
       }
     }
-    auth.markPending(ctx.conversationId, { resume: true });
 
     let text: string;
-    if (!admin) {
+    if (reason === 'unbound') {
+      text = record
+        ? '你已同意个人 DWS 授权，但还没有完成登录。请在单聊发送 /dws-login 完成设备码授权后再试。'
+        : '当前钉钉账号还没有独立的 DWS 授权。请在单聊发送 /dws-consent 查看授权范围，同意后发送 /dws-login 完成设备码授权。机器人不会再用管理员账号代替你查询。';
+    } else if (!singleChat) {
       text =
-        'DWS 授权已过期，暂时无法查询企业文档与组织数据。请联系管理员发送 /dws-login 完成重新授权，授权成功后我会自动继续刚才的问题。';
+        '你的个人 DWS 授权已过期。请在机器人的单聊中发送 /dws-login 完成重新授权，然后再 @ 我查询。';
     } else if (ticket) {
       text = [
-        'DWS 授权已过期，需要重新授权后才能继续查询企业数据。',
+        '你的个人 DWS 授权已过期，需要重新授权后才能继续。',
         '请在钉钉中打开以下链接完成授权（15 分钟内有效）：',
         ticket.verifyUrl,
         `授权码：${ticket.userCode}`,
         '授权完成后我会自动继续刚才的问题。',
       ].join('\n');
     } else {
-      text = `DWS 授权已过期，自动发起重新授权失败：${startError ?? '未知原因'}。请稍后发送 /dws-login 重试。`;
+      text = `个人 DWS 授权已过期，自动发起重新授权失败：${startError ?? '未知原因'}。请稍后发送 /dws-login 重试。`;
     }
 
-    if (ctx.notify) {
+    const shouldNotify = Boolean(ctx.notify) && singleChat;
+    if (shouldNotify && ctx.notify) {
       const now = this.now();
       const lastAt = this.lastNoticeAt.get(ctx.conversationId) ?? 0;
       if (now - lastAt >= 120_000) {
@@ -365,8 +410,10 @@ export class DwsCliToolProvider implements IToolProvider {
     return JSON.stringify({
       ok: false,
       authRequired: true,
-      authState: status.state,
-      ...(status.message ? { reason: status.message } : {}),
+      identityRequired: reason === 'unbound',
+      consentRequired: !record,
+      authState: status?.state ?? 'unbound',
+      ...(status?.message ? { reason: status.message } : {}),
       ...(ticket
         ? {
             loginUrl: ticket.verifyUrl,
@@ -377,9 +424,12 @@ export class DwsCliToolProvider implements IToolProvider {
             ),
           }
         : {}),
-      instruction: admin
-        ? 'DWS 授权已过期，已向用户发送重新授权链接与授权码。不要重复调用 DWS 工具；直接简要说明需要用户完成授权，授权成功后系统会自动继续。'
-        : 'DWS 授权已过期且当前用户不是管理员，已提示其联系管理员。不要重复调用 DWS 工具；告知用户等待管理员完成授权，授权成功后系统会自动继续。',
+      instruction:
+        reason === 'unbound'
+          ? '当前用户尚未完成个人 DWS 授权。已提示其私聊完成 /dws-consent 与 /dws-login。不要重复调用 DWS 工具，也不要声称已查询到数据。'
+          : singleChat
+            ? '个人 DWS 授权已过期，已向用户发送重新授权链接与授权码。不要重复调用 DWS 工具；直接简要说明需要用户完成授权，授权成功后系统会自动继续。'
+            : '个人 DWS 授权已过期且当前在群聊，已提示用户私聊完成授权。不要重复调用 DWS 工具。',
     });
   }
 
@@ -783,6 +833,7 @@ export class DwsCliToolProvider implements IToolProvider {
             operatorStaffId: ctx.senderStaffId,
           },
           optionalPage(args),
+          true,
         );
       },
     };
@@ -825,6 +876,7 @@ export class DwsCliToolProvider implements IToolProvider {
             operatorStaffId: ctx.senderStaffId,
           },
           optionalPage(args),
+          true,
         );
       },
     };
@@ -896,6 +948,7 @@ export class DwsCliToolProvider implements IToolProvider {
               operatorStaffId: ctx.senderStaffId,
             },
             optionalPage(args),
+            true,
           );
         }
 
@@ -921,6 +974,7 @@ export class DwsCliToolProvider implements IToolProvider {
               operatorStaffId: ctx.senderStaffId,
             },
             optionalPage(args),
+            true,
           );
         }
 
@@ -940,6 +994,7 @@ export class DwsCliToolProvider implements IToolProvider {
               operatorStaffId: ctx.senderStaffId,
             },
             optionalPage(args),
+            true,
           );
         }
 
@@ -1012,6 +1067,7 @@ export class DwsCliToolProvider implements IToolProvider {
               operatorStaffId: ctx.senderStaffId,
             },
             optionalPage(args),
+            true,
           );
         }
 
@@ -1039,6 +1095,7 @@ export class DwsCliToolProvider implements IToolProvider {
               operatorStaffId: ctx.senderStaffId,
             },
             optionalPage(args),
+            true,
           );
         }
 
@@ -1136,6 +1193,7 @@ export class DwsCliToolProvider implements IToolProvider {
               operatorStaffId: ctx.senderStaffId,
             },
             optionalPage(args),
+            true,
           );
         }
 
@@ -1159,6 +1217,7 @@ export class DwsCliToolProvider implements IToolProvider {
               operatorStaffId: ctx.senderStaffId,
             },
             optionalPage(args),
+            true,
           );
         }
 

@@ -1,64 +1,41 @@
-import { EventEmitter } from 'node:events';
 import { describe, expect, it } from 'vitest';
 import type { ExecutionContext } from '../../types/core.js';
+import type { DwsCommandRequest } from '../../types/mcp-and-sandbox.js';
+import type { DwsIdentityRecord } from '../../types/dws-identity.js';
 import type {
-  DwsAuthChild,
-  DwsStatusExecution,
-} from './DwsAuthManager.js';
-import { DwsAuthManager } from './DwsAuthManager.js';
+  DwsIdentityService,
+  DwsIdentityState,
+  DwsIdentityStatus,
+} from './DwsIdentityService.js';
 import { DwsCliToolProvider } from './DwsCliToolProvider.js';
 import type { DwsCliRunner, DwsRunResult } from './DwsCliRunner.js';
 
-const DEVICE_OUTPUT = [
-  '  link: https://login.dingtalk.com/oauth2/device/verify.htm',
-  '  authorization code: HVSD-BJVT',
-].join('\n');
-
-const AUTHENTICATED: DwsStatusExecution = {
-  exitCode: 0,
-  stdout: JSON.stringify({ authenticated: true, token_valid: true }),
-  stderr: '',
-};
-const EXPIRED: DwsStatusExecution = {
-  exitCode: 0,
-  stdout: JSON.stringify({ authenticated: false }),
-  stderr: '',
+const TICKET = {
+  verifyUrl: 'https://login.dingtalk.com/oauth2/device/verify.htm?user_code=HVSD-BJVT',
+  userCode: 'HVSD-BJVT',
+  expiresAt: Date.now() + 15 * 60_000,
 };
 
-function statusSequence(
-  sequence: DwsStatusExecution[],
-): () => Promise<DwsStatusExecution> {
-  let index = 0;
-  return async () => sequence[Math.min(index++, sequence.length - 1)];
-}
-
-function fakeSpawn(): () => DwsAuthChild {
-  const child = new EventEmitter() as EventEmitter & {
-    stdout: EventEmitter;
-    stderr: EventEmitter;
-    kill: () => boolean;
+function identityRecord(
+  overrides: Partial<DwsIdentityRecord> = {},
+): DwsIdentityRecord {
+  const at = new Date(0).toISOString();
+  return {
+    staffId: 'staff-1',
+    consentVersion: 1,
+    consentedAt: at,
+    scopes: [],
+    writeEnabled: false,
+    homeDir: 'u-0123456789abcdef01234567',
+    corpId: 'ding-corp',
+    dwsUserId: 'staff-1',
+    profile: 'ding-corp:staff-1',
+    userName: '张三',
+    corpName: '测试企业',
+    createdAt: at,
+    updatedAt: at,
+    ...overrides,
   };
-  child.stdout = new EventEmitter();
-  child.stderr = new EventEmitter();
-  child.kill = () => true;
-  setImmediate(() =>
-    child.stderr.emit('data', Buffer.from(DEVICE_OUTPUT)),
-  );
-  return () => child as unknown as DwsAuthChild;
-}
-
-function fakeRunner(result: DwsRunResult): {
-  runner: DwsCliRunner;
-  calls: Array<Record<string, unknown>>;
-} {
-  const calls: Array<Record<string, unknown>> = [];
-  const runner = {
-    run: async (request: Record<string, unknown>) => {
-      calls.push(request);
-      return result;
-    },
-  } as unknown as DwsCliRunner;
-  return { runner, calls };
 }
 
 function succeeded(text = '{"doc":1}'): DwsRunResult {
@@ -73,6 +50,84 @@ function succeeded(text = '{"doc":1}'): DwsRunResult {
     hasMore: false,
     timedOut: false,
   };
+}
+
+interface FakeIdentityOptions {
+  record?: DwsIdentityRecord | null;
+  states?: DwsIdentityState[];
+  runResult?: DwsRunResult;
+  startFails?: boolean;
+}
+
+function fakeIdentity(options: FakeIdentityOptions = {}): {
+  identity: DwsIdentityService;
+  calls: {
+    runs: DwsCommandRequest[];
+    startLogin: number;
+    pending: Array<{ staffId: string; conversationId: string }>;
+  };
+} {
+  const record = options.record === undefined ? null : options.record;
+  const states = [...(options.states ?? [record ? 'authenticated' : 'unbound'])];
+  const calls = {
+    runs: [] as DwsCommandRequest[],
+    startLogin: 0,
+    pending: [] as Array<{ staffId: string; conversationId: string }>,
+  };
+  const nextState = (): DwsIdentityState =>
+    states.length > 1 ? states.shift()! : states[0]!;
+  const status = async (): Promise<DwsIdentityStatus> => {
+    const state = nextState();
+    return {
+      state,
+      record,
+      token:
+        state === 'authenticated' || state === 'expired'
+          ? {
+              state: state === 'expired' ? 'expired' : 'authenticated',
+              authenticated: state === 'authenticated',
+              tokenValid: state === 'authenticated',
+              refreshTokenValid: state === 'authenticated',
+              checkedAt: Date.now(),
+            }
+          : null,
+      checkedAt: Date.now(),
+      ...(state === 'expired' ? { message: 'DWS 登录已过期，需要重新授权' } : {}),
+    };
+  };
+  const service = {
+    getRecord: async () => record,
+    status,
+    startLogin: async () => {
+      calls.startLogin += 1;
+      if (options.startFails) throw new Error('无法启动授权进程');
+      return TICKET;
+    },
+    markPending: (staffId: string, conversationId: string) => {
+      calls.pending.push({ staffId, conversationId });
+    },
+    run: async (_staffId: string, request: DwsCommandRequest) => {
+      calls.runs.push(request);
+      return options.runResult ?? succeeded();
+    },
+    isAuthFailure: (text: string) => /expired|token|授权/i.test(text),
+    invalidate: () => undefined,
+  };
+  return { identity: service as unknown as DwsIdentityService, calls };
+}
+
+function legacyRunner(result: DwsRunResult): {
+  runner: DwsCliRunner;
+  calls: DwsCommandRequest[];
+} {
+  const calls: DwsCommandRequest[] = [];
+  const runner = {
+    run: async (request: DwsCommandRequest) => {
+      calls.push(request);
+      return result;
+    },
+  } as unknown as DwsCliRunner;
+  return { runner, calls };
 }
 
 function context(overrides: Partial<ExecutionContext> = {}): {
@@ -108,18 +163,54 @@ async function runDocTool(
   return tool.execute({ target: 'doc', action: 'list' }, ctx);
 }
 
-describe('DwsCliToolProvider 授权闸门', () => {
-  it('管理员遇到过期授权时发起设备码登录并提醒当前会话', async () => {
-    const { runner, calls } = fakeRunner(succeeded());
-    const auth = new DwsAuthManager({
-      runStatus: async () => EXPIRED,
-      spawnLogin: fakeSpawn(),
+async function runCalendarCreate(
+  provider: DwsCliToolProvider,
+  ctx: ExecutionContext,
+): Promise<string> {
+  const tools = await provider.getTools(ctx);
+  const tool = tools.find((item) => item.name === 'dws_calendar_manage');
+  if (!tool) throw new Error('calendar tool missing');
+  return tool.execute(
+    {
+      action: 'create',
+      title: '评审',
+      start: '2026-11-02T10:00:00+08:00',
+      end: '2026-11-02T11:00:00+08:00',
+    },
+    ctx,
+  );
+}
+
+describe('DwsCliToolProvider 每员工独立身份闸门', () => {
+  it('未同意授权的单聊用户收到引导并提示模型不要声称已查询', async () => {
+    const { identity, calls } = fakeIdentity();
+    const provider = new DwsCliToolProvider({ identity });
+    const { ctx, notes } = context();
+
+    const output = JSON.parse(await runDocTool(provider, ctx)) as {
+      ok: boolean;
+      authRequired: boolean;
+      identityRequired: boolean;
+      consentRequired: boolean;
+      instruction: string;
+    };
+
+    expect(calls.runs).toHaveLength(0);
+    expect(output.ok).toBe(false);
+    expect(output.authRequired).toBe(true);
+    expect(output.identityRequired).toBe(true);
+    expect(output.consentRequired).toBe(true);
+    expect(output.instruction).toContain('/dws-consent');
+    expect(notes).toHaveLength(1);
+    expect(notes[0]).toContain('/dws-consent');
+  });
+
+  it('授权过期时在单聊自动发起本人设备码登录', async () => {
+    const { identity, calls } = fakeIdentity({
+      record: identityRecord(),
+      states: ['expired'],
     });
-    const provider = new DwsCliToolProvider({
-      runner,
-      auth,
-      isAdmin: () => true,
-    });
+    const provider = new DwsCliToolProvider({ identity });
     const { ctx, notes } = context();
 
     const output = JSON.parse(await runDocTool(provider, ctx)) as {
@@ -129,27 +220,23 @@ describe('DwsCliToolProvider 授权闸门', () => {
       userCode: string;
     };
 
-    expect(calls).toHaveLength(0);
+    expect(calls.runs).toHaveLength(0);
+    expect(calls.startLogin).toBe(1);
+    expect(calls.pending).toEqual([{ staffId: 'staff-1', conversationId: 'conv-1' }]);
     expect(output.ok).toBe(false);
     expect(output.authRequired).toBe(true);
     expect(output.userCode).toBe('HVSD-BJVT');
     expect(output.loginUrl).toContain('user_code=HVSD-BJVT');
     expect(notes).toHaveLength(1);
-    expect(notes[0]).toContain('DWS 授权已过期');
     expect(notes[0]).toContain('HVSD-BJVT');
   });
 
-  it('同一会话短时间内重复调用只提示一次', async () => {
-    const { runner } = fakeRunner(succeeded());
-    const auth = new DwsAuthManager({
-      runStatus: async () => EXPIRED,
-      spawnLogin: fakeSpawn(),
+  it('同一会话短时间内重复过期调用只提示一次', async () => {
+    const { identity } = fakeIdentity({
+      record: identityRecord(),
+      states: ['expired'],
     });
-    const provider = new DwsCliToolProvider({
-      runner,
-      auth,
-      isAdmin: () => true,
-    });
+    const provider = new DwsCliToolProvider({ identity });
     const { ctx, notes } = context();
 
     await runDocTool(provider, ctx);
@@ -157,40 +244,34 @@ describe('DwsCliToolProvider 授权闸门', () => {
     expect(notes).toHaveLength(1);
   });
 
-  it('非管理员不发起登录，只提示联系管理员', async () => {    const { runner, calls } = fakeRunner(succeeded());
-    const auth = new DwsAuthManager({
-      runStatus: async () => EXPIRED,
-      spawnLogin: () => {
-        throw new Error('非管理员不应触发登录');
-      },
+  it('群聊过期不发起登录，只提示私聊授权', async () => {
+    const { identity, calls } = fakeIdentity({
+      record: identityRecord(),
+      states: ['expired'],
     });
-    const provider = new DwsCliToolProvider({
-      runner,
-      auth,
-      isAdmin: () => false,
-    });
-    const { ctx, notes } = context({
-      senderStaffId: 'staff-2',
-      conversationType: '2',
-    });
+    const provider = new DwsCliToolProvider({ identity });
+    const { ctx, notes } = context({ conversationType: '2' });
 
     const output = JSON.parse(await runDocTool(provider, ctx)) as {
       authRequired: boolean;
       loginUrl?: string;
+      instruction: string;
     };
 
-    expect(calls).toHaveLength(0);
+    expect(calls.startLogin).toBe(0);
+    expect(calls.pending).toHaveLength(0);
     expect(output.authRequired).toBe(true);
     expect(output.loginUrl).toBeUndefined();
-    expect(notes[0]).toContain('联系管理员');
+    expect(output.instruction).toContain('群聊');
+    expect(notes).toHaveLength(0);
   });
 
-  it('授权有效时正常执行 DWS 工具', async () => {
-    const { runner, calls } = fakeRunner(succeeded());
-    const auth = new DwsAuthManager({
-      runStatus: async () => AUTHENTICATED,
+  it('授权有效时使用本人身份执行只读工具', async () => {
+    const { identity, calls } = fakeIdentity({
+      record: identityRecord(),
+      states: ['authenticated'],
     });
-    const provider = new DwsCliToolProvider({ runner, auth });
+    const provider = new DwsCliToolProvider({ identity });
     const { ctx, notes } = context();
 
     const output = JSON.parse(await runDocTool(provider, ctx)) as {
@@ -198,38 +279,73 @@ describe('DwsCliToolProvider 授权闸门', () => {
     };
 
     expect(output.ok).toBe(true);
-    expect(calls).toHaveLength(1);
+    expect(calls.runs).toHaveLength(1);
+    expect(calls.runs[0]?.operatorStaffId).toBe('staff-1');
     expect(notes).toHaveLength(0);
   });
 
-  it('执行阶段才发现授权过期时同样弹出重新授权提示', async () => {
-    const failed: DwsRunResult = {
-      ...succeeded(),
-      exitCode: 3,
-      stdout: '',
-      stderr: 'token expired, please login again',
+  it('只读授权拒绝写工具并提示单独授权', async () => {
+    const { identity, calls } = fakeIdentity({
+      record: identityRecord({ writeEnabled: false }),
+      states: ['authenticated'],
+    });
+    const provider = new DwsCliToolProvider({ identity });
+    const { ctx } = context();
+
+    const output = JSON.parse(await runCalendarCreate(provider, ctx)) as {
+      ok: boolean;
+      writeConsentRequired: boolean;
+      instruction: string;
     };
-    const { runner } = fakeRunner(failed);
-    const auth = new DwsAuthManager({
-      runStatus: statusSequence([AUTHENTICATED, EXPIRED]),
-      spawnLogin: fakeSpawn(),
+
+    expect(calls.runs).toHaveLength(0);
+    expect(output.ok).toBe(false);
+    expect(output.writeConsentRequired).toBe(true);
+    expect(output.instruction).toContain('/dws-consent write');
+  });
+
+  it('额外授权写操作后执行写工具', async () => {
+    const { identity, calls } = fakeIdentity({
+      record: identityRecord({ writeEnabled: true }),
+      states: ['authenticated'],
     });
-    const provider = new DwsCliToolProvider({
-      runner,
-      auth,
-      isAdmin: () => true,
+    const provider = new DwsCliToolProvider({ identity });
+    const { ctx } = context();
+
+    const output = JSON.parse(await runCalendarCreate(provider, ctx)) as {
+      ok: boolean;
+    };
+
+    expect(output.ok).toBe(true);
+    expect(calls.runs).toHaveLength(1);
+    expect(calls.runs[0]?.subcommand).toBe('event create');
+  });
+
+  it('执行阶段才发现授权过期时同样弹出重新授权', async () => {
+    const { identity, calls } = fakeIdentity({
+      record: identityRecord(),
+      states: ['authenticated', 'expired'],
+      runResult: {
+        ...succeeded(),
+        exitCode: 3,
+        stdout: '',
+        stderr: 'token expired, please login again',
+      },
     });
+    const provider = new DwsCliToolProvider({ identity });
     const { ctx, notes } = context();
 
     const output = JSON.parse(await runDocTool(provider, ctx)) as {
       authRequired: boolean;
     };
+
+    expect(calls.runs).toHaveLength(1);
     expect(output.authRequired).toBe(true);
     expect(notes[0]).toContain('HVSD-BJVT');
   });
 
-  it('未配置授权管理器时保持原有行为', async () => {
-    const { runner, calls } = fakeRunner(succeeded());
+  it('未配置身份服务时保持原有 runner 行为', async () => {
+    const { runner, calls } = legacyRunner(succeeded());
     const provider = new DwsCliToolProvider({ runner });
     const { ctx, notes } = context();
     const output = JSON.parse(await runDocTool(provider, ctx)) as {
