@@ -114,6 +114,11 @@ describe('CommandRouter', () => {
     const idle = runtime({ stopRun: () => 0 });
     await idle.router.tryHandle(message({ text: '/stop' }));
     expect(idle.replies[0]).toContain('没有进行中');
+
+    const queued = runtime({ stopRun: () => 3 });
+    await queued.router.tryHandle(message({ text: '/stop' }));
+    expect(queued.replies[0]).toContain('已停止');
+    expect(queued.replies[0]).toContain('2 条排队');
   });
 
   it('/reset 与 /retry 调用运行时', async () => {

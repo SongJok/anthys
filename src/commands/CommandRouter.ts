@@ -48,7 +48,7 @@ const HELP_TEXT = [
   '可用指令：',
   '- `/help` 查看帮助',
   '- `/status` 查看机器人与模型状态',
-  '- `/stop` 停止当前回答',
+  '- `/stop` 停止当前回答并清空排队中的问题',
   '- `/retry` 重试上一条问题',
   '- `/reset` 清空本会话上下文',
   '- `/trace` 查看最近一次执行轨迹摘要',
@@ -103,9 +103,14 @@ export class CommandRouter {
         return true;
       case 'stop': {
         const stopped = runtime.stopRun(message.conversationId);
+        const queued = Math.max(0, stopped - 1);
         await runtime.reply(
           message,
-          stopped > 0 ? '已停止当前回答。' : '当前没有进行中的回答。',
+          stopped === 0
+            ? '当前没有进行中的回答。'
+            : queued > 0
+              ? `已停止当前回答，并取消 ${queued} 条排队中的问题。`
+              : '已停止当前回答。',
         );
         return true;
       }

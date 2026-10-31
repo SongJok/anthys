@@ -41,7 +41,10 @@ import {
   conversationTitleFor,
   type HarnessLogger,
 } from './harness/AgentHarness.js';
-import { RunControlRegistry } from './harness/RunControlRegistry.js';
+import {
+  RunControlRegistry,
+  type BeginRunResult,
+} from './harness/RunControlRegistry.js';
 import {
   createToolApprovalGate,
   PendingActionStore,
@@ -947,6 +950,7 @@ async function main(): Promise<void> {
         return [
           `模型：${llm.provider} / ${llm.model}`,
           `进行中的回答：${runControl.activeCount()}`,
+          `排队中的问题：${runControl.pendingCount()}`,
           `Stream：${streamConnected ? '已连接' : '未连接'}`,
           `运行时长：${Math.floor(process.uptime() / 60)} 分钟`,
         ].join('\n');
@@ -1222,20 +1226,40 @@ async function main(): Promise<void> {
       reply: replyTo,
     });
 
+    const QUEUE_CANCELLED_TEXT = '这条问题已按 /stop 取消，没有执行。';
+
+    /** 排队时在卡片上给出位置，避免用户以为机器人没收到 */
+    function markQueued(streamer: CardStreamer, run: BeginRunResult): void {
+      if (run.queuedAhead <= 0) return;
+      streamer.handle({
+        type: 'status',
+        message: `已收到，正在按顺序处理（前面还有 ${run.queuedAhead} 条问题）…`,
+      });
+    }
+
     async function runTurn(
       message: InboundMessage,
+      run: BeginRunResult,
       proactive = false,
       startedStreamer?: CardStreamer,
     ): Promise<void> {
-      const run = runControl.begin(message);
-      metrics.set('agent_active_runs', runControl.activeCount());
       const mention = replyMention(message, proactive);
       const streamer =
         startedStreamer ?? createStreamer(message, { mention });
       const collector = new TraceCollector();
       const emit = makeEmit(collector, streamer);
       if (!startedStreamer) await streamer.start();
+      markQueued(streamer, run);
       try {
+        await run.started;
+        if (run.signal.aborted) {
+          streamer.handle({
+            type: 'answer_delta',
+            content: QUEUE_CANCELLED_TEXT,
+          });
+          await streamer.finish();
+          return;
+        }
         const result = await harness.handleMessage(message, {
           emit,
           signal: run.signal,
@@ -1279,14 +1303,17 @@ async function main(): Promise<void> {
 
     async function handleIncoming(message: InboundMessage): Promise<void> {
       if (await commandRouter.tryHandle(message)) return;
-      // 先建卡贴表情再解析附件，避免视觉理解耗时期间用户看不到任何反馈
-      emotionReplier.mark(message);
-      const streamer = createStreamer(message, {
-        mention: replyMention(message),
-      });
-      const cardReady = streamer.start();
+      // 先入队再解析附件：同一会话按到达顺序执行，慢附件不能把后一条问题插到前面
+      const run = runControl.begin(message);
+      metrics.set('agent_active_runs', runControl.activeCount());
       let effective = message;
       try {
+        // 先建卡贴表情再解析附件，避免视觉理解耗时期间用户看不到任何反馈
+        emotionReplier.mark(message);
+        const streamer = createStreamer(message, {
+          mention: replyMention(message),
+        });
+        const cardReady = streamer.start();
         if (message.attachments && message.attachments.length > 0) {
           try {
             const enriched = await enrichInboundMessage(message, {
@@ -1321,8 +1348,11 @@ async function main(): Promise<void> {
         metrics.inc('agent_messages_total', {
           conversationType: effective.conversationType,
         });
-        await runTurn(effective, false, streamer);
+        await runTurn(effective, run, false, streamer);
       } finally {
+        // runTurn 已释放时是幂等空操作；异常提前退出时靠这里归还队列
+        run.finish();
+        metrics.set('agent_active_runs', runControl.activeCount());
         void emotionReplier.clear(message);
       }
     }
@@ -1333,11 +1363,22 @@ async function main(): Promise<void> {
     ): Promise<void> {
       const run = runControl.begin(message);
       metrics.set('agent_active_runs', runControl.activeCount());
-      const streamer = createStreamer(message);
+      let streamer: CardStreamer | null = null;
       const collector = new TraceCollector();
-      const emit = makeEmit(collector, streamer);
-      await streamer.start();
       try {
+        streamer = createStreamer(message);
+        const emit = makeEmit(collector, streamer);
+        await streamer.start();
+        markQueued(streamer, run);
+        await run.started;
+        if (run.signal.aborted) {
+          streamer.handle({
+            type: 'answer_delta',
+            content: QUEUE_CANCELLED_TEXT,
+          });
+          await streamer.finish();
+          return;
+        }
         const result = await harness.handleBystanderMessage(message, {
           decision,
           emit,
@@ -1358,10 +1399,10 @@ async function main(): Promise<void> {
           { messageId: message.messageId, error: errorText(error) },
           'proactive turn failed',
         );
-        streamer.handle({ type: 'error', message: FALLBACK_ERROR_TEXT });
-        await streamer.finish();
+        streamer?.handle({ type: 'error', message: FALLBACK_ERROR_TEXT });
+        await streamer?.finish();
         await recordTrace(collector, message, EMPTY_RESULT, true);
-        if (!streamer.isAvailable) {
+        if (!streamer || !streamer.isAvailable) {
           await sendSessionWebhook(message, FALLBACK_ERROR_TEXT, cardLogger);
         }
       } finally {
@@ -1542,7 +1583,14 @@ async function main(): Promise<void> {
         'scheduled task triggered',
       );
       metrics.inc('scheduled_task_runs_total', { kind: task.kind });
-      await runTurn(message, true);
+      const run = runControl.begin(message);
+      metrics.set('agent_active_runs', runControl.activeCount());
+      try {
+        await runTurn(message, run, true);
+      } finally {
+        run.finish();
+        metrics.set('agent_active_runs', runControl.activeCount());
+      }
     };
 
     const normalizeSchedule = (
