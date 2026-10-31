@@ -282,8 +282,24 @@ describe('DwsIdentityService', () => {
     expect(record?.userName).toBe('张三');
   });
 
-  it('授权账号与发起人不一致时拒绝绑定', async () => {
-    const profiles = JSON.stringify({
+  it('CLI 授权完成后非零退出仍按 profile 落地绑定', async () => {
+    const { service: instance, store } = service();
+    await instance.recordConsent('staff-1');
+    const ticket = await instance.startLogin('staff-1');
+    expect(ticket.userCode).toBe('HVSD-BJVT');
+    const success = new Promise<{ staffId: string }>((resolve, reject) => {
+      instance.once('login-success', resolve as never);
+      instance.once('login-failed', ({ reason }) => reject(new Error(reason)));
+    });
+    const session = (instance as unknown as {
+      sessions: Map<string, { child: EventEmitter }>;
+    }).sessions.get('staff-1');
+    session?.child.emit('exit', 2, null);
+    await expect(success).resolves.toMatchObject({ staffId: 'staff-1' });
+    expect((await store.get('staff-1'))?.profile).toBe('ding-corp:staff-1');
+  });
+
+  it('授权账号与发起人不一致时拒绝绑定', async () => {    const profiles = JSON.stringify({
       profiles: [
         {
           profile: 'ding-corp:someone-else',

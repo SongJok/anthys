@@ -114,10 +114,19 @@ const DEFAULT_STATUS_TTL_MS = 60_000;
 const DEFAULT_LOGIN_TIMEOUT_MS = 900_000;
 const DEVICE_CODE_TICKET_TIMEOUT_MS = 20_000;
 const PENDING_TTL_MS = 30 * 60_000;
+const LOGIN_OUTPUT_TAIL_CHARS = 2_000;
 const HOME_NAME_PATTERN = /^u-[a-f0-9]{24}$/;
 const PROFILE_PATTERN = /^[A-Za-z0-9_-]+:[A-Za-z0-9_-]+$/;
 const AUTH_FAILURE_HINT =
   /登录|授权|auth|token|expired|unauth|401|403|未登录|过期|失效/i;
+
+function loginOutputSnippet(text: string): string {
+  const cleaned = text
+    .replace(/\u001b\[[0-9;]*m/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return cleaned ? `：${cleaned.slice(-400)}` : '';
+}
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -477,6 +486,7 @@ export class DwsIdentityService extends EventEmitter {
     this.sessions.set(staffId, session);
 
     let buffer = '';
+    let outputTail = '';
     const finish = (error?: Error): void => {
       if (session.finished) return;
       session.finished = true;
@@ -521,11 +531,34 @@ export class DwsIdentityService extends EventEmitter {
       this.emit('login-started', { staffId, ticket });
     };
 
-    child.stderr?.on('data', (data: Buffer | string) => scan(String(data)));
-    child.stdout?.on('data', (data: Buffer | string) => scan(String(data)));
+    child.stderr?.on('data', (data: Buffer | string) => {
+      const text = String(data);
+      outputTail = (outputTail + text).slice(-LOGIN_OUTPUT_TAIL_CHARS);
+      scan(text);
+    });
+    child.stdout?.on('data', (data: Buffer | string) => {
+      const text = String(data);
+      outputTail = (outputTail + text).slice(-LOGIN_OUTPUT_TAIL_CHARS);
+      scan(text);
+    });
     child.on('error', (error: Error) => finish(error));
     child.on('exit', (code, signal) => {
       if (code === 0) {
+        finish();
+        return;
+      }
+      // 设备码已发出且用户可能已经完成授权，CLI 收尾非零退出时
+      // 以 profile 是否真正落地为准，避免"授权成功却提示未授权"。
+      if (session.ticket) {
+        this.logger?.warn?.(
+          {
+            staffId,
+            code,
+            signal,
+            output: loginOutputSnippet(outputTail),
+          },
+          'dws auth login exited after ticket issued, verifying profile',
+        );
         finish();
         return;
       }
@@ -533,7 +566,7 @@ export class DwsIdentityService extends EventEmitter {
         new Error(
           signal
             ? `DWS 授权进程被终止（${signal}）`
-            : `DWS 授权进程退出码 ${code ?? 'unknown'}`,
+            : `DWS 授权进程退出码 ${code ?? 'unknown'}${loginOutputSnippet(outputTail)}`,
         ),
       );
     });
