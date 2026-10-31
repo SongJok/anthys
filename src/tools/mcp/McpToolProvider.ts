@@ -206,6 +206,7 @@ export class McpToolProvider implements IToolProvider {
       name: descriptor.namespacedName,
       description:
         `[MCP ${descriptor.serverName} · ${descriptor.domain}] ${descriptor.description}\n` +
+        `未标记错误的返回就是工具的真实输出；即使内容很短或看起来与问题无关，也可能就是查询结果，请如实采用，不要判定调用失败或重复调用。\n` +
         `单次结果超过 ${descriptor.maxResultChars} 字符时，系统会自动转存到沙盒工作区并返回样本预览与 Schema；` +
         `此时请调用 sandbox_analyze_and_aggregate，通过 datasets['data_*.json'] 读取完整数据做聚合。`,
       parametersJsonSchema: descriptor.inputSchema,

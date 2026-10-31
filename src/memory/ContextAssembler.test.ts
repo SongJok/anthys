@@ -43,6 +43,7 @@ describe('ContextAssembler', () => {
     expect(system?.content).toContain('研发助手');
     expect(system?.content).toContain('先结论后要点');
     expect(system?.content).toContain('优先调用可用工具');
+    expect(system?.content).toContain('未标记错误的工具返回就是真实数据');
     expect(system?.content).toContain('当前时间：');
     expect(messages[1]).toEqual({ role: 'user', content: '你好' });
   });

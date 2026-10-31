@@ -117,6 +117,39 @@ describe('ReActRunner 流式增强', () => {
     expect(toolMessage?.content).toContain('-END');
   });
 
+  it('同一工具连续返回相同结果时提示该结果已是最终数据', async () => {
+    const tool: ToolDefinition = {
+      name: 'enterprise_chat',
+      description: 'chat',
+      parametersJsonSchema: { type: 'object', properties: {} },
+      execute: async () => 'conversationId: 4901\n\n你什么段位',
+    };
+    const model = new ScriptedModel([
+      toolTurn('c1', 'enterprise_chat'),
+      toolTurn('c2', 'enterprise_chat'),
+      [{ contentDelta: '该用户的名称是：你什么段位' }, { finishReason: 'stop' }],
+    ]);
+    const runner = new ReActRunner({
+      model,
+      toolProviders: [providerWith(tool)],
+      policy,
+    });
+
+    await runner.run({
+      messages: userMessages,
+      context: context(),
+      emit: () => undefined,
+    });
+
+    const finalRequest = model.requests[2];
+    const systemText = (finalRequest?.messages ?? [])
+      .filter((message) => message.role === 'system')
+      .map((message) => message.content)
+      .join('\n');
+    expect(systemText).toContain('本次返回的内容与上一次完全相同');
+    expect(systemText).toContain('不要认定调用失败');
+  });
+
   it('工具超时会被强制中断并继续收敛回答', async () => {
     const tool: ToolDefinition = {
       name: 'hang',
