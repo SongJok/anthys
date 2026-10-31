@@ -425,6 +425,10 @@ async function main(): Promise<void> {
             enabled: () =>
               configCenter.getWebSearchConfig?.()?.enabled ?? false,
             logger: harnessLogger,
+            metrics,
+            cacheTtlSeconds: webSearchConfig.cacheTtlSeconds,
+            maxCallsPerHour: webSearchConfig.maxCallsPerHour,
+            dailyLimit: webSearchConfig.dailyLimit,
           })
         : undefined;
     if (webSearchConfig?.enabled && !webSearchConfig.apiKey) {
@@ -439,6 +443,9 @@ async function main(): Promise<void> {
         ready: Boolean(webSearchProvider),
         engine: webSearchConfig?.engine,
         count: webSearchConfig?.count,
+        cacheTtlSeconds: webSearchConfig?.cacheTtlSeconds,
+        maxCallsPerHour: webSearchConfig?.maxCallsPerHour,
+        dailyLimit: webSearchConfig?.dailyLimit,
         apiKeyConfigured: Boolean(webSearchConfig?.apiKey),
       },
       'web search configuration resolved',

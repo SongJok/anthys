@@ -18,6 +18,9 @@ describe('EnvConfigProvider web search', () => {
       contentSize: 'medium',
       timeoutMs: 12_000,
       redactOutbound: true,
+      cacheTtlSeconds: 300,
+      maxCallsPerHour: 30,
+      dailyLimit: 500,
     });
   });
 
@@ -44,6 +47,9 @@ describe('EnvConfigProvider web search', () => {
       WEB_SEARCH_CONTENT_SIZE: 'high',
       WEB_SEARCH_TIMEOUT_MS: '9000',
       WEB_SEARCH_REDACT: 'false',
+      WEB_SEARCH_CACHE_TTL_SECONDS: '0',
+      WEB_SEARCH_MAX_CALLS_PER_HOUR: '12',
+      WEB_SEARCH_DAILY_LIMIT: '80',
     });
 
     expect(provider.getWebSearchConfig()).toEqual({
@@ -55,6 +61,9 @@ describe('EnvConfigProvider web search', () => {
       contentSize: 'high',
       timeoutMs: 9_000,
       redactOutbound: false,
+      cacheTtlSeconds: 0,
+      maxCallsPerHour: 12,
+      dailyLimit: 80,
     });
   });
 
@@ -64,11 +73,17 @@ describe('EnvConfigProvider web search', () => {
       WEB_SEARCH_ENGINE: 'bing',
       WEB_SEARCH_CONTENT_SIZE: 'huge',
       WEB_SEARCH_COUNT: '999',
+      WEB_SEARCH_CACHE_TTL_SECONDS: '-5',
+      WEB_SEARCH_MAX_CALLS_PER_HOUR: '-1',
+      WEB_SEARCH_DAILY_LIMIT: 'abc',
     });
 
     const config = provider.getWebSearchConfig();
     expect(config.engine).toBe('search_pro');
     expect(config.contentSize).toBe('medium');
     expect(config.count).toBe(50);
+    expect(config.cacheTtlSeconds).toBe(0);
+    expect(config.maxCallsPerHour).toBe(0);
+    expect(config.dailyLimit).toBe(500);
   });
 });

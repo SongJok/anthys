@@ -165,8 +165,13 @@ pnpm run db:seed      # 可选：预写入默认人设与模型配置，已有�
 | `WEB_SEARCH_CONTENT_SIZE` | `medium` | 摘要长度，`medium` 或 `high` |
 | `WEB_SEARCH_TIMEOUT_MS` | `12000` | 单次搜索超时 |
 | `WEB_SEARCH_REDACT` | `true` | 出站前脱敏手机号、邮箱、证件号与密钥；内部术语不拦截 |
+| `WEB_SEARCH_CACHE_TTL_SECONDS` | `300` | 相同查询的结果缓存秒数；`0` 关闭缓存 |
+| `WEB_SEARCH_MAX_CALLS_PER_HOUR` | `30` | 单会话每小时真实调用上限；`0` 不限制 |
+| `WEB_SEARCH_DAILY_LIMIT` | `500` | 本进程每天真实调用上限；`0` 不限制 |
 
 单聊与群聊都会挂载该工具。查询只发往公网搜索引擎，企业内部数据仍应走企业 MCP 或 DWS；上游鉴权失败、限流或超时会以可读错误回传模型，不阻断其余工具。
+
+生产护栏：相同查询在 TTL 内直接复用结果，并发相同查询只发起一次请求；单会话小时配额与进程日配额用完后，工具返回「基于已有信息回答」的引导而不是继续计费。缓存与配额都是进程内状态，多实例部署时各实例独立计数。运行指标见 `/metrics`：`web_search_requests_total{result=success|empty|cache_hit|inflight_join|rate_limited|daily_limited|error}`、`web_search_results_total` 与 `web_search_duration_ms_total`。
 
 **推理预算**
 
@@ -469,7 +474,7 @@ pnpm start     # 通过 tsx 直接运行 src/index.ts
 | 内置工具 | `current_time` 时区时间、`calculator` 安全表达式计算、`system_status` 进程与资源状态 |
 | 企业 MCP | 通过 MCP 协议接入代码、数据、日志、接口文档等外部服务，可增删改查与热重载 |
 | 钉钉 DWS | 查询文档、知识库、日历、待办、通讯录与审批；写操作（建日程、建待办、改通讯录、发审批）经 `/confirm` 二次确认 |
-| 公网搜索 | `web_search` 调用智谱 Web Search API 检索公开网页，返回标题、链接、发布时间与摘要，并作为引用展示；单聊与群聊均可用，可在控制台关闭 |
+| 公网搜索 | `web_search` 调用智谱 Web Search API 检索公开网页，返回标题、链接、发布时间与摘要，并作为引用展示；相同查询短期缓存、单会话与进程级调用配额，单聊与群聊均可用，可在控制台关闭 |
 | 隔离沙盒 | `sandbox_analyze_and_aggregate` 对工具返回的大批量数据做脚本化统计与聚合 |
 | 管理员工具 | 仅在管理员单聊中出现的管控指令，普通员工与群聊不可见 |
 

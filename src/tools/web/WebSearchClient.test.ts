@@ -150,4 +150,59 @@ describe('WebSearchClient', () => {
     ).rejects.toThrow('搜索词不能为空');
     expect(fetchImpl).not.toHaveBeenCalled();
   });
+
+  it('超长搜索词与非法条数在本地拦截或归一', async () => {
+    const calls: CapturedCall[] = [];
+    const fetchImpl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: String(_url), init: init ?? {} });
+      return jsonResponse({ search_result: [] });
+    }) as unknown as typeof fetch;
+    const client = clientWith(fetchImpl);
+
+    await expect(
+      client.search({ query: '长'.repeat(71) }),
+    ).rejects.toMatchObject({ code: 'QUERY_TOO_LONG' });
+    expect(fetchImpl).not.toHaveBeenCalled();
+
+    await client.search({ query: '条数归一', count: 99 });
+    const body = JSON.parse(String(calls[0]?.init.body));
+    expect(body.count).toBe(50);
+  });
+
+  it('清洗摘要中的标签与控制字符', async () => {
+    const fetchImpl = (async () =>
+      jsonResponse({
+        search_result: [
+          {
+            title: '<b>标题</b>',
+            content: 'a\u0000b <script>x</script> c',
+            link: 'https://example.com/a',
+          },
+        ],
+      })) as typeof fetch;
+
+    const [result] = await clientWith(fetchImpl).search({ query: '清洗' });
+    expect(result?.title).toBe('标题');
+    expect(result?.content).toBe('a b x c');
+  });
+
+  it('过滤非 http 链接与重复链接，并按请求条数截断', async () => {
+    const fetchImpl = (async () =>
+      jsonResponse({
+        search_result: [
+          { title: '一', content: 'c1', link: 'https://example.com/1' },
+          { title: '二', content: 'c2', link: 'https://example.com/1' },
+          { title: '三', content: 'c3', link: 'javascript:alert(1)' },
+          { title: '四', content: 'c4', link: 'https://example.com/2' },
+        ],
+      })) as typeof fetch;
+
+    const results = await clientWith(fetchImpl).search({
+      query: '去重',
+      count: 1,
+    });
+    expect(results.map((item) => item.link)).toEqual([
+      'https://example.com/1',
+    ]);
+  });
 });

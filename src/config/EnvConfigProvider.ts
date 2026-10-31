@@ -253,6 +253,22 @@ export class EnvConfigProvider implements IConfigProvider {
         parseNumber(this.env.WEB_SEARCH_TIMEOUT_MS, 12_000),
       ),
       redactOutbound: parseBoolean(this.env.WEB_SEARCH_REDACT, true),
+      cacheTtlSeconds: Math.max(
+        0,
+        Math.trunc(
+          parseNumber(this.env.WEB_SEARCH_CACHE_TTL_SECONDS, 300),
+        ),
+      ),
+      maxCallsPerHour: Math.max(
+        0,
+        Math.trunc(
+          parseNumber(this.env.WEB_SEARCH_MAX_CALLS_PER_HOUR, 30),
+        ),
+      ),
+      dailyLimit: Math.max(
+        0,
+        Math.trunc(parseNumber(this.env.WEB_SEARCH_DAILY_LIMIT, 500)),
+      ),
     };
   }
 

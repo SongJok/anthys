@@ -68,6 +68,12 @@ export interface WebSearchConfig {
   timeoutMs: number;
   /** 出站前对查询做手机号/邮箱/证件/密钥脱敏 */
   redactOutbound: boolean;
+  /** 相同查询的结果缓存秒数，0 表示关闭缓存 */
+  cacheTtlSeconds: number;
+  /** 单会话每小时最多真实调用次数，0 表示不限制 */
+  maxCallsPerHour: number;
+  /** 进程内每天最多真实调用次数，0 表示不限制 */
+  dailyLimit: number;
 }
 
 export interface IConfigProvider {
