@@ -271,7 +271,7 @@ describe('DwsIdentityService', () => {
       'ding-corp',
     ]);
     const env = spawnCalls.calls[0]?.env ?? {};
-    expect(env.DWS_DISABLE_KEYCHAIN).toBe('1');
+    expect(env.DWS_DISABLE_KEYCHAIN).toBeUndefined();
     expect(env.DWS_CONFIG_DIR).toContain('config');
     expect(env.XDG_DATA_HOME).toContain('data');
     expect(success.staffId).toBe('staff-1');
@@ -354,7 +354,7 @@ describe('DwsIdentityService', () => {
     const call = runnerCalls.calls.at(-1);
     expect(call?.options.profile).toBe('ding-corp:staff-1');
     const env = call?.options.env as NodeJS.ProcessEnv;
-    expect(env.DWS_DISABLE_KEYCHAIN).toBe('1');
+    expect(env.DWS_DISABLE_KEYCHAIN).toBeUndefined();
     expect((await store.get('staff-1'))?.profile).toBe('ding-corp:staff-1');
   });
 

@@ -208,7 +208,7 @@ export function formatDwsConsentText(
     '为了用你本人的钉钉身份查询，而不是借用管理员账号，机器人需要在你本机单独完成一次设备码授权：',
     '- 只在你发起请求时使用你的身份，不会用于其他员工；',
     '- 默认只读范围：日程、待办、审批、通讯录、文档 / 知识库；',
-    '- 令牌以 file-DEK 加密保存在独立目录，管理员无法查看令牌内容；',
+    '- 令牌保存在本机 Keychain，并按你本人的 profile 单独存放，其他员工无法复用；',
     `- 发送 /dws-logout 会清除本机令牌；发送 /dws-consent revoke 会同时撤销同意。`,
     '',
     agreed,
@@ -775,12 +775,15 @@ export class DwsIdentityService extends EventEmitter {
 
   private async envFor(staffId: string): Promise<NodeJS.ProcessEnv> {
     const dir = await this.ensureHome(staffId);
-    return {
+    // 令牌由 CLI 按 profile（corpId:userId）写入 macOS Keychain，每个员工各自一条；
+    // file-DEK 模式必须先在 Keychain 里存在 DEK，首次授权无法写入，故不启用。
+    const env: NodeJS.ProcessEnv = {
       ...this.baseEnv,
       DWS_CONFIG_DIR: join(dir, 'config'),
       XDG_DATA_HOME: join(dir, 'data'),
-      DWS_DISABLE_KEYCHAIN: '1',
     };
+    delete env.DWS_DISABLE_KEYCHAIN;
+    return env;
   }
 
   private async wipeHome(staffId: string): Promise<void> {

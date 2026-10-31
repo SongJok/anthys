@@ -315,8 +315,8 @@ pnpm run db:seed      # 可选：预写入默认人设与模型配置，已有�
 | `DINGTALK_ADMIN` | 空 | 机器人管理员的 StaffId，与 `ADMIN_STAFF_IDS` 等价；也可在控制台「系统设置」的管理员白名单中调整 |
 | `DWS_CLI_ENABLED` | `true`（`.env.example` 中为 `false`） | 是否启用 DWS 命令行工具源 |
 | `DWS_BINARY` | `dws` | `dws` 可执行文件路径；需要指定 Node 版本时可指向包装脚本 |
-| `DWS_PROFILE_ROOT` | `.state/dws-profiles` | 每员工独立 DWS home 根目录（0700，file-DEK 加密令牌），已在 `.gitignore` 中忽略 |
-| `DWS_CORP_ID` | 空 | 期望绑定的企业 corpId；配置后拒绝绑定其他组织账号 |
+| `DWS_PROFILE_ROOT` | `.state/dws-profiles` | 每员工独立 DWS home 根目录（0700，按 profile 隔离配置），已在 `.gitignore` 中忽略 |
+| `DWS_CORP_ID` | 空 | 设备码授权的目标企业 corpId；配置后登录显式指向该组织，并拒绝绑定其他组织账号 |
 | `SANDBOX_ENABLED` | `true` | 是否启用隔离沙盒工具 |
 | `MCP_SERVERS_CONFIG` | `config/mcp-servers.json` | 首次启动时的 MCP 节点定义 |
 | `ENTERPRISE_MCP_ENDPOINT` | 空 | 示例企业 MCP 的地址，供配置文件中 `${...}` 引用 |
@@ -579,7 +579,7 @@ pnpm start     # 通过 tsx 直接运行 src/index.ts
 
 #### 每员工独立 DWS 身份（同意 + 设备码授权 + 加密令牌）
 
-- **独立 home**：每个员工在 `DWS_PROFILE_ROOT`（默认 `.state/dws-profiles`）下有独立的 `0700` 目录，设置 `DWS_CONFIG_DIR`、`XDG_DATA_HOME` 与 `DWS_DISABLE_KEYCHAIN=1`，由 CLI 以 file-DEK 方式加密保存 refresh token；管理员无法读取令牌内容。
+- **独立 home**：每个员工在 `DWS_PROFILE_ROOT`（默认 `.state/dws-profiles`）下有独立的 `0700` 目录，设置 `DWS_CONFIG_DIR`、`XDG_DATA_HOME`，配置、日志、待绑定状态互不干扰；令牌由钉钉 CLI 按 `corpId:userId` profile 存入本机 macOS Keychain，每个员工独立一条，其他员工无法复用。`DWS_DISABLE_KEYCHAIN=1` 的 file-DEK 模式首次授权会因 `dek missing` 无法落盘，因此不启用。
 - **自动授权、无需记命令**：员工提问时如果令牌缺失或过期，机器人会自动记录当前版本的只读同意并发起该员工本人的设备码登录。单聊直接把授权链接与授权码发在对话里；群聊只通过私聊发给提问人，群里不回传链接和授权码。用户只需打开链接完成授权。`/dws-consent`、`/dws-login` 仍保留，用于员工主动查看范围或手动重发。
 - **默认只读**：自动同意的范围仅包含日程、待办、审批、通讯录、文档/知识库的只读查询。写操作（建日程、建待办、发审批、改通讯录）必须额外发送 `/dws-consent write`；工具层会在执行前拦截未授权的写调用。
 - **身份校验**：登录完成后读取 `dws profile list`，只有 profile 的 `userId` 与当前钉钉 StaffId 一致才绑定；不一致会取消绑定并清空该员工的 home。配置 `DWS_CORP_ID` 时还会限定企业。
