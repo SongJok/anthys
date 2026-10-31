@@ -280,6 +280,7 @@ async function main(): Promise<void> {
       getMemoryConfig: () => baseConfig.getMemoryConfig(),
       getBystanderConfig: () => baseConfig.getBystanderConfig(),
       getVisionConfig: () => baseConfig.getVisionConfig(),
+      getWebSearchConfig: () => baseConfig.getWebSearchConfig(),
       getDatabaseUrl: () => baseConfig.getDatabaseUrl(),
       assertReady: () => baseConfig.assertReady(),
     };
