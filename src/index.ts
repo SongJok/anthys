@@ -703,6 +703,9 @@ async function main(): Promise<void> {
       logger.info({}, 'subagent delegation enabled');
     }
 
+    // 企业 MCP 普遍较慢，单次工具等待默认 120 秒（MCP 自身 180 秒上限之内）
+    const toolTimeoutMs =
+      envSeconds(process.env.TOOL_TIMEOUT_SECONDS, 120) * 1_000;
     const engine = new ReActRunner({
       model: chatModel,
       toolProviders,
@@ -711,6 +714,7 @@ async function main(): Promise<void> {
       enableNativeReasoning:
         configCenter.getLLMConfig().enableNativeReasoning,
       approval: resolveToolApproval,
+      toolTimeoutMs,
       ...(planner ? { planner } : {}),
     });
 
@@ -726,6 +730,7 @@ async function main(): Promise<void> {
         temperature: llm.temperature,
         enableNativeReasoning: llm.enableNativeReasoning,
         approval: resolveToolApproval,
+        toolTimeoutMs,
         ...(planner ? { planner } : {}),
       });
       routedEngines.set(model, runner);

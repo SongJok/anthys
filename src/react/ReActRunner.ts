@@ -30,7 +30,7 @@ import { extractCitations } from './citations.js';
 const FINAL_TURN_GRACE_MS = 30_000;
 const TOOL_OUTPUT_LIMIT = 4_000;
 const TOOL_SUMMARY_LIMIT = 400;
-const DEFAULT_TOOL_TIMEOUT_MS = 60_000;
+const DEFAULT_TOOL_TIMEOUT_MS = 120_000;
 const DEFAULT_PROGRESS_INTERVAL_MS = 15_000;
 
 const CONVERGENCE_NUDGE =
