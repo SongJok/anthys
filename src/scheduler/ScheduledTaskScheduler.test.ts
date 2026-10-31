@@ -13,6 +13,7 @@ function task(overrides: Partial<ScheduledTask> = {}): ScheduledTask {
     id: 'task-1',
     conversationId: 'cid-dev',
     conversationType: '2',
+    kind: 'prompt',
     title: '每日巡检',
     prompt: '汇总昨日错误日志',
     intervalSeconds: null,
@@ -29,6 +30,7 @@ function task(overrides: Partial<ScheduledTask> = {}): ScheduledTask {
 
 class FakeStore implements ScheduledTaskStore {
   public readonly runs: Array<[string, number, number | null]> = [];
+  public readonly updates: Array<[string, unknown, number | null]> = [];
   constructor(public due: ScheduledTask[]) {}
 
   async list(): Promise<ScheduledTask[]> {
@@ -40,8 +42,13 @@ class FakeStore implements ScheduledTaskStore {
   async create(): Promise<ScheduledTask> {
     throw new Error('not used');
   }
-  async update(): Promise<ScheduledTask> {
-    throw new Error('not used');
+  async update(
+    id: string,
+    input: unknown,
+    nextRunAtMs: number | null,
+  ): Promise<ScheduledTask> {
+    this.updates.push([id, input, nextRunAtMs]);
+    return this.due[0]!;
   }
   async remove(): Promise<boolean> {
     return true;
@@ -70,6 +77,12 @@ describe('computeNextRun', () => {
   it('未配置调度方式时抛错', () => {
     expect(() => computeNextRun(task(), Date.now())).toThrow('cron');
   });
+
+  it('一次性提醒不推进下一次时间', () => {
+    expect(
+      computeNextRun(task({ kind: 'reminder' }), Date.now()),
+    ).toBeNull();
+  });
 });
 
 describe('ScheduledTaskScheduler', () => {
@@ -87,6 +100,19 @@ describe('ScheduledTaskScheduler', () => {
     await scheduler.tick();
     expect(executed).toEqual(['task-1']);
     expect(store.runs).toEqual([['task-1', 10_000, 70_000]]);
+  });
+
+  it('一次性提醒执行后停用任务', async () => {
+    const store = new FakeStore([task({ kind: 'reminder' })]);
+    const scheduler = new ScheduledTaskScheduler({
+      store,
+      execute: async () => {},
+      now: () => 10_000,
+    });
+
+    await scheduler.tick();
+    expect(store.updates).toEqual([['task-1', { enabled: false }, null]]);
+    expect(store.runs).toEqual([['task-1', 10_000, null]]);
   });
 
   it('单个任务失败仍推进调度，不影响其他任务', async () => {

@@ -23,6 +23,10 @@ export interface CommandRuntime {
   confirmAction(message: InboundMessage): Promise<string>;
   /** 取消等待确认的写操作 */
   cancelAction(conversationId: string): Promise<string>;
+  /** 创建/查看/取消个人提醒（仅单聊） */
+  remind(message: InboundMessage, args: string[]): Promise<string>;
+  /** 创建/预览/取消个人日周月报（仅单聊） */
+  reports(message: InboundMessage, args: string[]): Promise<string>;
   reply(message: InboundMessage, text: string): Promise<void>;
 }
 
@@ -46,6 +50,8 @@ const HELP_TEXT = [
   '- `/feedback <内容>` 提交对本次回答的反馈',
   '- `/confirm` 执行等待确认的写操作',
   '- `/cancel` 取消等待确认的写操作',
+  '- `/remind 25分钟后 开会` 创建个人提醒（单聊）',
+  '- `/report daily 09:00` 定时推送日/周/月报（单聊）',
 ].join('\n');
 
 export function parseCommand(text: string): ParsedCommand | null {
@@ -152,6 +158,18 @@ export class CommandRouter {
         await runtime.reply(
           message,
           await runtime.cancelAction(message.conversationId),
+        );
+        return true;
+      }
+      case 'remind': {
+        await runtime.reply(message, await runtime.remind(message, command.args));
+        return true;
+      }
+      case 'report':
+      case 'reports': {
+        await runtime.reply(
+          message,
+          await runtime.reports(message, command.args),
         );
         return true;
       }

@@ -29,6 +29,8 @@ function runtime(overrides: Partial<CommandRuntime> = {}): {
     reset: [],
     mute: [],
     feedback: [],
+    remind: [],
+    reports: [],
   };
   const base: CommandRuntime = {
     isAdmin: () => true,
@@ -55,6 +57,14 @@ function runtime(overrides: Partial<CommandRuntime> = {}): {
     },
     confirmAction: async () => '已执行写操作。',
     cancelAction: async () => '已取消待确认的操作。',
+    remind: async (msg, args) => {
+      calls.remind.push([msg.messageId, args]);
+      return '已设置提醒。';
+    },
+    reports: async (msg, args) => {
+      calls.reports.push([msg.messageId, args]);
+      return '已创建定时报告。';
+    },
     reply: async (_message, text) => {
       replies.push(text);
     },
@@ -147,6 +157,16 @@ describe('CommandRouter', () => {
     });
     await cancel.router.tryHandle(message({ text: '/cancel' }));
     expect(cancel.replies[0]).toContain('已取消');
+  });
+
+  it('/remind 与 /report 转发给个人助手运行时', async () => {
+    const { router, calls, replies } = runtime();
+    await router.tryHandle(message({ text: '/remind 25分钟后 开会' }));
+    await router.tryHandle(message({ text: '/report daily 09:00' }));
+    expect(calls.remind).toEqual([['msg-1', ['25分钟后', '开会']]]);
+    expect(calls.reports).toEqual([['msg-1', ['daily', '09:00']]]);
+    expect(replies[0]).toContain('已设置提醒');
+    expect(replies[1]).toContain('已创建定时报告');
   });
 
   it('未知指令给出帮助提示', async () => {

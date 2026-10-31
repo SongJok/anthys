@@ -13,6 +13,7 @@ import type { Database } from './client.js';
 import type {
   ScheduledTask,
   ScheduledTaskInput,
+  ScheduledTaskKind,
   ScheduledTaskStore,
   ScheduledTaskUpdate,
 } from '../types/admin-and-console.js';
@@ -26,6 +27,7 @@ export const scheduledTasks = pgTable(
     conversationType: varchar('conversation_type', { length: 1 })
       .notNull()
       .default('2'),
+    kind: varchar('kind', { length: 20 }).notNull().default('prompt'),
     title: text('title').notNull().default(''),
     prompt: text('prompt').notNull(),
     intervalSeconds: integer('interval_seconds'),
@@ -46,11 +48,21 @@ export const scheduledTasks = pgTable(
   ],
 );
 
+function normalizeKind(value: string): ScheduledTaskKind {
+  return value === 'reminder' ||
+    value === 'daily_report' ||
+    value === 'weekly_report' ||
+    value === 'monthly_report'
+    ? value
+    : 'prompt';
+}
+
 function toTask(row: typeof scheduledTasks.$inferSelect): ScheduledTask {
   return {
     id: row.id,
     conversationId: row.conversationId,
     conversationType: row.conversationType === '1' ? '1' : '2',
+    kind: normalizeKind(row.kind),
     title: row.title,
     prompt: row.prompt,
     intervalSeconds: row.intervalSeconds ?? null,
@@ -98,6 +110,7 @@ export class DrizzleScheduledTaskStore implements ScheduledTaskStore {
       .values({
         conversationId: input.conversationId,
         conversationType: input.conversationType,
+        kind: input.kind ?? 'prompt',
         title: input.title,
         prompt: input.prompt,
         intervalSeconds: input.intervalSeconds ?? null,

@@ -11,19 +11,22 @@ export const DWS_SUBCOMMAND_WHITELIST: Record<
   doc: ['search', 'read', 'list', 'get'],
   wiki: ['search', 'read', 'list', 'get'],
   calendar: [
-    'list',
-    'today',
-    'search',
-    'freebusy',
+    'event list',
+    '+today',
+    '+week',
+    '+search-event',
+    'busy search',
     'event create',
     'event update',
     'event delete',
   ],
   todo: [
-    'list',
-    'search',
-    'get',
-    'today',
+    'task list',
+    'task get',
+    '+today',
+    '+due-today',
+    '+overdue',
+    '+search',
     'task create',
     'task update',
     'task done',
@@ -58,7 +61,7 @@ const DOMAIN_COMMAND_PREFIX: Record<DwsDomain, readonly string[]> = {
 };
 
 const DOMAINS = Object.keys(DWS_SUBCOMMAND_WHITELIST) as DwsDomain[];
-const SUBCOMMAND_TOKEN_PATTERN = /^[a-z][a-z0-9-]*$/i;
+const SUBCOMMAND_TOKEN_PATTERN = /^\+?[a-z][a-z0-9-]*$/i;
 const FLAG_NAME_PATTERN = /^[a-zA-Z][a-zA-Z0-9-]*$/;
 const MAX_FLAG_VALUE_LENGTH = 2_000;
 const DEFAULT_TIMEOUT_MS = 15_000;

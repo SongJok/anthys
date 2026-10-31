@@ -90,6 +90,10 @@ import {
 } from './cluster/SharedStateStore.js';
 import { AdminChatOpsToolProvider } from './tools/admin/AdminChatOpsToolProvider.js';
 import { DwsAuthManager } from './tools/dws/DwsAuthManager.js';
+import { DwsCliRunner } from './tools/dws/DwsCliRunner.js';
+import { PersonalReportBuilder } from './personal/PersonalReportBuilder.js';
+import { PersonalAssistantService } from './personal/PersonalAssistantService.js';
+import { PersonalAssistantToolProvider } from './tools/personal/PersonalAssistantToolProvider.js';
 import { TraceCollector, createMcpAdminPort } from './admin-api/runtime.js';
 import { startAdminServer } from './admin-api/server.js';
 import { MetricsRegistry } from './admin-api/metrics.js';
@@ -132,6 +136,24 @@ const EMPTY_RESULT: RunResult = {
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.stack ?? error.message : String(error);
+}
+
+/** 钉钉单聊文本单条有长度上限，按行切块后分条发送 */
+function splitForDelivery(text: string, limit = 1_200): string[] {
+  const chunks: string[] = [];
+  let current = '';
+  for (const line of text.split('\n')) {
+    const piece = line.length > limit ? line.slice(0, limit) : line;
+    const candidate = current === '' ? piece : `${current}\n${piece}`;
+    if (candidate.length > limit) {
+      if (current !== '') chunks.push(current);
+      current = piece;
+    } else {
+      current = candidate;
+    }
+  }
+  if (current !== '') chunks.push(current);
+  return chunks.length > 0 ? chunks : [text];
 }
 
 /** DINGTALK_ADMIN 与 ADMIN_STAFF_IDS 等价，合并去重后作为初始管理员 */
@@ -376,6 +398,17 @@ async function main(): Promise<void> {
       getAccessToken,
       logger: harnessLogger,
     });
+    const scheduledStore = new DrizzleScheduledTaskStore(dbHandle.db);
+    const personalAssistant = new PersonalAssistantService({
+      store: scheduledStore,
+      report: new PersonalReportBuilder({
+        runner: new DwsCliRunner({
+          binary: process.env.DWS_BINARY?.trim() || 'dws',
+          timeoutMs: 20_000,
+          maxOutputChars: 2_000_000,
+        }),
+      }),
+    });
 
     const authManager = new DwsAuthManager({
       binary: process.env.DWS_BINARY?.trim() || 'dws',
@@ -491,6 +524,9 @@ async function main(): Promise<void> {
       glossaryProvider: new GlossaryToolProvider({
         service: glossary,
         logger: harnessLogger,
+      }),
+      personalAssistantProvider: new PersonalAssistantToolProvider({
+        service: personalAssistant,
       }),
       ...(artifactDeliveryEnabled
         ? {
@@ -654,7 +690,6 @@ async function main(): Promise<void> {
 
     const memoryStore = new DrizzleMemoryStore(dbHandle.db);
     const usageLedger = new DrizzleUsageLedgerStore(dbHandle.db);
-    const scheduledStore = new DrizzleScheduledTaskStore(dbHandle.db);
     const usageGuard = new UsageGuard({
       ledger: usageLedger,
       policy: () => configCenter.getUsagePolicy(),
@@ -1011,6 +1046,10 @@ async function main(): Promise<void> {
           ? '已取消待确认的操作。'
           : '没有待确认的操作。';
       },
+      remind: (message, args) =>
+        personalAssistant.handleRemindCommand(message, args),
+      reports: (message, args) =>
+        personalAssistant.handleReportCommand(message, args),
       reply: replyTo,
     });
 
@@ -1215,8 +1254,49 @@ async function main(): Promise<void> {
       }
     });
 
+    const sendPersonalMessages = async (
+      task: ScheduledTask,
+      text: string,
+    ): Promise<void> => {
+      const staffId = task.createdBy.trim();
+      if (!staffId || staffId === 'admin-api' || staffId === 'scheduler') {
+        throw new Error(`个人任务 ${task.id} 缺少有效的创建人`);
+      }
+      const chunks = splitForDelivery(text);
+      for (const chunk of chunks) {
+        const result = await adminTextSender.send([staffId], chunk);
+        if (!result.ok) {
+          throw new Error(
+            result.failed[0]?.error ?? '单聊消息发送失败',
+          );
+        }
+      }
+      logger.info(
+        { taskId: task.id, staffId, kind: task.kind, chunks: chunks.length },
+        'personal task delivered',
+      );
+    };
+
     const executeScheduledTask = async (task: ScheduledTask): Promise<void> => {
       const now = Date.now();
+      if (task.kind === 'reminder') {
+        metrics.inc('scheduled_task_runs_total', { kind: task.kind });
+        await sendPersonalMessages(
+          task,
+          personalAssistant.reminderDeliveryText(task),
+        );
+        return;
+      }
+      if (
+        task.kind === 'daily_report' ||
+        task.kind === 'weekly_report' ||
+        task.kind === 'monthly_report'
+      ) {
+        metrics.inc('scheduled_task_runs_total', { kind: task.kind });
+        const text = await personalAssistant.reportDeliveryText(task);
+        await sendPersonalMessages(task, text);
+        return;
+      }
       const message: InboundMessage = {
         messageId: `scheduled_${task.id}_${now}`,
         conversationId: task.conversationId,
@@ -1232,7 +1312,7 @@ async function main(): Promise<void> {
         { taskId: task.id, conversationId: task.conversationId },
         'scheduled task triggered',
       );
-      metrics.inc('scheduled_task_runs_total');
+      metrics.inc('scheduled_task_runs_total', { kind: task.kind });
       await runTurn(message, true);
     };
 
@@ -1296,6 +1376,9 @@ async function main(): Promise<void> {
       ): Promise<ScheduledTask> => {
         const current = (await scheduledStore.list()).find((item) => item.id === id);
         if (!current) throw new Error(`未找到定时任务: ${id}`);
+        if (current.kind !== 'prompt') {
+          throw new Error('个人提醒与定时报告请由本人在单聊中管理（管理端仅支持删除）');
+        }
         const schedule = normalizeSchedule(input, current);
         const task = await scheduledStore.update(
           id,
@@ -1332,6 +1415,9 @@ async function main(): Promise<void> {
       runNow: async (id: string): Promise<void> => {
         const current = (await scheduledStore.list()).find((item) => item.id === id);
         if (!current) throw new Error(`未找到定时任务: ${id}`);
+        if (current.kind !== 'prompt') {
+          throw new Error('个人提醒与定时报告不支持由管理端立即执行');
+        }
         await executeScheduledTask(current);
         await scheduledStore.markRun(
           id,

@@ -241,7 +241,7 @@ describe('DwsCliRunner', () => {
     });
     const result = await runner.run({
       domain: 'todo',
-      subcommand: 'list',
+      subcommand: 'task list',
       flags: {},
       operatorStaffId: 'staff-001',
     });
@@ -257,7 +257,7 @@ describe('DwsCliRunner', () => {
     });
     const result = await runner.run({
       domain: 'calendar',
-      subcommand: 'today',
+      subcommand: 'event list',
       flags: {},
       operatorStaffId: 'staff-001',
     });
@@ -378,14 +378,7 @@ describe('DwsCliToolProvider', () => {
       ),
     ) as { ok: boolean; stdout: string };
     const inner = JSON.parse(output.stdout) as { argv: string[] };
-    expect(inner.argv).toEqual([
-      'calendar',
-      'today',
-      '--user',
-      'user-9',
-      '--date',
-      '2026-10-30',
-    ]);
+    expect(inner.argv).toEqual(['calendar', '+today']);
   });
 
   it('校验参数类型与页码', async () => {

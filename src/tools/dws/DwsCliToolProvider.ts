@@ -5,9 +5,7 @@ import type {
 } from '../../types/core.js';
 import type { DwsCommandRequest } from '../../types/mcp-and-sandbox.js';
 import {
-  DWS_SUBCOMMAND_WHITELIST,
   DwsCliRunner,
-  type DwsDomain,
   type DwsRunResult,
 } from './DwsCliRunner.js';
 import type { DwsAuthManager, DwsAuthStatus } from './DwsAuthManager.js';
@@ -542,6 +540,10 @@ export class DwsCliToolProvider implements IToolProvider {
             type: 'string',
             description: '审批实例 ID（approval 的 detail/records/tasks 使用）',
           },
+          taskId: {
+            type: 'string',
+            description: '待办任务 ID（todo 的 get 使用）',
+          },
           processCode: {
             type: 'string',
             description: '审批模板 processCode（approval 的 form-schema 使用）',
@@ -583,28 +585,72 @@ export class DwsCliToolProvider implements IToolProvider {
             `资源 ${resource} 不支持只读操作 ${action}（允许: ${allowed.join(', ')}）`,
           );
         }
-        const whitelisted = DWS_SUBCOMMAND_WHITELIST[resource as DwsDomain];
-        if (!whitelisted.includes(action)) {
-          throw new Error(
-            `资源 ${resource} 不支持操作 ${action}（允许: ${whitelisted.join(', ')}）`,
-          );
-        }
 
         const flags: DwsCommandRequest['flags'] = {};
         const query = optionalString(args, 'query');
         const userId = optionalString(args, 'userId');
         const date = optionalString(args, 'date');
+        const taskId = optionalString(args, 'taskId');
         const instanceId = optionalString(args, 'instanceId');
         const processCode = optionalString(args, 'processCode');
         const start = optionalString(args, 'start');
         const end = optionalString(args, 'end');
-        if (query) flags.query = query;
-        if (userId) flags.user = userId;
-        if (date) flags.date = date;
-        if (instanceId) flags['instance-id'] = instanceId;
-        if (processCode) flags['process-code'] = processCode;
-        if (start) flags.start = start;
-        if (end) flags.end = end;
+
+        let subcommand = action;
+        if (resource === 'calendar') {
+          // CLI v1 的真实入口：event list / +today / +search-event / busy search
+          if (action === 'today') {
+            subcommand = '+today';
+          } else if (action === 'list') {
+            subcommand = 'event list';
+            if (date) {
+              flags.start = `${date}T00:00:00+08:00`;
+              flags.end = `${date}T23:59:59+08:00`;
+            }
+            if (start) flags.start = start;
+            if (end) flags.end = end;
+          } else if (action === 'search') {
+            if (!query) throw new Error('calendar 的 search 必须提供 query');
+            subcommand = '+search-event';
+            flags.query = query;
+            if (start) flags.start = start;
+            if (end) flags.end = end;
+          } else if (action === 'freebusy') {
+            if (!userId) throw new Error('calendar 的 freebusy 必须提供 userId');
+            if (!start || !end) {
+              throw new Error('calendar 的 freebusy 必须提供 start 与 end');
+            }
+            subcommand = 'busy search';
+            flags.users = userId;
+            flags.start = start;
+            flags.end = end;
+          }
+        } else if (resource === 'todo') {
+          // CLI v1 的真实入口：task list / task get / +due-today / +search
+          if (action === 'today') {
+            subcommand = '+due-today';
+          } else if (action === 'list') {
+            subcommand = 'task list';
+            flags.status = 'false';
+            flags['role-types'] = 'executor';
+          } else if (action === 'search') {
+            if (!query) throw new Error('todo 的 search 必须提供 query');
+            subcommand = '+search';
+            flags.query = query;
+          } else if (action === 'get') {
+            if (!taskId) throw new Error('todo 的 get 必须提供 taskId');
+            subcommand = 'task get';
+            flags['task-id'] = taskId;
+          }
+        } else {
+          if (query) flags.query = query;
+          if (userId) flags.user = userId;
+          if (date) flags.date = date;
+          if (instanceId) flags['instance-id'] = instanceId;
+          if (processCode) flags['process-code'] = processCode;
+          if (start) flags.start = start;
+          if (end) flags.end = end;
+        }
 
         if (resource === 'approval') {
           if (action === 'list-pending' && (!start || !end)) {
@@ -629,7 +675,7 @@ export class DwsCliToolProvider implements IToolProvider {
           'dws_org_and_schedule',
           {
             domain: resource,
-            subcommand: action,
+            subcommand,
             flags,
             operatorStaffId: ctx.senderStaffId,
           },

@@ -394,15 +394,38 @@ pnpm start     # 通过 tsx 直接运行 src/index.ts
 | `/feedback <内容>` | 对最近一次回答提交反馈，写入 `user_feedback` |
 | `/confirm` | 执行本会话待确认的写操作（仅发起人或管理员） |
 | `/cancel` | 取消本会话待确认的写操作 |
+| `/remind <时间> <内容>` | 单聊内创建一次性提醒，到点用机器人单聊推送；`/remind list`、`/remind cancel <ID>` |
+| `/report <周期> <时间>` | 单聊内订阅日 / 周 / 月工作简报；`/report list`、`/report preview [weekly\|monthly]`、`/report cancel <ID>` |
 
 同一会话的新问题会自动中止尚未完成的旧回答，避免并发写入同一张卡片。
+
+### 个人提醒与工作报告
+
+这两个能力只在**单聊**中开放，避免把个人事务和工作数据发到群里；群里发送会直接提示改用单聊。
+
+**一次性提醒**（`/remind`）
+
+- 时间支持相对量与绝对量：`25分钟后`、`2小时后`、`3天后`、`今天18:30`、`明天9点`、`2026-11-01 09:00`、`11月1日 9点`；只写时刻且已过则顺延到明天。
+- 提醒至少要在 30 秒之后、一年之内；到点后由机器人以单聊文本推送 `⏰ 提醒：<内容>`，任务随即自动停用，不会重复触发。
+- 每人同时最多保留 12 个个人定时任务；`/remind list` 只列出自己的任务，ID 支持前缀匹配取消。
+
+**定时工作简报**（`/report`）
+
+- 支持三种周期：`/report daily 09:00`、`/report weekly 周一 09:00`、`/report monthly 1 09:00`（每月日期限制在 1–28，避免短月缺失；时间按 Asia/Shanghai 解释）。
+- 报告由钉钉日程、待办、审批数据**确定性生成**，不消耗模型 token：日报告含今日 / 明日日程、未完成与逾期待办、待我审批；周报 / 月报额外统计会议场次、累计时长与高频参与人。
+- `/report preview` 立即生成一份当日简报用于校验，`/report preview weekly|monthly` 预览周 / 月报告。
+- 每人最多订阅 4 份周期报告；任意 DWS 查询失败不会中断报告，失败原因会列在报告末尾的「数据提示」中，并提示用 `/dws-status` 检查授权。
+- 报告与提醒按创建者的 DWS 身份查询和推送；当前 DWS 只有一个登录账号，数据可见范围仍受该登录账号权限限制，不代表能读取任意员工的全量记录。
+
+单聊里也可以直接用自然语言让模型设置，例如「25 分钟后提醒我开会」「每周一 9 点给我发工作周报」；群聊中对应的工具不会挂载。创建只影响本人的提醒与订阅，因此不经过 `/confirm` 写操作闸门。
 
 ### 定时任务与主动播报
 
 管理端可以创建定时任务，在指定单聊或群聊中按固定间隔或 cron 主动发起一轮回答，例如每天 9 点汇总昨日错误日志、每小时巡检一次线上状态。
 
 - 调度支持 `intervalSeconds`（最小 30 秒）或 5 段 cron（按 Asia/Shanghai 解释，支持 `*`、`*/n`、区间、列表，周日可写 `0` 或 `7`），二者只能选其一。
-- 到点后以「定时任务」身份走完整的 ReAct 链路：卡片流式输出、工具调用、记忆与用量记账与正常问答一致。
+- 任务分三类 `kind`：`prompt`（管理端创建的主动播报，默认）、`reminder`（一次性个人提醒，触发后自动停用）、`daily_report` / `weekly_report` / `monthly_report`（个人定时报告）。后两类由单聊的 `/remind`、`/report` 或模型工具创建，投递走管理员文本通道（1200 字分片），不经过模型。
+- `prompt` 类型到点后以「定时任务」身份走完整的 ReAct 链路：卡片流式输出、工具调用、记忆与用量记账与正常问答一致。
 - 单次失败不会阻塞其他任务，也不会在原定时间反复重试；失败原因写入日志，下一次仍按计划触发。
 - 支持「立即执行」用于验证配置，执行后同样推进下一次触发时间。
 
@@ -525,8 +548,8 @@ pnpm start     # 通过 tsx 直接运行 src/index.ts
 | 域 | 只读命令 | 写命令（需 `/confirm`） |
 | --- | --- | --- |
 | 文档 / 知识库 | `search`、`read`、`list`、`get` | — |
-| 日历 | `list`、`today`、`search`、`freebusy` | `event create`、`event update`、`event delete` |
-| 待办 | `list`、`search`、`get`、`today` | `task create`、`task update`、`task done` |
+| 日历 | `event list`、`+today`、`+search-event`、`busy search` | `event create`、`event update`、`event delete` |
+| 待办 | `task list`、`task get`、`+due-today`、`+search` | `task create`、`task update`、`task done` |
 | 通讯录 | `search`、`get`、`list`、`self` | `user invite`、`user update` |
 | 审批 | `list-pending`、`list-submitted`、`detail`、`records`、`tasks`、`list-forms`、`search-forms`、`form-schema` | `create-instance`、`approve`、`reject` |
 
@@ -541,6 +564,8 @@ pnpm start     # 通过 tsx 直接运行 src/index.ts
 | `dws_todo_manage` | write | 创建 / 修改 / 完成待办，创建时执行人默认当前提问人 |
 | `dws_contact_manage` | write | 邀请员工或修改员工组织信息 |
 | `dws_approval_manage` | write | 发起、同意、拒绝审批 |
+
+模型工具使用稳定的 action 名称（日历 `list` / `today` / `search` / `freebusy`，待办 `list` / `search` / `get` / `today`），再映射到上表的真实 CLI 子命令，避免 `dws` 升级后提示词漂移；`dws_org_and_schedule` 只接受只读 action，写操作必须走对应的专用写工具。
 
 写工具统一声明 `write` / `destructive`，会先进入「写操作确认」闸门：机器人展示参数与风险，用户回复 `/confirm` 后才真正执行；执行时携带 `--yes`，避免 CLI 在无终端环境中等待交互确认。
 
@@ -681,9 +706,9 @@ pnpm start     # 通过 tsx 直接运行 src/index.ts
 | GET | `/api/v1/chat/stream?ticket=&question=` | 浏览器在线对话流（SSE，事件与钉钉卡片同源） |
 | GET | `/feedback` | 用户反馈列表 |
 | GET | `/usage?days=1` | 用量汇总：总 Token、按员工与按群排名 |
-| GET / POST | `/scheduled-tasks` | 定时任务列表 / 创建 |
-| PUT / DELETE | `/scheduled-tasks/:id` | 更新 / 删除定时任务 |
-| POST | `/scheduled-tasks/:id/run` | 立即执行一次 |
+| GET / POST | `/scheduled-tasks` | 定时任务列表（含各 `kind`）/ 创建主动播报 |
+| PUT / DELETE | `/scheduled-tasks/:id` | 更新 / 删除定时任务；个人提醒与报告只允许删除，不支持管理端改期或立即执行 |
+| POST | `/scheduled-tasks/:id/run` | 立即执行一次（仅主动播报） |
 | GET | `/governance` | 保留策略、各表行数与超期行数、附件占用 |
 | PUT | `/governance/retention` | 更新保留期（落库，重启后仍生效） |
 | POST | `/governance/cleanup` | 清理过期数据，默认 `dryRun: true` |

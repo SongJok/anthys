@@ -68,6 +68,8 @@ export interface ToolRegistryOptions {
   adminProvider?: IToolProvider;
   /** 术语知识库查询工具 */
   glossaryProvider?: IToolProvider;
+  /** 个人提醒与定时报告工具（内部只对单聊挂载） */
+  personalAssistantProvider?: IToolProvider;
   /** 公网搜索工具；由外部注入，并在 getTools 内实时判断开关 */
   webSearchProvider?: IToolProvider;
   /** 产物投递等额外工具提供方，按工作区路径构造 */
@@ -318,6 +320,9 @@ export class ToolRegistry {
     }
     if (options.glossaryProvider) {
       providers.push(options.glossaryProvider);
+    }
+    if (options.personalAssistantProvider) {
+      providers.push(options.personalAssistantProvider);
     }
     if (options.artifactProvider) {
       providers.push(options.artifactProvider(workspace));

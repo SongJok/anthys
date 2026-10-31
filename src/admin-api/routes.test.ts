@@ -429,6 +429,7 @@ async function createTestContext(staticDir?: string): Promise<TestContext> {
         id: `task-${tasks.length + 1}`,
         conversationId: input.conversationId,
         conversationType: input.conversationType,
+        kind: input.kind ?? 'prompt',
         title: input.title ?? '',
         prompt: input.prompt,
         intervalSeconds: input.intervalSeconds ?? null,

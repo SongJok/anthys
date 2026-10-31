@@ -9,12 +9,15 @@ export interface SchedulerLogger {
   warn(obj: Record<string, unknown>, msg: string): void;
 }
 
-/** 根据任务配置计算下一次触发时间；停用任务返回 null */
+/** 根据任务配置计算下一次触发时间；停用或一次性提醒返回 null */
 export function computeNextRun(
-  task: Pick<ScheduledTask, 'enabled' | 'cron' | 'intervalSeconds'>,
+  task: Pick<ScheduledTask, 'enabled' | 'cron' | 'intervalSeconds'> & {
+    kind?: ScheduledTask['kind'];
+  },
   fromMs: number,
 ): number | null {
   if (!task.enabled) return null;
+  if (task.kind === 'reminder') return null;
   if (task.cron?.trim()) return nextCronRun(task.cron, fromMs);
   if (task.intervalSeconds && task.intervalSeconds > 0) {
     return fromMs + task.intervalSeconds * 1_000;
@@ -91,6 +94,9 @@ export class ScheduledTaskScheduler {
         }
         try {
           const next = computeNextRun(item, nowMs);
+          if (next === null && item.enabled) {
+            await this.store.update(item.id, { enabled: false }, null);
+          }
           await this.store.markRun(item.id, nowMs, next);
         } catch (error) {
           this.logger?.warn(

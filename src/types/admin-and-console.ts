@@ -230,11 +230,24 @@ export interface UsageLedgerStore {
   purgeBefore(epochMs: number): Promise<number>;
 }
 
+/**
+ * prompt：到点走完整 ReAct 的主动播报；
+ * reminder：一次性个人提醒，执行后自动停用；
+ * *_report：确定性的个人工作简报，不消耗模型 token。
+ */
+export type ScheduledTaskKind =
+  | 'prompt'
+  | 'reminder'
+  | 'daily_report'
+  | 'weekly_report'
+  | 'monthly_report';
+
 /** 定时任务与主动播报 */
 export interface ScheduledTask {
   id: string;
   conversationId: string;
   conversationType: '1' | '2';
+  kind: ScheduledTaskKind;
   title: string;
   prompt: string;
   /** 固定间隔，秒；与 cron 二选一 */
@@ -252,6 +265,7 @@ export interface ScheduledTask {
 export interface ScheduledTaskInput {
   conversationId: string;
   conversationType: '1' | '2';
+  kind?: ScheduledTaskKind;
   title: string;
   prompt: string;
   intervalSeconds?: number | null;
