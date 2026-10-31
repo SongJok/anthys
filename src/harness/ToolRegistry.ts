@@ -68,6 +68,8 @@ export interface ToolRegistryOptions {
   adminProvider?: IToolProvider;
   /** 术语知识库查询工具 */
   glossaryProvider?: IToolProvider;
+  /** 公网搜索工具；由外部注入，并在 getTools 内实时判断开关 */
+  webSearchProvider?: IToolProvider;
   /** 产物投递等额外工具提供方，按工作区路径构造 */
   artifactProvider?: (workspace: WorkspacePaths) => IToolProvider;
   /** MCP 工具按群/角色授权（实时读取，支持热更新） */
@@ -266,6 +268,9 @@ export class ToolRegistry {
     const providers: IToolProvider[] = [];
     if (options.enableBuiltin !== false) {
       providers.push(new BuiltinToolProvider());
+    }
+    if (options.webSearchProvider) {
+      providers.push(options.webSearchProvider);
     }
     if (pool) {
       providers.push(

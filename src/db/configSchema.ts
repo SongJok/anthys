@@ -107,6 +107,7 @@ export type StoredDingTalkConfig = {
   aiCardTemplateId: string;
   adminStaffIds: string[];
   dwsCliEnabled: boolean;
+  webSearchEnabled: boolean;
 };
 
 /** sys_configs 中各 scope 的 JSON 形状 */

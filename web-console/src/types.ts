@@ -28,6 +28,7 @@ export interface DingTalkConfig {
   aiCardTemplateId: string;
   adminStaffIds: string[];
   dwsCliEnabled: boolean;
+  webSearchEnabled: boolean;
 }
 
 export interface StreamStatus {

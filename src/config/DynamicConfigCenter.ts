@@ -4,6 +4,7 @@ import type {
   DingTalkConfig,
   IConfigProvider,
   MemoryConfig,
+  WebSearchConfig,
 } from './IConfigProvider.js';
 import type {
   AdminAuditInput,
@@ -47,6 +48,7 @@ export interface DynamicConfigCenterOptions {
   initialMcpServers?: EnterpriseMcpServerConfig[];
   initialAdminStaffIds?: string[];
   initialDwsCliEnabled?: boolean;
+  initialWebSearchEnabled?: boolean;
   logger?: DynamicConfigCenterLogger;
   now?: () => number;
 }
@@ -58,6 +60,7 @@ export interface DingTalkUpdateInput {
   aiCardTemplateId?: string;
   adminStaffIds?: string[];
   dwsCliEnabled?: boolean;
+  webSearchEnabled?: boolean;
 }
 
 export interface LLMUpdateInput
@@ -193,6 +196,7 @@ export class DynamicConfigCenter
         aiCardTemplateId: this.state.dingtalk.aiCardTemplateId,
         adminStaffIds: [...this.state.dingtalk.adminStaffIds],
         dwsCliEnabled: this.state.dingtalk.dwsCliEnabled,
+        webSearchEnabled: this.state.dingtalk.webSearchEnabled,
       },
       llm: {
         ...clone(this.state.llm),
@@ -256,6 +260,15 @@ export class DynamicConfigCenter
     return this.defaults.getVisionConfig?.();
   }
 
+  public getWebSearchConfig(): WebSearchConfig | undefined {
+    const defaults = this.defaults.getWebSearchConfig?.();
+    if (!defaults) return undefined;
+    return {
+      ...defaults,
+      enabled: this.state.dingtalk.webSearchEnabled,
+    };
+  }
+
   public getBystanderConfig(): BystanderConfig {
     const defaults = this.defaults.getBystanderConfig();
     return {
@@ -311,6 +324,9 @@ export class DynamicConfigCenter
         : {}),
       ...(input.dwsCliEnabled !== undefined
         ? { dwsCliEnabled: input.dwsCliEnabled }
+        : {}),
+      ...(input.webSearchEnabled !== undefined
+        ? { webSearchEnabled: input.webSearchEnabled }
         : {}),
       ...(input.clientSecret
         ? { clientSecret: input.clientSecret.trim() }
@@ -614,7 +630,10 @@ export class DynamicConfigCenter
         adminStaffIds: sanitizeStaffIds(
           this.options.initialAdminStaffIds ?? [],
         ),
-        dwsCliEnabled: this.options.initialDwsCliEnabled ?? this.dwsEnabledFromEnv(),
+        dwsCliEnabled:
+          this.options.initialDwsCliEnabled ?? this.dwsEnabledFromEnv(),
+        webSearchEnabled:
+          this.options.initialWebSearchEnabled ?? this.webSearchEnabledFromEnv(),
       },
       llm: this.defaults.getLLMConfig(),
       loopPolicy: this.defaults.getLoopPolicy(),
@@ -639,6 +658,12 @@ export class DynamicConfigCenter
 
   private dwsEnabledFromEnv(): boolean {
     const raw = process.env.DWS_CLI_ENABLED;
+    if (raw === undefined || raw.trim() === '') return true;
+    return !['0', 'false', 'no', 'off'].includes(raw.trim().toLowerCase());
+  }
+
+  private webSearchEnabledFromEnv(): boolean {
+    const raw = process.env.WEB_SEARCH_ENABLED;
     if (raw === undefined || raw.trim() === '') return true;
     return !['0', 'false', 'no', 'off'].includes(raw.trim().toLowerCase());
   }

@@ -28,6 +28,7 @@ import type { EnterpriseMcpServerConfig } from '../types/mcp-and-sandbox.js';
 import { ReActRunner } from '../react/ReActRunner.js';
 import { DwsCliRunner } from '../tools/dws/DwsCliRunner.js';
 import type { McpTransportFactory } from '../tools/mcp/McpClientPool.js';
+import { WebSearchToolProvider } from '../tools/web/WebSearchToolProvider.js';
 import { loadMcpServerConfigs, ToolRegistry } from './ToolRegistry.js';
 
 const ORDERS = Array.from({ length: 120 }, (_, index) => ({
@@ -401,6 +402,62 @@ describe('ToolRegistry 阶段二联调', () => {
     expect(result.answer).toContain(`总金额 ${TOTAL_AMOUNT}`);
     expect(result.answer).toContain('alice');
     expect(result.answer).toContain('订单超时复盘');
+  });
+});
+
+describe('ToolRegistry 公网搜索工具', () => {
+  it('按运行期开关暴露或隐藏 web_search', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'tool-registry-web-'));
+    cleanup.push(async () => {
+      await rm(root, { recursive: true, force: true });
+    });
+    const workspace = { hostDir: join(root, 'workspace'), sandboxDir: '/workspace' };
+    const client = {
+      search: async () => [
+        {
+          title: '示例',
+          content: '摘要',
+          link: 'https://example.com',
+        },
+      ],
+    };
+
+    const enabled = await ToolRegistry.create({
+      mcpServers: [],
+      workspace,
+      enableBuiltin: false,
+      enableDws: false,
+      enableSandbox: false,
+      webSearchProvider: new WebSearchToolProvider({
+        client,
+        enabled: () => true,
+      }),
+    });
+    cleanup.push(async () => {
+      await enabled.close();
+    });
+    expect(enabled.providers.map((provider) => provider.providerName)).toContain(
+      'web',
+    );
+    expect(
+      (await enabled.assembleTools(makeContext())).map((tool) => tool.name),
+    ).toEqual(['web_search']);
+
+    const disabled = await ToolRegistry.create({
+      mcpServers: [],
+      workspace,
+      enableBuiltin: false,
+      enableDws: false,
+      enableSandbox: false,
+      webSearchProvider: new WebSearchToolProvider({
+        client,
+        enabled: () => false,
+      }),
+    });
+    cleanup.push(async () => {
+      await disabled.close();
+    });
+    await expect(disabled.assembleTools(makeContext())).resolves.toEqual([]);
   });
 });
 

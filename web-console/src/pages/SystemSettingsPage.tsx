@@ -22,6 +22,7 @@ interface FormValues {
   aiCardTemplateId: string;
   adminStaffIds: string[];
   dwsCliEnabled: boolean;
+  webSearchEnabled: boolean;
 }
 
 export default function SystemSettingsPage() {
@@ -45,6 +46,7 @@ export default function SystemSettingsPage() {
         aiCardTemplateId: result.config.aiCardTemplateId,
         adminStaffIds: result.config.adminStaffIds,
         dwsCliEnabled: result.config.dwsCliEnabled,
+        webSearchEnabled: result.config.webSearchEnabled,
       });
     } catch (error) {
       message.error(error instanceof Error ? error.message : String(error));
@@ -66,6 +68,7 @@ export default function SystemSettingsPage() {
         aiCardTemplateId: values.aiCardTemplateId.trim(),
         adminStaffIds: values.adminStaffIds ?? [],
         dwsCliEnabled: values.dwsCliEnabled,
+        webSearchEnabled: values.webSearchEnabled,
         ...(values.clientSecret?.trim()
           ? { clientSecret: values.clientSecret.trim() }
           : {}),
@@ -173,6 +176,14 @@ export default function SystemSettingsPage() {
             label="DWS CLI 权限开关"
             name="dwsCliEnabled"
             valuePropName="checked"
+          >
+            <Switch checkedChildren="开启" unCheckedChildren="关闭" />
+          </Form.Item>
+          <Form.Item
+            label="公网联网搜索"
+            name="webSearchEnabled"
+            valuePropName="checked"
+            extra="向模型暴露 web_search 工具，单聊与群聊均生效；关闭后模型无法调用公网搜索"
           >
             <Switch checkedChildren="开启" unCheckedChildren="关闭" />
           </Form.Item>

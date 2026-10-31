@@ -16,6 +16,8 @@ export interface DingTalkEnterpriseConfig {
   /** 拥有单聊管理权限的管理员钉钉 StaffId 列表 */
   adminStaffIds: string[];
   dwsCliEnabled: boolean;
+  /** 是否向模型暴露公网 web_search 工具 */
+  webSearchEnabled: boolean;
 }
 
 /** 按群 / 角色限制 MCP 工具可见范围的策略 */

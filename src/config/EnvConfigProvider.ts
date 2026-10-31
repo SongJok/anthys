@@ -9,6 +9,9 @@ import type {
   IConfigProvider,
   MemoryConfig,
   VisionConfig,
+  WebSearchConfig,
+  WebSearchContentSize,
+  WebSearchEngine,
 } from './IConfigProvider.js';
 import type {
   ModelRoutingPolicy,
@@ -30,6 +33,37 @@ function parseNumber(value: string | undefined, fallback: number): number {
 function parseBoolean(value: string | undefined, fallback: boolean): boolean {
   if (value === undefined || value.trim() === '') return fallback;
   return ['1', 'true', 'yes', 'on'].includes(value.trim().toLowerCase());
+}
+
+const ZHIPU_BASE_URL = 'https://open.bigmodel.cn/api/paas/v4';
+const WEB_SEARCH_ENGINES: readonly WebSearchEngine[] = [
+  'search_std',
+  'search_pro',
+  'search_pro_sogou',
+  'search_pro_quark',
+];
+const SOGOU_COUNTS = [10, 20, 30, 40, 50] as const;
+
+function parseWebSearchEngine(value: string | undefined): WebSearchEngine {
+  const engine = (value ?? '').trim();
+  return (WEB_SEARCH_ENGINES as readonly string[]).includes(engine)
+    ? (engine as WebSearchEngine)
+    : 'search_pro';
+}
+
+function parseWebSearchCount(
+  value: string | undefined,
+  engine: WebSearchEngine,
+): number {
+  const parsed = Math.trunc(parseNumber(value, 5));
+  if (engine === 'search_pro_sogou') {
+    return SOGOU_COUNTS.find((count) => count >= parsed) ?? 50;
+  }
+  return Math.min(50, Math.max(1, parsed));
+}
+
+function parseContentSize(value: string | undefined): WebSearchContentSize {
+  return value?.trim() === 'high' ? 'high' : 'medium';
 }
 
 export class EnvConfigProvider implements IConfigProvider {
@@ -193,6 +227,32 @@ export class EnvConfigProvider implements IConfigProvider {
       baseUrl: (this.env.VISION_BASE_URL ?? llm.baseUrl).trim(),
       apiKey: (this.env.VISION_API_KEY ?? llm.apiKey).trim(),
       model: (this.env.VISION_MODEL ?? llm.model).trim(),
+    };
+  }
+
+  getWebSearchConfig(): WebSearchConfig {
+    const llm = this.getLLMConfig();
+    const explicitBaseUrl = this.env.WEB_SEARCH_BASE_URL?.trim();
+    // 大模型不是智谱时不能把别家的 baseUrl/Key 复用给搜索接口
+    const llmIsZhipu = llm.baseUrl.includes('bigmodel.cn');
+    const baseUrl =
+      explicitBaseUrl || (llmIsZhipu ? llm.baseUrl : ZHIPU_BASE_URL);
+    const apiKey = (
+      this.env.WEB_SEARCH_API_KEY ?? (llmIsZhipu ? llm.apiKey : '')
+    ).trim();
+    const engine = parseWebSearchEngine(this.env.WEB_SEARCH_ENGINE);
+    return {
+      enabled: parseBoolean(this.env.WEB_SEARCH_ENABLED, true),
+      baseUrl,
+      apiKey,
+      engine,
+      count: parseWebSearchCount(this.env.WEB_SEARCH_COUNT, engine),
+      contentSize: parseContentSize(this.env.WEB_SEARCH_CONTENT_SIZE),
+      timeoutMs: Math.max(
+        1_000,
+        parseNumber(this.env.WEB_SEARCH_TIMEOUT_MS, 12_000),
+      ),
+      redactOutbound: parseBoolean(this.env.WEB_SEARCH_REDACT, true),
     };
   }
 

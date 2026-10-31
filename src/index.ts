@@ -75,6 +75,8 @@ import { DrizzleMemoryStore } from './db/memorySchema.js';
 import { DrizzleGlossaryStore } from './db/glossarySchema.js';
 import { GlossaryService } from './glossary/GlossaryService.js';
 import { GlossaryToolProvider } from './tools/glossary/GlossaryToolProvider.js';
+import { WebSearchClient } from './tools/web/WebSearchClient.js';
+import { WebSearchToolProvider } from './tools/web/WebSearchToolProvider.js';
 import { OpenAIEmbeddingClient } from './memory/EmbeddingClient.js';
 import { createChatModel } from './react/createChatModel.js';
 import { ReActRunner } from './react/ReActRunner.js';
@@ -406,6 +408,41 @@ async function main(): Promise<void> {
       retrievalLimit: envCount(process.env.GLOSSARY_RETRIEVAL_LIMIT, 4),
     });
 
+    const webSearchConfig = configCenter.getWebSearchConfig?.();
+    const webSearchProvider =
+      webSearchConfig && webSearchConfig.apiKey
+        ? new WebSearchToolProvider({
+            client: new WebSearchClient({
+              baseUrl: webSearchConfig.baseUrl,
+              apiKey: webSearchConfig.apiKey,
+              engine: webSearchConfig.engine,
+              count: webSearchConfig.count,
+              contentSize: webSearchConfig.contentSize,
+              timeoutMs: webSearchConfig.timeoutMs,
+              redactOutbound: webSearchConfig.redactOutbound,
+            }),
+            enabled: () =>
+              configCenter.getWebSearchConfig?.()?.enabled ?? false,
+            logger: harnessLogger,
+          })
+        : undefined;
+    if (webSearchConfig?.enabled && !webSearchConfig.apiKey) {
+      logger.warn(
+        {},
+        'WEB_SEARCH_ENABLED 已开启但缺少 API Key，web_search 工具不会挂载',
+      );
+    }
+    logger.info(
+      {
+        enabled: webSearchConfig?.enabled ?? false,
+        ready: Boolean(webSearchProvider),
+        engine: webSearchConfig?.engine,
+        count: webSearchConfig?.count,
+        apiKeyConfigured: Boolean(webSearchConfig?.apiKey),
+      },
+      'web search configuration resolved',
+    );
+
     toolRegistry = await ToolRegistry.create({
       mcpServers: configCenter.getMcpServers(),
       enableDws: configCenter.getSystemConfig().dingtalk.dwsCliEnabled,
@@ -441,6 +478,7 @@ async function main(): Promise<void> {
       ...(process.env.DWS_BINARY?.trim()
         ? { dwsBinary: process.env.DWS_BINARY.trim() }
         : {}),
+      ...(webSearchProvider ? { webSearchProvider } : {}),
       adminProvider,
       glossaryProvider: new GlossaryToolProvider({
         service: glossary,
@@ -1593,6 +1631,12 @@ async function main(): Promise<void> {
       const next = event.after as StoredDingTalkConfig;
       const previous = event.before as StoredDingTalkConfig;
       toolRegistry?.setDwsEnabled(next.dwsCliEnabled);
+      if (previous.webSearchEnabled !== next.webSearchEnabled) {
+        logger.info(
+          { webSearchEnabled: next.webSearchEnabled },
+          'web search tool toggled',
+        );
+      }
       const credentialsChanged =
         previous.clientId !== next.clientId ||
         previous.clientSecret !== next.clientSecret;
@@ -1612,6 +1656,7 @@ async function main(): Promise<void> {
           robotCode: next.robotCode,
           cardTemplateId: next.aiCardTemplateId,
           dwsCliEnabled: next.dwsCliEnabled,
+          webSearchEnabled: next.webSearchEnabled,
           credentialsChanged,
         },
         'dingtalk config applied',

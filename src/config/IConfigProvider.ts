@@ -48,6 +48,28 @@ export interface VisionConfig {
   model: string;
 }
 
+export type WebSearchEngine =
+  | 'search_std'
+  | 'search_pro'
+  | 'search_pro_sogou'
+  | 'search_pro_quark';
+
+export type WebSearchContentSize = 'medium' | 'high';
+
+/** 公网搜索配置；默认复用智谱大模型的 baseUrl 与 API Key */
+export interface WebSearchConfig {
+  enabled: boolean;
+  baseUrl: string;
+  apiKey: string;
+  engine: WebSearchEngine;
+  /** 单次返回结果条数 */
+  count: number;
+  contentSize: WebSearchContentSize;
+  timeoutMs: number;
+  /** 出站前对查询做手机号/邮箱/证件/密钥脱敏 */
+  redactOutbound: boolean;
+}
+
 export interface IConfigProvider {
   getLLMConfig(): LLMAndPersonaConfig;
   getLoopPolicy(): DynamicLoopPolicy;
@@ -62,6 +84,8 @@ export interface IConfigProvider {
   getEmbeddingConfig?(): EmbeddingConfig | undefined;
   /** 图片理解模型；未配置时图片只落盘不识别 */
   getVisionConfig?(): VisionConfig | undefined;
+  /** 公网搜索；未配置时不下发 web_search 工具 */
+  getWebSearchConfig?(): WebSearchConfig | undefined;
   getDatabaseUrl(): string;
   /** 校验启动必需配置，缺失时抛出可读错误 */
   assertReady(): void;

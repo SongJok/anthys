@@ -48,7 +48,7 @@ flowchart LR
   C -->|单聊或 @| D[ReAct 智能体]
   C -->|群内未 @| E[旁听判定]
   E -->|命中主题且通过冷却与置信度| D
-  D --> F[工具层<br/>企业 MCP · DWS · 沙盒 · 内置工具]
+  D --> F[工具层<br/>企业 MCP · DWS · 公网搜索 · 沙盒 · 内置工具]
   D --> G[三层记忆]
   D --> H[AI 卡片流式输出]
   I[Web 控制台 / 管理员单聊] --> J[动态配置中心]
@@ -152,6 +152,21 @@ pnpm run db:seed      # 可选：预写入默认人设与模型配置，已有�
 | `PERSONA_NAME` | `小钉` | 机器人名称 |
 | `PERSONA_ROLE_PROMPT` | 见示例 | 人设 Prompt |
 | `PERSONA_SPEAKING_STYLE` | 见示例 | 语气与表达风格 |
+
+**公网搜索**
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `WEB_SEARCH_ENABLED` | `true` | 是否向模型暴露 `web_search`；控制台「钉钉企业配置」可运行期开关并持久化 |
+| `WEB_SEARCH_BASE_URL` | 沿用智谱地址 | 智谱 Web Search API 地址；大模型不是智谱时默认 `https://open.bigmodel.cn/api/paas/v4` |
+| `WEB_SEARCH_API_KEY` | 沿用 `LLM_API_KEY` | 仅当 Base URL 指向智谱时复用模型密钥，避免把别家 Key 发到智谱 |
+| `WEB_SEARCH_ENGINE` | `search_pro` | `search_std` / `search_pro` / `search_pro_sogou` / `search_pro_quark` |
+| `WEB_SEARCH_COUNT` | `5` | 单次返回条数 1–50；搜狗引擎仅支持 10/20/30/40/50，会自动向上取整 |
+| `WEB_SEARCH_CONTENT_SIZE` | `medium` | 摘要长度，`medium` 或 `high` |
+| `WEB_SEARCH_TIMEOUT_MS` | `12000` | 单次搜索超时 |
+| `WEB_SEARCH_REDACT` | `true` | 出站前脱敏手机号、邮箱、证件号与密钥；内部术语不拦截 |
+
+单聊与群聊都会挂载该工具。查询只发往公网搜索引擎，企业内部数据仍应走企业 MCP 或 DWS；上游鉴权失败、限流或超时会以可读错误回传模型，不阻断其余工具。
 
 **推理预算**
 
@@ -454,6 +469,7 @@ pnpm start     # 通过 tsx 直接运行 src/index.ts
 | 内置工具 | `current_time` 时区时间、`calculator` 安全表达式计算、`system_status` 进程与资源状态 |
 | 企业 MCP | 通过 MCP 协议接入代码、数据、日志、接口文档等外部服务，可增删改查与热重载 |
 | 钉钉 DWS | 查询文档、知识库、日历、待办、通讯录与审批；写操作（建日程、建待办、改通讯录、发审批）经 `/confirm` 二次确认 |
+| 公网搜索 | `web_search` 调用智谱 Web Search API 检索公开网页，返回标题、链接、发布时间与摘要，并作为引用展示；单聊与群聊均可用，可在控制台关闭 |
 | 隔离沙盒 | `sandbox_analyze_and_aggregate` 对工具返回的大批量数据做脚本化统计与聚合 |
 | 管理员工具 | 仅在管理员单聊中出现的管控指令，普通员工与群聊不可见 |
 
@@ -580,7 +596,7 @@ pnpm start     # 通过 tsx 直接运行 src/index.ts
 | --- | --- |
 | **运行大盘** | 查看 Stream 状态、今日对话轮次与 Token、MCP 节点健康与工具数、各群旁听与主动回复统计、最近管理操作审计 |
 | **在线对话** | 用一次性票据订阅 SSE，直接在浏览器体验与钉钉相同的流式推理、工具调用与最终回答 |
-| **钉钉企业配置** | 修改 AppKey / AppSecret、RobotCode、AI 卡片模板、管理员白名单、DWS 开关；发送测试卡片验证链路 |
+| **钉钉企业配置** | 修改 AppKey / AppSecret、RobotCode、AI 卡片模板、管理员白名单、DWS 开关、公网联网搜索开关；发送测试卡片验证链路 |
 | **大模型与人设** | 切换模型渠道与模型、修改 Base URL / API Key / 温度 / 原生思维链、调整 ReAct 预算、在线编辑人设与语气，并发起沙盒对话测试 |
 | **企业 MCP** | 增删改查节点、启停并热应用、一键连通性测试并浏览工具 Schema、维护按群 / 角色的工具权限 |
 | **群聊旁听策略** | 查看全局默认策略、按群覆盖旁听与主动回复参数、一键紧急静音 |

@@ -120,6 +120,16 @@ function fakeDefaults(overrides: Record<string, string> = {}): IConfigProvider {
       triggerTopics: env.BYSTANDER_TRIGGER_TOPICS.split(','),
       debounceMs: 8_000,
     }),
+    getWebSearchConfig: () => ({
+      enabled: true,
+      baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+      apiKey: 'sk-env-secret-key',
+      engine: 'search_pro',
+      count: 5,
+      contentSize: 'medium',
+      timeoutMs: 12_000,
+      redactOutbound: true,
+    }),
     getDatabaseUrl: () => 'postgres://localhost:5432/test',
     assertReady: () => undefined,
   };
@@ -145,6 +155,7 @@ function createCenter(options: {
     auditStore: audit,
     initialAdminStaffIds: ['admin-001'],
     initialDwsCliEnabled: true,
+    initialWebSearchEnabled: true,
     now: () => 1_000,
   });
   return { center, store, groups, audit };
@@ -173,6 +184,7 @@ describe('DynamicConfigCenter', () => {
         aiCardTemplateId: 'db-card',
         adminStaffIds: ['admin-001', ' admin-002 ', 'admin-001'],
         dwsCliEnabled: false,
+        webSearchEnabled: false,
       },
     });
     const { center } = createCenter({ store });
@@ -186,6 +198,8 @@ describe('DynamicConfigCenter', () => {
     );
     expect(config.dingtalk.adminStaffIds).toEqual(['admin-001', 'admin-002']);
     expect(config.dingtalk.dwsCliEnabled).toBe(false);
+    expect(config.dingtalk.webSearchEnabled).toBe(false);
+    expect(center.getWebSearchConfig()?.enabled).toBe(false);
     expect(center.getDingTalkConfig().clientSecret).toBe(
       'db-client-secret-123456',
     );

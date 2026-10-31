@@ -193,6 +193,9 @@ export function createConfigRoutes(deps: ConfigRouteDeps): Hono {
         ...(readBoolean(body, 'dwsCliEnabled') !== undefined
           ? { dwsCliEnabled: readBoolean(body, 'dwsCliEnabled')! }
           : {}),
+        ...(readBoolean(body, 'webSearchEnabled') !== undefined
+          ? { webSearchEnabled: readBoolean(body, 'webSearchEnabled')! }
+          : {}),
       },
       actor(c),
     );

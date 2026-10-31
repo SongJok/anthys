@@ -301,6 +301,16 @@ function fakeDefaults(): IConfigProvider {
       triggerTopics: ['线上故障'],
       debounceMs: 8_000,
     }),
+    getWebSearchConfig: () => ({
+      enabled: true,
+      baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+      apiKey: 'sk-env-secret-key',
+      engine: 'search_pro',
+      count: 5,
+      contentSize: 'medium',
+      timeoutMs: 12_000,
+      redactOutbound: true,
+    }),
     getDatabaseUrl: () => 'postgres://localhost:5432/test',
     assertReady: () => undefined,
   };
@@ -398,6 +408,7 @@ async function createTestContext(staticDir?: string): Promise<TestContext> {
     initialMcpServers: [LOG_SERVER],
     initialAdminStaffIds: ['admin-001'],
     initialDwsCliEnabled: true,
+    initialWebSearchEnabled: true,
     now: () => NOW,
   });
   await center.init();
@@ -592,6 +603,7 @@ describe('钉钉与 LLM 配置接口', () => {
         robotCode: 'robot-code-v2',
         adminStaffIds: ['admin-001', 'admin-002'],
         dwsCliEnabled: false,
+        webSearchEnabled: false,
       }),
     });
     expect(put.status).toBe(200);
@@ -599,6 +611,8 @@ describe('钉钉与 LLM 配置接口', () => {
     expect(putBody.config.robotCode).toBe('robot-code-v2');
     expect(putBody.config.adminStaffIds).toEqual(['admin-001', 'admin-002']);
     expect(ctx.center.getSystemConfig().dingtalk.dwsCliEnabled).toBe(false);
+    expect(ctx.center.getSystemConfig().dingtalk.webSearchEnabled).toBe(false);
+    expect(ctx.center.getWebSearchConfig()?.enabled).toBe(false);
     expect(ctx.center.getDingTalkConfig().clientSecret).toBe(
       'ding-app-secret-123456',
     );
