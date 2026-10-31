@@ -226,14 +226,14 @@ export class ToolRegistry {
   public readonly providers: IToolProvider[];
   public readonly workspace: WorkspacePaths;
   public readonly pool: McpClientPool | null;
-  private dwsProvider: IToolProvider | null;
+  private dwsProvider: DwsCliToolProvider | null;
 
   private constructor(
     providers: IToolProvider[],
     workspace: WorkspacePaths,
     pool: McpClientPool | null,
-    dwsProvider: IToolProvider | null,
-    private readonly createDwsProvider: () => IToolProvider,
+    dwsProvider: DwsCliToolProvider | null,
+    private readonly createDwsProvider: () => DwsCliToolProvider,
   ) {
     this.providers = providers;
     this.workspace = workspace;
@@ -287,8 +287,8 @@ export class ToolRegistry {
         }),
       );
     }
-    let dwsProvider: IToolProvider | null = null;
-    const createDwsProvider = (): IToolProvider =>
+    let dwsProvider: DwsCliToolProvider | null = null;
+    const createDwsProvider = (): DwsCliToolProvider =>
       new DwsCliToolProvider({
         runner:
           options.dwsRunner ??
@@ -360,6 +360,14 @@ export class ToolRegistry {
       tools.push(tool);
     }
     return tools;
+  }
+
+  /** 写工具进入 /confirm 闸门前先完成本人授权检查；返回需要直接展示给用户的说明 */
+  public async dwsAuthorizationPrompt(
+    ctx: ExecutionContext,
+    write = true,
+  ): Promise<string | null> {
+    return (await this.dwsProvider?.authorizationPrompt(ctx, write)) ?? null;
   }
 
   /** DWS CLI 权限开关热切换：无需重建 MCP 连接或重启进程 */

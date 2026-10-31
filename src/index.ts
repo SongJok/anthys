@@ -123,6 +123,8 @@ import type {
   InboundMessage,
   LLMAndPersonaConfig,
   RunResult,
+  ToolApprovalDecision,
+  ToolApprovalRequest,
 } from './types/core.js';
 import type {
   LlmSandboxTestResult,
@@ -376,11 +378,22 @@ async function main(): Promise<void> {
         Math.max(30, Number(process.env.TOOL_CONFIRMATION_TTL_SECONDS ?? 300)) *
         1000,
     });
-    const resolveToolApproval = createToolApprovalGate({
+    const approvalGate = createToolApprovalGate({
       store: pendingActions,
       enabled: envEnabled(process.env.TOOL_CONFIRMATION_ENABLED, true),
       logger: harnessLogger,
     });
+    // 写工具先校验本人 DWS 授权，避免授权缺失时先让用户 /confirm
+    const resolveToolApproval = async (
+      request: ToolApprovalRequest,
+      context: ExecutionContext,
+    ): Promise<ToolApprovalDecision> => {
+      if (request.source === 'dws') {
+        const prompt = await toolRegistry?.dwsAuthorizationPrompt(context, true);
+        if (prompt) return { approved: false, reason: prompt };
+      }
+      return approvalGate(request);
+    };
 
     const adminProvider = new AdminChatOpsToolProvider({
       configCenter,

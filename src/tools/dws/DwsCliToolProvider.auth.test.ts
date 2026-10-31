@@ -425,6 +425,101 @@ describe('DwsCliToolProvider 每员工独立身份闸门', () => {
     expect(notes[0]).toContain('HVSD-BJVT');
   });
 
+  it('加密/外部群身份不发起授权，只说明需用企业账号单聊', async () => {
+    const { identity, calls } = fakeIdentity();
+    const provider = new DwsCliToolProvider({ identity });
+    const { ctx, notes } = context({
+      conversationType: '2',
+      senderStaffId: '$:LWCP_v1:$GRMWoyvR2g0Wd5NFTh1bp+Ajh7fMeBtJ',
+    });
+
+    const output = JSON.parse(await runDocTool(provider, ctx)) as {
+      ok: boolean;
+      externalIdentity: boolean;
+      loginUrl?: string;
+      instruction: string;
+    };
+
+    expect(calls.ensureReadConsent).toBe(0);
+    expect(calls.startLogin).toBe(0);
+    expect(calls.runs).toHaveLength(0);
+    expect(output.ok).toBe(false);
+    expect(output.externalIdentity).toBe(true);
+    expect(output.loginUrl).toBeUndefined();
+    expect(output.instruction).toContain('企业账号');
+    expect(notes).toHaveLength(0);
+  });
+
+  it('写工具闸门前返回可直接展示的授权说明', async () => {
+    const { identity, calls } = fakeIdentity();
+    const provider = new DwsCliToolProvider({ identity });
+    const { ctx, notes } = context();
+
+    const prompt = await provider.authorizationPrompt(ctx, true);
+
+    expect(prompt).toContain('HVSD-BJVT');
+    expect(prompt).not.toContain('/dws-consent');
+    expect(calls.ensureReadConsent).toBe(1);
+    expect(calls.startLogin).toBe(1);
+    expect(notes).toHaveLength(1);
+  });
+
+  it('写工具闸门前校验写授权与有效令牌', async () => {
+    const readOnly = fakeIdentity({
+      record: identityRecord({ writeEnabled: false }),
+      states: ['authenticated'],
+    });
+    const readOnlyPrompt = await new DwsCliToolProvider({
+      identity: readOnly.identity,
+    }).authorizationPrompt(context().ctx, true);
+    expect(readOnlyPrompt).toContain('/dws-consent write');
+
+    const ready = fakeIdentity({
+      record: identityRecord({ writeEnabled: true }),
+      states: ['authenticated'],
+    });
+    const readyPrompt = await new DwsCliToolProvider({
+      identity: ready.identity,
+    }).authorizationPrompt(context().ctx, true);
+    expect(readyPrompt).toBeNull();
+  });
+
+  it('群聊授权链接私聊送达时闸门提示已私聊发送', async () => {
+    const { identity } = fakeIdentity({
+      record: identityRecord(),
+      states: ['expired'],
+    });
+    const privateNotes: string[] = [];
+    const provider = new DwsCliToolProvider({
+      identity,
+      personalNotifier: (_staffId, text) => {
+        privateNotes.push(text);
+        return true;
+      },
+    });
+    const { ctx } = context({ conversationType: '2' });
+
+    const prompt = await provider.authorizationPrompt(ctx, true);
+
+    expect(privateNotes).toHaveLength(1);
+    expect(prompt).toContain('私聊');
+    expect(prompt).not.toContain('HVSD-BJVT');
+  });
+
+  it('群聊无法私聊送达时引导去企业内部单聊', async () => {
+    const { identity } = fakeIdentity({
+      record: identityRecord(),
+      states: ['expired'],
+    });
+    const provider = new DwsCliToolProvider({ identity });
+    const { ctx } = context({ conversationType: '2' });
+
+    const prompt = await provider.authorizationPrompt(ctx, true);
+
+    expect(prompt).toContain('企业内部单聊');
+    expect(prompt).not.toContain('HVSD-BJVT');
+  });
+
   it('未配置身份服务时保持原有 runner 行为', async () => {
     const { runner, calls } = legacyRunner(succeeded());
     const provider = new DwsCliToolProvider({ runner });
@@ -437,3 +532,4 @@ describe('DwsCliToolProvider 每员工独立身份闸门', () => {
     expect(notes).toHaveLength(0);
   });
 });
+

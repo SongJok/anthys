@@ -277,27 +277,8 @@ export class DwsCliToolProvider implements IToolProvider {
     }
     const identity = this.identity;
     if (identity) {
-      const record = await identity.getRecord(ctx.senderStaffId);
-      const consentOk = record?.consentVersion === DWS_CONSENT_VERSION;
-      if (!record?.profile || !consentOk) {
-        return this.identityPrompt(
-          ctx,
-          consentOk ? record : null,
-          'unbound',
-        );
-      }
-      if (write && !record.writeEnabled) {
-        return JSON.stringify({
-          ok: false,
-          writeConsentRequired: true,
-          instruction:
-            '当前个人 DWS 授权仅允许只读。若需要代你创建或修改日程、待办、审批，请先在单聊发送 /dws-consent write 明确授权写操作后重试。不要重复调用写工具。',
-        });
-      }
-      const status = await identity.status(ctx.senderStaffId);
-      if (status.state === 'expired') {
-        return this.identityPrompt(ctx, record, 'expired', status);
-      }
+      const blocked = await this.authCheck(ctx, write);
+      if (blocked) return blocked.json;
     }
 
     const remaining = ctx.deadlineAt - this.now();
@@ -318,7 +299,13 @@ export class DwsCliToolProvider implements IToolProvider {
     } catch (error) {
       if (identity && error instanceof DwsIdentityError) {
         const record = await identity.getRecord(ctx.senderStaffId);
-        return this.identityPrompt(ctx, record, 'unbound');
+        const consentOk = record?.consentVersion === DWS_CONSENT_VERSION;
+        const prompt = await this.identityPrompt(
+          ctx,
+          consentOk ? record : null,
+          'unbound',
+        );
+        return prompt.json;
       }
       throw error;
     }
@@ -329,7 +316,13 @@ export class DwsCliToolProvider implements IToolProvider {
     ) {
       const status = await identity.status(ctx.senderStaffId, { force: true });
       if (status.state === 'expired') {
-        return this.identityPrompt(ctx, status.record, 'expired', status);
+        const prompt = await this.identityPrompt(
+          ctx,
+          status.record,
+          'expired',
+          status,
+        );
+        return prompt.json;
       }
     }
     if (
@@ -345,6 +338,61 @@ export class DwsCliToolProvider implements IToolProvider {
   }
 
   /**
+   * 写工具在进入 /confirm 闸门前先完成本人授权检查，
+   * 返回需要直接展示给用户的说明；null 表示可以继续。
+   */
+  public async authorizationPrompt(
+    ctx: ExecutionContext,
+    write = true,
+  ): Promise<string | null> {
+    const blocked = await this.authCheck(ctx, write);
+    return blocked?.userText ?? null;
+  }
+
+  private async authCheck(
+    ctx: ExecutionContext,
+    write: boolean,
+  ): Promise<{ json: string; userText: string } | null> {
+    const identity = this.identity;
+    if (!identity) return null;
+    if (ctx.senderStaffId.startsWith('$:')) {
+      return {
+        json: JSON.stringify({
+          ok: false,
+          authRequired: true,
+          externalIdentity: true,
+          instruction:
+            '提问人的身份是群里加密/外部身份，钉钉没有提供企业账号（staffId），无法发起个人 DWS 授权，也不能私聊发送链接或查询个人数据。不要重复调用 DWS 工具，也不要声称已查询到数据；只简短说明需要用企业账号在单聊中提问。',
+        }),
+        userText:
+          '钉钉没有向我提供你的企业账号标识（当前是群里的加密/外部身份），我无法查询你的个人钉钉数据，也无法把授权链接发给你。请用企业账号在单聊中向我提问，我会直接把授权链接发给你。',
+      };
+    }
+    const record = await identity.getRecord(ctx.senderStaffId);
+    const consentOk = record?.consentVersion === DWS_CONSENT_VERSION;
+    if (!record?.profile || !consentOk) {
+      return this.identityPrompt(ctx, consentOk ? record : null, 'unbound');
+    }
+    const status = await identity.status(ctx.senderStaffId);
+    if (status.state === 'expired') {
+      return this.identityPrompt(ctx, record, 'expired', status);
+    }
+    if (write && !record.writeEnabled) {
+      return {
+        json: JSON.stringify({
+          ok: false,
+          writeConsentRequired: true,
+          instruction:
+            '当前个人 DWS 授权仅允许只读。若需要代你创建或修改日程、待办、审批，请先在单聊发送 /dws-consent write 明确授权写操作后重试。不要重复调用写工具。',
+        }),
+        userText:
+          '当前钉钉授权仅允许只读。若要代你创建或修改日程、待办、审批，请先在单聊发送 /dws-consent write 授权写操作后再试。',
+      };
+    }
+    return null;
+  }
+
+  /**
    * 令牌缺失或过期时不再让用户记命令：机器人自动记录只读同意并
    * 发起本人设备码登录，用户只需打开链接授权。群聊里链接只私聊发送。
    */
@@ -353,7 +401,7 @@ export class DwsCliToolProvider implements IToolProvider {
     record: DwsIdentityRecord | null,
     reason: 'unbound' | 'expired',
     status?: DwsIdentityStatus,
-  ): Promise<string> {
+  ): Promise<{ json: string; userText: string }> {
     const identity = this.identity!;
     const singleChat = ctx.conversationType === '1';
     const consentCurrent = record?.consentVersion === DWS_CONSENT_VERSION;
@@ -441,27 +489,38 @@ export class DwsCliToolProvider implements IToolProvider {
           : '个人 DWS 授权缺失或已过期，但无法私聊发送授权链接。不要重复调用 DWS 工具；只简短告知用户授权未完成、稍后再试。'
       : '个人 DWS 授权缺失或已过期，且自动发起授权失败。不要重复调用 DWS 工具；只简短告知用户稍后再试。';
 
-    return JSON.stringify({
-      ok: false,
-      authRequired: true,
-      identityRequired: reason === 'unbound',
-      authState: status?.state ?? 'unbound',
-      ...(status?.message ? { reason: status.message } : {}),
-      ...(autoConsentRecorded ? { readConsentRecorded: true } : {}),
-      ...(singleChat && ticket
-        ? {
-            loginUrl: ticket.verifyUrl,
-            userCode: ticket.userCode,
-            expiresInSeconds: Math.max(
-              0,
-              Math.ceil((ticket.expiresAt - this.now()) / 1000),
-            ),
-          }
-        : {}),
-      ...(!singleChat ? { authorizationSentPrivately: delivered } : {}),
-      ...(failure ? { loginError: failure } : {}),
-      instruction,
-    });
+    const userText = !ticket
+      ? '我尝试自动发起钉钉授权但失败了，请稍后再试。'
+      : singleChat
+        ? text
+        : delivered
+          ? '已把钉钉授权链接私聊发给你，请打开链接完成授权后再发一次刚才的问题。'
+          : '需要你本人完成钉钉授权，但我无法把授权链接私聊发给你。请在企业内部单聊中向我提问，我会直接把授权链接发给你。';
+
+    return {
+      json: JSON.stringify({
+        ok: false,
+        authRequired: true,
+        identityRequired: reason === 'unbound',
+        authState: status?.state ?? 'unbound',
+        ...(status?.message ? { reason: status.message } : {}),
+        ...(autoConsentRecorded ? { readConsentRecorded: true } : {}),
+        ...(singleChat && ticket
+          ? {
+              loginUrl: ticket.verifyUrl,
+              userCode: ticket.userCode,
+              expiresInSeconds: Math.max(
+                0,
+                Math.ceil((ticket.expiresAt - this.now()) / 1000),
+              ),
+            }
+          : {}),
+        ...(!singleChat ? { authorizationSentPrivately: delivered } : {}),
+        ...(failure ? { loginError: failure } : {}),
+        instruction,
+      }),
+      userText,
+    };
   }
 
   /**
@@ -770,7 +829,7 @@ export class DwsCliToolProvider implements IToolProvider {
     return {
       name: 'dws_calendar_manage',
       description:
-        '创建或修改钉钉日程（写操作，执行前需要用户 /confirm）。action=create 需要 title、start、end；action=update 需要 eventId 以及至少一个要修改的字段。时间为 ISO-8601，例如 2026-03-10T14:00:00+08:00。',
+        '创建或修改钉钉日程（写操作）。action=create 需要 title、start、end；action=update 需要 eventId 以及至少一个要修改的字段。时间为 ISO-8601，例如 2026-03-10T14:00:00+08:00。请直接调用本工具提交：系统会登记为待确认动作并提示用户回复 /confirm；不要只输出文字确认或编造已创建的结果。',
       risk: 'write',
       source: 'dws',
       parametersJsonSchema: {
@@ -874,7 +933,7 @@ export class DwsCliToolProvider implements IToolProvider {
     return {
       name: 'dws_calendar_cancel',
       description:
-        '取消（删除）钉钉日程（高危写操作，执行前需要用户 /confirm）。必须提供 eventId；可先用只读工具确认日程真实存在。',
+        '取消（删除）钉钉日程（高危写操作）。必须提供 eventId；可先用只读工具确认日程真实存在。请直接调用本工具提交：系统会登记为待确认动作并提示用户回复 /confirm；不要只输出文字确认或声称已取消。',
       risk: 'destructive',
       source: 'dws',
       parametersJsonSchema: {
@@ -917,7 +976,7 @@ export class DwsCliToolProvider implements IToolProvider {
     return {
       name: 'dws_todo_manage',
       description:
-        '创建、修改或完成钉钉待办（写操作，执行前需要用户 /confirm）。action=create 需要 title，executors 省略时默认指派给当前提问人；action=update 需要 taskId；action=complete 需要 taskId，status 默认 true。',
+        '创建、修改或完成钉钉待办（写操作）。action=create 需要 title，executors 省略时默认指派给当前提问人；action=update 需要 taskId；action=complete 需要 taskId，status 默认 true。请直接调用本工具提交：系统会登记为待确认动作并提示用户回复 /confirm；不要只输出文字确认或编造待办 ID。',
       risk: 'write',
       source: 'dws',
       parametersJsonSchema: {
@@ -1038,7 +1097,7 @@ export class DwsCliToolProvider implements IToolProvider {
     return {
       name: 'dws_contact_manage',
       description:
-        '邀请员工加入企业或修改员工组织信息（写操作，执行前需要用户 /confirm）。action=invite 需要 orgUserName、orgUserMobile；action=update 需要 userId 以及至少一个修改项。部门用 deptIds 数字数组传入。',
+        '邀请员工加入企业或修改员工组织信息（写操作）。action=invite 需要 orgUserName、orgUserMobile；action=update 需要 userId 以及至少一个修改项。部门用 deptIds 数字数组传入。请直接调用本工具提交：系统会登记为待确认动作并提示用户回复 /confirm；不要只输出文字确认。',
       risk: 'write',
       source: 'dws',
       parametersJsonSchema: {
@@ -1139,7 +1198,7 @@ export class DwsCliToolProvider implements IToolProvider {
     return {
       name: 'dws_approval_manage',
       description:
-        '发起、同意或拒绝钉钉审批（写操作，执行前需要用户 /confirm）。action=create 需要 processCode 与 formValues（表单字段对象）；action=approve/reject 需要 instanceId 与 taskId。发起前应先用只读工具查询表单 Schema。',
+        '发起、同意或拒绝钉钉审批（写操作）。action=create 需要 processCode 与 formValues（表单字段对象）；action=approve/reject 需要 instanceId 与 taskId。发起前应先用只读工具查询表单 Schema。请直接调用本工具提交：系统会登记为待确认动作并提示用户回复 /confirm；不要只输出文字确认。',
       risk: 'write',
       source: 'dws',
       parametersJsonSchema: {
