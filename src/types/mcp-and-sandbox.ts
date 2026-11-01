@@ -21,7 +21,16 @@ export interface EnterpriseMcpServerConfig {
 
 /** 2. 钉钉原生 DWS CLI 执行契约 */
 export interface DwsCommandRequest {
-  domain: 'doc' | 'wiki' | 'calendar' | 'todo' | 'contact' | 'approval';
+  domain:
+    | 'doc'
+    | 'wiki'
+    | 'calendar'
+    | 'todo'
+    | 'contact'
+    | 'approval'
+    | 'report'
+    | 'minutes'
+    | 'aitable';
   /** 子命令路径，多段命令用空格连接，如 `event create` */
   subcommand: string;
   flags: Record<string, string | number | boolean>;

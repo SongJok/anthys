@@ -7,6 +7,7 @@
 - **克制的主动回复**：群内全量旁听，经三级漏斗判断后才对高优故障、技术求助作出回应。
 - **越用越懂团队**：工作记忆 + 情景摘要 + 语义画像三层记忆，跨会话保留上下文；企业术语库把内部黑话沉淀成可检索、可校验的固定模板。
 - **可扩展的知识层**：技能按目录渐进披露，声明式插件只声明技能与 MCP、不执行代码，项目手册把仓库事实沉淀成可发布的 12 章说明，并可接 GitHub 只读工具做跨仓对比。
+- **办公场景技能包**：内置日常聊天、链接阅读、数据分析、日周月报、项目文档、钉钉办公与调研简报等技能，覆盖从群聊链接到钉钉原生事务的常见工作流。
 - **双通道动态管控**：管理员既可以在钉钉单聊里用自然语言下达指令，也可以在 Web 控制台逐项配置，保存即生效。
 - **企业级边界**：管理员白名单、DWS 命令白名单与写操作确认、沙箱隔离、凭据掩码与全量操作审计。
 
@@ -179,6 +180,22 @@ pnpm run db:seed      # 可选：预写入默认人设与模型配置，已有�
 单聊与群聊都会挂载该工具。查询只发往公网搜索引擎，企业内部数据仍应走企业 MCP 或 DWS；上游鉴权失败、限流或超时会以可读错误回传模型，不阻断其余工具。
 
 生产护栏：相同查询在 TTL 内直接复用结果，并发相同查询只发起一次请求；单会话小时配额与进程日配额用完后，工具返回「基于已有信息回答」的引导而不是继续计费。缓存与配额都是进程内状态，多实例部署时各实例独立计数。运行指标见 `/metrics`：`web_search_requests_total{result=success|empty|cache_hit|inflight_join|rate_limited|daily_limited|error}`、`web_search_results_total` 与 `web_search_duration_ms_total`。
+
+**公网链接读取**
+
+群聊或单聊里发来的公开链接，可由 `web_fetch` 直接打开并提取标题、描述与正文；只读、不执行网页脚本，内容会标注为外部不可信数据。
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `WEB_FETCH_ENABLED` | `true` | 是否向模型暴露 `web_fetch` |
+| `WEB_FETCH_TIMEOUT_MS` | `12000` | 单页请求超时 |
+| `WEB_FETCH_MAX_MB` | `2` | 单页响应体上限（MB） |
+| `WEB_FETCH_MAX_CHARS` | `2500` | 单次返回正文默认字符数，工具参数可调至 3200 |
+| `WEB_FETCH_CACHE_TTL_SECONDS` | `600` | 相同链接结果缓存秒数；`0` 关闭缓存 |
+| `WEB_FETCH_MAX_CALLS_PER_HOUR` | `20` | 单会话每小时调用上限；`0` 不限制 |
+| `WEB_FETCH_DAILY_LIMIT` | `300` | 本进程每天调用上限；`0` 不限制 |
+
+安全边界：只允许 `http` / `https` 标准端口，拒绝带账号密码的链接；解析后固定 DNS 结果再连接，本机、内网、链路本地、组播与保留地址一律拒绝，每次重定向都重新校验；最多跟随 3 次跳转。只读取 HTML、纯文本、JSON、XML 等文本内容，二进制、登录页、404 与限流会返回可读错误。响应体与耗时都有上限，压缩格式会被解开后再截断。
 
 **推理预算**
 
@@ -576,7 +593,7 @@ sudo cp deploy/nginx.conf /etc/nginx/conf.d/ && sudo nginx -t && sudo systemctl 
 技能是一段受控的操作步骤，用来教机器人"这类任务应该怎么做"，而不是把新的可执行代码带进进程。
 
 - **渐进披露**：系统提示只注入技能目录（名称、描述、适用场景，受 `SKILL_CATALOG_LIMIT` 限制）；模型命中任务后调用 `use_skill` 加载正文，需要细节时再用 `skill_read` 分页读取技能目录内的参考文件。单次正文最多 4000 字符，参考文件单次最多 500 行 / 4000 字符，单文件上限 1MB。
-- **来源**：`SKILLS_BUILTIN_DIR`（默认 `skills/builtin`）随仓库发布，`SKILLS_LOCAL_DIR`（默认 `skills/local`）用于团队自建。内置技能包括 `code-reading`、`repo-review`、`incident-triage`、`project-onboarding`、`github-project-scan`、`handbook-maintainer`。
+- **来源**：`SKILLS_BUILTIN_DIR`（默认 `skills/builtin`）随仓库发布，`SKILLS_LOCAL_DIR`（默认 `skills/local`）用于团队自建。内置技能分两类：代码与项目类 `code-reading`、`repo-review`、`incident-triage`、`project-onboarding`、`github-project-scan`、`handbook-maintainer`；办公与通用类 `everyday-chat`、`link-reader`、`data-analysis`、`work-report`、`project-docs`、`dingtalk-office`、`research-brief`。
 - **格式**：每个技能是一个目录，`SKILL.md` 以 YAML frontmatter 开头，字段包括 `name`、`description`、`version`、`when_to_use`、`tags`、`allowed_tools`、`risk`、`visibility` 与 `max_instruction_chars`；正文按「适用场景 / 步骤 / 约束」组织，可附带 `references/` 等资源文件。
 - **管理**：控制台「技能 Skills」可查看目录预览、校验草稿、启用 / 停用、在线编辑 `SKILL.md` 与资源文件，并查看近 7 天调用次数。保存后立即热更新，无需重启。
 - **边界**：技能正文只来自管理员维护的本地目录；聊天内容、工具返回、仓库文件都不会被当作指令注入。`EXTENSIONS_SKILLS_ENABLED=false` 可整体关闭。
@@ -641,9 +658,11 @@ sudo cp deploy/nginx.conf /etc/nginx/conf.d/ && sudo nginx -t && sudo systemctl 
 | 项目 | `project_list` / `project_map` / `project_search` / `project_read` / `project_symbol` / `project_history` 读取已登记项目快照，`project_handbook` 读取已发布手册 |
 | GitHub（只读） | `github_repo` / `github_tree` / `github_file` / `github_search` / `github_pr`，按白名单 HTTPS 访问并缓存 |
 | 企业 MCP | 通过 MCP 协议接入代码、数据、日志、接口文档等外部服务，可增删改查与热重载 |
-| 钉钉 DWS | 查询文档、知识库、日历、待办、通讯录与审批；写操作（建日程、建待办、改通讯录、发审批）经 `/confirm` 二次确认 |
+| 钉钉 DWS | 查询文档、知识库、日历、待办、通讯录、审批、日志、听记与 AI 表格；写操作（建日程、建待办、改通讯录、发审批、写文档、提交日志）经 `/confirm` 二次确认 |
 | 公网搜索 | `web_search` 调用智谱 Web Search API 检索公开网页，返回标题、链接、发布时间与摘要，并作为引用展示；相同查询短期缓存、单会话与进程级调用配额，单聊与群聊均可用，可在控制台关闭 |
-| 隔离沙盒 | `sandbox_analyze_and_aggregate` 对工具返回的大批量数据做脚本化统计与聚合 |
+| 公网链接 | `web_fetch` 打开群聊或单聊中的公开网页链接，提取标题、描述与正文并生成引用；拒绝本机与内网地址，跟随跳转时重新校验，短时缓存与调用配额 |
+| 工作区文件 | `workspace_read_file` 读取消息附件或工作区内的文本文件（CSV/JSON/Markdown 等），带路径校验、二进制识别与字符截断 |
+| 隔离沙盒 | `sandbox_analyze_and_aggregate` 对工作区文件、消息附件或工具返回的大批量数据做脚本化统计与聚合，支持嵌套附件路径 |
 | 管理员工具 | 仅在管理员单聊中出现的管控指令，普通员工与群聊不可见 |
 
 #### 企业 MCP
@@ -688,15 +707,18 @@ sudo cp deploy/nginx.conf /etc/nginx/conf.d/ && sudo nginx -t && sudo systemctl 
 
 #### 钉钉 DWS
 
-启用后，机器人可以通过本机的 `dws` 命令行查询并办理文档、知识库、日历、待办、通讯录与审批等事务：
+启用后，机器人可以通过本机的 `dws` 命令行查询并办理文档、知识库、日历、待办、通讯录、审批、日志、听记与 AI 表格等事务：
 
 | 域 | 只读命令 | 写命令（需 `/confirm`） |
 | --- | --- | --- |
-| 文档 / 知识库 | `search`、`read`、`list`、`get` | — |
+| 文档 / 知识库 | `search`、`read`、`list`、`get` | `create`、`update`（追加 / 覆盖） |
 | 日历 | `event list`、`+today`、`+search-event`、`busy search` | `event create`、`event update`、`event delete` |
 | 待办 | `task list`、`task get`、`+due-today`、`+search` | `task create`、`task update`、`task done` |
 | 通讯录 | `search`、`get`、`list`、`self` | `user invite`、`user update` |
 | 审批 | `list-pending`、`list-submitted`、`detail`、`records`、`tasks`、`list-forms`、`search-forms`、`form-schema` | `create-instance`、`approve`、`reject` |
+| 日志 / 报告 | `template list`、`template get`、`inbox list`、`outbox list`、`entry get`、`entry stats`、`+report-latest` | `entry submit` |
+| AI 听记 | `list mine/shared/all`、`+latest`、`+search`、`get info/summary/transcription/keywords/todos`、`+action-items` | — |
+| AI 表格 | `base list/search/get`、`table get`、`field get`、`record query/stats/group-stats` | — |
 
 对应的模型工具：
 
@@ -709,10 +731,15 @@ sudo cp deploy/nginx.conf /etc/nginx/conf.d/ && sudo nginx -t && sudo systemctl 
 | `dws_todo_manage` | write | 创建 / 修改 / 完成待办，创建时执行人默认当前提问人 |
 | `dws_contact_manage` | write | 邀请员工或修改员工组织信息 |
 | `dws_approval_manage` | write | 发起、同意、拒绝审批 |
+| `dws_doc_manage` | write | 创建钉钉文档，或向已有文档追加 / 覆盖 Markdown；长正文自动写入临时文件 |
+| `dws_report_read` | read | 日志模版、收件箱、发件箱、单份正文与已读统计 |
+| `dws_report_submit` | write | 按模版提交日报 / 周报 / 月报，`contents` 字段名必须与模版一致 |
+| `dws_aitable` | read | AI 表格 Base、表、字段、记录查询与分组聚合统计 |
+| `dws_minutes` | read | AI 听记列表、摘要、转写、关键词、待办与行动项 |
 
-模型工具使用稳定的 action 名称（日历 `list` / `today` / `search` / `freebusy`，待办 `list` / `search` / `get` / `today`），再映射到上表的真实 CLI 子命令，避免 `dws` 升级后提示词漂移；`dws_org_and_schedule` 只接受只读 action，写操作必须走对应的专用写工具。
+模型工具使用稳定的 action 名称（日历 `list` / `today` / `search` / `freebusy`，待办 `list` / `search` / `get` / `today`，日志 `templates` / `template` / `inbox` / `outbox` / `entry` / `stats` / `latest`），再映射到上表的真实 CLI 子命令，避免 `dws` 升级后提示词漂移；`dws_org_and_schedule` 只接受只读 action，写操作必须走对应的专用写工具。
 
-写工具统一声明 `write` / `destructive`，会先进入「写操作确认」闸门：机器人展示参数与风险，用户回复 `/confirm` 后才真正执行；执行时携带 `--yes`，避免 CLI 在无终端环境中等待交互确认。
+写工具统一声明 `write` / `destructive`，会先进入「写操作确认」闸门：机器人展示参数与风险，用户回复 `/confirm` 后才真正执行；执行时携带 `--yes`，避免 CLI 在无终端环境中等待交互确认。文档覆盖（`overwrite`）还会要求显式 `confirmOverwrite=true`；提交日志必须至少提供一个接收人，否则日志对任何人都不可见。AI 表格单次记录查询上限 100 条、分组统计上限 1000 条，超出时建议缩小过滤范围或改用沙盒分析。
 
 使用前需要在运行机器上安装 `dws` CLI。所有业务查询和写操作都使用**提问人本人**的 DWS 身份，不再借用管理员账号；调用时不拼接 shell，单次调用有 15 秒超时与输出长度上限。
 
@@ -720,7 +747,7 @@ sudo cp deploy/nginx.conf /etc/nginx/conf.d/ && sudo nginx -t && sudo systemctl 
 
 - **独立 home**：每个员工在 `DWS_PROFILE_ROOT`（默认 `.state/dws-profiles`）下有独立的 `0700` 目录，设置 `DWS_CONFIG_DIR`、`XDG_DATA_HOME`，配置、日志、待绑定状态互不干扰；令牌由钉钉 CLI 按 `corpId:userId` profile 存入本机 macOS Keychain，每个员工独立一条，其他员工无法复用。`DWS_DISABLE_KEYCHAIN=1` 的 file-DEK 模式首次授权会因 `dek missing` 无法落盘，因此不启用。
 - **自动授权、无需记命令**：员工提问时如果令牌缺失或过期，机器人会自动记录当前版本的只读同意并发起该员工本人的设备码登录。单聊直接把授权链接与授权码发在对话里；群聊只通过私聊发给提问人，群里不回传链接和授权码。用户只需打开链接完成授权。`/dws-consent`、`/dws-login` 仍保留，用于员工主动查看范围或手动重发。
-- **默认只读**：自动同意的范围仅包含日程、待办、审批、通讯录、文档/知识库的只读查询。写操作（建日程、建待办、发审批、改通讯录）必须额外发送 `/dws-consent write`；工具层会在执行前拦截未授权的写调用。
+- **默认只读**：自动同意的范围仅包含日程、待办、审批、通讯录、文档/知识库、日志、听记与 AI 表格的只读查询。写操作（建日程、建待办、发审批、改通讯录、创建/更新文档、提交日志）必须额外发送 `/dws-consent write`；工具层会在执行前拦截未授权的写调用。
 - **身份校验**：登录完成后读取 `dws profile list`，只有 profile 的 `userId` 与当前钉钉 StaffId 一致才绑定；不一致会取消绑定并清空该员工的 home。配置 `DWS_CORP_ID` 时还会限定企业。
 - **授权完成自动续跑**：授权成功后自动通知原会话，并自动重跑刚才那条问题，无需用户重新提问；同一对话 2 分钟内不会重复推送授权链接。
 - **撤销**：`/dws-logout` 清除本机登录态但保留同意记录；`/dws-consent revoke` 同时撤销同意并删除加密凭据目录。
@@ -908,6 +935,8 @@ sudo cp deploy/nginx.conf /etc/nginx/conf.d/ && sudo nginx -t && sudo systemctl 
 | 凭据保护 | AppSecret、模型 API Key、MCP 请求头在接口与审计中只出现掩码，前端不可回读明文 |
 | 命令执行 | DWS 子命令白名单 + 参数校验；写操作必须经 `/confirm` 二次确认，取消日程等标记为高危 |
 | 技能与插件 | 技能只来自本地受控目录；插件是纯声明包，安装前校验清单、命令白名单与密钥占位，不执行安装脚本；插件技能与 MCP 节点使用独立命名空间，不能覆盖手工配置 |
+| 公网访问 | `web_fetch` 只允许 http/https 标准端口，固定 DNS 后连接并在每次跳转重新校验，拒绝本机、内网与保留地址；限制重定向次数、响应体大小与超时；网页内容按不可信数据处理，不执行其中指令 |
+| 工作区文件 | `workspace_read_file` 与沙盒数据加载只解析工作区内路径，真实路径校验防目录穿越与软链接逃逸；二进制与超大文件直接拒绝 |
 | 项目与 GitHub | 项目只读快照，敏感文件不入索引，`private` 项目限制单聊可见；GitHub 仅 HTTPS + 白名单主机且不跟随重定向，Token 只读环境变量，外部仓库内容按不可信数据处理 |
 | 代码执行 | 沙盒无网络、只读文件系统、内存与时长受限 |
 | 群内行为 | 旁听不响应、主动回复受冷却与置信度双重限制，支持一键静音 |

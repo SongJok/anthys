@@ -1,5 +1,4 @@
-import { readFile, stat } from 'node:fs/promises';
-import { join } from 'node:path';
+import { readFile } from 'node:fs/promises';
 import type {
   ExecutionContext,
   IToolProvider,
@@ -10,13 +9,16 @@ import type {
   WorkspacePaths,
 } from '../../types/mcp-and-sandbox.js';
 import {
+  resolveWorkspaceFile,
+  WorkspaceFileError,
+} from '../workspace/WorkspaceFileResolver.js';
+import {
   IsolatedSandbox,
   type IsolatedSandboxOptions,
   type SandboxLanguage,
 } from './IsolatedSandbox.js';
 
 const LANGUAGES = ['javascript', 'python', 'bash'] as const;
-const DATASET_KEY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const DEFAULT_MAX_DATASET_BYTES = 32 * 1024 * 1024;
 
 export interface SandboxToolProviderOptions {
@@ -74,18 +76,26 @@ export class SandboxToolProvider implements IToolProvider {
   ): Promise<Record<string, unknown>> {
     const datasets: Record<string, unknown> = { ...inline };
     for (const key of keys) {
-      if (!DATASET_KEY_PATTERN.test(key) || key.includes('..')) {
-        throw new Error(`非法的数据集 key: "${key}"`);
-      }
       if (!this.workspace) {
         throw new Error('沙盒未配置工作区，无法按 datasetKeys 加载数据');
       }
-      const path = join(this.workspace.hostDir, key);
-      const info = await stat(path).catch(() => undefined);
-      if (!info || !info.isFile()) {
-        throw new Error(`数据集不存在: ${key}`);
+      let path: string;
+      let size: number;
+      try {
+        const file = await resolveWorkspaceFile(
+          key,
+          this.workspace.hostDir,
+        );
+        path = file.absolutePath;
+        size = file.size;
+      } catch (error) {
+        throw new Error(
+          error instanceof WorkspaceFileError
+            ? error.message
+            : `无法加载数据集 ${key}`,
+        );
       }
-      if (info.size > this.maxDatasetBytes) {
+      if (size > this.maxDatasetBytes) {
         throw new Error(
           `数据集 ${key} 超过 ${this.maxDatasetBytes} 字节上限`,
         );
@@ -107,7 +117,7 @@ export class SandboxToolProvider implements IToolProvider {
         '在隔离沙盒中执行分析脚本，用于日志正则提取、异常堆栈聚类、多表 Join、同比/环比与统计汇总。' +
         'javascript 模式（默认）无需任何依赖，脚本可直接使用全局变量 datasets 与 loadDataset(key)，把最终结果赋值给 result，console.log 的内容会一并返回；' +
         'python/bash 会进入无网络、只读文件系统的受限 Docker 容器，脚本可读取 /workspace/datasets.json，python 额外提供 datasets 与 load_dataset(key)。' +
-        'MCP 大结果被卸载后，用 datasetKeys 传入返回的 datasetKey 即可加载完整数据。',
+        'MCP 大结果被卸载后，用 datasetKeys 传入返回的 datasetKey 即可加载完整数据；用户上传的 csv / json / txt 附件也可以直接用其工作区路径作为 datasetKeys。',
       parametersJsonSchema: {
         type: 'object',
         properties: {
@@ -125,7 +135,7 @@ export class SandboxToolProvider implements IToolProvider {
             type: 'array',
             items: { type: 'string' },
             description:
-              '需要挂载的数据集 key（来自 MCP 卸载结果中的 datasetKey），从沙盒工作区读取',
+              '需要挂载的数据集 key（MCP 卸载结果中的 datasetKey，或用户附件在工作区内的相对/绝对路径），从沙盒工作区读取',
           },
           inputDatasets: {
             type: 'object',

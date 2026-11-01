@@ -67,7 +67,7 @@ export function renderAttachmentSection(
     );
   }
   lines.push(
-    '说明：可借助沙盒或 DWS 工具读取上述本地路径；回答时直接说明附件结论，无需复述路径。',
+    '说明：文本/CSV/JSON/Markdown 附件可用 workspace_read_file 读取，整表分析可把路径传给 sandbox_analyze_and_aggregate 的 datasetKeys；回答时直接说明附件结论，无需复述路径。',
   );
   return lines.join('\n');
 }

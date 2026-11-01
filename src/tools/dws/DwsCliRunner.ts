@@ -8,7 +8,7 @@ export const DWS_SUBCOMMAND_WHITELIST: Record<
   DwsDomain,
   readonly string[]
 > = {
-  doc: ['search', 'read', 'list', 'get'],
+  doc: ['search', 'read', 'list', 'get', 'create', 'update'],
   wiki: ['search', 'read', 'list', 'get'],
   calendar: [
     'event list',
@@ -48,6 +48,39 @@ export const DWS_SUBCOMMAND_WHITELIST: Record<
     'reject',
     'revoke',
   ],
+  report: [
+    'template list',
+    'template get',
+    'inbox list',
+    'outbox list',
+    'entry get',
+    'entry stats',
+    'entry submit',
+    '+report-latest',
+  ],
+  minutes: [
+    'list mine',
+    'list shared',
+    'list all',
+    'get info',
+    'get summary',
+    'get transcription',
+    'get keywords',
+    'get todos',
+    '+latest',
+    '+search',
+    '+action-items',
+  ],
+  aitable: [
+    'base list',
+    'base search',
+    'base get',
+    'table get',
+    'field get',
+    'record query',
+    'record stats',
+    'record group-stats',
+  ],
 };
 
 /** 部分域在 CLI 中的真实命令前缀与 domain 名不一致 */
@@ -58,6 +91,9 @@ const DOMAIN_COMMAND_PREFIX: Record<DwsDomain, readonly string[]> = {
   todo: ['todo'],
   contact: ['contact'],
   approval: ['oa', 'approval'],
+  report: ['report'],
+  minutes: ['minutes'],
+  aitable: ['aitable'],
 };
 
 const DOMAINS = Object.keys(DWS_SUBCOMMAND_WHITELIST) as DwsDomain[];

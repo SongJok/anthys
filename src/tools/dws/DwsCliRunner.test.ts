@@ -321,6 +321,11 @@ describe('DwsCliToolProvider', () => {
       'dws_todo_manage',
       'dws_contact_manage',
       'dws_approval_manage',
+      'dws_doc_manage',
+      'dws_report_read',
+      'dws_report_submit',
+      'dws_aitable',
+      'dws_minutes',
     ]);
     const risks = Object.fromEntries(
       tools.map((tool) => [tool.name, tool.risk]),

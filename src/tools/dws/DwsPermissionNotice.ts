@@ -42,6 +42,21 @@ export const DWS_PERMISSION_GUIDES: Record<DwsDomain, DwsPermissionGuide> = {
       'Workflow.Form.Write',
     ],
   },
+  report: {
+    label: '日志读写权限',
+    keyword: '日志',
+    scopes: [],
+  },
+  minutes: {
+    label: 'AI 听记读取权限',
+    keyword: '听记',
+    scopes: [],
+  },
+  aitable: {
+    label: 'AI 表格读取权限',
+    keyword: 'AI 表格',
+    scopes: [],
+  },
 };
 
 /** 应用/接口级权限点缺失，任何域都值得通知管理员 */

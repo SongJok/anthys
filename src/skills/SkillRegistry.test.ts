@@ -111,11 +111,18 @@ describe('SkillRegistry', () => {
     const definitions = await registry.scan();
     expect(definitions.map((item) => item.name).sort()).toEqual([
       'code-reading',
+      'data-analysis',
+      'dingtalk-office',
+      'everyday-chat',
       'github-project-scan',
       'handbook-maintainer',
       'incident-triage',
+      'link-reader',
+      'project-docs',
       'project-onboarding',
       'repo-review',
+      'research-brief',
+      'work-report',
     ]);
     expect(definitions.every((item) => !item.loadError)).toBe(true);
     expect(definitions.every((item) => item.body.length > 0)).toBe(true);

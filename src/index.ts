@@ -35,6 +35,7 @@ import { AttachmentStore } from './multimodal/AttachmentStore.js';
 import { enrichInboundMessage } from './multimodal/MessageEnricher.js';
 import { OpenAiVisionDescriber } from './multimodal/VisionDescriber.js';
 import { ArtifactToolProvider } from './tools/artifacts/ArtifactToolProvider.js';
+import { WorkspaceReadToolProvider } from './tools/workspace/WorkspaceReadToolProvider.js';
 import type { CardActionEvent } from './dingtalk/CardActions.js';
 import {
   AgentHarness,
@@ -99,6 +100,8 @@ import { GlossaryService } from './glossary/GlossaryService.js';
 import { GlossaryToolProvider } from './tools/glossary/GlossaryToolProvider.js';
 import { WebSearchClient } from './tools/web/WebSearchClient.js';
 import { WebSearchToolProvider } from './tools/web/WebSearchToolProvider.js';
+import { WebFetchClient } from './tools/web/WebFetchClient.js';
+import { WebFetchToolProvider } from './tools/web/WebFetchToolProvider.js';
 import { OpenAIEmbeddingClient } from './memory/EmbeddingClient.js';
 import { createChatModel } from './react/createChatModel.js';
 import { ReActRunner } from './react/ReActRunner.js';
@@ -237,6 +240,11 @@ function envSeconds(raw: string | undefined, fallbackSeconds: number): number {
 function envCount(raw: string | undefined, fallback: number): number {
   const value = Number(raw);
   return Number.isFinite(value) && value >= 0 ? value : fallback;
+}
+
+function envBool(raw: string | undefined, fallback: boolean): boolean {
+  if (raw === undefined || raw.trim() === '') return fallback;
+  return !['0', 'false', 'no', 'off'].includes(raw.trim().toLowerCase());
 }
 
 async function runWithTimeout<T>(
@@ -959,6 +967,42 @@ async function main(): Promise<void> {
       'web search configuration resolved',
     );
 
+    const webFetchEnabled = envBool(process.env.WEB_FETCH_ENABLED, true);
+    const webFetchProvider = webFetchEnabled
+      ? new WebFetchToolProvider({
+          client: new WebFetchClient({
+            timeoutMs: envSeconds(process.env.WEB_FETCH_TIMEOUT_MS, 12),
+            maxBytes: envMegabytes(process.env.WEB_FETCH_MAX_MB, 2),
+          }),
+          logger: harnessLogger,
+          metrics,
+          cacheTtlSeconds: envCount(
+            process.env.WEB_FETCH_CACHE_TTL_SECONDS,
+            600,
+          ),
+          maxCallsPerHour: envCount(
+            process.env.WEB_FETCH_MAX_CALLS_PER_HOUR,
+            20,
+          ),
+          dailyLimit: envCount(process.env.WEB_FETCH_DAILY_LIMIT, 300),
+          defaultMaxChars: envCount(process.env.WEB_FETCH_MAX_CHARS, 2_500),
+        })
+      : undefined;
+    logger.info(
+      {
+        enabled: webFetchEnabled,
+        timeoutMs: envSeconds(process.env.WEB_FETCH_TIMEOUT_MS, 12) * 1_000,
+        maxBytes: envMegabytes(process.env.WEB_FETCH_MAX_MB, 2),
+        cacheTtlSeconds: envCount(process.env.WEB_FETCH_CACHE_TTL_SECONDS, 600),
+        maxCallsPerHour: envCount(
+          process.env.WEB_FETCH_MAX_CALLS_PER_HOUR,
+          20,
+        ),
+        dailyLimit: envCount(process.env.WEB_FETCH_DAILY_LIMIT, 300),
+      },
+      'web fetch configuration resolved',
+    );
+
     toolRegistry = await ToolRegistry.create({
       mcpServers: await mergeMcpServers(),
       enableDws: configCenter.getSystemConfig().dingtalk.dwsCliEnabled,
@@ -1004,6 +1048,7 @@ async function main(): Promise<void> {
         ? { dwsBinary: process.env.DWS_BINARY.trim() }
         : {}),
       ...(webSearchProvider ? { webSearchProvider } : {}),
+      ...(webFetchProvider ? { webFetchProvider } : {}),
       adminProvider,
       glossaryProvider: new GlossaryToolProvider({
         service: glossary,
@@ -1032,6 +1077,8 @@ async function main(): Promise<void> {
       personalAssistantProvider: new PersonalAssistantToolProvider({
         service: personalAssistant,
       }),
+      workspaceReadProvider: (workspace) =>
+        new WorkspaceReadToolProvider({ workspace }),
       ...(artifactDeliveryEnabled
         ? {
             artifactProvider: (workspace) => {

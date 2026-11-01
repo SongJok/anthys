@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -250,6 +250,12 @@ describe('SandboxToolProvider', () => {
       'raw log line 1\nraw log line 2\n',
       'utf8',
     );
+    await mkdir(join(workDir, 'attachments', 'msg-1'), { recursive: true });
+    await writeFile(
+      join(workDir, 'attachments', 'msg-1', '0-orders.csv'),
+      'id,amount\n1,10\n2,20\n',
+      'utf8',
+    );
   });
 
   afterAll(async () => {
@@ -332,6 +338,29 @@ describe('SandboxToolProvider', () => {
     expect(failed.hint).toContain('不要臆测');
   });
 
+  it('支持加载附件目录下的嵌套文件', async () => {
+    const provider = new SandboxToolProvider({
+      workspace: { hostDir: workDir, sandboxDir: '/workspace' },
+    });
+    const tool = await findTool('sandbox_analyze_and_aggregate', provider);
+    const output = JSON.parse(
+      await tool.execute(
+        {
+          language: 'javascript',
+          datasetKeys: ['attachments/msg-1/0-orders.csv'],
+          code: `
+            const rows = datasets['attachments/msg-1/0-orders.csv']
+              .trim().split('\\n').slice(1);
+            result = rows.reduce((sum, row) => sum + Number(row.split(',')[1]), 0);
+          `,
+        },
+        ctx,
+      ),
+    ) as { exitCode: number; stdout: string };
+    expect(output.exitCode).toBe(0);
+    expect(parseStdout(output.stdout).result).toBe(30);
+  });
+
   it('拒绝路径穿越与缺失的数据集', async () => {
     const provider = new SandboxToolProvider({
       workspace: { hostDir: workDir, sandboxDir: '/workspace' },
@@ -342,13 +371,13 @@ describe('SandboxToolProvider', () => {
         { language: 'javascript', datasetKeys: ['../secret.json'], code: '1' },
         ctx,
       ),
-    ).rejects.toThrow('非法的数据集 key');
+    ).rejects.toThrow('只能读取工作区内的文件');
     await expect(
       tool.execute(
         { language: 'javascript', datasetKeys: ['nope.json'], code: '1' },
         ctx,
       ),
-    ).rejects.toThrow('数据集不存在');
+    ).rejects.toThrow('文件不存在');
     const withoutWorkspace = new SandboxToolProvider();
     const orphanTool = await findTool(
       'sandbox_analyze_and_aggregate',

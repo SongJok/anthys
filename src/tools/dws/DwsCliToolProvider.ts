@@ -1,3 +1,6 @@
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type {
   ExecutionContext,
   IToolProvider,
@@ -56,6 +59,7 @@ const ORG_ACTIONS = [
 const AUTH_FAILURE_HINT =
   /登录|授权|auth|token|expired|unauth|401|403|未登录|过期|失效/i;
 const PERMISSION_NOTICE_INTERVAL_MS = 10 * 60_000;
+const MAX_CONTENT_CHARS = 30_000;
 
 type DocTarget = (typeof DOC_TARGETS)[number];
 type DocAction = (typeof DOC_ACTIONS)[number];
@@ -199,6 +203,54 @@ function optionalPage(args: Record<string, unknown>): number {
   return Math.floor(page);
 }
 
+function optionalInteger(
+  args: Record<string, unknown>,
+  key: string,
+  label: string,
+  min: number,
+  max: number,
+): number | undefined {
+  const value = args[key];
+  if (value === undefined || value === null) return undefined;
+  const number = typeof value === 'number' ? value : Number(value);
+  if (!Number.isInteger(number) || number < min || number > max) {
+    throw new Error(`参数 ${key}（${label}）必须是 ${min}-${max} 的整数`);
+  }
+  return number;
+}
+
+/** 接受对象/数组或 JSON 字符串，校验后统一序列化为 CLI 需要的 JSON 字符串 */
+function optionalJsonFlag(
+  args: Record<string, unknown>,
+  key: string,
+  label: string,
+  expected: 'object' | 'array',
+): string | undefined {
+  const value = args[key];
+  if (value === undefined || value === null) return undefined;
+  let parsed: unknown = value;
+  if (typeof value === 'string') {
+    if (value.trim() === '') return undefined;
+    try {
+      parsed = JSON.parse(value);
+    } catch {
+      throw new Error(`参数 ${key}（${label}）必须是合法 JSON`);
+    }
+  }
+  const valid =
+    expected === 'array'
+      ? Array.isArray(parsed)
+      : Boolean(parsed) && typeof parsed === 'object' && !Array.isArray(parsed);
+  if (!valid) {
+    throw new Error(`参数 ${key}（${label}）必须是 JSON ${expected === 'array' ? '数组' : '对象'}`);
+  }
+  const text = JSON.stringify(parsed);
+  if (text.length > 1_900) {
+    throw new Error(`参数 ${key}（${label}）过长，请减少条件后重试`);
+  }
+  return text;
+}
+
 function formatResult(
   request: DwsCommandRequest,
   result: DwsRunResult,
@@ -262,6 +314,11 @@ export class DwsCliToolProvider implements IToolProvider {
       this.todoManageTool(),
       this.contactManageTool(),
       this.approvalManageTool(),
+      this.docManageTool(),
+      this.reportReadTool(),
+      this.reportSubmitTool(),
+      this.aitableTool(),
+      this.minutesTool(),
     ];
   }
 
@@ -335,6 +392,36 @@ export class DwsCliToolProvider implements IToolProvider {
       return this.permissionPrompt(ctx, toolName, request, result);
     }
     return formatResult(request, result);
+  }
+
+  /** 长内容先写入临时文件，避免超出单个 flag 长度上限，也避免 shell 转义问题 */
+  private async executeWithFile(
+    ctx: ExecutionContext,
+    toolName: string,
+    request: DwsCommandRequest,
+    page: number,
+    write: boolean,
+    fileFlag: 'content-file' | 'contents-file',
+    content: string,
+    extension: 'md' | 'json',
+  ): Promise<string> {
+    const dir = await mkdtemp(join(tmpdir(), 'dws-content-'));
+    const file = join(dir, `payload.${extension}`);
+    try {
+      await writeFile(file, content, 'utf8');
+      return await this.execute(
+        ctx,
+        toolName,
+        {
+          ...request,
+          flags: { ...request.flags, [fileFlag]: file },
+        },
+        page,
+        write,
+      );
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   }
 
   /**
@@ -1312,6 +1399,780 @@ export class DwsCliToolProvider implements IToolProvider {
         }
 
         throw new Error(`action 只允许 create、approve 或 reject，收到: ${action}`);
+      },
+    };
+  }
+
+  private docManageTool(): ToolDefinition {
+    return {
+      name: 'dws_doc_manage',
+      description:
+        '创建钉钉在线文档，或向已有文档追加/覆盖 Markdown 内容（写操作）。action=create 需要 name 与 content，可选 folder（文件夹 nodeId）或 workspace（知识库 ID）；action=append 需要 documentId 与 content，只在文档末尾追加；action=overwrite 会清空原文，必须额外传 confirmOverwrite=true，并建议先用 dws_doc_search_and_read 备份正文。长内容自动写入临时文件传给 DWS。请直接调用本工具提交：系统会登记为待确认动作并提示用户回复 /confirm；不要只输出文字确认或编造文档链接。',
+      risk: 'write',
+      source: 'dws',
+      parametersJsonSchema: {
+        type: 'object',
+        properties: {
+          action: {
+            type: 'string',
+            enum: ['create', 'append', 'overwrite'],
+            description: 'create 新建 / append 末尾追加 / overwrite 整篇覆盖（危险）',
+          },
+          name: { type: 'string', description: '文档标题，create 时必填' },
+          documentId: {
+            type: 'string',
+            description: '文档 ID 或 URL，append/overwrite 时必填',
+          },
+          content: {
+            type: 'string',
+            description: 'Markdown 正文，最多 30000 字符',
+          },
+          folder: {
+            type: 'string',
+            description: '目标文件夹 nodeId，create 时可选',
+          },
+          workspace: {
+            type: 'string',
+            description: '目标知识库 ID，create 时可选',
+          },
+          confirmOverwrite: {
+            type: 'boolean',
+            description: 'overwrite 时必须显式传 true，表示确认清空原内容',
+          },
+        },
+        required: ['action', 'content'],
+        additionalProperties: false,
+      },
+      execute: async (args, ctx) => {
+        const action = requireString(args, 'action', '操作');
+        const content = requireString(args, 'content', '文档内容');
+        if (content.length > MAX_CONTENT_CHARS) {
+          throw new Error(
+            `文档内容过长（${content.length} 字符），请控制在 ${MAX_CONTENT_CHARS} 字符以内，可分段追加`,
+          );
+        }
+        const name = optionalString(args, 'name');
+        const documentId = optionalString(args, 'documentId');
+        const folder = optionalString(args, 'folder');
+        const workspace = optionalString(args, 'workspace');
+
+        if (action === 'create') {
+          if (!name) throw new Error('action=create 时必须提供 name');
+          const flags: DwsCommandRequest['flags'] = {
+            name,
+            'content-format': 'markdown',
+          };
+          if (folder) flags.folder = folder;
+          if (workspace) flags.workspace = workspace;
+          return this.executeWithFile(
+            ctx,
+            'dws_doc_manage',
+            {
+              domain: 'doc',
+              subcommand: 'create',
+              flags,
+              operatorStaffId: ctx.senderStaffId,
+            },
+            optionalPage(args),
+            true,
+            'content-file',
+            content,
+            'md',
+          );
+        }
+
+        if (action !== 'append' && action !== 'overwrite') {
+          throw new Error(
+            `action 只允许 create、append 或 overwrite，收到: ${action}`,
+          );
+        }
+        if (!documentId) {
+          throw new Error(`action=${action} 时必须提供 documentId`);
+        }
+        const flags: DwsCommandRequest['flags'] = {
+          node: documentId,
+          mode: action,
+          'content-format': 'markdown',
+        };
+        if (action === 'overwrite') {
+          if (args.confirmOverwrite !== true) {
+            throw new Error(
+              'overwrite 会清空原文档，必须显式传 confirmOverwrite=true；如需保留原文请改用 append',
+            );
+          }
+          flags.yes = true;
+        }
+        return this.executeWithFile(
+          ctx,
+          'dws_doc_manage',
+          {
+            domain: 'doc',
+            subcommand: 'update',
+            flags,
+            operatorStaffId: ctx.senderStaffId,
+          },
+          optionalPage(args),
+          true,
+          'content-file',
+          content,
+          'md',
+        );
+      },
+    };
+  }
+
+  private reportReadTool(): ToolDefinition {
+    return {
+      name: 'dws_report_read',
+      description:
+        '只读查询钉钉日志（OA 周报应用）：templates 列出可用模版，template 读取模版字段，inbox 查我收到的日志，outbox 查我发出的日志，entry 读取单份正文，stats 读取已读统计，latest 读取我最近提交的日志。时间使用 ISO-8601（如 2026-03-10T00:00:00+08:00）；inbox 必须提供 start 与 end；outbox 查询跨度最多 20 天。提交日志请使用 dws_report_submit。',
+      risk: 'read',
+      source: 'dws',
+      parametersJsonSchema: {
+        type: 'object',
+        properties: {
+          action: {
+            type: 'string',
+            enum: [
+              'templates',
+              'template',
+              'inbox',
+              'outbox',
+              'entry',
+              'stats',
+              'latest',
+            ],
+          },
+          templateName: {
+            type: 'string',
+            description: '日志模版名称，action=template 时必填，outbox 可按它过滤',
+          },
+          reportId: {
+            type: 'string',
+            description: '日志 ID，action=entry/stats 时必填（来自 inbox/outbox）',
+          },
+          start: { type: 'string', description: '开始时间 ISO-8601' },
+          end: { type: 'string', description: '结束时间 ISO-8601' },
+          senderUserIds: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'inbox 按发送人过滤的 staffId 列表',
+          },
+          keyword: {
+            type: 'string',
+            description: 'action=latest 时按模版名称精确过滤',
+          },
+          cursor: {
+            type: 'integer',
+            minimum: 0,
+            description: 'inbox/outbox 分页游标，首次传 0',
+          },
+          size: {
+            type: 'integer',
+            minimum: 1,
+            maximum: 20,
+            description: 'inbox/outbox 每页条数，最大 20',
+          },
+          page: {
+            type: 'integer',
+            minimum: 1,
+            description: '输出分页页码，默认 1',
+          },
+        },
+        required: ['action'],
+        additionalProperties: false,
+      },
+      execute: async (args, ctx) => {
+        const action = requireString(args, 'action', '操作');
+        const templateName = optionalString(args, 'templateName');
+        const reportId = optionalString(args, 'reportId');
+        const start = optionalString(args, 'start');
+        const end = optionalString(args, 'end');
+        const keyword = optionalString(args, 'keyword');
+        const senderUserIds = optionalStringList(
+          args,
+          'senderUserIds',
+          '发送人',
+        );
+        const cursor = optionalInteger(args, 'cursor', '分页游标', 0, 1e9);
+        const size = optionalInteger(args, 'size', '每页条数', 1, 20);
+        const flags: DwsCommandRequest['flags'] = {};
+
+        let subcommand: string;
+        switch (action) {
+          case 'templates':
+            subcommand = 'template list';
+            break;
+          case 'template':
+            if (!templateName) {
+              throw new Error('action=template 时必须提供 templateName');
+            }
+            subcommand = 'template get';
+            flags.name = templateName;
+            break;
+          case 'inbox':
+            if (!start || !end) {
+              throw new Error('action=inbox 时必须提供 start 与 end');
+            }
+            subcommand = 'inbox list';
+            flags.start = start;
+            flags.end = end;
+            if (senderUserIds) {
+              flags['sender-user-ids'] = senderUserIds.join(',');
+            }
+            if (cursor !== undefined) flags.cursor = cursor;
+            if (size !== undefined) flags.size = size;
+            break;
+          case 'outbox':
+            if ((start && !end) || (!start && end)) {
+              throw new Error('action=outbox 的 start 与 end 必须同时提供');
+            }
+            subcommand = 'outbox list';
+            if (start) flags.start = start;
+            if (end) flags.end = end;
+            if (templateName) flags['template-name'] = templateName;
+            if (cursor !== undefined) flags.cursor = cursor;
+            if (size !== undefined) flags.size = size;
+            break;
+          case 'entry':
+          case 'stats':
+            if (!reportId) {
+              throw new Error(`action=${action} 时必须提供 reportId`);
+            }
+            subcommand = action === 'entry' ? 'entry get' : 'entry stats';
+            flags['report-id'] = reportId;
+            break;
+          case 'latest':
+            if ((start && !end) || (!start && end)) {
+              throw new Error('action=latest 的 start 与 end 必须同时提供');
+            }
+            subcommand = '+report-latest';
+            if (start) flags.start = start;
+            if (end) flags.end = end;
+            if (keyword) flags.keyword = keyword;
+            break;
+          default:
+            throw new Error(
+              `action 只允许 templates、template、inbox、outbox、entry、stats、latest，收到: ${action}`,
+            );
+        }
+
+        return this.execute(
+          ctx,
+          'dws_report_read',
+          {
+            domain: 'report',
+            subcommand,
+            flags,
+            operatorStaffId: ctx.senderStaffId,
+          },
+          optionalPage(args),
+        );
+      },
+    };
+  }
+
+  private reportSubmitTool(): ToolDefinition {
+    return {
+      name: 'dws_report_submit',
+      description:
+        '按钉钉日志模版提交一份日报/周报（写操作）。先调用 dws_report_read 的 templates/template 取得 templateId 与字段定义；contents 中每项的 key 必须等于模版字段名，content 为字段正文；toUserIds 至少一个接收人，否则日志对任何人都不可见。请直接调用本工具提交：系统会登记为待确认动作并提示用户回复 /confirm；不要只输出文字确认或编造提交结果。',
+      risk: 'write',
+      source: 'dws',
+      parametersJsonSchema: {
+        type: 'object',
+        properties: {
+          templateId: {
+            type: 'string',
+            description: '日志模版 ID（来自 dws_report_read templates）',
+          },
+          contents: {
+            type: 'array',
+            description:
+              '字段内容数组，每项至少包含 key 与 content，可选 sort/contentType/type，例如 [{"key":"今日完成","content":"..."}]',
+            items: {
+              type: 'object',
+              properties: {
+                key: { type: 'string', description: '模版字段名' },
+                content: { type: 'string', description: '字段正文（Markdown）' },
+                sort: { type: 'string', description: '排序值，默认按数组顺序' },
+                contentType: {
+                  type: 'string',
+                  description: '内容类型，默认 markdown',
+                },
+                type: {
+                  type: 'string',
+                  description: '字段类型，默认 1',
+                },
+              },
+              required: ['key', 'content'],
+            },
+          },
+          toUserIds: {
+            type: 'array',
+            items: { type: 'string' },
+            description: '日志接收人 userId 列表，至少一个',
+          },
+          toChat: {
+            type: 'boolean',
+            description: '是否同时发送到接收人单聊，默认 false',
+          },
+          page: {
+            type: 'integer',
+            minimum: 1,
+            description: '输出分页页码，默认 1',
+          },
+        },
+        required: ['templateId', 'contents', 'toUserIds'],
+        additionalProperties: false,
+      },
+      execute: async (args, ctx) => {
+        const templateId = requireString(args, 'templateId', '模版 ID');
+        const toUserIds = optionalStringList(args, 'toUserIds', '接收人');
+        if (!toUserIds || toUserIds.length === 0) {
+          throw new Error('toUserIds 至少需要一个接收人 userId');
+        }
+        const rawContents = args.contents;
+        if (!Array.isArray(rawContents) || rawContents.length === 0) {
+          throw new Error('contents 必须是非空数组');
+        }
+        const contents = rawContents.map((item, index) => {
+          if (!item || typeof item !== 'object' || Array.isArray(item)) {
+            throw new Error(`contents[${index}] 必须是对象`);
+          }
+          const record = item as Record<string, unknown>;
+          const key = typeof record.key === 'string' ? record.key.trim() : '';
+          const content =
+            typeof record.content === 'string' ? record.content : '';
+          if (!key || !content.trim()) {
+            throw new Error(`contents[${index}] 必须包含非空的 key 与 content`);
+          }
+          const sort =
+            record.sort === undefined ? String(index) : String(record.sort);
+          const contentType =
+            typeof record.contentType === 'string' &&
+            record.contentType.trim() !== ''
+              ? record.contentType.trim()
+              : 'markdown';
+          const type =
+            record.type === undefined ? '1' : String(record.type);
+          return { key, sort, content, contentType, type };
+        });
+        const payload = JSON.stringify(contents);
+        if (payload.length > MAX_CONTENT_CHARS * 4) {
+          throw new Error('日志内容过长，请精简后再提交');
+        }
+        const flags: DwsCommandRequest['flags'] = {
+          'template-id': templateId,
+          'to-user-ids': toUserIds.join(','),
+          yes: true,
+        };
+        if (args.toChat === true) flags['to-chat'] = true;
+
+        return this.executeWithFile(
+          ctx,
+          'dws_report_submit',
+          {
+            domain: 'report',
+            subcommand: 'entry submit',
+            flags,
+            operatorStaffId: ctx.senderStaffId,
+          },
+          optionalPage(args),
+          true,
+          'contents-file',
+          payload,
+          'json',
+        );
+      },
+    };
+  }
+
+  private aitableTool(): ToolDefinition {
+    return {
+      name: 'dws_aitable',
+      description:
+        '只读查询钉钉 AI 表格（多维表）：base_list/base_search 找 Base，base_get 看表目录，table_get 看字段与视图，field_get 展开字段配置，record_query 查记录（支持 filters/sort/keyword/recordIds），record_stats 做 COUNT/SUM/AVG 等标量统计，record_group_stats 做分组与 DISTINCT 统计。数值比较的过滤值必须是 JSON 数字；单选/多选过滤使用选项名称字面量。写记录请使用对应的企业 MCP 或 DWS 写工具。',
+      risk: 'read',
+      source: 'dws',
+      parametersJsonSchema: {
+        type: 'object',
+        properties: {
+          action: {
+            type: 'string',
+            enum: [
+              'base_list',
+              'base_search',
+              'base_get',
+              'table_get',
+              'field_get',
+              'record_query',
+              'record_stats',
+              'record_group_stats',
+            ],
+          },
+          baseId: {
+            type: 'string',
+            description: 'Base ID（base_list/base_search 返回）',
+          },
+          tableId: {
+            type: 'string',
+            description: '数据表 ID（base_get/table_get 返回）',
+          },
+          tableIds: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'table_get 指定表 ID 列表，最多 10 个；省略返回全部表',
+          },
+          fieldIds: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'field_get 或 record_query 要返回的字段 ID，最多 100 个',
+          },
+          recordIds: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'record_query 按记录 ID 精准取数，最多 100 个',
+          },
+          query: {
+            type: 'string',
+            description: 'base_search 的关键词，或 record_query 的全文关键词',
+          },
+          cursor: { type: 'string', description: '分页游标，首次不传' },
+          limit: {
+            type: 'integer',
+            minimum: 1,
+            description: '返回条数：base_list 最大 10，record_query 最大 100，group_stats 最大 1000',
+          },
+          filters: {
+            type: 'object',
+            description:
+              '结构化过滤 JSON，例如 {"operator":"and","operands":[{"operator":"eq","operands":["fldX","值"]}]}',
+          },
+          sort: {
+            type: 'array',
+            description:
+              '排序 JSON 数组，例如 [{"fieldId":"fldX","direction":"desc"}]',
+          },
+          stats: {
+            type: 'array',
+            description:
+              '统计项数组。record_stats 用大写 statsType（如 {"fieldId":"fldAmount","statsType":"SUM"}）；record_group_stats 用小写（如 sum、distinct）',
+          },
+          group: {
+            type: 'array',
+            description:
+              '分组字段数组，用于 record_group_stats，例如 [{"fieldId":"fldCategory","direction":"ASC","arraySplitMode":true}]',
+          },
+          keyword: {
+            type: 'string',
+            description: 'record_stats 的全文关键词',
+          },
+          page: {
+            type: 'integer',
+            minimum: 1,
+            description: '输出分页页码，默认 1',
+          },
+        },
+        required: ['action'],
+        additionalProperties: false,
+      },
+      execute: async (args, ctx) => {
+        const action = requireString(args, 'action', '操作');
+        const baseId = optionalString(args, 'baseId');
+        const tableId = optionalString(args, 'tableId');
+        const query = optionalString(args, 'query');
+        const cursor = optionalString(args, 'cursor');
+        const keyword = optionalString(args, 'keyword');
+        const tableIds = optionalStringList(args, 'tableIds', '数据表 ID');
+        const fieldIds = optionalStringList(args, 'fieldIds', '字段 ID');
+        const recordIds = optionalStringList(args, 'recordIds', '记录 ID');
+        const filters = optionalJsonFlag(args, 'filters', '过滤条件', 'object');
+        const sort = optionalJsonFlag(args, 'sort', '排序条件', 'array');
+        const stats = optionalJsonFlag(args, 'stats', '统计项', 'array');
+        const group = optionalJsonFlag(args, 'group', '分组字段', 'array');
+        const limit = optionalInteger(args, 'limit', '返回条数', 1, 1_000);
+
+        for (const [name, value] of [
+          ['tableIds', tableIds],
+          ['fieldIds', fieldIds],
+          ['recordIds', recordIds],
+        ] as const) {
+          if (value && value.length > 100) {
+            throw new Error(`参数 ${name} 最多 100 项`);
+          }
+        }
+
+        const flags: DwsCommandRequest['flags'] = {};
+        const requireBase = () => {
+          if (!baseId) throw new Error(`action=${action} 必须提供 baseId`);
+          flags['base-id'] = baseId;
+        };
+        const requireTable = () => {
+          if (!tableId) throw new Error(`action=${action} 必须提供 tableId`);
+          flags['table-id'] = tableId;
+        };
+
+        let subcommand: string;
+        switch (action) {
+          case 'base_list':
+            if (limit !== undefined && limit > 10) {
+              throw new Error('base_list 的 limit 最大为 10');
+            }
+            subcommand = 'base list';
+            if (limit !== undefined) flags.limit = limit;
+            if (cursor) flags.cursor = cursor;
+            break;
+          case 'base_search':
+            if (!query) {
+              throw new Error('action=base_search 必须提供 query');
+            }
+            subcommand = 'base search';
+            flags.query = query;
+            if (cursor) flags.cursor = cursor;
+            break;
+          case 'base_get':
+            requireBase();
+            subcommand = 'base get';
+            break;
+          case 'table_get':
+            requireBase();
+            if (tableIds) {
+              if (tableIds.length > 10) {
+                throw new Error('table_get 的 tableIds 最多 10 个');
+              }
+              flags['table-ids'] = tableIds.join(',');
+            }
+            subcommand = 'table get';
+            break;
+          case 'field_get':
+            requireBase();
+            requireTable();
+            if (fieldIds) flags['field-ids'] = fieldIds.join(',');
+            subcommand = 'field get';
+            break;
+          case 'record_query': {
+            requireBase();
+            requireTable();
+            if (limit !== undefined && limit > 100) {
+              throw new Error('record_query 的 limit 最大为 100');
+            }
+            if (query) flags.query = query;
+            if (fieldIds) flags['field-ids'] = fieldIds.join(',');
+            if (recordIds) flags['record-ids'] = recordIds.join(',');
+            if (filters) flags.filters = filters;
+            if (sort) flags.sort = sort;
+            if (limit !== undefined) flags.limit = limit;
+            if (cursor) flags.cursor = cursor;
+            subcommand = 'record query';
+            break;
+          }
+          case 'record_stats':
+            requireBase();
+            requireTable();
+            if (!stats) throw new Error('action=record_stats 必须提供 stats');
+            flags.stats = stats;
+            if (filters) flags.filters = filters;
+            if (keyword) flags.keyword = keyword;
+            if (sort) flags.sort = sort;
+            if (limit !== undefined) flags.limit = limit;
+            subcommand = 'record stats';
+            break;
+          case 'record_group_stats':
+            requireBase();
+            requireTable();
+            if (!stats) {
+              throw new Error('action=record_group_stats 必须提供 stats');
+            }
+            if (limit !== undefined && limit > 1_000) {
+              throw new Error('record_group_stats 的 limit 最大为 1000');
+            }
+            flags.stats = stats;
+            if (group) flags.group = group;
+            if (filters) flags.filters = filters;
+            if (sort) flags.sort = sort;
+            if (limit !== undefined) flags.limit = limit;
+            subcommand = 'record group-stats';
+            break;
+          default:
+            throw new Error(
+              `action 只允许 base_list、base_search、base_get、table_get、field_get、record_query、record_stats、record_group_stats，收到: ${action}`,
+            );
+        }
+
+        return this.execute(
+          ctx,
+          'dws_aitable',
+          {
+            domain: 'aitable',
+            subcommand,
+            flags,
+            operatorStaffId: ctx.senderStaffId,
+          },
+          optionalPage(args),
+        );
+      },
+    };
+  }
+
+  private minutesTool(): ToolDefinition {
+    return {
+      name: 'dws_minutes',
+      description:
+        '只读查询钉钉 AI 听记（妙记）：list 按 mine/shared/all 列出听记，latest 取我最新一条，search 按标题关键词/时间搜索，info 看基础信息，summary 看 AI 摘要，transcript 看完整转写，keywords 看关键词，todos 看提取的待办，action_items 看行动项。先用 list/latest/search 拿到 taskUuid，再读取详情；转写较长时会分页。',
+      risk: 'read',
+      source: 'dws',
+      parametersJsonSchema: {
+        type: 'object',
+        properties: {
+          action: {
+            type: 'string',
+            enum: [
+              'list',
+              'latest',
+              'search',
+              'info',
+              'summary',
+              'transcript',
+              'keywords',
+              'todos',
+              'action_items',
+            ],
+          },
+          scope: {
+            type: 'string',
+            enum: ['mine', 'shared', 'all'],
+            description: 'list/search 的范围，默认 list=mine、search=all',
+          },
+          id: {
+            type: 'string',
+            description:
+              '听记 taskUuid；除 list/latest/search 外必填，action_items 可省略表示最新一条',
+          },
+          query: {
+            type: 'string',
+            description: 'search 的标题关键词；search 至少提供 query/start/end 之一',
+          },
+          keyword: {
+            type: 'string',
+            description: 'latest 的关键词过滤',
+          },
+          start: { type: 'string', description: '开始时间 ISO-8601' },
+          end: { type: 'string', description: '结束时间 ISO-8601' },
+          limit: {
+            type: 'integer',
+            minimum: 1,
+            maximum: 100,
+            description: '每页条数，默认 10',
+          },
+          cursor: { type: 'string', description: '分页 token，首页不传' },
+          direction: {
+            type: 'string',
+            enum: ['0', '1'],
+            description: 'transcript 排序：0 正序（默认），1 倒序',
+          },
+          page: {
+            type: 'integer',
+            minimum: 1,
+            description: '输出分页页码，默认 1',
+          },
+        },
+        required: ['action'],
+        additionalProperties: false,
+      },
+      execute: async (args, ctx) => {
+        const action = requireString(args, 'action', '操作');
+        const scopeValue = optionalString(args, 'scope');
+        const scope =
+          scopeValue === 'mine' || scopeValue === 'shared' || scopeValue === 'all'
+            ? scopeValue
+            : undefined;
+        if (scopeValue && !scope) {
+          throw new Error('scope 只允许 mine、shared 或 all');
+        }
+        const id = optionalString(args, 'id');
+        const query = optionalString(args, 'query');
+        const keyword = optionalString(args, 'keyword');
+        const start = optionalString(args, 'start');
+        const end = optionalString(args, 'end');
+        const cursor = optionalString(args, 'cursor');
+        const direction = optionalString(args, 'direction');
+        if (direction && direction !== '0' && direction !== '1') {
+          throw new Error('direction 只允许 0 或 1');
+        }
+        const limit = optionalInteger(args, 'limit', '每页条数', 1, 100);
+        const flags: DwsCommandRequest['flags'] = {};
+
+        const requireId = () => {
+          if (!id) {
+            throw new Error(
+              `action=${action} 必须提供 id（先用 list/latest/search 查询 taskUuid）`,
+            );
+          }
+        };
+
+        let subcommand: string;
+        switch (action) {
+          case 'list':
+            subcommand = `list ${scope ?? 'mine'}`;
+            if (query) flags.query = query;
+            if (start) flags.start = start;
+            if (end) flags.end = end;
+            if (limit !== undefined) flags.limit = limit;
+            if (cursor) flags.cursor = cursor;
+            break;
+          case 'latest':
+            subcommand = '+latest';
+            if (keyword) flags.keyword = keyword;
+            break;
+          case 'search':
+            if (!query && !start && !end) {
+              throw new Error(
+                'action=search 至少提供 query、start、end 之一',
+              );
+            }
+            subcommand = '+search';
+            flags.scope = scope ?? 'all';
+            if (query) flags.query = query;
+            if (start) flags.start = start;
+            if (end) flags.end = end;
+            if (limit !== undefined) flags.limit = limit;
+            if (cursor) flags.cursor = cursor;
+            break;
+          case 'info':
+          case 'summary':
+          case 'transcript':
+          case 'keywords':
+          case 'todos':
+            requireId();
+            subcommand =
+              action === 'transcript' ? 'get transcription' : `get ${action}`;
+            flags.id = id!;
+            if (action === 'transcript' && direction) {
+              flags.direction = direction;
+            }
+            break;
+          case 'action_items':
+            subcommand = '+action-items';
+            if (id) flags.id = id;
+            break;
+          default:
+            throw new Error(
+              `action 只允许 list、latest、search、info、summary、transcript、keywords、todos、action_items，收到: ${action}`,
+            );
+        }
+
+        return this.execute(
+          ctx,
+          'dws_minutes',
+          {
+            domain: 'minutes',
+            subcommand,
+            flags,
+            operatorStaffId: ctx.senderStaffId,
+          },
+          optionalPage(args),
+        );
       },
     };
   }
