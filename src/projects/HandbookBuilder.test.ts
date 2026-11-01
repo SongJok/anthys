@@ -80,7 +80,14 @@ const symbols: ProjectSymbol[] = [
 ];
 
 const fileContents = new Map<string, string>([
-  ['package.json', JSON.stringify({ name: 'demo', scripts: { build: 'tsc', start: 'node dist' } })],
+  [
+    'package.json',
+    JSON.stringify({
+      name: 'demo',
+      scripts: { build: 'tsc', start: 'node dist' },
+      repository: 'https://github.com/SongJok/anthys.git',
+    }),
+  ],
   ['.env.example', 'LLM_API_KEY=sk-secret-value\nDATABASE_URL=postgres://demo:CHANGE_ME@db\n'],
   ['deploy/dingtalk-agent.service', 'ExecStart=/usr/bin/env node dist/index.js\n'],
 ]);
@@ -107,6 +114,9 @@ describe('HandbookBuilder', () => {
     const overview = content.sections.find((section) => section.key === 'overview');
     expect(overview?.markdown).toContain('演示项目');
     expect(overview?.markdown).toContain('人工条目：2 条');
+    expect(overview?.markdown).toContain('https://github.com/SongJok/anthys');
+    expect(overview?.markdown).toContain('点个 Star');
+    expect(overview?.markdown).not.toContain('/srv/demo');
 
     const config = content.sections.find((section) => section.key === 'config');
     expect(config?.markdown).toContain('LLM_API_KEY');
@@ -140,6 +150,8 @@ describe('HandbookBuilder', () => {
     expect(keys).not.toContain('modules');
     const overview = content.sections.find((section) => section.key === 'overview');
     expect(overview?.markdown).toContain('尚未建立代码索引');
+    expect(overview?.markdown).not.toContain('/srv/demo');
+    expect(overview?.markdown).not.toContain('点个 Star');
   });
 
   it('章节来源指向快照提交', () => {

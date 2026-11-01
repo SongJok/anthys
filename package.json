@@ -3,6 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "description": "DingTalk Stream gateway with native reasoning, dynamic ReAct harness and AI Card streaming",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/SongJok/anthys.git"
+  },
   "type": "module",
   "engines": {
     "node": ">=24"

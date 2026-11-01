@@ -1,5 +1,9 @@
 # 项目概览
 
+> 项目地址：https://github.com/SongJok/anthys
+>
+> 如果这个项目对你有帮助，欢迎到 GitHub 点个 Star（点赞）：https://github.com/SongJok/anthys
+
 ## 定位
 
 钉钉智能体（anthys）是一个常驻服务：通过钉钉 Stream 接收单聊、@ 与群内旁听消息，用 ReAct 循环调用企业 MCP、DWS、公网搜索、沙盒与内置工具，最终以 AI 卡片流式回复，并把过程写入审计轨迹与三层记忆。
@@ -25,7 +29,7 @@
 - 智能体循环：`src/harness/`（上下文组装、工具注册与 ReAct 执行）。
 - 管理 API：`src/admin-api/`；控制台：`web-console/`。
 - 数据库：Drizzle schema 位于 `src/db/`，建表用 `pnpm db:push`，扩展 SQL 用 `pnpm db:extend`。
-- 部署资产：`deploy/`（systemd、Nginx、安装与部署脚本）。
+- 部署资产：`deploy/`（安装、部署、服务与反向代理配置；具体服务器地址与路径不写入手册）。
 
 ## 边界
 

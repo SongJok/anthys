@@ -49,6 +49,7 @@ interface PackageInfo {
   scripts: Record<string, string>;
   dependencies: string[];
   devDependencies: string[];
+  repositoryUrl?: string;
 }
 
 function formatBytes(bytes: number): string {
@@ -106,12 +107,68 @@ function markdownHeadings(text: string, limit = 12): string[] {
     .slice(0, limit);
 }
 
-function repoLineOf(project: ProjectRecord): string {
-  if (project.source.type === 'github') {
-    return `https://github.com/${project.source.repo}`;
+function githubRepoUrlOfPath(pathname: string): string | null {
+  const segments = pathname
+    .replace(/^\/+/u, '')
+    .replace(/\.git$/iu, '')
+    .split('/')
+    .filter(Boolean);
+  const [owner, repo] = segments;
+  if (!owner || !repo) return null;
+  if (![owner, repo].every((segment) => /^[A-Za-z0-9_.-]+$/u.test(segment))) {
+    return null;
   }
+  return `https://github.com/${owner}/${repo}`;
+}
+
+/** 只接受 GitHub 公开地址；其余主机、凭据与任意 URL 一律不进入手册 */
+function normalizeGithubUrl(value: unknown): string | null {
+  const raw =
+    typeof value === 'string'
+      ? value.trim()
+      : value && typeof value === 'object'
+        ? typeof (value as Record<string, unknown>)['url'] === 'string'
+          ? ((value as Record<string, unknown>)['url'] as string).trim()
+          : ''
+        : '';
+  if (!raw) return null;
+  const shorthand = /^(?:github:)?([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(?:\.git)?$/u.exec(
+    raw,
+  );
+  if (shorthand?.[1] && shorthand[2]) {
+    return `https://github.com/${shorthand[1]}/${shorthand[2]}`;
+  }
+  if (/^git@github\.com:/iu.test(raw)) {
+    return githubRepoUrlOfPath(raw.replace(/^git@github\.com:/iu, ''));
+  }
+  if (/^(?:www\.)?github\.com\//iu.test(raw)) {
+    return githubRepoUrlOfPath(raw.replace(/^(?:www\.)?github\.com\//iu, ''));
+  }
+  try {
+    const url = new URL(raw.replace(/^git\+/u, ''));
+    if (!['https:', 'http:', 'git:', 'ssh:'].includes(url.protocol)) return null;
+    if (url.hostname.toLowerCase() !== 'github.com') return null;
+    return githubRepoUrlOfPath(url.pathname);
+  } catch {
+    return null;
+  }
+}
+
+function publicRepoUrlOf(
+  project: ProjectRecord,
+  files: Map<string, string>,
+): string | null {
+  if (project.source.type === 'github') {
+    return normalizeGithubUrl(project.source.repo);
+  }
+  if (project.source.type !== 'local') return null;
+  return packageInfoOf(files)?.repositoryUrl ?? null;
+}
+
+function sourceLineOf(project: ProjectRecord): string {
+  if (project.source.type === 'github') return 'GitHub 公开仓库';
   if (project.source.type === 'local') {
-    return `本地路径 \`${project.source.path}\``;
+    return '本地已登记仓库（服务器路径不写入手册）';
   }
   return '仅手册项目（无代码仓库）';
 }
@@ -137,12 +194,16 @@ function packageInfoOf(files: Map<string, string>): PackageInfo | null {
       parsed['devDependencies'] && typeof parsed['devDependencies'] === 'object'
         ? Object.keys(parsed['devDependencies'] as Record<string, unknown>)
         : [];
+    const repositoryUrl =
+      normalizeGithubUrl(parsed['repository']) ??
+      normalizeGithubUrl(parsed['homepage']);
     return {
       path: 'package.json',
       name: typeof parsed['name'] === 'string' ? parsed['name'] : '',
       scripts,
       dependencies: depsRaw.sort(),
       devDependencies: devDepsRaw.sort(),
+      ...(repositoryUrl ? { repositoryUrl } : {}),
     };
   } catch {
     return null;
@@ -238,9 +299,11 @@ function buildOverview(input: HandbookBuildInput): HandbookSection | null {
           .slice(0, 10)
           .map(([dir, count]) => `${dir}（${count}）`)
           .join('、');
+  const publicUrl = publicRepoUrlOf(project, input.fileContents);
   const lines = [
     `- 定位：${project.description || '未填写项目说明'}`,
-    `- 来源：${repoLineOf(project)}；默认分支 \`${project.defaultBranch}\``,
+    `- 来源：${sourceLineOf(project)}；默认分支 \`${project.defaultBranch}\``,
+    ...(publicUrl ? [`- 项目地址：${publicUrl}`] : []),
     snapshot
       ? `- 当前快照：\`${commit.slice(0, 12)}\`（${snapshot.branch || 'unknown'}）；${snapshot.fileCount} 个文件 / ${formatBytes(snapshot.totalBytes)} / ${snapshot.symbolCount} 个符号`
       : '- 当前快照：尚未建立代码索引，本手册仅来自项目登记信息',
@@ -249,6 +312,13 @@ function buildOverview(input: HandbookBuildInput): HandbookSection | null {
   ];
   if (input.manualEntryCount !== undefined && input.manualEntryCount > 0) {
     lines.push(`- 人工条目：${input.manualEntryCount} 条（见手册底部，可信内容）`);
+  }
+  if (publicUrl) {
+    lines.push(
+      '',
+      '### 支持项目',
+      `- 如果这个项目对你有帮助，欢迎到 GitHub 点个 Star（点赞）：${publicUrl}`,
+    );
   }
   if (readmeEntry) {
     lines.push('', '### README 摘要', excerpt(readmeEntry[1]));

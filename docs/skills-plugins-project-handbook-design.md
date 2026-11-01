@@ -51,6 +51,7 @@ P0、P1、P2 已按本文实现并合入 `main`，README 的「技能、插件�
 | 项目只读工具与权限过滤 | 已实现 | `project_list` / `project_handbook` / `project_map` / `project_search` / `project_read` / `project_symbol` / `project_history` |
 | 项目手册 12 章生成、草稿 / 发布版本与人工条目 | 已实现 | `src/projects/HandbookBuilder.ts`、`ProjectService`、控制台「项目手册」 |
 | 手册章节编辑：生成草稿 → 控制台改章节 → 发布新版本 | 已实现 | `ProjectService.saveHandbookDraft`、`PUT /projects/:id/handbook`、控制台章节编辑器 |
+| 手册隐私边界：不暴露本地 / 服务器地址，展示公开项目地址与 Star 邀请 | 已实现 | `src/projects/HandbookBuilder.ts`、`ProjectService.buildBrief`、`ProjectToolProvider`、`projects/anthys/manual/` |
 | 项目索引聚合状态（索引统计、向量补齐、最近任务、手册版本） | 已实现 | `ProjectService.getProjectStatus`、`GET /projects/:id/status` |
 | 项目分块向量与混合检索 | 已实现 | `ProjectService.embedChunks`、`EMBEDDING_ENABLED`、`project_chunks.embedding` + HNSW |
 | token 级关键词召回与 IDF 近似重排 | 已实现 | `ProjectStore.searchChunks`、`ProjectSearchService.weightTokens` |
@@ -71,6 +72,7 @@ P0、P1、P2 已按本文实现并合入 `main`，README 的「技能、插件�
 - 启用 `EMBEDDING_ENABLED` 后，同步会为所有分块写入 1536 维向量；历史快照缺少 `embeddedChunks` 统计时会在下一次同步自动重建一次。embedding 调用失败只记录 `embeddingError` 并降级为关键词检索，不会让同步失败。
 - `EMBEDDING_DIMENSIONS` 必须与数据库 `vector(1536)` 一致；不一致时进程会记录错误并禁用 embedding，避免写入失败。
 - `.env` 及其变体（`.env.local`、`.env.production` 等）全部被 Git 忽略，只有 `.env.example` 与 `.env.*.example` 模板允许提交；`src/config/envSafety.test.ts` 会检查示例不含真实密钥且没有被 Git 跟踪。
+- 手册与项目简报不输出本地仓库绝对路径、服务器地址、主机名或端口；公开项目地址只接受 GitHub URL（来源为 GitHub 或 `package.json` 的 `repository` / `homepage`），概览会展示项目地址并邀请读者点 Star。
 - 项目检索按 token 拆分查询并做 IDF 近似加权，`eval/golden/**` 与 `tmp/**` 通过 `.anthysignore` 排除出索引；本地 30 题评测当前为引用命中 100%、事实代理覆盖 100%、p95 265ms、安全通过（受仓库规模限制，不代表 1 万文件生产环境）。
 
 验证方式：`pnpm typecheck`、`pnpm test`、`pnpm --dir web-console build`；连接数据库并同步项目后运行 `pnpm eval:golden` 查看 30 题评测报告。
@@ -849,7 +851,7 @@ PLUGIN_ALLOWED_COMMANDS=npx,uvx,node,python3,docker
 | `github` | `owner/name`，可选 `ref` 和克隆深度 | 支持 |
 | `manual` | 只有手册，不索引代码 | 支持 |
 
-本地路径只读使用，不写入仓库；GitHub 仓库克隆到 `.state/projects/<projectId>/mirror`。
+本地路径只读使用，不写入仓库；该路径仅用于服务端扫描，不进入手册、项目简报或项目工具输出。GitHub 仓库克隆到 `.state/projects/<projectId>/mirror`。
 
 ### 8.3 同步流水线
 
@@ -1041,7 +1043,8 @@ interface HandbookSection {
 生成规则：
 
 - **确定性事实**（目录、脚本、依赖、入口、部署文件）由扫描器直接生成，不允许模型改写事实。
-- **人工条目**由管理员维护：负责人、值班、环境地址、外部文档、历史决策、常见坑。它们是可信内容。
+- **人工条目**由管理员维护：负责人、值班、公开项目地址、外部文档、历史决策、常见坑。它们是可信内容。
+- 手册与项目简报不输出本地仓库绝对路径、服务器地址、主机名、端口或凭据；部署章节只列仓库相对路径与命令。公开项目地址只接受 GitHub URL（来源为 GitHub，或 `package.json` 的 `repository` / `homepage`），概览中附项目地址与 Star 邀请。
 - **模型叙述**只在管理员触发时生成；必须逐段带来源；没有来源的段落标记 `unsourced`，默认不允许发布。
 - 手册发布时记录 `commit_sha` 和版本号；如果当前快照 commit 与手册 commit 不同，标记 `stale`。
 - 手册正文按不可信工具结果返回；只有“人工条目摘要”可以进入 system prompt 的项目简报。
@@ -1068,6 +1071,7 @@ interface HandbookSection {
 - 多个项目命中时，按别名长度和命中次数取最高分；无法判断时不注入，提示用户指定项目；
 - 简报 ≤ 600 token；超过时截断到“仓库 + 技术栈 + 入口 + 工具提示”；
 - 简报只使用人工条目和确定性事实，不使用模型生成叙述；
+- 简报中的“仓库”只展示公开 GitHub 地址；`local` 来源显示“本地已登记仓库（服务器路径不写入上下文）”，不输出绝对路径；
 - 群聊中遵守项目可见性；`private` 项目只在单聊且管理员可见。
 
 ### 8.9 项目工具
@@ -2859,7 +2863,8 @@ max_instruction_chars: 4000
 - 业务价值：
 - 技术栈：
 - 维护状态：
-- 仓库地址：
+- 仓库地址（只允许公开 GitHub 地址；本地路径不记录）：
+- 支持项目（如适用）：欢迎到 GitHub 点 Star
 
 ## architecture
 - 模块划分：

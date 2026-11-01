@@ -1327,7 +1327,7 @@ export class ProjectService {
       project.source.type === 'github'
         ? `https://github.com/${project.source.repo}`
         : project.source.type === 'local'
-          ? `本地路径 ${project.source.path}`
+          ? '本地已登记仓库（服务器路径不写入上下文）'
           : '仅手册项目';
     const core = [
       '## 项目上下文',

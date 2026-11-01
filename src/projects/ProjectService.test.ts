@@ -552,7 +552,11 @@ async function createFixture(embedder?: EmbeddingClient): Promise<{
   await writeFile(path.join(repoRoot, 'README.md'), '# Demo\n\n示例项目。\n');
   await writeFile(
     path.join(repoRoot, 'package.json'),
-    JSON.stringify({ name: 'demo', version: '1.0.0' }),
+    JSON.stringify({
+      name: 'demo',
+      version: '1.0.0',
+      repository: 'https://github.com/SongJok/anthys.git',
+    }),
   );
   await writeFile(path.join(repoRoot, '.env'), 'TOKEN=secret\n');
   const store = new MemoryProjectStore();
@@ -668,6 +672,7 @@ describe('ProjectService 同步与读取', () => {
     });
     expect(brief?.projectId).toBe('anthys');
     expect(brief?.text).toContain('project_map');
+    expect(brief?.text).not.toContain(repoRoot);
     expect(brief?.commit).toBe(result.snapshot.commitSha);
   });
 
@@ -892,6 +897,13 @@ describe('ProjectService 同步与读取', () => {
     expect(config?.markdown).toContain('LLM_API_KEY');
     expect(config?.markdown).not.toContain('sk-secret-value');
     expect(config?.markdown).not.toContain('postgres://demo:secret');
+
+    const overview = draft.content.sections.find(
+      (section) => section.key === 'overview',
+    );
+    expect(overview?.markdown).toContain('https://github.com/SongJok/anthys');
+    expect(overview?.markdown).toContain('点个 Star');
+    expect(overview?.markdown).not.toContain(repoRoot);
 
     const published = await service.publishHandbook('anthys', draft.version);
     expect(published.status).toBe('published');

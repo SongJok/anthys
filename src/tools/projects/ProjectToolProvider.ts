@@ -132,7 +132,7 @@ export class ProjectToolProvider implements IToolProvider {
                 entry.project.source.type === 'github'
                   ? `github:${entry.project.source.repo}`
                   : entry.project.source.type === 'local'
-                    ? `local:${entry.project.source.path}`
+                    ? 'local:本地仓库（路径不展示）'
                     : 'manual';
               const lines = [
                 `${parts.join(' ')}`,

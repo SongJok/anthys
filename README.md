@@ -597,12 +597,12 @@ sudo cp deploy/nginx.conf /etc/nginx/conf.d/ && sudo nginx -t && sudo systemctl 
 
 项目登记后，机器人可以像熟悉仓库的同事一样回答"入口在哪、这个符号怎么定义、上线要注意什么"，并且每个结论都能落到具体文件与提交。
 
-- **来源**：`local`（服务器上的目录，只能读 `PROJECT_ALLOWED_ROOTS`，默认仓库根）、`github`（`owner/name` + ref，按 GitHub 只读接口拉取）与 `manual`（只维护手册与人工条目，不扫描代码）。
+- **来源**：`local`（服务器上的目录，只能读 `PROJECT_ALLOWED_ROOTS`，默认仓库根；绝对路径不写入手册）、`github`（`owner/name` + ref，按 GitHub 只读接口拉取）与 `manual`（只维护手册与人工条目，不扫描代码）。
 - **同步与快照**：每次同步生成不可变快照，记录 commit、文件清单、分块索引与符号表；检索结果与引用统一带 `path:line @ commit`，历史版本可追溯。定期同步由项目的 `autoSyncMinutes` 控制，缺省回退到 `PROJECT_SYNC_INTERVAL_SECONDS`。
 - **扫描边界**：`.env`、私钥、证书、凭据文件不进入索引；`.env.example` / `.sample` / `.template` 会保留，用于在手册里只列出变量名而不泄露取值。超大文件、二进制与依赖目录会被跳过。仓库根目录的 `.anthysignore` 可按行声明额外排除的 glob（`#` 注释，不影响 git 跟踪）；`anthys` 种子用它排除 `eval/golden/**` 与 `tmp/**`，避免评测答案和临时产物进入语料。
 - **混合检索**：关键词（全文与 trigram）、路径、符号与可选 pgvector 向量一起召回；查询会拆成 token 分别做全文与子串匹配，再按 token 稀有度（IDF 近似）加权路径 / 符号命中，避免通用词淹没真正的定义文件。可按 `pathGlob`、语言与类型（`code` / `doc` / `config` / `test`）过滤。启用 `EMBEDDING_ENABLED` 后，同步会按批为所有分块生成 1536 维向量；旧快照缺少向量统计时会在下一次同步自动重建一次。embedding 失败只记录 `embeddingError` 并降级关键词检索，不会让同步失败。`private` 项目只在单聊中向 owner 或管理员开放，`admin` 项目仅管理员可见。
 - **项目工具**：`project_list`、`project_handbook`、`project_map`、`project_search`、`project_read`、`project_symbol`、`project_history`。`project_history` 在 GitHub 来源下可直接查 issues / PRs，其余来源会说明能力边界。
-- **项目手册**：按固定 12 章生成草稿——项目概览、架构设计、模块地图、数据模型、配置与密钥、构建与部署、运维与故障、编码约定、测试与验收、历史决策、常见问题、风险与边界。草稿可以预览、重新生成和发布；发布后才进入模型上下文，并递增 `handbookVersion`。手册内容只汇总变量名、脚本路径与命令，不展开密钥值或部署脚本正文。
+- **项目手册**：按固定 12 章生成草稿——项目概览、架构设计、模块地图、数据模型、配置与密钥、构建与部署、运维与故障、编码约定、测试与验收、历史决策、常见问题、风险与边界。草稿可以预览、重新生成和发布；发布后才进入模型上下文，并递增 `handbookVersion`。手册内容只汇总变量名、脚本路径与命令，不展开密钥值或部署脚本正文；本地仓库绝对路径、服务器地址、主机名与端口不会进入手册或项目简报。若来源是 GitHub，或在 `package.json` 中配置了 GitHub `repository`，概览会展示公开项目地址，并邀请读者到 GitHub 点 Star。
 - **章节编辑与状态**：控制台可基于最新草稿（没有草稿时基于最新发布版）逐章修改标题与 Markdown，保存会生成新草稿而不改动已发布版本；审核后再发布。`GET /projects/:id/status` 汇总索引文件数 / 分块数 / 已向量化分块数、最近同步任务与错误、发布与草稿版本、是否过期；控制台会如实展示这些状态与降级原因。
 - **人工条目**：管理员可在任意章节新增、编辑、删除人工条目，设置可见性、敏感级别、是否注入项目简报与优先级。人工条目优先于自动生成内容，重新生成不会覆盖管理员编辑。
 - **种子目录**：启动时读取 `PROJECT_SEED_DIR`（默认 `projects`）下的 `<projectId>/project.json` 与 `manual/*.md`。项目不存在才创建，配置更新不会覆盖已有记录；种子人工条目只更新由 `seed:projects/manual` 自己写入的版本，管理员改过的条目会被跳过。
@@ -1006,3 +1006,5 @@ pnpm eval:golden -- --no-sync   # 复用当前快照，不做重新同步
 ## 反馈
 
 问题、建议或接入需求，欢迎在 [Issues](https://github.com/SongJok/anthys/issues) 中提出。
+
+项目主页：https://github.com/SongJok/anthys 。如果这个项目对你有帮助，欢迎到 GitHub 点个 Star（点赞）。

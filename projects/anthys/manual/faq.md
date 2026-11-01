@@ -1,5 +1,9 @@
 # 常见问题
 
+## 项目地址在哪里？如何支持项目？
+
+项目地址：https://github.com/SongJok/anthys。如果这个项目对你有帮助，欢迎到 GitHub 点个 Star（点赞）：https://github.com/SongJok/anthys。
+
 ## 怎么更换模型？
 
 控制台「大模型与人设」页修改并保存，配置进入动态配置中心，无需重启；也可改 `.env` 的 `LLM_*` 后重启作为默认值。
@@ -34,4 +38,4 @@
 
 ## 管理控制台打不开或接口 401？
 
-确认已执行 `pnpm build`、Nginx 代理到 `8787`，且控制台填写的 Token 与服务端 `ADMIN_API_TOKEN` 一致。
+确认已执行 `pnpm build`、反向代理已指向服务管理端口，且控制台填写的 Token 与服务端 `ADMIN_API_TOKEN` 一致。

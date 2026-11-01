@@ -15,7 +15,7 @@
 | `src/db/` | Drizzle schema、扩展 SQL、种子与数据访问 |
 | `src/skills/` `src/plugins/` `src/projects/` | 扩展能力：技能、声明式插件、项目快照与手册 |
 | `web-console/` | React + Ant Design 管理控制台（独立子工程） |
-| `deploy/` | 阿里云 ECS 单机部署脚本与 systemd/Nginx 配置 |
+| `deploy/` | 部署脚本、systemd 服务与反向代理配置（不记录服务器地址） |
 
 ## 运行时数据流
 
