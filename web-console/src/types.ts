@@ -623,6 +623,35 @@ export interface ProjectAdminEntry {
   stale: boolean;
 }
 
+export interface GithubAdminStatus {
+  enabled: boolean;
+  ready: boolean;
+  tokenConfigured: boolean;
+  providerRegistered: boolean;
+  toolsActive: boolean;
+  apiBase: string;
+  allowedHosts: string[];
+  cacheTtlSeconds: number;
+  defaultRepo: string;
+  initError?: string;
+  defaultRepoError?: string;
+  hint: string;
+}
+
+export interface GithubConnectionTestResult {
+  ok: boolean;
+  repo: string;
+  checkedAt: number;
+  latencyMs: number;
+  tokenConfigured: boolean;
+  fullName?: string;
+  defaultBranch?: string;
+  private?: boolean;
+  status?: number;
+  rateLimited?: boolean;
+  error?: string;
+}
+
 export interface ProjectSearchHit {
   path: string;
   startLine: number;

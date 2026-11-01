@@ -19,6 +19,7 @@ import type {
 import type { EnterpriseMcpServerConfig } from '../types/mcp-and-sandbox.js';
 import type { GlossaryAdminPort } from '../types/glossary.js';
 import type {
+  GithubAdminPort,
   PluginAdminPort,
   ProjectAdminPort,
   SkillAdminPort,
@@ -30,6 +31,7 @@ import { createGlossaryRoutes } from './routes/glossaryRoutes.js';
 import { createSkillRoutes } from './routes/skillRoutes.js';
 import { createPluginRoutes } from './routes/pluginRoutes.js';
 import { createProjectRoutes } from './routes/projectRoutes.js';
+import { createGithubRoutes } from './routes/githubRoutes.js';
 import { createGovernanceRoutes } from '../governance/governanceRoutes.js';
 import type { DataGovernancePort } from '../governance/DataRetention.js';
 import {
@@ -103,6 +105,8 @@ export interface AdminApiOptions {
   plugins?: PluginAdminPort;
   /** 项目登记、同步与检索管理 */
   projects?: ProjectAdminPort;
+  /** GitHub 只读工具的真实运行状态与连通性测试 */
+  github?: GithubAdminPort;
 }
 
 export interface AdminServerOptions extends AdminApiOptions {
@@ -235,6 +239,15 @@ export function createAdminApp(options: AdminApiOptions): Hono {
       '/',
       createProjectRoutes({
         projects: options.projects,
+        configCenter: options.configCenter,
+      }),
+    );
+  }
+  if (options.github) {
+    admin.route(
+      '/',
+      createGithubRoutes({
+        github: options.github,
         configCenter: options.configCenter,
       }),
     );

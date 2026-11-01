@@ -87,7 +87,7 @@ export class GithubToolProvider implements IToolProvider {
       {
         name: 'github_repo',
         description:
-          '查看 GitHub 仓库元数据：描述、默认分支、语言、Star、License 信息、最近更新和主页地址。',
+          '查看 GitHub 仓库元数据：描述、默认分支、语言、Star、License、最近更新和主页地址。',
         risk: 'read',
         source: 'github',
         parametersJsonSchema: {
@@ -104,6 +104,7 @@ export class GithubToolProvider implements IToolProvider {
             `[github:${info.fullName}] ${info.name}${info.private ? ' [private]' : ''}`,
             `描述：${info.description || '无'}`,
             `语言：${info.language || '未知'}；Star：${info.stars}；默认分支：${info.defaultBranch}`,
+            `License：${info.license || '未声明'}`,
             `最近更新：${info.updatedAt}`,
             ...(info.topics.length > 0 ? [`Topics：${info.topics.join('、')}`] : []),
             `主页：${info.htmlUrl}`,
@@ -242,7 +243,6 @@ export class GithubToolProvider implements IToolProvider {
             repo,
             readString(args, 'query'),
             {
-              ...(readString(args, 'ref') ? { ref: readString(args, 'ref') } : {}),
               kind,
               limit: readNumber(args, 'limit', 10, 1, 30),
             },
@@ -294,10 +294,17 @@ export class GithubToolProvider implements IToolProvider {
           const number = readNumber(args, 'number', 0, 1, Number.MAX_SAFE_INTEGER);
           const result = await this.options.client.pull(repo, number);
           const info = result.info;
+          const mergeable =
+            info.mergeable === null
+              ? '未知'
+              : info.mergeable
+                ? '是'
+                : '否';
           const lines = [
             `[github:${repo}] PR #${info.number} ${info.title}`,
-            `状态：${info.state}${info.draft ? '（draft）' : ''}；作者：${info.author}；${info.head} → ${info.base}`,
-            `变更：${result.changedFiles} 个文件，+${result.additions}/-${result.deletions}`,
+            `状态：${info.state}${info.merged ? '（已合并）' : ''}${info.draft ? '（draft）' : ''}；作者：${info.author}；${info.head} → ${info.base}`,
+            `可合并：${mergeable}${info.mergeableState ? `（${info.mergeableState}）` : ''}`,
+            `变更：${result.changedFiles} 个文件，+${result.additions}/-${result.deletions}；提交：${info.commits}；评论：${info.comments} / 评审 ${info.reviewComments}`,
             `链接：${info.htmlUrl}`,
             ...(info.body.trim()
               ? ['', '描述摘要：', clip(info.body.trim(), 600)]

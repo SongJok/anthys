@@ -61,8 +61,12 @@ export interface GithubFileOptions {
   maxLines?: number;
 }
 
+export interface GithubRepoOptions {
+  /** 跳过 TTL 缓存强制访问网络，供连通性测试使用 */
+  fresh?: boolean;
+}
+
 export interface GithubSearchOptions {
-  ref?: string;
   kind?: 'code' | 'issues' | 'prs';
   limit?: number;
 }
@@ -76,7 +80,10 @@ interface CacheEntry {
 function encodePath(path: string): string {
   const normalized = path.replace(/\\/gu, '/').replace(/^\/+/u, '');
   const segments = normalized.split('/');
-  if (segments.length === 0 || segments.some((segment) => segment === '..')) {
+  if (
+    segments.length === 0 ||
+    segments.some((segment) => segment === '.' || segment === '..')
+  ) {
     throw new GithubClientError(`非法仓库路径：${path}`);
   }
   return segments.map((segment) => encodeURIComponent(segment)).join('/');
@@ -137,16 +144,28 @@ export class GithubClient {
       throw new GithubClientError(`GitHub 仓库格式应为 owner/name：${repo}`);
     }
     const [owner, name] = repo.split('/');
-    if (!owner || !name) {
+    if (
+      !owner ||
+      !name ||
+      owner === '.' ||
+      owner === '..' ||
+      name === '.' ||
+      name === '..'
+    ) {
       throw new GithubClientError(`GitHub 仓库格式应为 owner/name：${repo}`);
     }
     return { owner, repo: name };
   }
 
-  public async repo(repoRef: string): Promise<GithubRepoInfo> {
+  public async repo(
+    repoRef: string,
+    options: GithubRepoOptions = {},
+  ): Promise<GithubRepoInfo> {
     const repo = this.parseRepo(repoRef);
     const data = await this.request<Record<string, unknown>>(
       `/repos/${repo.owner}/${repo.repo}`,
+      undefined,
+      options.fresh === true ? { bypassCache: true } : {},
     );
     return {
       owner: String((data['owner'] as Record<string, unknown> | undefined)?.['login'] ?? repo.owner),
@@ -164,6 +183,10 @@ export class GithubClient {
           )
         : [],
       language: String(data['language'] ?? ''),
+      license: String(
+        (data['license'] as Record<string, unknown> | undefined)?.['spdx_id'] ??
+          '',
+      ),
     };
   }
 
@@ -371,11 +394,16 @@ export class GithubClient {
     const data = await this.request<Record<string, unknown>>(
       `/repos/${repo.owner}/${repo.repo}/pulls/${pullNumber}`,
     );
+    const mergeableRaw = data['mergeable'];
     const info: GithubPullRequestInfo = {
       number: Number(data['number'] ?? pullNumber),
       title: String(data['title'] ?? ''),
       state: String(data['state'] ?? ''),
       draft: Boolean(data['draft']),
+      merged: Boolean(data['merged']),
+      mergeable:
+        typeof mergeableRaw === 'boolean' ? mergeableRaw : null,
+      mergeableState: String(data['mergeable_state'] ?? ''),
       author: String(
         (data['user'] as Record<string, unknown> | undefined)?.['login'] ?? '',
       ),
@@ -387,6 +415,9 @@ export class GithubClient {
       ),
       htmlUrl: String(data['html_url'] ?? ''),
       body: String(data['body'] ?? ''),
+      comments: Number(data['comments'] ?? 0),
+      reviewComments: Number(data['review_comments'] ?? 0),
+      commits: Number(data['commits'] ?? 0),
       createdAt: String(data['created_at'] ?? ''),
       updatedAt: String(data['updated_at'] ?? ''),
     };
@@ -422,6 +453,7 @@ export class GithubClient {
   private async request<T>(
     path: string,
     params?: URLSearchParams,
+    options: { bypassCache?: boolean } = {},
   ): Promise<T> {
     const url = new URL(`${this.apiBase}${path}`);
     if (params) {
@@ -431,7 +463,7 @@ export class GithubClient {
       throw new GithubClientError('GitHub 请求地址越界');
     }
     const key = url.toString();
-    const cached = this.cache.get(key);
+    const cached = options.bypassCache ? undefined : this.cache.get(key);
     const now = Date.now();
     if (
       cached &&

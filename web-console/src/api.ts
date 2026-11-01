@@ -11,6 +11,8 @@ import type {
   GlossaryTerm,
   GlossaryTimeliness,
   GlossaryValidationReport,
+  GithubAdminStatus,
+  GithubConnectionTestResult,
   GroupPolicy,
   KnownGroup,
   LLMConfig,
@@ -516,6 +518,14 @@ export const api = {
       `/projects/${encodeURIComponent(id)}/manual-entries/${encodeURIComponent(entryId)}`,
       { method: 'DELETE' },
     ),
+
+  githubStatus: () =>
+    request<{ ok: boolean; status: GithubAdminStatus }>('/github/status'),
+  testGithub: (repo?: string) =>
+    request<{ ok: boolean; result: GithubConnectionTestResult }>('/github/test', {
+      method: 'POST',
+      body: JSON.stringify(repo ? { repo } : {}),
+    }),
 };
 
 /** EventSource 无法携带 Authorize 头，改用一次性票据订阅 SSE */

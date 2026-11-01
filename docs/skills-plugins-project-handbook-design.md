@@ -51,6 +51,7 @@ P0、P1、P2 已按本文实现并合入 `main`，README 的「技能、插件�
 | 项目只读工具与权限过滤 | 已实现 | `project_list` / `project_handbook` / `project_map` / `project_search` / `project_read` / `project_symbol` / `project_history` |
 | 项目手册 12 章生成、草稿 / 发布版本与人工条目 | 已实现 | `src/projects/HandbookBuilder.ts`、`ProjectService`、控制台「项目手册」 |
 | GitHub 只读工具（repo / tree / file / search / pr） | 已实现 | `src/github/GithubClient.ts`、`src/tools/github/GithubToolProvider.ts` |
+| GitHub 运行状态与连通性测试 | 已实现 | `src/github/GithubAdminPort.ts`、`src/admin-api/routes/githubRoutes.ts`、控制台「项目手册」页 |
 | 项目种子（`projects/<id>/project.json` + `manual/*.md`） | 已实现 | `src/projects/ProjectSeed.ts`、`projects/anthys/` |
 | tree-sitter / 调用图 / 插件市场与签名 / 沙箱化第三方工具 | 未实现（P3） | 保持非目标 |
 | 模型生成手册叙述 | 未实现（可选） | 当前为确定性生成 + 人工条目；需要叙述时由模型基于手册现场回答 |
@@ -58,6 +59,7 @@ P0、P1、P2 已按本文实现并合入 `main`，README 的「技能、插件�
 实现与设计的两点差异：
 
 - GitHub 工具从“第二期”提前到本次交付，默认 `GITHUB_ENABLED=false`，配置 Token 与白名单后启用。
+- GitHub 状态只反映进程启动时读到的配置：`GITHUB_ENABLED`、Token 或 API 主机变更后必须重启；控制台状态页与 `/github/test` 不读取 `.env` 文件中的未生效值，连通性测试强制绕过 TTL 缓存。
 - 项目检索依赖 `pnpm run db:push` 之后执行 `pnpm run db:extend` 补齐 `tsvector`、`pg_trgm` 与 HNSW 索引；部署脚本已包含该步骤。
 
 验证方式：`pnpm typecheck`、`pnpm test`、`pnpm --dir web-console build`。
@@ -1208,11 +1210,13 @@ interface HandbookSection {
 
 | 工具 | 能力 |
 | --- | --- |
-| `github_repo` | 仓库元数据、语言、License、Star、最近活动、默认分支、最新 Release |
+| `github_repo` | 仓库元数据、语言、License、Star、最近活动、默认分支 |
 | `github_tree` | 指定 ref/path 的目录树，深度和条数受限 |
 | `github_file` | 读取指定文件的行范围，带 commit 引用 |
 | `github_search` | 仓库内代码/Issue/PR 搜索，受限流 |
-| `github_pr` | PR 元数据、文件列表、diff 统计、评审状态 |
+| `github_pr` | PR 元数据、文件列表、diff 统计、合并 / 可合并状态与讨论统计 |
+
+最新 Release 与代码搜索的 `ref` 限定不属于 GitHub REST 代码搜索能力，当前不提供；PR 的评审决策需要 GraphQL，暂以可合并状态、评论与评审评论数代替。
 
 约束：
 
@@ -1223,6 +1227,12 @@ interface HandbookSection {
 - 不拼接 shell，不跟随任意重定向到非白名单域名；
 - 文件内容按不可信数据处理；
 - 代码搜索需要认证，未配置 token 时只提供公开元数据和文件读取。
+
+运行期可见性：
+
+- `GET /api/v1/admin/github/status` 返回进程内状态：`enabled`（启动时环境变量）、`ready`（客户端是否创建）、`tokenConfigured`、`toolsActive`（含扩展项目动态开关）、API Base、白名单、缓存 TTL、默认仓库与初始化错误，并附带一条可执行的中文提示。
+- `POST /api/v1/admin/github/test` 对显式 `repo` 或默认项目仓库发起一次绕过缓存的读取，返回延迟、默认分支、可见性、HTTP 状态与限流标记；失败不抛 5xx，便于控制台直接展示，并写入 `TEST_GITHUB` 审计。
+- 状态与测试都不返回 Token；`.env` 修改不会改变已运行进程的状态，控制台会明确提示需要重启。
 
 **推荐路线：**
 

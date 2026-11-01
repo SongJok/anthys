@@ -74,7 +74,8 @@ export type AdminActionType =
   | 'DELETE_PROJECT'
   | 'GENERATE_PROJECT_HANDBOOK'
   | 'PUBLISH_PROJECT_HANDBOOK'
-  | 'UPDATE_PROJECT_MANUAL';
+  | 'UPDATE_PROJECT_MANUAL'
+  | 'TEST_GITHUB';
 
 /** 2. 管理员单聊管控审计记录契约 */
 export interface AdminAuditLog {

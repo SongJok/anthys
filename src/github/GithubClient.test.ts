@@ -24,6 +24,15 @@ afterEach(() => {
 });
 
 describe('GithubClient', () => {
+  it('拒绝带路径穿越的仓库名与文件路径', async () => {
+    const fetchMock = vi.fn(async () => json({}));
+    const client = clientWith(fetchMock);
+    expect(() => client.parseRepo('../user')).toThrow(/owner\/name/u);
+    expect(() => client.parseRepo('a/..')).toThrow(/owner\/name/u);
+    await expect(client.file('a/b', 'src/../secret')).rejects.toThrow(/非法/u);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('拒绝非 HTTPS 或非白名单的 API 地址', () => {
     expect(
       () => new GithubClient({ apiBase: 'http://api.github.com' }),
@@ -54,6 +63,7 @@ describe('GithubClient', () => {
         updated_at: '2026-10-01T00:00:00Z',
         topics: ['dingtalk'],
         language: 'TypeScript',
+        license: { spdx_id: 'MIT' },
       }),
     );
     const anonymous = clientWith(fetchMock);
@@ -65,6 +75,7 @@ describe('GithubClient', () => {
       defaultBranch: 'main',
       stars: 12,
       topics: ['dingtalk'],
+      license: 'MIT',
     });
     const headers = (fetchMock.mock.calls[0]?.[1]?.headers ??
       {}) as Record<string, string>;
@@ -179,11 +190,17 @@ describe('GithubClient', () => {
           title: '增加 GitHub 工具',
           state: 'open',
           draft: false,
+          merged: false,
+          mergeable: true,
+          mergeable_state: 'clean',
           user: { login: 'joony' },
           head: { ref: 'feat/github' },
           base: { ref: 'main' },
           html_url: 'https://github.com/SongJok/anthys/pull/12',
           body: '新增只读工具',
+          comments: 3,
+          review_comments: 5,
+          commits: 4,
           created_at: '2026-10-01T00:00:00Z',
           updated_at: '2026-10-02T00:00:00Z',
           additions: 120,
@@ -209,6 +226,12 @@ describe('GithubClient', () => {
       title: '增加 GitHub 工具',
       head: 'feat/github',
       base: 'main',
+      merged: false,
+      mergeable: true,
+      mergeableState: 'clean',
+      comments: 3,
+      reviewComments: 5,
+      commits: 4,
     });
     expect(result).toMatchObject({ additions: 120, deletions: 8, changedFiles: 2 });
     expect(result.files[0]?.filename).toBe('src/github/GithubClient.ts');
@@ -261,5 +284,28 @@ describe('GithubClient', () => {
     const secondHeaders = (fetchMock.mock.calls[1]?.[1]?.headers ??
       {}) as Record<string, string>;
     expect(secondHeaders['If-None-Match']).toBe('W/"1"');
+  });
+
+  it('fresh 选项绕过 TTL 缓存强制访问网络', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        json({ full_name: 'a/b', default_branch: 'main' }, 200, {
+          etag: 'W/"1"',
+        }),
+      )
+      .mockResolvedValueOnce(
+        json({ full_name: 'a/b', default_branch: 'dev' }, 200, {
+          etag: 'W/"2"',
+        }),
+      );
+    const client = clientWith(fetchMock, { cacheTtlMs: 60_000 });
+    await client.repo('a/b');
+    const fresh = await client.repo('a/b', { fresh: true });
+    expect(fresh.defaultBranch).toBe('dev');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const headers = (fetchMock.mock.calls[1]?.[1]?.headers ??
+      {}) as Record<string, string>;
+    expect(headers['If-None-Match']).toBeUndefined();
   });
 });

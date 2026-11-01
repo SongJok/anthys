@@ -781,6 +781,7 @@ export interface GithubRepoInfo {
   updatedAt: string;
   topics: string[];
   language: string;
+  license: string;
 }
 
 export interface GithubTreeEntry {
@@ -860,11 +861,17 @@ export interface GithubPullRequestInfo {
   title: string;
   state: string;
   draft: boolean;
+  merged: boolean;
+  mergeable: boolean | null;
+  mergeableState: string;
   author: string;
   head: string;
   base: string;
   htmlUrl: string;
   body: string;
+  comments: number;
+  reviewComments: number;
+  commits: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -894,6 +901,42 @@ export interface GithubSearchItem {
 export interface GithubSearchResult {
   items: GithubSearchItem[];
   total: number;
+}
+
+/** 进程内 GitHub 运行状态；enabled 与 ready 分离，避免把 .env 默认值当成已生效 */
+export interface GithubAdminStatus {
+  enabled: boolean;
+  ready: boolean;
+  tokenConfigured: boolean;
+  providerRegistered: boolean;
+  toolsActive: boolean;
+  apiBase: string;
+  allowedHosts: string[];
+  cacheTtlSeconds: number;
+  defaultRepo: string;
+  initError?: string;
+  defaultRepoError?: string;
+  hint: string;
+}
+
+export interface GithubConnectionTestResult {
+  ok: boolean;
+  repo: string;
+  checkedAt: number;
+  latencyMs: number;
+  tokenConfigured: boolean;
+  fullName?: string;
+  defaultBranch?: string;
+  private?: boolean;
+  status?: number;
+  rateLimited?: boolean;
+  error?: string;
+}
+
+export interface GithubAdminPort {
+  status(): Promise<GithubAdminStatus>;
+  /** repo 省略时使用默认项目的 GitHub 仓库；返回结构化失败而不是抛错 */
+  test(repo?: string): Promise<GithubConnectionTestResult>;
 }
 
 /* ------------------------------------------------------------------ */

@@ -26,11 +26,14 @@ import type { ColumnsType } from 'antd/es/table';
 import {
   BookOutlined,
   CloudSyncOutlined,
+  GithubOutlined,
   PlusOutlined,
   ReloadOutlined,
 } from '@ant-design/icons';
 import { api } from '../api';
 import type {
+  GithubAdminStatus,
+  GithubConnectionTestResult,
   HandbookSectionKey,
   ProjectAdminEntry,
   ProjectHandbookRecord,
@@ -221,6 +224,14 @@ export default function ProjectsPage() {
   );
   const [searching, setSearching] = useState(false);
   const [syncingId, setSyncingId] = useState('');
+  const [githubStatus, setGithubStatus] = useState<GithubAdminStatus | null>(
+    null,
+  );
+  const [githubLoading, setGithubLoading] = useState(false);
+  const [githubTestRepo, setGithubTestRepo] = useState('');
+  const [githubTesting, setGithubTesting] = useState(false);
+  const [githubTestResult, setGithubTestResult] =
+    useState<GithubConnectionTestResult | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -239,6 +250,41 @@ export default function ProjectsPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  const loadGithubStatus = useCallback(async () => {
+    setGithubLoading(true);
+    try {
+      const { status } = await api.githubStatus();
+      setGithubStatus(status);
+    } catch (error) {
+      setGithubStatus(null);
+      message.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setGithubLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadGithubStatus();
+  }, [loadGithubStatus]);
+
+  const runGithubTest = async () => {
+    setGithubTesting(true);
+    setGithubTestResult(null);
+    try {
+      const { result } = await api.testGithub(githubTestRepo.trim() || undefined);
+      setGithubTestResult(result);
+      if (result.ok) {
+        message.success('GitHub 连通性正常');
+      } else {
+        message.warning(result.error ?? 'GitHub 连通性测试失败');
+      }
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setGithubTesting(false);
+    }
+  };
 
   const refreshDetail = async (id: string) => {
     setDetailLoading(true);
@@ -649,6 +695,118 @@ export default function ProjectsPage() {
 
   return (
     <Space direction="vertical" size={16} style={{ width: '100%' }}>
+      <Card
+        size="small"
+        className="console-card"
+        title={
+          <Space>
+            <GithubOutlined />
+            GitHub 只读工具
+          </Space>
+        }
+        extra={
+          <Button
+            size="small"
+            icon={<ReloadOutlined />}
+            loading={githubLoading}
+            onClick={() => void loadGithubStatus()}
+          >
+            刷新状态
+          </Button>
+        }
+      >
+        {githubStatus ? (
+          <Space direction="vertical" size={10} style={{ width: '100%' }}>
+            <Space wrap size={[8, 8]}>
+              <Tag color={githubStatus.enabled ? 'green' : 'default'}>
+                GITHUB_ENABLED={String(githubStatus.enabled)}
+              </Tag>
+              <Tag color={githubStatus.ready ? 'green' : 'red'}>
+                {githubStatus.ready ? '客户端就绪' : '客户端未就绪'}
+              </Tag>
+              <Tag color={githubStatus.toolsActive ? 'green' : 'orange'}>
+                {githubStatus.toolsActive ? '工具可用' : '工具不可用'}
+              </Tag>
+              <Tag color={githubStatus.tokenConfigured ? 'green' : 'orange'}>
+                {githubStatus.tokenConfigured ? 'Token 已配置' : 'Token 未配置'}
+              </Tag>
+              <Tag>API {githubStatus.apiBase}</Tag>
+              <Tag>缓存 {githubStatus.cacheTtlSeconds}s</Tag>
+              {githubStatus.defaultRepo ? (
+                <Tag color="blue">默认 {githubStatus.defaultRepo}</Tag>
+              ) : null}
+            </Space>
+            <Alert
+              type={
+                githubStatus.toolsActive
+                  ? 'success'
+                  : githubStatus.ready
+                    ? 'warning'
+                    : 'error'
+              }
+              showIcon
+              message={githubStatus.hint}
+              description={
+                githubStatus.initError || githubStatus.defaultRepoError ? (
+                  <>
+                    {githubStatus.initError ? (
+                      <div>初始化错误：{githubStatus.initError}</div>
+                    ) : null}
+                    {githubStatus.defaultRepoError ? (
+                      <div>默认仓库读取失败：{githubStatus.defaultRepoError}</div>
+                    ) : null}
+                  </>
+                ) : undefined
+              }
+            />
+            <Space.Compact style={{ width: '100%', maxWidth: 620 }}>
+              <Input
+                allowClear
+                placeholder={
+                  githubStatus.defaultRepo
+                    ? `留空使用默认仓库 ${githubStatus.defaultRepo}`
+                    : 'owner/name'
+                }
+                value={githubTestRepo}
+                onChange={(event) => setGithubTestRepo(event.target.value)}
+                onPressEnter={() => {
+                  if (!githubTesting) void runGithubTest();
+                }}
+              />
+              <Button
+                type="primary"
+                loading={githubTesting}
+                onClick={() => void runGithubTest()}
+              >
+                测试连通性
+              </Button>
+            </Space.Compact>
+            {githubTestResult ? (
+              <Alert
+                type={githubTestResult.ok ? 'success' : 'error'}
+                showIcon
+                message={
+                  githubTestResult.ok
+                    ? `连接成功：${githubTestResult.fullName ?? githubTestResult.repo}（${githubTestResult.latencyMs} ms）`
+                    : `连接失败：${githubTestResult.repo || '未指定仓库'}（${githubTestResult.latencyMs} ms）`
+                }
+                description={
+                  githubTestResult.ok
+                    ? `默认分支 ${githubTestResult.defaultBranch || '未知'}；${githubTestResult.private ? '私有仓库' : '公开仓库'}`
+                    : `${githubTestResult.error ?? '未知错误'}${githubTestResult.rateLimited ? '（已触发 GitHub 限流）' : ''}`
+                }
+              />
+            ) : null}
+          </Space>
+        ) : (
+          <Typography.Text type="secondary">
+            {githubLoading
+              ? '正在读取 GitHub 运行状态…'
+              : '无法读取 GitHub 运行状态，请确认管理 API 已启用。'}
+          </Typography.Text>
+        )}
+      </Card>
+
       <Card
         title="项目手册与代码理解"
         className="console-card"

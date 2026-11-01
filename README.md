@@ -239,7 +239,7 @@ pnpm run db:seed      # 可选：预写入默认人设与模型配置，已有�
 
 | 变量 | 默认值 | 说明 |
 | --- | --- | --- |
-| `GITHUB_ENABLED` | `false` | 是否向模型暴露 `github_*` 只读工具 |
+| `GITHUB_ENABLED` | `false` | 是否向模型暴露 `github_*` 只读工具；修改后需重启进程，控制台「项目手册」页会显示真实运行状态 |
 | `GITHUB_TOKEN` | 空 | GitHub Token，只从环境变量读取；代码检索必需，公开仓库读取可选 |
 | `GITHUB_API_BASE` | `https://api.github.com` | 必须是 HTTPS，且主机在默认白名单或 `GITHUB_ALLOWED_HOSTS` 内 |
 | `GITHUB_ALLOWED_HOSTS` | 空 | 额外允许的 GitHub Enterprise API 主机名，逗号分隔 |
@@ -609,11 +609,11 @@ sudo cp deploy/nginx.conf /etc/nginx/conf.d/ && sudo nginx -t && sudo systemctl 
 
 | 工具 | 说明 |
 | --- | --- |
-| `github_repo` | 仓库元信息：默认分支、语言、可见性、Star、更新时间与 topics |
+| `github_repo` | 仓库元信息：默认分支、语言、可见性、Star、License、更新时间与 topics |
 | `github_tree` | 指定 ref / 目录的树状结构，按深度与条数收敛 |
 | `github_file` | 读取文件，支持行区间与续读；单文件上限 1MB |
 | `github_search` | 代码检索需要 Token；issues / PRs 检索无需 Token |
-| `github_pr` | PR 详情与变更文件，补丁按长度截断 |
+| `github_pr` | PR 详情、合并 / 可合并状态、讨论统计与变更文件，补丁按长度截断 |
 
 安全与稳定性：
 
@@ -622,6 +622,8 @@ sudo cp deploy/nginx.conf /etc/nginx/conf.d/ && sudo nginx -t && sudo systemctl 
 - 相同请求按 ETag / 304 缓存，TTL 由 `GITHUB_CACHE_TTL_SECONDS` 控制；限流错误会带出重置时间，而不是静默失败。
 - 仓库内容属于外部不可信数据：只作为参考材料展示，不当作指令执行，也不会自动写入项目手册的权威结论。
 - 未启用时不会挂载 `github_*` 工具；GitHub 来源项目的 issues / PRs 查询会返回"需要开启 `GITHUB_ENABLED`"的说明，本地项目能力不受影响。
+- 控制台「项目手册」页顶部展示进程内真实状态（`GITHUB_ENABLED`、客户端、Token、工具是否可用、默认仓库与初始化错误），并可对指定或默认仓库做一次绕过缓存的连通性测试；修改 `.env` 后必须重启进程，状态卡片不会把文件里的新值伪装成已生效。
+- 连通性测试只返回仓库元数据与延迟，不返回 Token；测试动作写入审计日志。
 
 ### 工具能力
 
@@ -873,6 +875,8 @@ sudo cp deploy/nginx.conf /etc/nginx/conf.d/ && sudo nginx -t && sudo systemctl 
 | PUT / DELETE | `/projects/:id/manual-entries/:entryId` | 更新 / 删除人工条目 |
 | GET | `/projects/:id/handbook`、`/handbooks` | 当前已发布手册 / 全部版本 |
 | POST | `/projects/:id/handbook/generate`、`/publish` | 生成草稿 / 发布指定版本 |
+| GET | `/github/status` | GitHub 工具的真实运行状态（不读取 `.env` 文件中的未生效值） |
+| POST | `/github/test` | 对指定或默认仓库做连通性测试（绕过缓存，写审计） |
 | GET | `/audit-logs` | 管理操作审计 |
 | POST | `/chat/tickets` | 换取一次性 SSE 票据（60 秒内有效、用后即焚） |
 | GET | `/api/v1/chat/stream?ticket=&question=` | 浏览器在线对话流（SSE，事件与钉钉卡片同源） |

@@ -75,6 +75,7 @@ import { RepoSource } from './projects/RepoSource.js';
 import { seedProjectsFromRoot } from './projects/ProjectSeed.js';
 import { ProjectToolProvider } from './tools/projects/ProjectToolProvider.js';
 import { GithubClient } from './github/GithubClient.js';
+import { createGithubAdminPort } from './github/GithubAdminPort.js';
 import { GithubToolProvider } from './tools/github/GithubToolProvider.js';
 import type { SkillScanRoot } from './skills/SkillRegistry.js';
 import { GroupTranscriptBuffer } from './bystander/GroupTranscriptBuffer.js';
@@ -538,26 +539,32 @@ async function main(): Promise<void> {
       .filter(Boolean)
       .map((item) => resolve(process.cwd(), item));
     const githubEnabled = envEnabled(process.env.GITHUB_ENABLED, false);
+    const githubApiBase =
+      process.env.GITHUB_API_BASE?.trim() || 'https://api.github.com';
+    const githubAllowedHosts = (process.env.GITHUB_ALLOWED_HOSTS ?? '')
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean);
+    const githubCacheTtlSeconds = envSeconds(
+      process.env.GITHUB_CACHE_TTL_SECONDS,
+      300,
+    );
     let githubClient: GithubClient | undefined;
+    let githubInitError = '';
     if (githubEnabled) {
       try {
         githubClient = new GithubClient({
           token: process.env.GITHUB_TOKEN?.trim() ?? '',
-          ...(process.env.GITHUB_API_BASE?.trim()
-            ? { apiBase: process.env.GITHUB_API_BASE.trim() }
-            : {}),
-          allowedHosts: (process.env.GITHUB_ALLOWED_HOSTS ?? '')
-            .split(',')
-            .map((item) => item.trim())
-            .filter(Boolean),
-          cacheTtlMs: envSeconds(process.env.GITHUB_CACHE_TTL_SECONDS, 300) * 1000,
+          apiBase: githubApiBase,
+          allowedHosts: githubAllowedHosts,
+          cacheTtlMs: githubCacheTtlSeconds * 1000,
           logger: harnessLogger,
         });
       } catch (error) {
+        githubInitError =
+          error instanceof Error ? error.message : String(error);
         logger.warn(
-          {
-            error: error instanceof Error ? error.message : String(error),
-          },
+          { error: githubInitError },
           'github client init failed; github tools disabled',
         );
       }
@@ -593,6 +600,12 @@ async function main(): Promise<void> {
       briefMaxChars: extensionsConfig.projectBriefMaxChars,
     });
     const projects = projectService;
+    const defaultGithubRepo = async (): Promise<string> => {
+      const defaultId = configCenter.getExtensionsConfig().defaultProjectId;
+      if (!defaultId) return '';
+      const record = await projects.getProject(defaultId);
+      return record?.source.type === 'github' ? record.source.repo : '';
+    };
     const projectSeedRoot = resolve(
       process.cwd(),
       process.env.PROJECT_SEED_DIR?.trim() || 'projects',
@@ -629,9 +642,20 @@ async function main(): Promise<void> {
         githubEnabled,
         githubReady: Boolean(githubClient),
         githubTokenConfigured: githubClient?.hasToken ?? false,
+        ...(githubInitError ? { githubInitError } : {}),
       },
       'extension services configured',
     );
+    const githubAdminPort = createGithubAdminPort({
+      enabled: githubEnabled,
+      ...(githubClient ? { client: githubClient } : {}),
+      ...(githubInitError ? { initError: githubInitError } : {}),
+      toolsEnabled: () => configCenter.getExtensionsConfig().projectsEnabled,
+      defaultRepo: defaultGithubRepo,
+      apiBase: githubApiBase,
+      allowedHosts: githubAllowedHosts,
+      cacheTtlSeconds: githubCacheTtlSeconds,
+    });
 
     const adminProjectMember: ProjectMemberContextInput = {
       senderStaffId: 'admin-console',
@@ -977,15 +1001,7 @@ async function main(): Promise<void> {
         ? {
             githubProvider: new GithubToolProvider({
               client: githubClient,
-              defaultRepo: async () => {
-                const defaultId =
-                  configCenter.getExtensionsConfig().defaultProjectId;
-                if (!defaultId) return '';
-                const record = await projects.getProject(defaultId);
-                return record?.source.type === 'github'
-                  ? record.source.repo
-                  : '';
-              },
+              defaultRepo: defaultGithubRepo,
               enabled: () =>
                 configCenter.getExtensionsConfig().projectsEnabled,
             }),
@@ -2664,6 +2680,7 @@ async function main(): Promise<void> {
       skillFiles: skillFilePort,
       plugins: pluginAdminPort,
       projects: projectAdminPort,
+      github: githubAdminPort,
       mcp: {
         status: () => mcpPort.status(),
         applyServers: (servers) => mcpPort.applyServers(servers),
