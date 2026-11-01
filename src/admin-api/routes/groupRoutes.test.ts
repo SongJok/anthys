@@ -234,6 +234,21 @@ describe('群工作区管理接口', () => {
     expect(workspace.createGoal).toHaveBeenCalledTimes(1);
   });
 
+  it('PUT goals 拒绝空白标题', async () => {
+    const { app, workspace } = setup();
+    const response = await app.request(
+      '/api/v1/admin/groups/cid-group-1/goals/goal-0001',
+      {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ title: '   ' }),
+      },
+    );
+    expect(response.status).toBe(400);
+    expect(await response.text()).toContain('目标标题不能为空');
+    expect(workspace.updateGoal).not.toHaveBeenCalled();
+  });
+
   it('PUT goals 拒绝未知状态，DELETE 记录审计', async () => {
     const { app, workspace, recordAudit } = setup();
     const bad = await app.request(
@@ -275,6 +290,21 @@ describe('群工作区管理接口', () => {
     expect(recordAudit).toHaveBeenCalledWith(
       expect.objectContaining({ actionType: 'DELETE_GROUP_GOAL' }),
     );
+  });
+
+  it('PUT tasks 拒绝空白标题', async () => {
+    const { app, workspace } = setup();
+    const response = await app.request(
+      '/api/v1/admin/groups/cid-group-1/tasks/task-0001',
+      {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ title: '' }),
+      },
+    );
+    expect(response.status).toBe(400);
+    expect(await response.text()).toContain('任务标题不能为空');
+    expect(workspace.updateTask).not.toHaveBeenCalled();
   });
 
   it('任务接口支持创建、完成与删除', async () => {

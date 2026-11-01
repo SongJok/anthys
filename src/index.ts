@@ -1620,9 +1620,16 @@ async function main(): Promise<void> {
       preferences: new DrizzlePersonPreferencesStore(dbHandle.db),
       consents: new DrizzlePersonMemoryConsentStore(dbHandle.db),
     });
-    toolProviders.push(
+    const interactionProviders = [
       new GroupWorkspaceToolProvider({ service: groupWorkspace }),
       new PersonSettingsToolProvider({ service: personSettings }),
+    ];
+    toolProviders.push(...interactionProviders);
+    logger.info(
+      {
+        providers: interactionProviders.map((provider) => provider.providerName),
+      },
+      'group and person tool providers registered',
     );
     const repository = new DrizzleConversationRepository(dbHandle.db);
     const harness = new AgentHarness({

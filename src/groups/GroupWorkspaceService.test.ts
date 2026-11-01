@@ -387,4 +387,33 @@ describe('GroupWorkspaceService', () => {
     expect(clipped.endsWith('…')).toBe(true);
     expect(clipped.length).toBe(31);
   });
+
+  it('工作区标题超长时裁剪，更新目标或任务时拒绝空标题', async () => {
+    const { service } = makeService();
+    const workspace = await service.updateWorkspace(
+      'cid-group-1',
+      { title: '群'.repeat(100) },
+      'staff:1',
+    );
+    expect(workspace.title).toHaveLength(81);
+    expect(workspace.title.endsWith('…')).toBe(true);
+
+    const goal = await service.createGoal(
+      'cid-group-1',
+      { title: 'SLA 达标' },
+      'staff:1',
+    );
+    await expect(
+      service.updateGoal('cid-group-1', goal.id, { title: '  ' }, 'staff:1'),
+    ).rejects.toThrow('群目标标题不能为空');
+
+    const task = await service.createTask(
+      'cid-group-1',
+      { title: '整理复盘' },
+      'staff:1',
+    );
+    await expect(
+      service.updateTask('cid-group-1', task.id, { title: '' }, 'staff:1'),
+    ).rejects.toThrow('群任务标题不能为空');
+  });
 });

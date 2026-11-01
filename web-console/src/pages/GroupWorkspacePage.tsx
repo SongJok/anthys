@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Button,
@@ -91,6 +91,7 @@ export default function GroupWorkspacePage() {
   const [taskModal, setTaskModal] = useState<{ open: boolean; editing?: GroupTaskRecord }>({
     open: false,
   });
+  const requestSeq = useRef(0);
 
   const loadGroups = useCallback(async () => {
     try {
@@ -103,9 +104,11 @@ export default function GroupWorkspacePage() {
   }, []);
 
   const loadSnapshot = useCallback(async (id: string) => {
+    const seq = ++requestSeq.current;
     setLoading(true);
     try {
       const result = await api.groupWorkspace(id);
+      if (seq !== requestSeq.current) return;
       setSnapshot(result);
       workspaceForm.setFieldsValue({
         title: result.workspace.title,
@@ -113,9 +116,11 @@ export default function GroupWorkspacePage() {
         responsibilities: result.workspace.responsibilities,
       });
     } catch (error) {
-      message.error(error instanceof Error ? error.message : String(error));
+      if (seq === requestSeq.current) {
+        message.error(error instanceof Error ? error.message : String(error));
+      }
     } finally {
-      setLoading(false);
+      if (seq === requestSeq.current) setLoading(false);
     }
   }, [workspaceForm]);
 
@@ -258,7 +263,13 @@ export default function GroupWorkspacePage() {
             placeholder="选择要维护的钉钉群"
             value={conversationId}
             options={groupOptions}
-            onChange={setConversationId}
+            onChange={(value) => {
+              requestSeq.current += 1;
+              setSnapshot(null);
+              setGoalModal({ open: false });
+              setTaskModal({ open: false });
+              setConversationId(value);
+            }}
           />
           <Button
             icon={<ReloadOutlined />}

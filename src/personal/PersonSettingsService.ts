@@ -45,7 +45,7 @@ const PRIVACY_USAGE = [
   '- `/privacy allow <群会话ID>` / `/privacy deny <群会话ID>` 限定生效群',
   '- `/privacy clear` 清除群白名单（所有群按当前档位生效）',
   '',
-  'off：任何群都不使用你的个人记忆；shareable：只使用显式标记可共享的条目；all：可使用全部非敏感个人记忆。',
+  'off：任何群都不使用你的个人记忆；shareable：只使用显式标记可共享的条目；all：可使用全部非敏感个人记忆。标记为敏感的记忆在任何档位下都不会进入群聊。',
 ].join('\n');
 
 function defaultPreferences(

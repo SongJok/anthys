@@ -695,7 +695,7 @@ ReAct 循环内置看门狗（`src/watchdog/RunWatchdog.ts`），只观察不执
 - 控制台「人设与身份」页可把两个标识绑定为同一员工；绑定会迁移旧 `personKey` 下的个人记忆、分层人设与已合并的子孙身份，并立即清除解析缓存。
 - 人设按「系统默认 → 群设定 → 个人设定」逐层覆盖：群设定描述该群负责什么、不负责什么；个人设定在单聊中可整体覆盖，在群聊中只调整说话风格，不改变群职责。安全与权限边界固定写入系统提示，不会被任何人设覆盖。
 - 员工个人偏好（`person_preferences`）只影响单聊表达：回答长度、回答语言、称呼与额外要求可在单聊用 `/pref` 调整，也可在控制台「人设与身份」页维护；群聊不注入个人偏好，避免个人设定影响群职责。
-- 跨群记忆授权（`person_memory_consents`）决定个人语义记忆能否在群聊召回：`off` 完全不用，`shareable`（默认）只用显式标记可共享的条目，`all` 使用全部非敏感记忆；可再配置生效群白名单。员工可在单聊用 `/privacy` 调整，管理员可在控制台修改。
+- 跨群记忆授权（`person_memory_consents`）决定个人语义记忆能否在群聊召回：`off` 完全不用，`shareable`（默认）只用显式标记可共享的条目，`all` 使用全部非敏感记忆；可再配置生效群白名单。员工可在单聊用 `/privacy` 调整，管理员可在控制台修改。标记为敏感的记忆在任何档位下都不会进入群聊上下文。
 
 ### 群工作区与按群模型路由
 
@@ -703,7 +703,7 @@ ReAct 循环内置看门狗（`src/watchdog/RunWatchdog.ts`），只观察不执
 
 - `group_workspaces` 保存群定位与职责，`group_goals` 保存群目标，`group_tasks` 保存群任务；这些数据彼此隔离，不会跨群注入。
 - 每次群聊组装提示时会追加一段「本群工作区」简报：群定位、职责、进行中 / 已暂停的目标与未完成任务，超长时截断，未配置时完全不注入。
-- 群成员可在群里发送 `/group purpose ...`、`/group responsibility add|remove ...`、`/group goal add|list|done|pause|resume|archive ...`、`/group task add|list|start|done|cancel ...`、`/group note ...`；机器人也能调用 `group_workspace_view`、`group_goal_create`、`group_task_update`、`group_memory_save` 等群内工具。目标与任务的状态变更仅限创建人或管理员。
+- 群成员可在群里发送 `/group purpose ...`、`/group responsibility add|remove ...`、`/group goal add|list|done|pause|resume|archive ...`、`/group task add|list|start|done|cancel ...`、`/group note ...`；机器人也能调用 `group_workspace_view`、`group_goal_create`、`group_task_update`、`group_memory_save` 等群内工具。目标与任务的后续修改（状态、标题、负责人、截止时间）仅限创建人或管理员，群内指令与工具遵循同一规则。
 - 控制台「群工作区」页可以维护群定位、职责、目标与任务，与群内指令读写同一份数据。
 - 按群模型路由（`group_model_routes`）让同一机器人在不同群使用不同供应商或模型，只对群聊生效（含该群的主动回复），单聊仍走默认角色模型。未填写的供应商、Base URL、温度、思维链与最大 Token 沿用默认模型档案；API Key 只保存环境变量名（例如 `GROUP_A_MODEL_KEY`），密钥仍留在部署环境，控制台只显示是否已配置。本实例保存后立即生效，跨实例最多 60 秒生效；若填了变量名但部署环境未提供对应密钥，该群自动回退默认引擎并记录告警，不会让群聊中断。
 
@@ -719,7 +719,7 @@ ReAct 循环内置看门狗（`src/watchdog/RunWatchdog.ts`），只观察不执
 
 语义记忆分为 `global` / `group` / `user` 三种作用域，并带来源、置信度、敏感级别、状态和过期时间：
 
-- 用户级记忆默认只在单聊召回；要在该员工所在的群里使用，需要把授权档位设为 `shareable`（默认，只召回显式可共享条目）或 `all`，并可用群白名单限定生效范围。员工可在单聊用 `/privacy` 调整，管理员可在控制台「人设与身份」页修改。
+- 用户级记忆默认只在单聊召回；要在该员工所在的群里使用，需要把授权档位设为 `shareable`（默认，只召回显式可共享条目）或 `all`（全部非敏感记忆），并可用群白名单限定生效范围。敏感级记忆在任何档位下都不会进入群聊。员工可在单聊用 `/privacy` 调整，管理员可在控制台「人设与身份」页修改。
 - 群级记忆只在对应群召回，不会跨群泄露；全局记忆对所有会话可见。
 - 已停用（`retired`）或已过期的记忆不参与召回；修改记忆正文会清空 embedding，等待重新沉淀。
 - 控制台「记忆治理」页可按作用域、类型、状态、归属与关键词筛选，调整共享范围、敏感级别、置信度、状态与过期时间，所有写操作都落审计。

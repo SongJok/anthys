@@ -11,6 +11,7 @@ import type {
 } from '../types/group-workspace.js';
 import { formatShanghaiDateTime } from '../time/shanghaiTime.js';
 
+const TITLE_LIMIT = 80;
 const PURPOSE_LIMIT = 2_000;
 const GOAL_TITLE_LIMIT = 120;
 const TASK_TITLE_LIMIT = 120;
@@ -174,7 +175,9 @@ export class GroupWorkspaceService implements GroupWorkspaceAdminPort {
           ].slice(0, 30);
     return this.store.upsertWorkspace({
       ...before,
-      ...(input.title !== undefined ? { title: input.title.trim() } : {}),
+      ...(input.title !== undefined
+        ? { title: clip(input.title, TITLE_LIMIT) }
+        : {}),
       ...(input.purpose !== undefined
         ? { purpose: clip(input.purpose, PURPOSE_LIMIT) }
         : {}),
@@ -220,10 +223,13 @@ export class GroupWorkspaceService implements GroupWorkspaceAdminPort {
     _actor: string,
   ): Promise<GroupGoalRecord> {
     const goal = await this.requireGoal(conversationId, goalId);
+    const title =
+      input.title === undefined
+        ? undefined
+        : clip(input.title, GOAL_TITLE_LIMIT);
+    if (title !== undefined && !title) throw new Error('群目标标题不能为空');
     const updated = await this.store.updateGoal(goal.id, {
-      ...(input.title !== undefined
-        ? { title: clip(input.title, GOAL_TITLE_LIMIT) }
-        : {}),
+      ...(title !== undefined ? { title } : {}),
       ...(input.detail !== undefined
         ? { detail: clip(input.detail, DETAIL_LIMIT) }
         : {}),
@@ -283,6 +289,11 @@ export class GroupWorkspaceService implements GroupWorkspaceAdminPort {
     _actor: string,
   ): Promise<GroupTaskRecord> {
     const task = await this.requireTask(conversationId, taskId);
+    const title =
+      input.title === undefined
+        ? undefined
+        : clip(input.title, TASK_TITLE_LIMIT);
+    if (title !== undefined && !title) throw new Error('群任务标题不能为空');
     const completing =
       input.status === 'done' && task.status !== 'done'
         ? this.now()
@@ -290,9 +301,7 @@ export class GroupWorkspaceService implements GroupWorkspaceAdminPort {
           ? null
           : undefined;
     const updated = await this.store.updateTask(task.id, {
-      ...(input.title !== undefined
-        ? { title: clip(input.title, TASK_TITLE_LIMIT) }
-        : {}),
+      ...(title !== undefined ? { title } : {}),
       ...(input.detail !== undefined
         ? { detail: clip(input.detail, DETAIL_LIMIT) }
         : {}),
@@ -327,9 +336,11 @@ export class GroupWorkspaceService implements GroupWorkspaceAdminPort {
     conversationId: string,
     maxChars = BRIEF_LIMIT,
   ): Promise<string> {
-    const workspace = await this.store.getWorkspace(conversationId);
-    const goals = await this.store.listGoals(conversationId);
-    const tasks = await this.store.listTasks(conversationId);
+    const [workspace, goals, tasks] = await Promise.all([
+      this.store.getWorkspace(conversationId),
+      this.store.listGoals(conversationId),
+      this.store.listTasks(conversationId),
+    ]);
     const activeGoals = goals.filter(
       (goal) => goal.status === 'active' || goal.status === 'paused',
     );
@@ -512,7 +523,7 @@ export class GroupWorkspaceService implements GroupWorkspaceAdminPort {
       case 'archive': {
         const goal = await this.resolveGoal(conversationId, rest[0] ?? '');
         if ('error' in goal) return goal.error;
-        if (!this.canManage(goal.goal, message, personKey)) {
+        if (!this.canManage(goal.goal, message.senderStaffId, personKey)) {
           return '只有创建人或管理员可以变更群目标状态。';
         }
         const status: GroupGoalStatus =
@@ -562,7 +573,7 @@ export class GroupWorkspaceService implements GroupWorkspaceAdminPort {
       case 'cancel': {
         const task = await this.resolveTask(conversationId, rest[0] ?? '');
         if ('error' in task) return task.error;
-        if (!this.canManage(task.task, message, personKey)) {
+        if (!this.canManage(task.task, message.senderStaffId, personKey)) {
           return '只有创建人或管理员可以变更群任务状态。';
         }
         const status: GroupTaskStatus =
@@ -680,15 +691,16 @@ export class GroupWorkspaceService implements GroupWorkspaceAdminPort {
     return 'error' in resolved ? resolved : { task: resolved.record };
   }
 
-  private canManage(
+  /** 群目标/任务的变更权限：创建人或管理员 */
+  public canManage(
     record: { createdBy: string },
-    message: InboundMessage,
+    senderStaffId: string,
     personKey: string,
   ): boolean {
     return (
       record.createdBy === personKey ||
-      record.createdBy === message.senderStaffId ||
-      this.isAdmin(message.senderStaffId)
+      record.createdBy === senderStaffId ||
+      this.isAdmin(senderStaffId)
     );
   }
 }

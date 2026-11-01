@@ -125,6 +125,9 @@ class InMemorySemanticStore implements SemanticMemoryStore {
       .filter((record) => {
         if (record.status !== 'active') return false;
         if (record.expiresAt !== null && record.expiresAt <= now) return false;
+        if (query.excludeSensitive && record.sensitivity === 'sensitive') {
+          return false;
+        }
         return true;
       })
       .filter((record) => {
@@ -397,6 +400,75 @@ describe('HierarchicalMemoryManager', () => {
     });
     expect(single.userSemanticProfile).toContain('张三负责支付网关研发');
     expect(single.userSemanticProfile).toContain('不喜欢周会');
+  });
+
+  it('群聊按授权档位召回个人记忆，敏感记忆在任何档位都不扩散', async () => {
+    const ctx = setup();
+    await ctx.manager.remember([
+      {
+        scope: 'user',
+        subjectKey: 'staff-1',
+        kind: 'profile',
+        content: '张三负责支付网关研发',
+        keywords: ['支付网关'],
+        shareableInGroup: true,
+        sensitivity: 'normal',
+      },
+      {
+        scope: 'user',
+        subjectKey: 'staff-1',
+        kind: 'profile',
+        content: '张三的私人体检结果',
+        keywords: ['体检'],
+        shareableInGroup: false,
+        sensitivity: 'private',
+      },
+      {
+        scope: 'user',
+        subjectKey: 'staff-1',
+        kind: 'profile',
+        content: '张三的薪资包',
+        keywords: ['薪资'],
+        shareableInGroup: true,
+        sensitivity: 'sensitive',
+      },
+      {
+        scope: 'group',
+        subjectKey: 'cid-1',
+        kind: 'terminology',
+        content: 'GMV 指商品交易总额',
+        keywords: ['GMV'],
+      },
+    ]);
+    const base = {
+      personaSystemPrompt: 'system',
+      userId: 'staff-1',
+      speakerNick: '张三',
+      groupConversationId: 'cid-1',
+      audience: 'group' as const,
+      semanticQuery: '支付网关 体检 薪资 GMV',
+    };
+
+    const off = await ctx.manager.assemble({ ...base, userGroupSharing: 'off' });
+    expect(off.userSemanticProfile).not.toContain('支付网关研发');
+    expect(off.userSemanticProfile).not.toContain('体检');
+    expect(off.userSemanticProfile).not.toContain('薪资');
+    expect(off.userSemanticProfile).toContain('GMV 指商品交易总额');
+
+    const shareable = await ctx.manager.assemble(base);
+    expect(shareable.userSemanticProfile).toContain('支付网关研发');
+    expect(shareable.userSemanticProfile).not.toContain('体检');
+    expect(shareable.userSemanticProfile).not.toContain('薪资');
+    expect(shareable.userSemanticProfile).toContain('GMV 指商品交易总额');
+
+    const all = await ctx.manager.assemble({
+      ...base,
+      userGroupSharing: 'all',
+    });
+    expect(all.userSemanticProfile).toContain('支付网关研发');
+    expect(all.userSemanticProfile).toContain('体检');
+    expect(all.userSemanticProfile).not.toContain('薪资');
+    expect(all.userSemanticProfile).toContain('GMV 指商品交易总额');
   });
 
   it('停用或已过期的记忆不参与召回', async () => {

@@ -58,8 +58,16 @@ function resolveByPrefix<T extends { id: string; title: string }>(
 function formatSnapshot(snapshot: Awaited<
   ReturnType<GroupWorkspaceService['snapshot']>
 >): string {
-  const lines: string[] = [];
   const { workspace, goals, tasks } = snapshot;
+  if (
+    !workspace.purpose.trim() &&
+    workspace.responsibilities.length === 0 &&
+    goals.length === 0 &&
+    tasks.length === 0
+  ) {
+    return '本群尚未配置工作区；可用 /group purpose 或管理台设置。';
+  }
+  const lines: string[] = [];
   if (workspace.purpose.trim()) lines.push(`群定位：${workspace.purpose.trim()}`);
   if (workspace.responsibilities.length > 0) {
     lines.push('群职责：', ...workspace.responsibilities.map((item) => `- ${item}`));
@@ -84,7 +92,6 @@ function formatSnapshot(snapshot: Awaited<
         }`,
     ),
   );
-  if (lines.length === 0) return '本群尚未配置工作区。';
   return lines.join('\n');
 }
 
@@ -189,6 +196,15 @@ export class GroupWorkspaceToolProvider implements IToolProvider {
           const snapshot = await this.service.snapshot(conversationId);
           const resolved = resolveByPrefix(snapshot.goals, goalId, '群目标');
           if ('error' in resolved) return resolved.error;
+          if (
+            !this.service.canManage(
+              resolved.record,
+              ctx.senderStaffId,
+              actorOf(ctx),
+            )
+          ) {
+            return '只有创建人或管理员可以修改群目标。';
+          }
           const status = optionalString(args, 'status');
           if (status && !isGroupGoalStatus(status)) {
             return `未知目标状态：${status}`;
@@ -283,6 +299,15 @@ export class GroupWorkspaceToolProvider implements IToolProvider {
           const snapshot = await this.service.snapshot(conversationId);
           const resolved = resolveByPrefix(snapshot.tasks, taskId, '群任务');
           if ('error' in resolved) return resolved.error;
+          if (
+            !this.service.canManage(
+              resolved.record,
+              ctx.senderStaffId,
+              actorOf(ctx),
+            )
+          ) {
+            return '只有创建人或管理员可以修改群任务。';
+          }
           const status = optionalString(args, 'status');
           if (status && !isGroupTaskStatus(status)) {
             return `未知任务状态：${status}`;

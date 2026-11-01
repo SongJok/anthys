@@ -553,9 +553,8 @@ export class HierarchicalMemoryManager {
               ...(inGroup && userGroupSharing === 'shareable'
                 ? { shareableOnly: true }
                 : {}),
-              ...(inGroup && userGroupSharing === 'all'
-                ? { excludeSensitive: true }
-                : {}),
+              // 敏感级记忆在任何授权档位下都不进入群聊上下文
+              ...(inGroup ? { excludeSensitive: true } : {}),
             },
             queryVector,
           );

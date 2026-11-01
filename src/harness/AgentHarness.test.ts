@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { AgentHarness, conversationTitleFor } from './AgentHarness.js';
 import { ContextAssembler } from '../memory/ContextAssembler.js';
 import { PersonaResolver } from '../persona/PersonaResolver.js';
@@ -113,6 +113,9 @@ function createHarness(
     memory?: HierarchicalMemoryManager;
     personas?: PersonaResolver;
     identity?: ConstructorParameters<typeof AgentHarness>[0]['identity'];
+    personSettings?: ConstructorParameters<
+      typeof AgentHarness
+    >[0]['personSettings'];
   },
 ) {
   const { repository, conversations, rows } = createRepository();
@@ -125,6 +128,9 @@ function createHarness(
     ...(extras?.memory ? { memory: extras.memory } : {}),
     ...(extras?.personas ? { personas: extras.personas } : {}),
     ...(extras?.identity ? { identity: extras.identity } : {}),
+    ...(extras?.personSettings
+      ? { personSettings: extras.personSettings }
+      : {}),
     repository,
     assembler: new ContextAssembler({ windowMessages: 20, now: () => 0 }),
     persona,
@@ -325,6 +331,143 @@ describe('AgentHarness', () => {
       audience: 'group',
       groupConversationId: 'cid-group',
     });
+  });
+
+  it('个人偏好只在单聊注入系统提示，群聊按授权档位召回记忆', async () => {
+    const calls: { messages: unknown[] }[] = [];
+    const memoryInputs: Array<
+      Parameters<HierarchicalMemoryManager['assemble']>[0]
+    > = [];
+    const memory = {
+      async assemble(
+        input: Parameters<HierarchicalMemoryManager['assemble']>[0],
+      ) {
+        memoryInputs.push(input);
+        return {
+          personaSystemPrompt: input.personaSystemPrompt,
+          userSemanticProfile: '',
+          groupRecentTranscript: '',
+          episodicSummary: '',
+          activeTurnMessages: input.activeTurnMessages ?? [],
+        };
+      },
+      async maybeCompress() {
+        return { compressed: false };
+      },
+      shouldExtractSemantic() {
+        return false;
+      },
+      async captureSemantic() {
+        return [];
+      },
+    } as unknown as HierarchicalMemoryManager;
+    const buildPrompt = vi.fn(
+      async (_personKey: string, conversationType: '1' | '2') =>
+        conversationType === '1'
+          ? '【员工个人偏好】\n- 称呼这位员工为「老张」。'
+          : undefined,
+    );
+    const resolveGroupMode = vi.fn(async () => 'off' as const);
+    const { harness } = createHarness(
+      scriptedEngine(calls),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        memory,
+        personSettings: { buildPrompt, resolveGroupMode },
+      },
+    );
+
+    await harness.handleMessage(inbound(), { emit: () => undefined });
+    await harness.flushMemoryTasks();
+    const singleSystem = (
+      calls[0]?.messages as Array<{ role: string; content: string }>
+    ).find((message) => message.role === 'system');
+    expect(singleSystem?.content).toContain('称呼这位员工为「老张」');
+    expect(buildPrompt).toHaveBeenCalledWith('staff:staff-1', '1');
+    expect(resolveGroupMode).not.toHaveBeenCalled();
+    expect(memoryInputs.at(-1)?.userGroupSharing).toBeUndefined();
+
+    await harness.handleMessage(
+      inbound({
+        messageId: 'msg-group',
+        conversationType: '2',
+        conversationId: 'cid-group-1',
+      }),
+      { emit: () => undefined },
+    );
+    await harness.flushMemoryTasks();
+    const groupSystem = (
+      calls[1]?.messages as Array<{ role: string; content: string }>
+    ).find((message) => message.role === 'system');
+    expect(groupSystem?.content).not.toContain('称呼这位员工为「老张」');
+    expect(resolveGroupMode).toHaveBeenCalledWith(
+      'staff:staff-1',
+      'cid-group-1',
+    );
+    expect(memoryInputs.at(-1)).toMatchObject({
+      audience: 'group',
+      userGroupSharing: 'off',
+    });
+  });
+
+  it('授权解析失败时群聊继续执行，按默认共享档位召回', async () => {
+    const calls: { messages: unknown[] }[] = [];
+    const memoryInputs: Array<
+      Parameters<HierarchicalMemoryManager['assemble']>[0]
+    > = [];
+    const memory = {
+      async assemble(
+        input: Parameters<HierarchicalMemoryManager['assemble']>[0],
+      ) {
+        memoryInputs.push(input);
+        return {
+          personaSystemPrompt: input.personaSystemPrompt,
+          userSemanticProfile: '',
+          groupRecentTranscript: '',
+          episodicSummary: '',
+          activeTurnMessages: input.activeTurnMessages ?? [],
+        };
+      },
+      async maybeCompress() {
+        return { compressed: false };
+      },
+      shouldExtractSemantic() {
+        return false;
+      },
+      async captureSemantic() {
+        return [];
+      },
+    } as unknown as HierarchicalMemoryManager;
+    const { harness } = createHarness(
+      scriptedEngine(calls),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        memory,
+        personSettings: {
+          async buildPrompt() {
+            return undefined;
+          },
+          async resolveGroupMode() {
+            throw new Error('consent store down');
+          },
+        },
+      },
+    );
+
+    const result = await harness.handleMessage(
+      inbound({ conversationType: '2', conversationId: 'cid-group-1' }),
+      { emit: () => undefined },
+    );
+    await harness.flushMemoryTasks();
+    expect(result?.answer).toBe('现在是十点。');
+    expect(calls).toHaveLength(1);
+    expect(memoryInputs.at(-1)?.userGroupSharing).toBeUndefined();
   });
 
   it('后台任务复用会话链路执行并带任务归因', async () => {
