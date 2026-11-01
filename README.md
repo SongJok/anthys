@@ -1006,7 +1006,7 @@ ReAct 循环内置看门狗（`src/watchdog/RunWatchdog.ts`），只观察不执
 
 ## 管理 API
 
-控制台通过以下 REST 接口操作；ChatOps 在进程内复用同一配置中心与审计链路。接口前缀 `/api/v1/admin`，需要带上 `Authorization: Bearer <ADMIN_API_TOKEN>`（未配置 Token 时不校验）。
+控制台通过以下 REST 接口操作；ChatOps 在进程内复用同一配置中心与审计链路。除健康检查、就绪探针与指标外，接口前缀为 `/api/v1/admin`，需要带上 `Authorization: Bearer <ADMIN_API_TOKEN>`（未配置 Token 时不校验）。`/health`、`/healthz`、`/readyz` 与 `/metrics` 挂在服务根路径，其中 `/metrics` 单独校验 Token。
 
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
