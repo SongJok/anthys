@@ -604,25 +604,33 @@ export class HierarchicalMemoryManager {
     if (facts.length === 0) return [];
 
     return this.remember(
-      facts.map((fact) => ({
-        scope: fact.scope,
-        subjectKey:
-          fact.scope === 'user'
-            ? input.userId
-            : fact.scope === 'group'
-              ? input.conversationId
-              : 'global',
-        kind: fact.kind,
-        content: fact.content,
-        keywords: fact.keywords,
-        // 私聊沉淀的个人事实默认不跨群共享，需管理员显式放开
-        shareableInGroup: fact.scope === 'user' ? false : true,
-        sensitivity: fact.scope === 'user' ? 'private' : 'normal',
-        confidence: 0.8,
-        sourceConversationId: input.conversationId,
-        sourceConversationType: input.conversationType,
-        sourceMessageId: input.sourceMessageId ?? null,
-      })),
+      facts.map((fact) => {
+        // 单聊没有群上下文，抽取器误标为 group 的事实归回该员工，
+        // 否则会落在永远无法召回的伪群作用域里
+        const scope =
+          fact.scope === 'group' && input.conversationType === '1'
+            ? 'user'
+            : fact.scope;
+        return {
+          scope,
+          subjectKey:
+            scope === 'user'
+              ? input.userId
+              : scope === 'group'
+                ? input.conversationId
+                : 'global',
+          kind: fact.kind,
+          content: fact.content,
+          keywords: fact.keywords,
+          // 私聊沉淀的个人事实默认不跨群共享，需管理员显式放开
+          shareableInGroup: scope === 'user' ? false : true,
+          sensitivity: scope === 'user' ? 'private' : 'normal',
+          confidence: 0.8,
+          sourceConversationId: input.conversationId,
+          sourceConversationType: input.conversationType,
+          sourceMessageId: input.sourceMessageId ?? null,
+        };
+      }),
     );
   }
 }

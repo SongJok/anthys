@@ -335,6 +335,14 @@ export class DrizzlePersonIdentityStore implements PersonIdentityStore {
     };
   }
 
+  public async listPeopleMergedInto(personKey: string): Promise<string[]> {
+    const rows = await this.db
+      .select({ personKey: personIdentities.personKey })
+      .from(personIdentities)
+      .where(eq(personIdentities.mergedInto, personKey));
+    return rows.map((row) => row.personKey);
+  }
+
   public async listPeople(input: {
     query?: string;
     limit?: number;

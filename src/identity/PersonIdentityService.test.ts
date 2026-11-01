@@ -93,6 +93,12 @@ class FakeIdentityStore implements PersonIdentityStore {
     };
   }
 
+  public async listPeopleMergedInto(personKey: string): Promise<string[]> {
+    return [...this.people.values()]
+      .filter((person) => person.mergedInto === personKey)
+      .map((person) => person.personKey);
+  }
+
   public async listPeople(input: {
     query?: string;
     limit?: number;
@@ -237,6 +243,35 @@ describe('PersonIdentityService', () => {
     });
   });
 
+  it('首次解析时把旧版本原始 ID 归属的记忆迁到 personKey', async () => {
+    const store = new FakeIdentityStore();
+    const memoryMoves: Array<[string, string]> = [];
+    const service = createService({
+      store,
+      memories: {
+        async reassignSubjectKey(from, to) {
+          memoryMoves.push([from, to]);
+          return 1;
+        },
+      },
+    });
+
+    await service.resolve(
+      message({
+        senderStaffId: '0135',
+        rawPayload: { senderStaffId: '0135' },
+      }),
+    );
+    await service.resolve(
+      message({
+        senderStaffId: '0135',
+        rawPayload: { senderStaffId: '0135' },
+      }),
+    );
+
+    expect(memoryMoves).toEqual([['0135', 'staff:0135']]);
+  });
+
   it('未绑定的 openDingTalkId 保持隔离，不会误并到其他员工', async () => {
     const store = new FakeIdentityStore();
     const service = createService({ store });
@@ -292,6 +327,7 @@ describe('PersonIdentityService', () => {
         rawPayload: { senderOpenDingTalkId: 'open-2' },
       }),
     );
+    memoryMoves.length = 0;
     const outcome = await service.bind({ alias: 'open:open-2', staffId: 'staff-2' });
 
     expect(outcome).toEqual({
@@ -338,6 +374,7 @@ describe('PersonIdentityService', () => {
         rawPayload: { senderOpenDingTalkId: 'open-6' },
       }),
     );
+    memoryMoves.length = 0;
     const outcome = await service.bind({
       alias: 'open:open-6',
       staffId: 'staff-6',
@@ -377,6 +414,44 @@ describe('PersonIdentityService', () => {
     expect(outcome.previousPersonKey).toBe('external:open-4');
     expect(memoryMoves).toEqual(['external:open-4', 'external:open-5']);
     expect(store.people.get('external:open-4')?.mergedInto).toBe('staff:staff-4');
+  });
+
+  it('重新绑定旧身份时把已并入它的子孙记忆一并迁移', async () => {
+    const store = new FakeIdentityStore();
+    store.addPerson('external:leaf', {
+      alias: { alias: 'open:leaf', source: 'open' },
+      mergedInto: 'external:mid',
+    });
+    store.addPerson('external:mid', {
+      alias: { alias: 'open:mid', source: 'open' },
+    });
+    const memoryMoves: string[] = [];
+    const service = createService({
+      store,
+      memories: {
+        async reassignSubjectKey(from) {
+          memoryMoves.push(from);
+          return 1;
+        },
+      },
+    });
+
+    const outcome = await service.bind({
+      alias: 'open:mid',
+      staffId: 'target',
+    });
+
+    expect(outcome.previousPersonKey).toBe('external:mid');
+    expect(memoryMoves).toEqual(['external:mid', 'external:leaf']);
+    expect(store.people.get('external:mid')?.mergedInto).toBe('staff:target');
+
+    const resolved = await service.resolve(
+      message({
+        senderStaffId: 'leaf',
+        rawPayload: { senderOpenDingTalkId: 'leaf' },
+      }),
+    );
+    expect(resolved.personKey).toBe('staff:target');
   });
 
   it('解析时跟随多级 mergedInto，返回最终 personKey', async () => {

@@ -142,6 +142,7 @@ export class PersonIdentityService
     previousPersonKey: string | null;
   }) => void;
   private readonly cache = new Map<string, CachedAlias>();
+  private readonly legacyMigrated = new Set<string>();
 
   constructor(options: {
     store: PersonIdentityStore;
@@ -172,6 +173,7 @@ export class PersonIdentityService
       const found = await this.lookup(candidate.alias);
       if (!found) continue;
       const personKey = await this.followMerge(found.personKey, found.mergedInto);
+      await this.migrateLegacyMemories(message.senderStaffId, personKey);
       return {
         personKey,
         displayName: found.displayName || candidate.displayName,
@@ -210,6 +212,7 @@ export class PersonIdentityService
       },
       'person identity registered',
     );
+    await this.migrateLegacyMemories(message.senderStaffId, personKey);
     return {
       personKey,
       displayName: primary.displayName,
@@ -251,12 +254,18 @@ export class PersonIdentityService
       throw new Error('personKey 必须以 staff: 或 external: 开头');
     }
 
-    // bindAlias 会把旧身份的 mergedInto 改指向目标，因此必须先取合并链
+    // bindAlias 会把旧身份的 mergedInto 改指向目标，因此必须先取合并链与子孙身份
     const existing = await this.store.findPersonByAlias(normalized.alias);
-    const mergeChain =
+    const sourcePersonKey =
       existing && existing.personKey !== targetPersonKey && input.mergeMemories !== false
-        ? await this.collectMergeChain(existing.personKey)
-        : [];
+        ? existing.personKey
+        : null;
+    const mergeChain = sourcePersonKey
+      ? await this.collectMergeChain(sourcePersonKey)
+      : [];
+    const descendants = sourcePersonKey
+      ? await this.collectDescendants(sourcePersonKey, new Set(mergeChain))
+      : [];
 
     const outcome = await this.store.bindAlias({
       alias: normalized.alias,
@@ -270,10 +279,12 @@ export class PersonIdentityService
     let migratedMemories = 0;
     let migratedPersonas = 0;
     if (outcome.previousPersonKey && input.mergeMemories !== false) {
-      const keys =
+      const keys = new Set(
         mergeChain.length > 0
           ? mergeChain
-          : [outcome.previousPersonKey];
+          : [outcome.previousPersonKey],
+      );
+      for (const descendant of descendants) keys.add(descendant);
       for (const oldKey of keys) {
         if (oldKey === targetPersonKey) continue;
         migratedMemories +=
@@ -307,6 +318,44 @@ export class PersonIdentityService
     };
   }
 
+  /**
+   * 旧版本直接以原始 staffId / openDingTalkId 作为语义记忆归属键。
+   * 首次见到该标识时把它并到 canonical personKey，避免历史画像不可召回。
+   */
+  private async migrateLegacyMemories(
+    rawId: string | undefined,
+    personKey: string,
+  ): Promise<void> {
+    if (!this.memories) return;
+    const raw = rawId?.trim();
+    if (!raw || raw === personKey) return;
+    const key = `${raw}\u0000${personKey}`;
+    if (this.legacyMigrated.has(key)) return;
+    if (this.legacyMigrated.size >= MAX_CACHE_ENTRIES) {
+      this.legacyMigrated.clear();
+    }
+    this.legacyMigrated.add(key);
+    try {
+      const migrated = await this.memories.reassignSubjectKey(raw, personKey);
+      if (migrated > 0) {
+        this.logger?.info(
+          { rawId: raw, personKey, migrated },
+          'legacy semantic memory subject key migrated',
+        );
+      }
+    } catch (error) {
+      this.legacyMigrated.delete(key);
+      this.logger?.warn(
+        {
+          rawId: raw,
+          personKey,
+          error: error instanceof Error ? error.message : String(error),
+        },
+        'legacy semantic memory migration failed',
+      );
+    }
+  }
+
   private async followMerge(
     personKey: string,
     mergedInto: string | null,
@@ -330,6 +379,32 @@ export class PersonIdentityService
       current = person?.mergedInto ?? null;
     }
     return chain;
+  }
+
+  /**
+   * 旧身份可能已被更低一级的别名并入（A→B→C）。重新绑定 B 时，
+   * 这些子孙身份会跟随 B 指向新目标，其记忆也必须一并迁移。
+   */
+  private async collectDescendants(
+    start: string,
+    exclude: Set<string>,
+  ): Promise<string[]> {
+    const seen = new Set([start, ...exclude]);
+    const found: string[] = [];
+    let frontier = [start];
+    for (let depth = 0; depth < 5 && frontier.length > 0; depth += 1) {
+      const next: string[] = [];
+      for (const key of frontier) {
+        for (const child of await this.store.listPeopleMergedInto(key)) {
+          if (seen.has(child)) continue;
+          seen.add(child);
+          found.push(child);
+          next.push(child);
+        }
+      }
+      frontier = next;
+    }
+    return found;
   }
 
   private async lookup(alias: string): Promise<CachedAlias | null> {

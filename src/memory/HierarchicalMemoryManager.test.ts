@@ -535,6 +535,38 @@ describe('HierarchicalMemoryManager', () => {
     expect(ctx.manager.shouldExtractSemantic('今天下午茶吃什么？')).toBe(false);
   });
 
+  it('单聊中抽取器误标为 group 的事实归回该员工', async () => {
+    const extractor: SemanticFactExtractor = {
+      async extract() {
+        return [
+          {
+            scope: 'group',
+            kind: 'terminology',
+            content: '结算域把退款单叫 RT',
+            keywords: ['RT'],
+          },
+        ];
+      },
+    };
+    const ctx = setup({ extractor });
+    const saved = await ctx.manager.captureSemantic({
+      userId: 'staff:staff-1',
+      speakerNick: '张三',
+      conversationId: 'cid-single',
+      conversationType: '1',
+      userText: '我们组把退款单叫 RT',
+      assistantText: '已记录',
+    });
+
+    expect(saved).toHaveLength(1);
+    expect(ctx.semanticStore.records[0]).toMatchObject({
+      scope: 'user',
+      subjectKey: 'staff:staff-1',
+      shareableInGroup: false,
+      sensitivity: 'private',
+    });
+  });
+
   it('LLM 抽取器解析 JSON 并忽略非法条目', async () => {
     const extractor = new LlmSemanticFactExtractor({
       model: {

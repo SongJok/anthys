@@ -103,6 +103,8 @@ export interface PersonIdentityStore {
     displayName?: string;
   }): Promise<void>;
   getPerson(personKey: string): Promise<PersonIdentityRecord | null>;
+  /** 已被并入该 personKey 的旧身份，用于多级合并时追溯子孙记录 */
+  listPeopleMergedInto(personKey: string): Promise<string[]>;
   listPeople(input?: {
     query?: string;
     limit?: number;
