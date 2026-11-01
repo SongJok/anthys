@@ -87,6 +87,14 @@ describe('createPinnedLookup', () => {
   });
 });
 
+describe('dnsServers', () => {
+  it('拒绝非 IP 的 DNS 服务器配置', () => {
+    expect(
+      () => new WebFetchClient({ dnsServers: ['not-an-ip'] }),
+    ).toThrow('WEB_FETCH_DNS_SERVERS');
+  });
+});
+
 describe('WebFetchClient 安全边界', () => {
   it('拒绝非 http(s)、带凭据、非标准端口和本机地址', async () => {
     const fetcher = vi.fn<HttpFetcher>();

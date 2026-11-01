@@ -191,6 +191,7 @@ pnpm run db:seed      # 可选：预写入默认人设与模型配置，已有�
 | `WEB_FETCH_TIMEOUT_MS` | `12000` | 单页请求超时 |
 | `WEB_FETCH_MAX_MB` | `2` | 单页响应体上限（MB） |
 | `WEB_FETCH_MAX_CHARS` | `2500` | 单次返回正文默认字符数，工具参数可调至 3200 |
+| `WEB_FETCH_DNS_SERVERS` | 空（系统 DNS） | 可选的独立 DNS 服务器 IP，逗号分隔，例如 `223.5.5.5,119.29.29.29`；用于绕开本地代理返回的 fake-IP，解析结果仍会做私网与保留地址校验 |
 | `WEB_FETCH_CACHE_TTL_SECONDS` | `600` | 相同链接结果缓存秒数；`0` 关闭缓存 |
 | `WEB_FETCH_MAX_CALLS_PER_HOUR` | `20` | 单会话每小时调用上限；`0` 不限制 |
 | `WEB_FETCH_DAILY_LIMIT` | `300` | 本进程每天调用上限；`0` 不限制 |

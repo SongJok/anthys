@@ -968,11 +968,18 @@ async function main(): Promise<void> {
     );
 
     const webFetchEnabled = envBool(process.env.WEB_FETCH_ENABLED, true);
+    const webFetchDnsServers = (process.env.WEB_FETCH_DNS_SERVERS ?? '')
+      .split(',')
+      .map((server) => server.trim())
+      .filter(Boolean);
     const webFetchProvider = webFetchEnabled
       ? new WebFetchToolProvider({
           client: new WebFetchClient({
             timeoutMs: envSeconds(process.env.WEB_FETCH_TIMEOUT_MS, 12),
             maxBytes: envMegabytes(process.env.WEB_FETCH_MAX_MB, 2),
+            ...(webFetchDnsServers.length > 0
+              ? { dnsServers: webFetchDnsServers }
+              : {}),
           }),
           logger: harnessLogger,
           metrics,
@@ -999,6 +1006,7 @@ async function main(): Promise<void> {
           20,
         ),
         dailyLimit: envCount(process.env.WEB_FETCH_DAILY_LIMIT, 300),
+        dnsServers: webFetchDnsServers,
       },
       'web fetch configuration resolved',
     );

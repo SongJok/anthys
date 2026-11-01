@@ -1,4 +1,4 @@
-import { lookup as dnsLookup } from 'node:dns/promises';
+import { Resolver, lookup as dnsLookup } from 'node:dns/promises';
 import { request as httpRequest, type IncomingHttpHeaders } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import { isIP } from 'node:net';
@@ -86,6 +86,8 @@ export interface WebFetchClientOptions {
   fetcher?: HttpFetcher;
   /** 测试注入 DNS 解析 */
   resolveHost?: (hostname: string) => Promise<Array<{ address: string; family: 4 | 6 }>>;
+  /** 指定独立 DNS 服务器 IP；默认使用系统 DNS，可绕开本地代理返回的 fake-IP */
+  dnsServers?: string[];
 }
 
 export class WebFetchError extends Error {
@@ -206,9 +208,9 @@ export function isPrivateAddress(address: string): boolean {
   return true;
 }
 
-async function defaultResolveHost(
-  hostname: string,
-): Promise<Array<{ address: string; family: 4 | 6 }>> {
+type ResolvedHost = Array<{ address: string; family: 4 | 6 }>;
+
+async function defaultResolveHost(hostname: string): Promise<ResolvedHost> {
   if (isIP(hostname) !== 0) {
     return [{ address: hostname, family: isIP(hostname) as 4 | 6 }];
   }
@@ -217,6 +219,26 @@ async function defaultResolveHost(
     address: record.address,
     family: record.family as 4 | 6,
   }));
+}
+
+function createResolveHost(servers: string[]): (hostname: string) => Promise<ResolvedHost> {
+  if (servers.length === 0) return defaultResolveHost;
+  const resolver = new Resolver();
+  resolver.setServers(servers);
+  return async (hostname) => {
+    const family = isIP(hostname);
+    if (family !== 0) {
+      return [{ address: hostname, family: family as 4 | 6 }];
+    }
+    const [v4, v6] = await Promise.all([
+      resolver.resolve4(hostname).catch(() => [] as string[]),
+      resolver.resolve6(hostname).catch(() => [] as string[]),
+    ]);
+    return [
+      ...v4.map((address) => ({ address, family: 4 as const })),
+      ...v6.map((address) => ({ address, family: 6 as const })),
+    ];
+  };
 }
 
 function headerValue(
@@ -528,7 +550,18 @@ export class WebFetchClient implements WebFetchExecutor {
       Math.max(0, options.maxRedirects ?? DEFAULT_MAX_REDIRECTS),
     );
     this.fetcher = options.fetcher ?? defaultHttpFetcher;
-    this.resolveHost = options.resolveHost ?? defaultResolveHost;
+    const dnsServers = (options.dnsServers ?? [])
+      .map((server) => server.trim())
+      .filter(Boolean);
+    for (const server of dnsServers) {
+      if (isIP(server) === 0) {
+        throw new WebFetchError(
+          `WEB_FETCH_DNS_SERVERS 包含非法 IP 地址：${server}`,
+          'INVALID_DNS',
+        );
+      }
+    }
+    this.resolveHost = options.resolveHost ?? createResolveHost(dnsServers);
   }
 
   public async fetch(input: {
