@@ -87,7 +87,7 @@ describe('OpenApiCardApi', () => {
     await api.createAndDeliver({
       cardTemplateId: 'tpl-1',
       outTrackId: 'card_m1',
-      spaceId: 'dtv1.card//IM_ROBOT.cid-1',
+      spaceId: 'dtv1.card//IM_ROBOT.staff-1',
       params: {
         thinking_section: '思考中',
         answer_section: '',
@@ -109,7 +109,7 @@ describe('OpenApiCardApi', () => {
     expect(request.body).toMatchObject({
       cardTemplateId: 'tpl-1',
       outTrackId: 'card_m1',
-      openSpaceId: 'dtv1.card//IM_ROBOT.cid-1',
+      openSpaceId: 'dtv1.card//IM_ROBOT.staff-1',
       callbackType: 'STREAM',
       userId: 'staff-1',
       userIdType: 1,
@@ -232,7 +232,7 @@ describe('OpenApiCardApi', () => {
       api.createAndDeliver({
         cardTemplateId: 'tpl-1',
         outTrackId: 'card_m1',
-        spaceId: 'dtv1.card//IM_ROBOT.cid-1',
+        spaceId: 'dtv1.card//IM_ROBOT.staff-1',
         params: { thinking_section: '', answer_section: '', status_bar: '' },
         deliver: {
           conversationType: '1',

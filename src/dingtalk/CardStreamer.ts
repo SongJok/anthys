@@ -254,6 +254,7 @@ class TokenBucket {
 export class CardStreamer {
   public readonly outTrackId: string;
   private readonly spaceId: string;
+  private readonly deliverUserId: string;
   private readonly throttler: Throttler;
   private readonly api: CardApi;
   private readonly logger?: CardLogger;
@@ -305,9 +306,12 @@ export class CardStreamer {
     );
     // messageId 可能含 base64 的 / + =，不能直接做卡片标识
     this.outTrackId = `card_${randomUUID().replace(/-/g, '')}`;
+    // IM_ROBOT 空间的 openSpaceId 必须是用户 staffId（IM_GROUP 才用 openConversationId）
+    this.deliverUserId =
+      options.message.cardDeliverUserId ?? options.message.senderStaffId;
     this.spaceId =
       options.message.conversationType === '1'
-        ? `dtv1.card//IM_ROBOT.${options.message.conversationId}`
+        ? `dtv1.card//IM_ROBOT.${this.deliverUserId}`
         : `dtv1.card//IM_GROUP.${options.message.conversationId}`;
     this.throttler = new Throttler({
       intervalMs: options.intervalMs,
@@ -346,9 +350,7 @@ export class CardStreamer {
           deliver: {
             conversationType: this.options.message.conversationType,
             robotCode: this.options.robotCode,
-            userId:
-              this.options.message.cardDeliverUserId ??
-              this.options.message.senderStaffId,
+            userId: this.deliverUserId,
             conversationId: this.options.message.conversationId,
           },
         });

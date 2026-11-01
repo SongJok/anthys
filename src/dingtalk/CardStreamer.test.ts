@@ -75,7 +75,7 @@ describe('CardStreamer', () => {
     expect(fake.created[0]).toMatchObject({
       cardTemplateId: 'tpl-1',
       outTrackId: streamer.outTrackId,
-      spaceId: 'dtv1.card//IM_ROBOT.cid-1',
+      spaceId: 'dtv1.card//IM_ROBOT.staff-1',
       params: {
         thinking_section: '正在思考…',
         answer_section: '',
@@ -87,6 +87,19 @@ describe('CardStreamer', () => {
         userId: 'staff-1',
       },
     });
+  });
+
+  it('单聊优先用 cardDeliverUserId 作为 IM_ROBOT 空间标识', async () => {
+    const fake = fakeApi();
+    const streamer = new CardStreamer({
+      api: fake.api,
+      message: inbound({ cardDeliverUserId: 'staff-2' }),
+      cardTemplateId: 'tpl-1',
+      robotCode: 'robot-1',
+    });
+    await streamer.start();
+    expect(fake.created[0]?.spaceId).toBe('dtv1.card//IM_ROBOT.staff-2');
+    expect(fake.created[0]?.deliver.userId).toBe('staff-2');
   });
 
   it('群聊卡片投放到 IM_GROUP 空间', async () => {

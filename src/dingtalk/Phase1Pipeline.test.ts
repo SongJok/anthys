@@ -332,7 +332,7 @@ describe('阶段一链路集成（网关 → Harness → ReAct → 卡片）', (
     expect(ctx.creates[0]).toMatchObject({
       cardTemplateId: 'tpl-1',
       outTrackId: ctx.creates[0]?.outTrackId,
-      spaceId: 'dtv1.card//IM_ROBOT.cid-1',
+      spaceId: 'dtv1.card//IM_ROBOT.staff-1',
       params: {
         thinking_section: '正在思考…',
         answer_section: '',
