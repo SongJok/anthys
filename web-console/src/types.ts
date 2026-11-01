@@ -907,3 +907,90 @@ export interface SemanticMemoryPage {
   total: number;
   items: SemanticMemory[];
 }
+
+export type GroupGoalStatus = 'active' | 'achieved' | 'paused' | 'archived';
+export type GroupTaskStatus = 'todo' | 'doing' | 'done' | 'cancelled';
+
+export interface GroupWorkspaceRecord {
+  conversationId: string;
+  title: string;
+  purpose: string;
+  responsibilities: string[];
+  updatedBy: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface GroupGoalRecord {
+  id: string;
+  conversationId: string;
+  title: string;
+  detail: string;
+  status: GroupGoalStatus;
+  ownerPersonKey: string | null;
+  ownerName: string;
+  dueAt: number | null;
+  createdBy: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface GroupTaskRecord {
+  id: string;
+  conversationId: string;
+  title: string;
+  detail: string;
+  status: GroupTaskStatus;
+  assigneePersonKey: string | null;
+  assigneeName: string;
+  dueAt: number | null;
+  createdBy: string;
+  createdAt: number;
+  updatedAt: number;
+  completedAt: number | null;
+}
+
+export interface GroupWorkspaceSnapshot {
+  workspace: GroupWorkspaceRecord;
+  goals: GroupGoalRecord[];
+  tasks: GroupTaskRecord[];
+}
+
+export type GroupModelProvider = '' | 'openai-compatible' | 'anthropic';
+
+export interface GroupModelRoute {
+  conversationId: string;
+  enabled: boolean;
+  provider: GroupModelProvider;
+  baseUrl: string;
+  apiKeyEnv: string;
+  model: string;
+  temperature: number | null;
+  thinking: '' | 'off' | 'auto' | 'low' | 'high' | 'max';
+  maxTokens: number | null;
+  updatedBy: string;
+  updatedAt: number;
+}
+
+export type ReplyLength = 'concise' | 'balanced' | 'detailed';
+export type PreferenceLanguage = 'auto' | 'zh' | 'en';
+export type GroupMemorySharing = 'off' | 'shareable' | 'all';
+
+export interface PersonPreferences {
+  personKey: string;
+  replyLength: ReplyLength;
+  language: PreferenceLanguage;
+  addressAs: string;
+  extraInstructions: string;
+  enabled: boolean;
+  updatedBy: string;
+  updatedAt: number;
+}
+
+export interface PersonMemoryConsent {
+  personKey: string;
+  groupSharing: GroupMemorySharing;
+  allowedConversationIds: string[];
+  updatedBy: string;
+  updatedAt: number;
+}

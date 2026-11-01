@@ -8,7 +8,7 @@ import type {
 import { AnthropicChatModel } from './AnthropicChatModel.js';
 import { OpenAIChatModel } from './OpenAIChatModel.js';
 
-function inferDialect(baseUrl: string): LlmDialect {
+export function inferDialect(baseUrl: string): LlmDialect {
   const url = baseUrl.toLowerCase();
   if (url.includes('deepseek')) return 'deepseek';
   if (url.includes('moonshot') || url.includes('kimi')) return 'moonshot';

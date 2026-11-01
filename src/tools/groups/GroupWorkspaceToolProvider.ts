@@ -1,0 +1,348 @@
+import type {
+  ExecutionContext,
+  IToolProvider,
+  ToolDefinition,
+} from '../../types/core.js';
+import type { GroupWorkspaceService } from '../../groups/GroupWorkspaceService.js';
+import { parseDueAt } from '../../groups/GroupWorkspaceService.js';
+import {
+  isGroupGoalStatus,
+  isGroupTaskStatus,
+} from '../../types/group-workspace.js';
+
+function optionalString(
+  args: Record<string, unknown>,
+  key: string,
+): string | undefined {
+  const value = args[key];
+  if (typeof value !== 'string') return undefined;
+  const text = value.trim();
+  return text === '' ? undefined : text;
+}
+
+function optionalStringArray(
+  args: Record<string, unknown>,
+  key: string,
+): string[] | undefined {
+  const value = args[key];
+  if (!Array.isArray(value)) return undefined;
+  return value
+    .filter((item): item is string => typeof item === 'string')
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function actorOf(ctx: ExecutionContext): string {
+  return ctx.personKey?.trim() || ctx.senderStaffId;
+}
+
+function resolveByPrefix<T extends { id: string; title: string }>(
+  records: T[],
+  id: string,
+  label: string,
+): { record: T } | { error: string } {
+  const needle = id.trim().toLowerCase();
+  if (!needle) return { error: `缺少${label} ID。` };
+  const exact = records.find((record) => record.id.toLowerCase() === needle);
+  if (exact) return { record: exact };
+  const matches = records.filter((record) =>
+    record.id.toLowerCase().startsWith(needle),
+  );
+  if (matches.length === 1 && matches[0]) return { record: matches[0] };
+  if (matches.length > 1) {
+    return { error: `${label} ID 前缀 ${id} 匹配到多条，请提供更完整的 ID。` };
+  }
+  return { error: `未找到${label} ${id}。` };
+}
+
+function formatSnapshot(snapshot: Awaited<
+  ReturnType<GroupWorkspaceService['snapshot']>
+>): string {
+  const lines: string[] = [];
+  const { workspace, goals, tasks } = snapshot;
+  if (workspace.purpose.trim()) lines.push(`群定位：${workspace.purpose.trim()}`);
+  if (workspace.responsibilities.length > 0) {
+    lines.push('群职责：', ...workspace.responsibilities.map((item) => `- ${item}`));
+  }
+  const activeGoals = goals.filter((goal) => goal.status !== 'archived');
+  lines.push(
+    activeGoals.length > 0 ? '群目标：' : '群目标：暂无。',
+    ...activeGoals.map(
+      (goal) =>
+        `- ${goal.id.slice(0, 8)} · [${goal.status}] ${goal.title}${
+          goal.ownerName ? `（负责人 ${goal.ownerName}）` : ''
+        }`,
+    ),
+  );
+  const openTasks = tasks.filter((task) => task.status !== 'cancelled');
+  lines.push(
+    openTasks.length > 0 ? '群任务：' : '群任务：暂无。',
+    ...openTasks.map(
+      (task) =>
+        `- ${task.id.slice(0, 8)} · [${task.status}] ${task.title}${
+          task.assigneeName ? `（负责人 ${task.assigneeName}）` : ''
+        }`,
+    ),
+  );
+  if (lines.length === 0) return '本群尚未配置工作区。';
+  return lines.join('\n');
+}
+
+/**
+ * 让模型在群聊中维护当前群的目标与任务。
+ * 工具只在本群内生效，不能跨群读取或改写其他群的数据。
+ */
+export class GroupWorkspaceToolProvider implements IToolProvider {
+  public readonly providerName = 'group-workspace';
+  private readonly service: GroupWorkspaceService;
+
+  constructor(options: { service: GroupWorkspaceService }) {
+    this.service = options.service;
+  }
+
+  public async getTools(ctx: ExecutionContext): Promise<ToolDefinition[]> {
+    if (ctx.conversationType !== '2') return [];
+    const conversationId = ctx.conversationId;
+    return [
+      {
+        name: 'group_workspace_view',
+        description:
+          '查看当前群的工作区：群定位、群职责、群目标与群任务。回答“这个群负责什么”“我们还有哪些任务”时使用。只能读取当前群。',
+        parametersJsonSchema: {
+          type: 'object',
+          properties: {},
+          additionalProperties: false,
+        },
+        risk: 'read',
+        source: 'group-workspace',
+        execute: async () =>
+          formatSnapshot(await this.service.snapshot(conversationId)),
+      },
+      {
+        name: 'group_goal_create',
+        description:
+          '为当前群创建一个长期目标。仅在群聊中可用，用于把讨论形成的群目标沉淀下来。',
+        parametersJsonSchema: {
+          type: 'object',
+          properties: {
+            title: { type: 'string', description: '目标标题' },
+            detail: { type: 'string', description: '目标说明或验收标准' },
+            ownerName: { type: 'string', description: '负责人姓名（可选）' },
+            due: {
+              type: 'string',
+              description: '截止日期，YYYY-MM-DD 或 ISO 时间（可选）',
+            },
+          },
+          required: ['title'],
+          additionalProperties: false,
+        },
+        risk: 'write',
+        source: 'group-workspace',
+        execute: async (args) => {
+          const title = optionalString(args, 'title');
+          if (!title) return '缺少目标标题。';
+          const goal = await this.service.createGoal(
+            conversationId,
+            {
+              title,
+              ...(optionalString(args, 'detail')
+                ? { detail: optionalString(args, 'detail')! }
+                : {}),
+              ...(optionalString(args, 'ownerName')
+                ? { ownerName: optionalString(args, 'ownerName')! }
+                : {}),
+              dueAt: parseDueAt(
+                optionalString(args, 'due') ?? null,
+              ),
+            },
+            actorOf(ctx),
+          );
+          return `已创建群目标 ${goal.id.slice(0, 8)}：${goal.title}`;
+        },
+      },
+      {
+        name: 'group_goal_update',
+        description:
+          '更新当前群的群目标（状态、标题、说明、负责人、截止日期）。goalId 支持 ID 前缀。',
+        parametersJsonSchema: {
+          type: 'object',
+          properties: {
+            goalId: { type: 'string', description: '群目标 ID 或前缀' },
+            status: {
+              type: 'string',
+              enum: ['active', 'achieved', 'paused', 'archived'],
+              description: '新状态',
+            },
+            title: { type: 'string' },
+            detail: { type: 'string' },
+            ownerName: { type: 'string' },
+            due: { type: 'string', description: 'YYYY-MM-DD 或 ISO 时间' },
+          },
+          required: ['goalId'],
+          additionalProperties: false,
+        },
+        risk: 'write',
+        source: 'group-workspace',
+        execute: async (args) => {
+          const goalId = optionalString(args, 'goalId');
+          if (!goalId) return '缺少目标 ID。';
+          const snapshot = await this.service.snapshot(conversationId);
+          const resolved = resolveByPrefix(snapshot.goals, goalId, '群目标');
+          if ('error' in resolved) return resolved.error;
+          const status = optionalString(args, 'status');
+          if (status && !isGroupGoalStatus(status)) {
+            return `未知目标状态：${status}`;
+          }
+          const due = optionalString(args, 'due');
+          const updated = await this.service.updateGoal(
+            conversationId,
+            resolved.record.id,
+            {
+              ...(status && isGroupGoalStatus(status) ? { status } : {}),
+              ...(optionalString(args, 'title')
+                ? { title: optionalString(args, 'title')! }
+                : {}),
+              ...(optionalString(args, 'detail') !== undefined
+                ? { detail: optionalString(args, 'detail') ?? '' }
+                : {}),
+              ...(optionalString(args, 'ownerName') !== undefined
+                ? { ownerName: optionalString(args, 'ownerName') ?? '' }
+                : {}),
+              ...(due !== undefined ? { dueAt: parseDueAt(due) } : {}),
+            },
+            actorOf(ctx),
+          );
+          return `群目标 ${updated.id.slice(0, 8)} 已更新。`;
+        },
+      },
+      {
+        name: 'group_task_create',
+        description:
+          '为当前群创建一个待办任务，并可记录负责人与截止日期。仅在群聊中可用。',
+        parametersJsonSchema: {
+          type: 'object',
+          properties: {
+            title: { type: 'string', description: '任务标题' },
+            detail: { type: 'string', description: '任务说明' },
+            assigneeName: { type: 'string', description: '负责人姓名（可选）' },
+            due: {
+              type: 'string',
+              description: '截止日期，YYYY-MM-DD 或 ISO 时间（可选）',
+            },
+          },
+          required: ['title'],
+          additionalProperties: false,
+        },
+        risk: 'write',
+        source: 'group-workspace',
+        execute: async (args) => {
+          const title = optionalString(args, 'title');
+          if (!title) return '缺少任务标题。';
+          const task = await this.service.createTask(
+            conversationId,
+            {
+              title,
+              ...(optionalString(args, 'detail')
+                ? { detail: optionalString(args, 'detail')! }
+                : {}),
+              ...(optionalString(args, 'assigneeName')
+                ? { assigneeName: optionalString(args, 'assigneeName')! }
+                : {}),
+              dueAt: parseDueAt(optionalString(args, 'due') ?? null),
+            },
+            actorOf(ctx),
+          );
+          return `已创建群任务 ${task.id.slice(0, 8)}：${task.title}`;
+        },
+      },
+      {
+        name: 'group_task_update',
+        description:
+          '更新当前群的群任务（状态、标题、说明、负责人、截止日期）。taskId 支持 ID 前缀。',
+        parametersJsonSchema: {
+          type: 'object',
+          properties: {
+            taskId: { type: 'string', description: '群任务 ID 或前缀' },
+            status: {
+              type: 'string',
+              enum: ['todo', 'doing', 'done', 'cancelled'],
+            },
+            title: { type: 'string' },
+            detail: { type: 'string' },
+            assigneeName: { type: 'string' },
+            due: { type: 'string', description: 'YYYY-MM-DD 或 ISO 时间' },
+          },
+          required: ['taskId'],
+          additionalProperties: false,
+        },
+        risk: 'write',
+        source: 'group-workspace',
+        execute: async (args) => {
+          const taskId = optionalString(args, 'taskId');
+          if (!taskId) return '缺少任务 ID。';
+          const snapshot = await this.service.snapshot(conversationId);
+          const resolved = resolveByPrefix(snapshot.tasks, taskId, '群任务');
+          if ('error' in resolved) return resolved.error;
+          const status = optionalString(args, 'status');
+          if (status && !isGroupTaskStatus(status)) {
+            return `未知任务状态：${status}`;
+          }
+          const due = optionalString(args, 'due');
+          const updated = await this.service.updateTask(
+            conversationId,
+            resolved.record.id,
+            {
+              ...(status && isGroupTaskStatus(status) ? { status } : {}),
+              ...(optionalString(args, 'title')
+                ? { title: optionalString(args, 'title')! }
+                : {}),
+              ...(optionalString(args, 'detail') !== undefined
+                ? { detail: optionalString(args, 'detail') ?? '' }
+                : {}),
+              ...(optionalString(args, 'assigneeName') !== undefined
+                ? { assigneeName: optionalString(args, 'assigneeName') ?? '' }
+                : {}),
+              ...(due !== undefined ? { dueAt: parseDueAt(due) } : {}),
+            },
+            actorOf(ctx),
+          );
+          return `群任务 ${updated.id.slice(0, 8)} 已更新。`;
+        },
+      },
+      {
+        name: 'group_memory_save',
+        description:
+          '把当前群的长期知识（项目代号、约定、决策结论、群规则）写成群级语义记忆，后续群聊可召回。不要保存临时状态或私人信息。',
+        parametersJsonSchema: {
+          type: 'object',
+          properties: {
+            content: { type: 'string', description: '要沉淀的群知识' },
+            keywords: {
+              type: 'array',
+              items: { type: 'string' },
+              description: '检索关键词（可选）',
+            },
+          },
+          required: ['content'],
+          additionalProperties: false,
+        },
+        risk: 'write',
+        source: 'group-workspace',
+        execute: async (args) => {
+          const content = optionalString(args, 'content');
+          if (!content) return '缺少要保存的内容。';
+          const saved = await this.service.rememberNote({
+            conversationId,
+            content: content.slice(0, 500),
+            keywords: optionalStringArray(args, 'keywords') ?? [],
+            createdBy: actorOf(ctx),
+            ...(ctx.messageId ? { sourceMessageId: ctx.messageId } : {}),
+          });
+          return saved
+            ? '已写入群级语义记忆。'
+            : '群记忆写入未启用。';
+        },
+      },
+    ];
+  }
+}

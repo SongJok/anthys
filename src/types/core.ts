@@ -196,6 +196,8 @@ export interface ExecutionContext {
   senderStaffId: string;
   senderNick: string;
   conversationType: '1' | '2';
+  /** 归一后的员工身份，工具据此读写个人偏好与任务归属 */
+  personKey?: string;
   /** epoch ms，超过该时间点即视为预算耗尽 */
   deadlineAt: number;
   now: () => number;

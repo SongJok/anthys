@@ -84,6 +84,21 @@ function runtime(overrides: Partial<CommandRuntime> = {}): {
       calls.tasks.push([msg.messageId, args]);
       return `任务命令：${args.join(' ')}`;
     },
+    group: async (msg, args) => {
+      calls.group = calls.group ?? [];
+      calls.group.push([msg.messageId, args]);
+      return `群工作区命令：${args.join(' ')}`;
+    },
+    pref: async (msg, args) => {
+      calls.pref = calls.pref ?? [];
+      calls.pref.push([msg.messageId, args]);
+      return `个人偏好命令：${args.join(' ')}`;
+    },
+    privacy: async (msg, args) => {
+      calls.privacy = calls.privacy ?? [];
+      calls.privacy.push([msg.messageId, args]);
+      return `跨群授权命令：${args.join(' ')}`;
+    },
     listJobs: async () => '本会话暂无后台任务。',
     jobStatus: async (_msg, id) => `任务 ${id} 详情。`,
     cancelJob: async (_msg, id) => `已取消后台任务 ${id}。`,

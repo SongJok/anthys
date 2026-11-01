@@ -95,6 +95,17 @@ export interface AgentHarnessOptions {
   glossary?: GlossaryContextProvider;
   /** 技能目录 / 项目手册简报等扩展系统提示词 */
   extensions?: ExtensionPromptProvider;
+  /** 个人表达偏好与跨群记忆授权；缺省时按既有默认行为处理 */
+  personSettings?: {
+    buildPrompt(
+      personKey: string,
+      conversationType: '1' | '2',
+    ): Promise<string | undefined>;
+    resolveGroupMode(
+      personKey: string,
+      conversationId: string,
+    ): Promise<'off' | 'shareable' | 'all'>;
+  };
   /** 压缩/摘要回看的历史消息上限，默认 200 */
   fullHistoryLimit?: number;
   /** 每日 Token 配额与用量记账 */
@@ -250,6 +261,7 @@ export class AgentHarness {
       message,
       text,
       handle.proactive ?? false,
+      personKey,
     );
     const messages = assembler.build({
       persona,
@@ -283,6 +295,7 @@ export class AgentHarness {
         senderStaffId: message.senderStaffId,
         senderNick: message.senderNick,
         conversationType: message.conversationType,
+        personKey,
         deadlineAt: startedAt + policy.maxWallTimeMs,
         now: this.now,
         proactive: handle.proactive ?? false,
@@ -443,6 +456,7 @@ export class AgentHarness {
         senderStaffId: message.senderStaffId,
         senderNick: message.senderNick,
         conversationType: message.conversationType,
+        personKey,
         deadlineAt: startedAt + policy.maxWallTimeMs,
         now: this.now,
         proactive: true,
@@ -553,6 +567,7 @@ export class AgentHarness {
         senderStaffId: message.senderStaffId,
         senderNick: message.senderNick,
         conversationType: message.conversationType,
+        personKey,
         deadlineAt: startedAt + deadlineMs,
         now: this.now,
         proactive: true,
@@ -656,6 +671,7 @@ export class AgentHarness {
       message,
       text,
       proactive,
+      personKey,
     );
     const jobInstruction = [
       `这是一个后台任务（${job.kind}），用户不会实时查看执行过程。`,
@@ -707,6 +723,7 @@ export class AgentHarness {
         senderStaffId: message.senderStaffId,
         senderNick: message.senderNick,
         conversationType: message.conversationType,
+        personKey,
         deadlineAt: startedAt + policy.maxWallTimeMs,
         now: this.now,
         proactive,
@@ -882,6 +899,25 @@ export class AgentHarness {
       );
     }
 
+    let userGroupSharing: 'off' | 'shareable' | 'all' | undefined;
+    if (audience === 'group' && this.options.personSettings) {
+      try {
+        userGroupSharing = await this.options.personSettings.resolveGroupMode(
+          input.personKey,
+          message.conversationId,
+        );
+      } catch (error) {
+        this.options.logger?.warn(
+          {
+            conversationId: message.conversationId,
+            personKey: input.personKey,
+            error: error instanceof Error ? error.message : String(error),
+          },
+          'memory consent resolution failed, keeping default shareable mode',
+        );
+      }
+    }
+
     return memory.assemble({
       personaSystemPrompt: input.personaSystemPrompt,
       userId: input.personKey,
@@ -890,6 +926,7 @@ export class AgentHarness {
       ...(audience === 'group'
         ? { groupConversationId: message.conversationId }
         : {}),
+      ...(userGroupSharing ? { userGroupSharing } : {}),
       audience,
       groupRecentTranscript: groupTranscript,
       activeTurnMessages: [{ role: 'user', content: input.userText }],
@@ -926,6 +963,7 @@ export class AgentHarness {
     message: InboundMessage,
     text: string,
     proactive: boolean,
+    personKey?: string,
   ): Promise<string | undefined> {
     const extensionPrompt = await this.buildExtensionPrompt(
       message,
@@ -933,10 +971,34 @@ export class AgentHarness {
       proactive,
     );
     const glossaryPrompt = await this.buildGlossaryPrompt(message, text);
-    const sections = [extensionPrompt, glossaryPrompt].filter(
+    const personPrompt = personKey
+      ? await this.buildPersonPrompt(personKey, message.conversationType)
+      : undefined;
+    const sections = [extensionPrompt, personPrompt, glossaryPrompt].filter(
       (section): section is string => Boolean(section),
     );
     return sections.length > 0 ? sections.join('\n\n') : undefined;
+  }
+
+  private async buildPersonPrompt(
+    personKey: string,
+    conversationType: '1' | '2',
+  ): Promise<string | undefined> {
+    const settings = this.options.personSettings;
+    if (!settings) return undefined;
+    try {
+      return (await settings.buildPrompt(personKey, conversationType))?.trim() || undefined;
+    } catch (error) {
+      this.options.logger?.warn(
+        {
+          personKey,
+          conversationType,
+          error: error instanceof Error ? error.message : String(error),
+        },
+        'failed to build personal preference prompt, continuing without it',
+      );
+      return undefined;
+    }
   }
 
   private async buildExtensionPrompt(

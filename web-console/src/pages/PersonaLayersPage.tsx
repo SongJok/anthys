@@ -22,10 +22,15 @@ import { PlusOutlined, ReloadOutlined, UserSwitchOutlined } from '@ant-design/ic
 import { api } from '../api';
 import { formatShanghaiDateTime } from '../time';
 import type {
+  GroupMemorySharing,
   KnownGroup,
   PersonIdentity,
+  PersonMemoryConsent,
+  PersonPreferences,
   PersonaProfile,
   PersonaScope,
+  PreferenceLanguage,
+  ReplyLength,
 } from '../types';
 
 interface PersonaForm {
@@ -41,6 +46,22 @@ interface BindForm {
   displayName: string;
   mergeMemories: boolean;
 }
+
+interface PersonSettingsForm {
+  replyLength: ReplyLength;
+  language: PreferenceLanguage;
+  addressAs: string;
+  extraInstructions: string;
+  enabled: boolean;
+  groupSharing: GroupMemorySharing;
+  allowedConversationIds: string[];
+}
+
+const SHARING_LABELS: Record<GroupMemorySharing, string> = {
+  off: '群聊不使用',
+  shareable: '仅可共享条目',
+  all: '全部非敏感记忆',
+};
 
 export default function PersonaLayersPage() {
   const [scope, setScope] = useState<PersonaScope>('group');
@@ -62,6 +83,16 @@ export default function PersonaLayersPage() {
   const [bindForm] = Form.useForm<BindForm>();
   const [bindOpen, setBindOpen] = useState(false);
   const [binding, setBinding] = useState(false);
+
+  const [preferences, setPreferences] = useState<PersonPreferences[]>([]);
+  const [consents, setConsents] = useState<PersonMemoryConsent[]>([]);
+  const [settingsModal, setSettingsModal] = useState<{
+    open: boolean;
+    person?: PersonIdentity;
+  }>({ open: false });
+  const [settingsLoading, setSettingsLoading] = useState(false);
+  const [settingsSaving, setSettingsSaving] = useState(false);
+  const [settingsForm] = Form.useForm<PersonSettingsForm>();
 
   const loadProfiles = useCallback(async (nextScope: PersonaScope) => {
     setLoading(true);
@@ -100,10 +131,93 @@ export default function PersonaLayersPage() {
     void loadProfiles(scope);
   }, [loadProfiles, scope]);
 
+  const loadPersonSettings = useCallback(async () => {
+    try {
+      const [prefResult, consentResult] = await Promise.all([
+        api.personPreferences(),
+        api.personConsents(),
+      ]);
+      setPreferences(
+        Array.isArray(prefResult.preferences)
+          ? prefResult.preferences
+          : [prefResult.preferences],
+      );
+      setConsents(consentResult.consents ?? []);
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : String(error));
+    }
+  }, []);
+
   useEffect(() => {
     void loadGroups();
     void loadIdentities();
-  }, [loadGroups, loadIdentities]);
+    void loadPersonSettings();
+  }, [loadGroups, loadIdentities, loadPersonSettings]);
+
+  const preferenceByPerson = new Map(
+    preferences.map((item) => [item.personKey, item]),
+  );
+  const consentByPerson = new Map(
+    consents.map((item) => [item.personKey, item]),
+  );
+
+  const openSettings = async (person: PersonIdentity) => {
+    setSettingsModal({ open: true, person });
+    setSettingsLoading(true);
+    try {
+      const [prefResult, consentResult] = await Promise.all([
+        api.personPreferences(person.personKey),
+        api.personConsents(person.personKey),
+      ]);
+      const pref = Array.isArray(prefResult.preferences)
+        ? undefined
+        : prefResult.preferences;
+      settingsForm.setFieldsValue({
+        replyLength: pref?.replyLength ?? 'balanced',
+        language: pref?.language ?? 'auto',
+        addressAs: pref?.addressAs ?? '',
+        extraInstructions: pref?.extraInstructions ?? '',
+        enabled: pref?.enabled ?? true,
+        groupSharing: consentResult.consent?.groupSharing ?? 'shareable',
+        allowedConversationIds:
+          consentResult.consent?.allowedConversationIds ?? [],
+      });
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setSettingsLoading(false);
+    }
+  };
+
+  const saveSettings = async (values: PersonSettingsForm) => {
+    if (!settingsModal.person) return;
+    setSettingsSaving(true);
+    try {
+      const personKey = settingsModal.person.personKey;
+      await Promise.all([
+        api.updatePersonPreferences({
+          personKey,
+          replyLength: values.replyLength,
+          language: values.language,
+          addressAs: values.addressAs ?? '',
+          extraInstructions: values.extraInstructions ?? '',
+          enabled: values.enabled,
+        }),
+        api.updatePersonConsent({
+          personKey,
+          groupSharing: values.groupSharing,
+          allowedConversationIds: values.allowedConversationIds ?? [],
+        }),
+      ]);
+      message.success('个人偏好与跨群授权已保存');
+      setSettingsModal({ open: false });
+      await loadPersonSettings();
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setSettingsSaving(false);
+    }
+  };
 
   const subjectOptions = (
     scope === 'group'
@@ -421,9 +535,51 @@ export default function PersonaLayersPage() {
             {
               title: '合并到',
               dataIndex: 'mergedInto',
-              width: 220,
+              width: 180,
               render: (value: string | null) =>
                 value ? <Tag color="purple">{value}</Tag> : '-',
+            },
+            {
+              title: '个人偏好',
+              key: 'preferences',
+              width: 150,
+              render: (_, row) => {
+                const pref = preferenceByPerson.get(row.personKey);
+                if (!pref) return <Tag>系统默认</Tag>;
+                return (
+                  <Space size={4} wrap>
+                    <Tag>{pref.replyLength}</Tag>
+                    <Tag>{pref.language}</Tag>
+                    {pref.enabled ? null : <Tag color="orange">停用</Tag>}
+                  </Space>
+                );
+              },
+            },
+            {
+              title: '跨群记忆',
+              key: 'consent',
+              width: 140,
+              render: (_, row) => {
+                const consent = consentByPerson.get(row.personKey);
+                const mode = consent?.groupSharing ?? 'shareable';
+                return (
+                  <Tooltip
+                    title={
+                      consent
+                        ? `白名单：${
+                            consent.allowedConversationIds.length > 0
+                              ? consent.allowedConversationIds.join('、')
+                              : '全部群'
+                          }`
+                        : '未单独设置，默认只在群聊使用可共享记忆'
+                    }
+                  >
+                    <Tag color={mode === 'off' ? 'red' : mode === 'all' ? 'green' : 'blue'}>
+                      {SHARING_LABELS[mode]}
+                    </Tag>
+                  </Tooltip>
+                );
+              },
             },
             {
               title: '最后更新',
@@ -431,6 +587,16 @@ export default function PersonaLayersPage() {
               width: 170,
               render: (value: number) =>
                 value ? formatShanghaiDateTime(value) : '-',
+            },
+            {
+              title: '操作',
+              key: 'actions',
+              width: 110,
+              render: (_, row) => (
+                <Button size="small" onClick={() => void openSettings(row)}>
+                  个人设置
+                </Button>
+              ),
             },
           ]}
         />
@@ -552,6 +718,85 @@ export default function PersonaLayersPage() {
             extra="仅在同一员工的两个 ID 被误拆时开启；不同员工的记忆不要合并。"
           >
             <Switch />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
+        title={`个人偏好与跨群授权：${
+          settingsModal.person?.displayName ||
+          settingsModal.person?.personKey ||
+          ''
+        }`}
+        open={settingsModal.open}
+        confirmLoading={settingsSaving}
+        onCancel={() => setSettingsModal({ open: false })}
+        onOk={() => void settingsForm.submit()}
+        okText="保存"
+        width={680}
+      >
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginBottom: 12 }}
+          message="个人偏好只影响单聊表达，不会带进群聊；跨群记忆授权决定个人语义记忆能否在群聊中被召回。安全与权限边界不受两者影响。"
+        />
+        <Form
+          form={settingsForm}
+          layout="vertical"
+          onFinish={saveSettings}
+          disabled={settingsLoading}
+        >
+          <Form.Item label="回答长度" name="replyLength">
+            <Select
+              options={[
+                { value: 'concise', label: '简短（先结论）' },
+                { value: 'balanced', label: '适中（默认）' },
+                { value: 'detailed', label: '详细（含依据与示例）' },
+              ]}
+            />
+          </Form.Item>
+          <Form.Item label="回答语言" name="language">
+            <Select
+              options={[
+                { value: 'auto', label: '自动（默认）' },
+                { value: 'zh', label: '中文' },
+                { value: 'en', label: 'English' },
+              ]}
+            />
+          </Form.Item>
+          <Form.Item label="称呼（单聊）" name="addressAs">
+            <Input placeholder="例如：老张；留空表示不特别称呼" />
+          </Form.Item>
+          <Form.Item
+            label="补充要求（单聊）"
+            name="extraInstructions"
+            extra="例如：先给结论、代码用 TypeScript、避免客套。"
+          >
+            <Input.TextArea rows={3} />
+          </Form.Item>
+          <Form.Item label="启用个人偏好" name="enabled" valuePropName="checked">
+            <Switch />
+          </Form.Item>
+          <Form.Item
+            label="群聊中使用个人记忆"
+            name="groupSharing"
+            extra="默认只召回显式标记可共享的条目；安全与敏感记忆始终不进入群聊上下文。"
+          >
+            <Select
+              options={[
+                { value: 'off', label: '关闭：任何群都不使用' },
+                { value: 'shareable', label: '仅可共享条目（默认）' },
+                { value: 'all', label: '全部非敏感记忆' },
+              ]}
+            />
+          </Form.Item>
+          <Form.Item
+            label="生效群白名单"
+            name="allowedConversationIds"
+            extra="留空表示对所有群生效；填写 conversationId 后只在这些群生效。"
+          >
+            <Select mode="tags" placeholder="输入群 conversationId 后回车" />
           </Form.Item>
         </Form>
       </Modal>

@@ -115,6 +115,8 @@ export interface SemanticRecallQuery {
   embedding?: number[];
   /** 群聊召回用户级记忆时只取明确可共享的条目 */
   shareableOnly?: boolean;
+  /** 排除敏感级记忆；用户授权 all 时仍不扩散敏感信息 */
+  excludeSensitive?: boolean;
   /** 过期判断基准，默认当前时间 */
   now?: number;
 }

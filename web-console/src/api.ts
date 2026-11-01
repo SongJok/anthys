@@ -13,7 +13,15 @@ import type {
   GlossaryValidationReport,
   GithubAdminStatus,
   GithubConnectionTestResult,
+  GroupGoalRecord,
+  GroupGoalStatus,
+  GroupMemorySharing,
+  GroupModelRoute,
+  GroupModelProvider,
   GroupPolicy,
+  GroupTaskRecord,
+  GroupTaskStatus,
+  GroupWorkspaceSnapshot,
   HandbookSectionPatch,
   KnownGroup,
   LLMConfig,
@@ -25,8 +33,12 @@ import type {
   McpTestResult,
   PersonIdentity,
   PersonIdentityBindResult,
+  PersonMemoryConsent,
+  PersonPreferences,
   PersonaProfile,
   PersonaScope,
+  PreferenceLanguage,
+  ReplyLength,
   PluginAdminView,
   PluginPackagePreview,
   PluginValidationIssue,
@@ -243,6 +255,151 @@ export const api = {
   }) =>
     request<PersonIdentityBindResult & { ok: boolean }>('/identities/bind', {
       method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  groupWorkspace: (conversationId: string) =>
+    request<GroupWorkspaceSnapshot & { ok: boolean }>(
+      `/groups/${encodeURIComponent(conversationId)}/workspace`,
+    ),
+  updateGroupWorkspace: (
+    conversationId: string,
+    body: { title?: string; purpose?: string; responsibilities?: string[] },
+  ) =>
+    request<{ workspace: GroupWorkspaceSnapshot['workspace'] }>(
+      `/groups/${encodeURIComponent(conversationId)}/workspace`,
+      { method: 'PUT', body: JSON.stringify(body) },
+    ),
+  createGroupGoal: (
+    conversationId: string,
+    body: {
+      title: string;
+      detail?: string;
+      ownerName?: string;
+      dueAt?: number | null;
+    },
+  ) =>
+    request<{ goal: GroupGoalRecord }>(
+      `/groups/${encodeURIComponent(conversationId)}/goals`,
+      { method: 'POST', body: JSON.stringify(body) },
+    ),
+  updateGroupGoal: (
+    conversationId: string,
+    goalId: string,
+    body: {
+      title?: string;
+      detail?: string;
+      status?: GroupGoalStatus;
+      ownerName?: string;
+      dueAt?: number | null;
+    },
+  ) =>
+    request<{ goal: GroupGoalRecord }>(
+      `/groups/${encodeURIComponent(conversationId)}/goals/${encodeURIComponent(goalId)}`,
+      { method: 'PUT', body: JSON.stringify(body) },
+    ),
+  deleteGroupGoal: (conversationId: string, goalId: string) =>
+    request<{ ok: boolean; removed: boolean }>(
+      `/groups/${encodeURIComponent(conversationId)}/goals/${encodeURIComponent(goalId)}`,
+      { method: 'DELETE' },
+    ),
+  createGroupTask: (
+    conversationId: string,
+    body: {
+      title: string;
+      detail?: string;
+      assigneeName?: string;
+      dueAt?: number | null;
+    },
+  ) =>
+    request<{ task: GroupTaskRecord }>(
+      `/groups/${encodeURIComponent(conversationId)}/tasks`,
+      { method: 'POST', body: JSON.stringify(body) },
+    ),
+  updateGroupTask: (
+    conversationId: string,
+    taskId: string,
+    body: {
+      title?: string;
+      detail?: string;
+      status?: GroupTaskStatus;
+      assigneeName?: string;
+      dueAt?: number | null;
+    },
+  ) =>
+    request<{ task: GroupTaskRecord }>(
+      `/groups/${encodeURIComponent(conversationId)}/tasks/${encodeURIComponent(taskId)}`,
+      { method: 'PUT', body: JSON.stringify(body) },
+    ),
+  deleteGroupTask: (conversationId: string, taskId: string) =>
+    request<{ ok: boolean; removed: boolean }>(
+      `/groups/${encodeURIComponent(conversationId)}/tasks/${encodeURIComponent(taskId)}`,
+      { method: 'DELETE' },
+    ),
+
+  groupModelRoute: (conversationId: string) =>
+    request<{
+      route: GroupModelRoute | null;
+      apiKeyConfigured?: boolean;
+    }>(`/groups/${encodeURIComponent(conversationId)}/model-route`),
+  updateGroupModelRoute: (
+    conversationId: string,
+    body: {
+      enabled?: boolean;
+      provider?: GroupModelProvider;
+      baseUrl?: string;
+      apiKeyEnv?: string;
+      model?: string;
+      temperature?: number | null;
+      thinking?: GroupModelRoute['thinking'];
+      maxTokens?: number | null;
+    },
+  ) =>
+    request<{ route: GroupModelRoute; apiKeyConfigured: boolean }>(
+      `/groups/${encodeURIComponent(conversationId)}/model-route`,
+      { method: 'PUT', body: JSON.stringify(body) },
+    ),
+  deleteGroupModelRoute: (conversationId: string) =>
+    request<{ ok: boolean; removed: boolean }>(
+      `/groups/${encodeURIComponent(conversationId)}/model-route`,
+      { method: 'DELETE' },
+    ),
+
+  personPreferences: (personKey?: string) =>
+    request<{ preferences: PersonPreferences | PersonPreferences[] }>(
+      `/person-settings/preferences${
+        personKey?.trim()
+          ? `?personKey=${encodeURIComponent(personKey.trim())}`
+          : ''
+      }`,
+    ),
+  updatePersonPreferences: (body: {
+    personKey: string;
+    replyLength?: ReplyLength;
+    language?: PreferenceLanguage;
+    addressAs?: string;
+    extraInstructions?: string;
+    enabled?: boolean;
+  }) =>
+    request<{ preferences: PersonPreferences }>(
+      '/person-settings/preferences',
+      { method: 'PUT', body: JSON.stringify(body) },
+    ),
+  personConsents: (personKey?: string) =>
+    request<{ consent?: PersonMemoryConsent; consents?: PersonMemoryConsent[] }>(
+      `/person-settings/consents${
+        personKey?.trim()
+          ? `?personKey=${encodeURIComponent(personKey.trim())}`
+          : ''
+      }`,
+    ),
+  updatePersonConsent: (body: {
+    personKey: string;
+    groupSharing?: GroupMemorySharing;
+    allowedConversationIds?: string[];
+  }) =>
+    request<{ consent: PersonMemoryConsent }>('/person-settings/consents', {
+      method: 'PUT',
       body: JSON.stringify(body),
     }),
 

@@ -46,6 +46,12 @@ export interface CommandRuntime {
   ): Promise<string>;
   /** 任务线程：创建/查看/关联/订阅/关闭 */
   tasks(message: InboundMessage, args: string[]): Promise<string>;
+  /** 群工作区：群定位、职责、群目标与群任务（仅群聊） */
+  group(message: InboundMessage, args: string[]): Promise<string>;
+  /** 个人表达偏好（仅单聊） */
+  pref(message: InboundMessage, args: string[]): Promise<string>;
+  /** 跨群记忆授权（仅单聊） */
+  privacy(message: InboundMessage, args: string[]): Promise<string>;
   /** 查看本会话最近的后台任务 */
   listJobs(message: InboundMessage): Promise<string>;
   /** 查看指定后台任务详情（支持 ID 前缀） */
@@ -91,6 +97,9 @@ const HELP_TEXT = [
   '- `/worker <research|ops|report> <需求>` 提交指定 Worker 的后台任务',
   '- `/task new <需求>` 创建任务线程；`/task list`、`/task show <ID>` 查看',
   '- `/task link <ID> <类型> <引用>` 关联外部实体；`/task subscribe|unsubscribe <ID>` 订阅更新',
+  '- `/group` 查看或维护本群定位、职责、群目标与群任务（群聊）',
+  '- `/pref` 查看或设置个人回答偏好（单聊）',
+  '- `/privacy` 设置个人记忆在群聊中的使用范围（单聊）',
   '- `/jobs` 查看本会话最近的后台任务',
   '- `/job-status <id>` 查看任务详情',
   '- `/job-cancel <id>` 取消排队或执行中的任务',
@@ -254,6 +263,21 @@ export class CommandRouter {
       }
       case 'task': {
         await runtime.reply(message, await runtime.tasks(message, command.args));
+        return true;
+      }
+      case 'group': {
+        await runtime.reply(message, await runtime.group(message, command.args));
+        return true;
+      }
+      case 'pref': {
+        await runtime.reply(message, await runtime.pref(message, command.args));
+        return true;
+      }
+      case 'privacy': {
+        await runtime.reply(
+          message,
+          await runtime.privacy(message, command.args),
+        );
         return true;
       }
       case 'jobs': {

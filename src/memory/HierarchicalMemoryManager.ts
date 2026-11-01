@@ -264,6 +264,12 @@ export interface AssembleMemoryInput {
   groupRecentTranscript?: string;
   activeTurnMessages?: Array<{ role: 'user' | 'assistant'; content: string }>;
   semanticQuery?: string;
+  /**
+   * 群聊中该员工个人记忆的共享档位：
+   * off 不召回；shareable 只召回标记可共享的；all 召回全部非敏感记忆。
+   * 单聊忽略此字段。
+   */
+  userGroupSharing?: 'off' | 'shareable' | 'all';
 }
 
 export interface HierarchicalMemoryManagerOptions {
@@ -535,16 +541,26 @@ export class HierarchicalMemoryManager {
     const audience =
       input.audience ?? (input.groupConversationId ? 'group' : 'single');
     const inGroup = audience === 'group';
-    const [userRecall, groupRecall, episodicSummary] = await Promise.all([
-      this.recall(
-        {
-          query: queryText,
-          scope: 'user',
-          subjectKey: input.userId,
-          ...(inGroup ? { shareableOnly: true } : {}),
-        },
-        queryVector,
-      ),
+    const userGroupSharing = input.userGroupSharing ?? 'shareable';
+    const userRecall =
+      inGroup && userGroupSharing === 'off'
+        ? Promise.resolve({ profileLines: [], glossaryLines: [] })
+        : this.recall(
+            {
+              query: queryText,
+              scope: 'user',
+              subjectKey: input.userId,
+              ...(inGroup && userGroupSharing === 'shareable'
+                ? { shareableOnly: true }
+                : {}),
+              ...(inGroup && userGroupSharing === 'all'
+                ? { excludeSensitive: true }
+                : {}),
+            },
+            queryVector,
+          );
+    const [userRecallResult, groupRecall, episodicSummary] = await Promise.all([
+      userRecall,
       inGroup && input.groupConversationId
         ? this.recall(
             {
@@ -561,13 +577,19 @@ export class HierarchicalMemoryManager {
     ]);
 
     const profileLines = [`发言人：${input.speakerNick}`];
-    for (const line of userRecall.profileLines) {
+    for (const line of userRecallResult.profileLines) {
       if (!profileLines.includes(line)) profileLines.push(line);
     }
-    if (userRecall.glossaryLines.length + groupRecall.glossaryLines.length > 0) {
+    if (
+      userRecallResult.glossaryLines.length + groupRecall.glossaryLines.length >
+      0
+    ) {
       profileLines.push(
         '团队术语：',
-        ...[...userRecall.glossaryLines, ...groupRecall.glossaryLines].filter(
+        ...[
+          ...userRecallResult.glossaryLines,
+          ...groupRecall.glossaryLines,
+        ].filter(
           (line, index, all) => all.indexOf(line) === index,
         ),
       );

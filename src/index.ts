@@ -129,8 +129,25 @@ import {
   DrizzlePersonIdentityStore,
   DrizzlePersonaProfileStore,
 } from './db/personSchema.js';
-import { PersonIdentityService } from './identity/PersonIdentityService.js';
+import {
+  PersonIdentityService,
+  defaultPersonKeyFor,
+} from './identity/PersonIdentityService.js';
 import { PersonaResolver } from './persona/PersonaResolver.js';
+import {
+  DrizzleGroupModelRouteStore,
+  DrizzleGroupWorkspaceStore,
+} from './db/groupSchema.js';
+import {
+  DrizzlePersonMemoryConsentStore,
+  DrizzlePersonPreferencesStore,
+} from './db/personSettingsSchema.js';
+import { GroupWorkspaceService } from './groups/GroupWorkspaceService.js';
+import { GroupModelRoutingEngine } from './groups/GroupModelRoutingEngine.js';
+import { GroupModelRouteService } from './groups/GroupModelRouteService.js';
+import { PersonSettingsService } from './personal/PersonSettingsService.js';
+import { GroupWorkspaceToolProvider } from './tools/groups/GroupWorkspaceToolProvider.js';
+import { PersonSettingsToolProvider } from './tools/personal/PersonSettingsToolProvider.js';
 import { DrizzleGlossaryStore } from './db/glossarySchema.js';
 import { GlossaryService } from './glossary/GlossaryService.js';
 import { GlossaryToolProvider } from './tools/glossary/GlossaryToolProvider.js';
@@ -139,7 +156,7 @@ import { WebSearchToolProvider } from './tools/web/WebSearchToolProvider.js';
 import { WebFetchClient } from './tools/web/WebFetchClient.js';
 import { WebFetchToolProvider } from './tools/web/WebFetchToolProvider.js';
 import { OpenAIEmbeddingClient } from './memory/EmbeddingClient.js';
-import { createChatModel } from './react/createChatModel.js';
+import { createChatModel, inferDialect } from './react/createChatModel.js';
 import { ReActRunner } from './react/ReActRunner.js';
 import { createPlanner } from './react/Planner.js';
 import { SubagentToolProvider } from './react/SubagentToolProvider.js';
@@ -1463,6 +1480,49 @@ async function main(): Promise<void> {
       engineForRole: runnerForRole,
       isAdmin: (staffId) => configCenter.isAdmin(staffId),
     });
+    const groupModelRouteStore = new DrizzleGroupModelRouteStore(dbHandle.db);
+    const groupModelRouting = new GroupModelRoutingEngine({
+      fallback: routingEngine,
+      routes: groupModelRouteStore,
+      engineForRoute: (route) => {
+        if (route.apiKeyEnv && !process.env[route.apiKeyEnv]?.trim()) {
+          return null;
+        }
+        const base = configCenter.getModelProfiles().default;
+        const baseUrl = route.baseUrl || base.baseUrl;
+        const apiKey = route.apiKeyEnv
+          ? (process.env[route.apiKeyEnv] ?? '')
+          : base.apiKey;
+        const maxTokens = route.maxTokens ?? base.maxTokens;
+        const profile: ModelProfile = {
+          provider: route.provider || base.provider,
+          dialect: inferDialect(baseUrl),
+          baseUrl,
+          apiKey,
+          model: route.model || base.model,
+          temperature: route.temperature ?? base.temperature,
+          thinking: route.thinking || base.thinking,
+          ...(maxTokens ? { maxTokens } : {}),
+        };
+        return new ReActRunner({
+          model: createChatModel(profile),
+          toolProviders: applyExecutionPolicy(() => toolProviders),
+          policy: configCenter.getLoopPolicy(),
+          temperature: profile.temperature,
+          enableNativeReasoning: profile.thinking !== 'off',
+          ...(profile.maxTokens ? { maxTokens: profile.maxTokens } : {}),
+          approval: resolveToolApproval,
+          toolTimeoutMs,
+          ...(planner ? { planner } : {}),
+          ...watchdogRunOptions,
+        });
+      },
+      logger: harnessLogger,
+    });
+    const groupModelRoutes = new GroupModelRouteService({
+      store: groupModelRouteStore,
+      onChange: (conversationId) => groupModelRouting.invalidate(conversationId),
+    });
 
     const memoryStore = new DrizzleMemoryStore(dbHandle.db);
     const personIdentityStore = new DrizzlePersonIdentityStore(dbHandle.db);
@@ -1535,9 +1595,38 @@ async function main(): Promise<void> {
       logger: harnessLogger,
       onBind: () => personaResolver.invalidate(),
     });
+    const groupWorkspace = new GroupWorkspaceService({
+      store: new DrizzleGroupWorkspaceStore(dbHandle.db),
+      isAdmin: (staffId) => configCenter.isAdmin(staffId),
+      saveNote: async (note) => {
+        await hierarchicalMemory.remember([
+          {
+            scope: 'group',
+            subjectKey: note.conversationId,
+            kind: 'terminology',
+            content: note.content,
+            keywords: note.keywords,
+            shareableInGroup: true,
+            sensitivity: 'normal',
+            confidence: 0.95,
+            sourceConversationId: note.conversationId,
+            sourceConversationType: '2',
+            sourceMessageId: note.sourceMessageId ?? null,
+          },
+        ]);
+      },
+    });
+    const personSettings = new PersonSettingsService({
+      preferences: new DrizzlePersonPreferencesStore(dbHandle.db),
+      consents: new DrizzlePersonMemoryConsentStore(dbHandle.db),
+    });
+    toolProviders.push(
+      new GroupWorkspaceToolProvider({ service: groupWorkspace }),
+      new PersonSettingsToolProvider({ service: personSettings }),
+    );
     const repository = new DrizzleConversationRepository(dbHandle.db);
     const harness = new AgentHarness({
-      engine: routingEngine,
+      engine: groupModelRouting,
       investigationEngine,
       workerRuntimes,
       repository,
@@ -1552,11 +1641,33 @@ async function main(): Promise<void> {
       logger: harnessLogger,
       memory: hierarchicalMemory,
       glossary,
+      personSettings: {
+        buildPrompt: (personKey, conversationType) =>
+          personSettings.buildPrompt(personKey, conversationType),
+        resolveGroupMode: (personKey, conversationId) =>
+          personSettings.resolveGroupMode(personKey, conversationId),
+      },
       extensions: {
         build: async ({ message, text }) => {
           const config = configCenter.getExtensionsConfig();
           const isAdmin = configCenter.isAdmin(message.senderStaffId);
           const sections: string[] = [];
+          if (message.conversationType === '2') {
+            try {
+              const brief = await groupWorkspace.buildBrief(
+                message.conversationId,
+              );
+              if (brief) sections.push(brief);
+            } catch (error) {
+              logger.warn(
+                {
+                  conversationId: message.conversationId,
+                  error: errorText(error),
+                },
+                'failed to build group workspace brief, continuing without it',
+              );
+            }
+          }
           let projectId: string | undefined;
           if (config.projectsEnabled) {
             try {
@@ -1952,6 +2063,24 @@ async function main(): Promise<void> {
       };
     };
 
+    const resolveCommandPersonKey = async (
+      message: InboundMessage,
+    ): Promise<string> => {
+      try {
+        return (await personIdentity.resolve(message)).personKey;
+      } catch (error) {
+        logger.warn(
+          {
+            conversationId: message.conversationId,
+            senderStaffId: message.senderStaffId,
+            error: errorText(error),
+          },
+          'command identity resolution failed, using isolated fallback',
+        );
+        return defaultPersonKeyFor(message);
+      }
+    };
+
     const commandRouter = new CommandRouter({
       isAdmin: (staffId) => configCenter.isAdmin(staffId),
       stopRun: (conversationId) => runControl.stop(conversationId),
@@ -2208,6 +2337,7 @@ async function main(): Promise<void> {
           senderStaffId: message.senderStaffId,
           senderNick: message.senderNick,
           conversationType: message.conversationType,
+          personKey: await resolveCommandPersonKey(message),
           deadlineAt: Date.now() + 120_000,
           now: Date.now,
         };
@@ -2311,6 +2441,24 @@ async function main(): Promise<void> {
         ].join('\n');
       },
       tasks: (message, args) => taskService.handleCommand(message, args),
+      group: async (message, args) =>
+        groupWorkspace.handleCommand(
+          message,
+          args,
+          await resolveCommandPersonKey(message),
+        ),
+      pref: async (message, args) =>
+        personSettings.handlePreferenceCommand(
+          message,
+          args,
+          await resolveCommandPersonKey(message),
+        ),
+      privacy: async (message, args) =>
+        personSettings.handleConsentCommand(
+          message,
+          args,
+          await resolveCommandPersonKey(message),
+        ),
       listJobs: async (message) =>
         formatJobList(
           await jobStore.list({
@@ -3166,6 +3314,7 @@ async function main(): Promise<void> {
       roleModelRefs.admin.current = createChatModel(profiles.admin);
       roleModelRefs.proactive.current = createChatModel(profiles.proactive);
       routedEngines.clear();
+      groupModelRouting.invalidate();
       engine.updateTemperature(next.temperature);
       engine.updateNativeReasoning(
         (next.thinking ?? (next.enableNativeReasoning ? 'auto' : 'off')) !==
@@ -3180,6 +3329,7 @@ async function main(): Promise<void> {
     });
     configCenter.on('loopPolicy:changed', (event) => {
       routedEngines.clear();
+      groupModelRouting.invalidate();
       const next = event.after as ReturnType<typeof configCenter.getLoopPolicy>;
       engine.updatePolicy(next);
       harness.updatePolicy(next);
@@ -3406,6 +3556,9 @@ async function main(): Promise<void> {
       },
       identities: personIdentity,
       memories: memoryStore,
+      groupWorkspace,
+      groupModelRoutes,
+      personSettings,
       mcp: {
         status: () => mcpPort.status(),
         applyServers: (servers) => mcpPort.applyServers(servers),

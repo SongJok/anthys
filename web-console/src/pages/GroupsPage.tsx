@@ -5,6 +5,7 @@ import {
   Card,
   Descriptions,
   Form,
+  Input,
   InputNumber,
   Modal,
   Popconfirm,
@@ -14,11 +15,28 @@ import {
   Table,
   Tag,
   Tooltip,
+  Typography,
   message,
 } from 'antd';
 import { api } from '../api';
 import { formatShanghaiDateTime } from '../time';
-import type { DefaultGroupPolicy, GroupPolicy, KnownGroup } from '../types';
+import type {
+  DefaultGroupPolicy,
+  GroupModelProvider,
+  GroupPolicy,
+  KnownGroup,
+} from '../types';
+
+interface ModelRouteForm {
+  enabled: boolean;
+  provider: GroupModelProvider;
+  baseUrl: string;
+  apiKeyEnv: string;
+  model: string;
+  temperature: number | null;
+  thinking: 'off' | 'auto' | 'low' | 'high' | 'max' | '';
+  maxTokens: number | null;
+}
 
 interface PolicyForm {
   bystanderEnabled: boolean;
@@ -37,6 +55,16 @@ export default function GroupsPage() {
   const [modal, setModal] = useState<{ open: boolean; group?: KnownGroup }>({ open: false });
   const [saving, setSaving] = useState(false);
   const [form] = Form.useForm<PolicyForm>();
+
+  const [modelModal, setModelModal] = useState<{
+    open: boolean;
+    group?: KnownGroup;
+    exists?: boolean;
+    apiKeyConfigured?: boolean;
+    updatedAt?: number;
+  }>({ open: false });
+  const [modelSaving, setModelSaving] = useState(false);
+  const [modelForm] = Form.useForm<ModelRouteForm>();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -86,6 +114,81 @@ export default function GroupsPage() {
       message.error(error instanceof Error ? error.message : String(error));
     } finally {
       setSaving(false);
+    }
+  };
+
+  const openModelRoute = async (group: KnownGroup) => {
+    try {
+      const result = await api.groupModelRoute(group.conversationId);
+      const route = result.route;
+      modelForm.setFieldsValue({
+        enabled: route?.enabled ?? true,
+        provider: route?.provider ?? '',
+        baseUrl: route?.baseUrl ?? '',
+        apiKeyEnv: route?.apiKeyEnv ?? '',
+        model: route?.model ?? '',
+        temperature: route?.temperature ?? null,
+        thinking: route?.thinking ?? '',
+        maxTokens: route?.maxTokens ?? null,
+      });
+      setModelModal({
+        open: true,
+        group,
+        exists: Boolean(route),
+        apiKeyConfigured: result.apiKeyConfigured ?? false,
+        ...(route ? { updatedAt: route.updatedAt } : {}),
+      });
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  const saveModelRoute = async (values: ModelRouteForm) => {
+    if (!modelModal.group) return;
+    setModelSaving(true);
+    try {
+      const result = await api.updateGroupModelRoute(
+        modelModal.group.conversationId,
+        {
+          enabled: values.enabled,
+          provider: values.provider ?? '',
+          baseUrl: values.baseUrl ?? '',
+          apiKeyEnv: values.apiKeyEnv ?? '',
+          model: values.model ?? '',
+          temperature:
+            values.temperature === undefined ? null : values.temperature,
+          thinking: values.thinking ?? '',
+          maxTokens: values.maxTokens === undefined ? null : values.maxTokens,
+        },
+      );
+      message.success(
+        result.apiKeyConfigured || !result.route.apiKeyEnv
+          ? '群模型路由已保存，下一条消息立即生效'
+          : `路由已保存，但环境变量 ${result.route.apiKeyEnv} 未配置，调用会失败`,
+      );
+      setModelModal((prev) => ({
+        ...prev,
+        exists: true,
+        apiKeyConfigured: result.apiKeyConfigured,
+      }));
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setModelSaving(false);
+    }
+  };
+
+  const removeModelRoute = async () => {
+    if (!modelModal.group) return;
+    setModelSaving(true);
+    try {
+      await api.deleteGroupModelRoute(modelModal.group.conversationId);
+      message.success('已删除群模型路由，该群回落到默认模型');
+      setModelModal({ open: false });
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setModelSaving(false);
     }
   };
 
@@ -235,10 +338,16 @@ export default function GroupsPage() {
             {
               title: '操作',
               key: 'actions',
+              width: 200,
               render: (_, row) => (
-                <Button size="small" onClick={() => openEdit(row)}>
-                  配置策略
-                </Button>
+                <Space size={4}>
+                  <Button size="small" onClick={() => openEdit(row)}>
+                    配置策略
+                  </Button>
+                  <Button size="small" onClick={() => void openModelRoute(row)}>
+                    模型路由
+                  </Button>
+                </Space>
               ),
             },
           ]}
@@ -292,6 +401,108 @@ export default function GroupsPage() {
           </Form.Item>
           <Form.Item label="触发话题" name="triggerTopics">
             <Select mode="tags" placeholder="输入话题后回车" />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
+        title={`群模型路由：${modelModal.group?.title ?? modelModal.group?.conversationId ?? ''}`}
+        open={modelModal.open}
+        confirmLoading={modelSaving}
+        onCancel={() => setModelModal({ open: false })}
+        onOk={() => void modelForm.submit()}
+        okText="保存并生效"
+        width={640}
+        footer={(_, { OkBtn, CancelBtn }) => (
+          <Space>
+            {modelModal.exists ? (
+              <Popconfirm
+                title="删除该群模型路由？"
+                description="删除后该群回落到默认模型。"
+                onConfirm={() => void removeModelRoute()}
+              >
+                <Button danger loading={modelSaving}>
+                  删除路由
+                </Button>
+              </Popconfirm>
+            ) : null}
+            <CancelBtn />
+            <OkBtn />
+          </Space>
+        )}
+      >
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginBottom: 12 }}
+          message="群模型路由只对群聊生效（含该群的主动回复），单聊仍走默认角色模型。留空字段沿用默认模型配置；API Key 只填环境变量名，密钥留在部署环境。"
+        />
+        {modelModal.group ? (
+          <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
+            会话：{modelModal.group.conversationId}
+            {modelModal.updatedAt
+              ? ` · 最后更新 ${formatShanghaiDateTime(modelModal.updatedAt)}`
+              : ''}
+            {modelModal.exists && modelModal.apiKeyConfigured === false
+              ? ' · 当前环境变量未配置'
+              : ''}
+          </Typography.Paragraph>
+        ) : null}
+        <Form form={modelForm} layout="vertical" onFinish={saveModelRoute}>
+          <Form.Item label="启用" name="enabled" valuePropName="checked">
+            <Switch />
+          </Form.Item>
+          <Form.Item
+            label="供应商"
+            name="provider"
+            extra="留空沿用默认供应商；anthropic 走 Anthropic 协议。"
+          >
+            <Select
+              options={[
+                { value: '', label: '沿用默认' },
+                { value: 'openai-compatible', label: 'OpenAI 兼容' },
+                { value: 'anthropic', label: 'Anthropic' },
+              ]}
+            />
+          </Form.Item>
+          <Form.Item
+            label="模型名"
+            name="model"
+            rules={[{ required: true, message: '群路由必须显式指定模型' }]}
+          >
+            <Input placeholder="例如 gpt-4o-mini / qwen-max" />
+          </Form.Item>
+          <Form.Item
+            label="Base URL"
+            name="baseUrl"
+            extra="留空沿用默认地址；填写后需带 http(s)://。"
+          >
+            <Input placeholder="https://api.example.com/v1" />
+          </Form.Item>
+          <Form.Item
+            label="API Key 环境变量名"
+            name="apiKeyEnv"
+            extra="例如 GROUP_A_MODEL_KEY；留空沿用默认模型的密钥。"
+          >
+            <Input placeholder="GROUP_A_MODEL_KEY" />
+          </Form.Item>
+          <Form.Item label="温度（0-2，留空沿用默认）" name="temperature">
+            <InputNumber min={0} max={2} step={0.1} style={{ width: '100%' }} />
+          </Form.Item>
+          <Form.Item label="思维链" name="thinking">
+            <Select
+              options={[
+                { value: '', label: '沿用默认' },
+                { value: 'off', label: 'off' },
+                { value: 'auto', label: 'auto' },
+                { value: 'low', label: 'low' },
+                { value: 'high', label: 'high' },
+                { value: 'max', label: 'max' },
+              ]}
+            />
+          </Form.Item>
+          <Form.Item label="最大输出 tokens（留空沿用默认）" name="maxTokens">
+            <InputNumber min={1} max={200000} style={{ width: '100%' }} />
           </Form.Item>
         </Form>
       </Modal>

@@ -6,6 +6,7 @@ import {
   gt,
   ilike,
   isNull,
+  ne,
   or,
   sql,
 } from 'drizzle-orm';
@@ -358,6 +359,9 @@ export class DrizzleMemoryStore
       }
     } else if (query.shareableOnly) {
       conditions.push(eq(semanticMemories.shareableInGroup, true));
+    }
+    if (query.excludeSensitive) {
+      conditions.push(ne(semanticMemories.sensitivity, 'sensitive'));
     }
 
     const terms = query.query

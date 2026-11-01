@@ -17,6 +17,7 @@ import {
   BulbOutlined,
   DashboardOutlined,
   DatabaseOutlined,
+  FlagOutlined,
   IdcardOutlined,
   MessageOutlined,
   ReadOutlined,
@@ -31,6 +32,7 @@ import SystemSettingsPage from './pages/SystemSettingsPage';
 import LlmPersonaPage from './pages/LlmPersonaPage';
 import McpConfigPage from './pages/McpConfigPage';
 import GroupsPage from './pages/GroupsPage';
+import GroupWorkspacePage from './pages/GroupWorkspacePage';
 import TracesPage from './pages/TracesPage';
 import ChatPage from './pages/ChatPage';
 import DataGovernancePage from './pages/DataGovernancePage';
@@ -51,6 +53,7 @@ const MENU = [
   { key: 'personas', icon: <IdcardOutlined />, label: '人设与身份' },
   { key: 'mcp', icon: <ApiOutlined />, label: '企业 MCP' },
   { key: 'groups', icon: <TeamOutlined />, label: '群聊旁听策略' },
+  { key: 'workspace', icon: <FlagOutlined />, label: '群工作区' },
   { key: 'memories', icon: <SafetyCertificateOutlined />, label: '记忆治理' },
   { key: 'traces', icon: <BranchesOutlined />, label: 'ReAct 审计轨迹' },
   { key: 'glossary', icon: <ReadOutlined />, label: '术语知识库' },
@@ -68,6 +71,7 @@ const PAGE_TITLES: Record<string, string> = {
   personas: '人设分层与身份归并',
   mcp: '企业内部 MCP 配置',
   groups: '群聊旁听与主动回复策略',
+  workspace: '群工作区：群目标与群任务',
   memories: '语义记忆召回与治理',
   traces: 'ReAct 全链路审计',
   glossary: '企业术语知识库',
@@ -128,6 +132,7 @@ export default function App() {
           {active === 'personas' && <PersonaLayersPage />}
           {active === 'mcp' && <McpConfigPage />}
           {active === 'groups' && <GroupsPage />}
+          {active === 'workspace' && <GroupWorkspacePage />}
           {active === 'memories' && <MemoryGovernancePage />}
           {active === 'traces' && <TracesPage />}
           {active === 'glossary' && <GlossaryPage />}

@@ -34,6 +34,11 @@ import { createProjectRoutes } from './routes/projectRoutes.js';
 import { createGithubRoutes } from './routes/githubRoutes.js';
 import { createPersonaRoutes } from './routes/personaRoutes.js';
 import { createMemoryRoutes } from './routes/memoryRoutes.js';
+import { createGroupRoutes } from './routes/groupRoutes.js';
+import { createPersonSettingsRoutes } from './routes/personSettingsRoutes.js';
+import type { GroupWorkspaceAdminPort } from '../types/group-workspace.js';
+import type { GroupModelRouteService } from '../groups/GroupModelRouteService.js';
+import type { PersonSettingsAdminPort } from '../types/personal-settings.js';
 import { createGovernanceRoutes } from '../governance/governanceRoutes.js';
 import type { DataGovernancePort } from '../governance/DataRetention.js';
 import type {
@@ -120,6 +125,12 @@ export interface AdminApiOptions {
   identities?: PersonIdentityAdminPort;
   /** 语义记忆治理：查看、修订、退役与删除 */
   memories?: SemanticMemoryAdminPort;
+  /** 群工作区：定位、职责、群目标与群任务 */
+  groupWorkspace?: GroupWorkspaceAdminPort;
+  /** 按群模型路由 */
+  groupModelRoutes?: GroupModelRouteService;
+  /** 个人表达偏好与跨群记忆授权 */
+  personSettings?: PersonSettingsAdminPort;
 }
 
 export interface AdminServerOptions extends AdminApiOptions {
@@ -280,6 +291,25 @@ export function createAdminApp(options: AdminApiOptions): Hono {
       '/',
       createMemoryRoutes({
         memories: options.memories,
+        configCenter: options.configCenter,
+      }),
+    );
+  }
+  if (options.groupWorkspace && options.groupModelRoutes) {
+    admin.route(
+      '/',
+      createGroupRoutes({
+        workspace: options.groupWorkspace,
+        modelRoutes: options.groupModelRoutes,
+        configCenter: options.configCenter,
+      }),
+    );
+  }
+  if (options.personSettings) {
+    admin.route(
+      '/',
+      createPersonSettingsRoutes({
+        settings: options.personSettings,
         configCenter: options.configCenter,
       }),
     );
