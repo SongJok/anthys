@@ -1040,6 +1040,7 @@ ReAct 循环内置看门狗（`src/watchdog/RunWatchdog.ts`），只观察不执
 | GET / POST | `/scheduled-tasks` | 定时任务列表（含各 `kind`）/ 创建主动播报 |
 | PUT / DELETE | `/scheduled-tasks/:id` | 更新 / 删除定时任务；个人提醒与报告只允许删除，不支持管理端改期或立即执行 |
 | POST | `/scheduled-tasks/:id/run` | 立即执行一次（仅主动播报） |
+| GET | `/flow-eval?days=7&limit=500` | 基于真实 ReAct 轨迹的消息流评测：回答率、工具错误、引用、看门狗与窗口延迟 |
 | GET | `/governance` | 保留策略、各表行数与超期行数、附件占用 |
 | PUT | `/governance/retention` | 更新保留期（落库，重启后仍生效） |
 | POST | `/governance/cleanup` | 清理过期数据，默认 `dryRun: true` |
@@ -1135,6 +1136,35 @@ pnpm eval:golden -- --no-sync   # 复用当前快照，不做重新同步
 ```
 
 报告包含引用命中率、引用完整率、事实代理覆盖率（检索证据中 `factKeywords` 的命中比例）、`project_search` p95 与安全探针结果。它是确定性检索评测，不生成回答文本，事实覆盖率不等同于人工判分；安全项覆盖密钥泄露、敏感文件与 `.env` 读取探针，不覆盖模型是否服从仓库内提示注入。未达标时命令以非零状态退出，可用于发布前检查。
+
+消息流评测读取 `react_traces` 中已落库的真实消息轨迹，不调用模型也不产生额外费用：
+
+```bash
+pnpm eval:flow -- --days=7 --limit=500 --json=tmp/flow-report.json
+pnpm eval:flow -- --days=7 --cases=eval/flow/cases.json
+```
+
+报告包含回答率、含工具轮次的错误率、引用覆盖率、看门狗触发率、Token/耗时均值与 p95。传入 `--cases` 时按 `question`（忽略空白、大小写和句末标点）匹配最近一条轨迹，并校验期望关键词、必须/禁止工具、引用、步数与 Token 上限；任用例未通过时命令以非零状态退出。用例文件格式：
+
+```json
+{
+  "description": "发布流程回归",
+  "cases": [
+    {
+      "id": "publish",
+      "question": "如何发布到生产？",
+      "expectedKeywords": ["pnpm db:push", "systemd"],
+      "expectedTools": ["project_search"],
+      "forbiddenTools": ["dws_approval_manage"],
+      "requireCitation": true,
+      "maxSteps": 8,
+      "maxTokens": 60000
+    }
+  ]
+}
+```
+
+同一份汇总也可通过管理端 `GET /flow-eval?days=7` 获取。控制台「大盘」页展示今日成本归因；更长时间窗口可直接调用 `/usage?days=N`。
 
 ---
 

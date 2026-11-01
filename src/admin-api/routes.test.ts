@@ -1080,6 +1080,17 @@ describe('在线对话与可观测性接口', () => {
     expect(payload.summary.byUser[0].label).toBe('张三');
   });
 
+  it('消息流评测接口汇总真实轨迹质量', async () => {
+    const response = await ctx.app.request('/api/v1/admin/flow-eval?days=7', {
+      headers: headers(),
+    });
+    expect(response.status).toBe(200);
+    const payload = await body(response);
+    expect(payload.report.totalTurns).toBe(2);
+    expect(payload.report.toolTurns).toBe(1);
+    expect(payload.report.answeredRate).toBe(1);
+  });
+
   it('用户反馈接口在未接入存储时返回空列表', async () => {
     const response = await ctx.app.request('/api/v1/admin/feedback', {
       headers: headers(),

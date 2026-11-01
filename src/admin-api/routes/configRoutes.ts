@@ -7,10 +7,12 @@ import type {
   GroupDirectory,
   LlmSandboxTestResult,
   McpServerStatusView,
+  ReActTraceRecord,
   ReActTraceStore,
 } from '../../types/admin-and-console.js';
 import type { DynamicLoopPolicy } from '../../types/core.js';
 import { startOfShanghaiDay } from '../../time/shanghaiTime.js';
+import { evaluateMessageFlow } from '../../eval/MessageFlowEval.js';
 
 export interface ConfigRouteDeps {
   configCenter: DynamicConfigCenter;
@@ -495,6 +497,29 @@ export function createConfigRoutes(deps: ConfigRouteDeps): Hono {
       today,
       groups,
       auditLogs,
+    });
+  });
+
+  app.get('/flow-eval', async (c) => {
+    const rawDays = Number(c.req.query('days') ?? 7);
+    const days = Number.isFinite(rawDays)
+      ? Math.min(30, Math.max(1, Math.trunc(rawDays)))
+      : 7;
+    const rawLimit = Number(c.req.query('limit') ?? 500);
+    const limit = Number.isFinite(rawLimit)
+      ? Math.min(2_000, Math.max(100, Math.trunc(rawLimit)))
+      : 500;
+    const sinceMs = now() - days * 86_400_000;
+    const items: ReActTraceRecord[] = [];
+    for (let page = 1; items.length < limit; page += 1) {
+      const size = Math.min(100, limit - items.length);
+      const result = await deps.traces.query({ page, pageSize: size, sinceMs });
+      items.push(...result.items);
+      if (result.items.length < size || items.length >= result.total) break;
+    }
+    return c.json({
+      ok: true,
+      report: evaluateMessageFlow(items, { sinceMs }),
     });
   });
 
