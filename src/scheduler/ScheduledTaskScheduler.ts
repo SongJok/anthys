@@ -29,6 +29,9 @@ export interface ScheduledTaskSchedulerOptions {
   store: ScheduledTaskStore;
   execute: (task: ScheduledTask) => Promise<void>;
   intervalMs?: number;
+  /** 领取租约时长，默认 10 分钟 */
+  leaseMs?: number;
+  owner?: string;
   logger?: SchedulerLogger;
   now?: () => number;
 }
@@ -44,6 +47,8 @@ export class ScheduledTaskScheduler {
   private readonly store: ScheduledTaskStore;
   private readonly execute: (task: ScheduledTask) => Promise<void>;
   private readonly intervalMs: number;
+  private readonly leaseMs: number;
+  private readonly owner: string;
   private readonly logger?: SchedulerLogger;
   private readonly now: () => number;
 
@@ -51,6 +56,8 @@ export class ScheduledTaskScheduler {
     this.store = options.store;
     this.execute = options.execute;
     this.intervalMs = Math.max(1_000, options.intervalMs ?? 15_000);
+    this.leaseMs = Math.max(30_000, options.leaseMs ?? 10 * 60_000);
+    this.owner = options.owner ?? `scheduler:${process.pid}`;
     this.logger = options.logger;
     this.now = options.now ?? Date.now;
   }
@@ -78,7 +85,13 @@ export class ScheduledTaskScheduler {
     if (this.tickInFlight) return this.tickInFlight;
     const task = (async () => {
       const nowMs = this.now();
-      const due = await this.store.listDue(nowMs);
+      const due = this.store.claimDue
+        ? await this.store.claimDue({
+            owner: this.owner,
+            nowMs,
+            leaseMs: this.leaseMs,
+          })
+        : await this.store.listDue(nowMs);
       for (const item of due) {
         try {
           await this.execute(item);

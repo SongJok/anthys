@@ -253,6 +253,81 @@ describe('ReActRunner', () => {
     ).toHaveLength(2);
   });
 
+  it('限制单轮工具并发数，避免同时打满外部系统', async () => {
+    let active = 0;
+    let maxActive = 0;
+    const makeTool = (name: string): ToolDefinition => ({
+      name,
+      description: name,
+      parametersJsonSchema: { type: 'object', properties: {} },
+      execute: async () => {
+        active += 1;
+        maxActive = Math.max(maxActive, active);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        active -= 1;
+        return `${name} done`;
+      },
+    });
+    const provider: IToolProvider = {
+      providerName: 'limited-parallel-test',
+      getTools: async () => [
+        makeTool('tool_a'),
+        makeTool('tool_b'),
+        makeTool('tool_c'),
+      ],
+    };
+    const model = new ScriptedModel([
+      toolTurn([
+        { index: 0, id: 'a', name: 'tool_a', args: {} },
+        { index: 1, id: 'b', name: 'tool_b', args: {} },
+        { index: 2, id: 'c', name: 'tool_c', args: {} },
+      ]),
+      [{ contentDelta: '完成' }, { finishReason: 'stop' }],
+    ]);
+    const runner = new ReActRunner({
+      model,
+      toolProviders: [provider],
+      policy: { ...policy, maxParallelTools: 2 },
+    });
+    const events: AgentStreamEvent[] = [];
+
+    await runner.run({
+      messages: userMessages,
+      context: makeContext(),
+      emit: (event) => events.push(event),
+    });
+
+    expect(maxActive).toBe(2);
+    expect(
+      events.filter((event) => event.type === 'tool_end'),
+    ).toHaveLength(3);
+  });
+
+  it('达到单次运行最大轮数时拒接并停止', async () => {
+    const model = new ScriptedModel([
+      toolTurn([{ index: 0, id: 'c1', name: 'current_time', args: {} }]),
+      toolTurn([{ index: 0, id: 'c2', name: 'current_time', args: {} }]),
+      [{ contentDelta: '不应该继续。' }, { finishReason: 'stop' }],
+    ]);
+    const runner = new ReActRunner({
+      model,
+      toolProviders: [new BuiltinToolProvider()],
+      policy: { ...policy, maxIterations: 2 },
+    });
+    const events: AgentStreamEvent[] = [];
+
+    const result = await runner.run({
+      messages: userMessages,
+      context: makeContext(),
+      emit: (event) => events.push(event),
+    });
+
+    expect(model.requests).toHaveLength(2);
+    expect(result.answer).toContain('最大推理轮数');
+    expect(result.answer).not.toContain('不应该继续');
+    expect(events.at(-1)?.type).toBe('completed');
+  });
+
   it('连续相同工具调用会向模型注入 Harness 警告', async () => {
     const model = new ScriptedModel([
       toolTurn([{ index: 0, id: 'c1', name: 'current_time', args: {} }]),

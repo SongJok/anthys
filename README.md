@@ -218,6 +218,8 @@ pnpm run db:seed      # 可选：预写入默认人设与模型配置，已有�
 | `LOOP_MAX_WALL_TIME_MS` | `900000` | 单轮回答的最大墙钟时间（15 分钟），超出即拒接并停止 |
 | `LOOP_MAX_TOTAL_TOKENS` | `120000` | 单轮回答的 Token 上限，超出即拒接并停止 |
 | `LOOP_MAX_CONSECUTIVE_SAME_TOOL` | `2` | 同一工具同参数连续调用上限 |
+| `LOOP_MAX_ITERATIONS` | `40` | 单次运行最多模型轮数（含工具轮），超出即拒接并停止 |
+| `LOOP_MAX_PARALLEL_TOOLS` | `4` | 同一轮内工具调用的最大并发数 |
 | `LOOP_CONVERGENCE_CHECK` | `true` | 是否启用信息收敛自检 |
 | `TOOL_TIMEOUT_SECONDS` | `300` | 单次工具调用（含 MCP）的最长等待；实际还受 `config/mcp-servers.json` 的 `timeoutMs`（默认 480 秒）约束 |
 
@@ -480,6 +482,7 @@ sudo cp deploy/nginx.conf /etc/nginx/conf.d/ && sudo nginx -t && sudo systemctl 
 - 命中写操作的工具（MCP 或 DWS 中声明为 `write` / `destructive`，或按工具名推断）不会直接执行：机器人先登记一次待确认动作，把参数与风险等级展示出来，并结束本轮回答。
 - 用户回复 `/confirm` 才真正执行，回复 `/cancel` 丢弃；确认请求 5 分钟（`TOOL_CONFIRMATION_TTL_SECONDS`）内有效，同一会话新请求会覆盖旧请求。
 - 待确认动作只允许发起人或管理员确认；确认时执行的是登记时缓存的参数，不会让模型重新生成一遍调用。
+- 待确认动作持久化在 `pending_actions` 表，进程重启后未过期的请求仍可继续 `/confirm`。
 - 设置 `TOOL_CONFIRMATION_ENABLED=false` 可关闭闸门，所有工具直接执行。
 - 工具输出中的 URL 会自动提取为「参考来源」：去重、保留前若干个，并随 `citation` 事件推送到卡片引用区与轨迹。
 
@@ -507,8 +510,28 @@ sudo cp deploy/nginx.conf /etc/nginx/conf.d/ && sudo nginx -t && sudo systemctl 
 | `/cancel` | 取消本会话待确认的写操作 |
 | `/remind <时间> <内容>` | 单聊内创建一次性提醒，到点用机器人单聊推送；`/remind list`、`/remind cancel <ID>` |
 | `/report <周期> <时间>` | 单聊内订阅日 / 周 / 月工作简报；`/report list`、`/report preview [weekly\|monthly]`、`/report cancel <ID>` |
+| `/job <需求>` | 提交后台任务，完成后机器人单聊通知结果；任务持久化到 `agent_jobs`，进程重启不丢 |
+| `/jobs` | 查看本会话最近的后台任务 |
+| `/job-status <ID>` | 查看后台任务状态、耗时与结果摘要（ID 支持前缀） |
+| `/job-cancel <ID>` | 取消排队或执行中的后台任务（仅发起人或管理员） |
 
-同一会话（单聊或群聊）严格按到达顺序串行处理：群里多人先后 @ 机器人时，先 @ 的问题先回答完整，后来的问题进入队列等待，不会为了回答下一条而中断未完成的任务。只有 `/stop`（或进程退出）会中止当前回答，并同时清空该会话排队中的问题；排队中的卡片会显示前面还有几条问题。
+同一会话（单聊或群聊）严格按到达顺序串行处理：群里多人先后 @ 机器人时，先 @ 的问题先回答完整，后来的问题进入队列等待，不会为了回答下一条而中断未完成的任务。只有 `/stop`（或进程退出）会中止当前回答，并同时清空该会话排队中的问题；排队中的卡片会显示前面还有几条问题。后台任务不占用该会话队列，由独立 JobRunner 按配额领取执行。
+
+### 后台任务队列
+
+`/job` 把耗时需求交给持久化队列，适合需要多轮检索、跨系统查询或结果整理的任务：
+
+- 任务写入 PostgreSQL `agent_jobs`，状态包含 `queued` / `running` / `paused` / `succeeded` / `failed` / `cancelled`；进程崩溃后，租约过期的 `running` 任务会被其他实例重新领取。
+- JobRunner 用 `FOR UPDATE SKIP LOCKED` 原子领取任务，默认每 5 秒轮询、单实例并发 2 个；执行过程写入 `agent_job_events`，可通过 `/job-status` 查看。
+- 任务复用对话会话、记忆与工具链，但不会打断当前对话；结果同时写入会话历史，并通过机器人单聊通知发起人。
+- 失败任务按 `maxAttempts` 自动退避重试；连续失败进入 `failed` 并通知发起人。
+- 集群模式下只有持有主锁的实例运行 JobRunner 与定时调度器，避免重复执行。
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `JOB_RUNNER_INTERVAL_SECONDS` | `5` | 后台任务轮询间隔（秒） |
+| `JOB_LEASE_SECONDS` | `1800` | 任务执行租约，需大于单任务最长执行时间；租约过期可被重新领取 |
+| `JOB_MAX_CONCURRENCY` | `2` | 单实例同时执行的后台任务数 |
 
 ### 个人提醒与工作报告
 

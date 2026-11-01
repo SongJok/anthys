@@ -254,6 +254,14 @@ export class EnvConfigProvider implements IConfigProvider {
         parseNumber(this.env.LOOP_MAX_CONSECUTIVE_SAME_TOOL, 2),
       ),
       convergenceCheck: parseBoolean(this.env.LOOP_CONVERGENCE_CHECK, true),
+      maxIterations: Math.max(
+        1,
+        parseNumber(this.env.LOOP_MAX_ITERATIONS, 40),
+      ),
+      maxParallelTools: Math.max(
+        1,
+        parseNumber(this.env.LOOP_MAX_PARALLEL_TOOLS, 4),
+      ),
     };
   }
 

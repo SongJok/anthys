@@ -1,4 +1,4 @@
-import { and, asc, eq, lte } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, lt, lte, or } from 'drizzle-orm';
 import {
   boolean,
   index,
@@ -35,6 +35,8 @@ export const scheduledTasks = pgTable(
     enabled: boolean('enabled').notNull().default(true),
     lastRunAt: timestamp('last_run_at', { withTimezone: true }),
     nextRunAt: timestamp('next_run_at', { withTimezone: true }),
+    leaseOwner: text('lease_owner'),
+    leaseExpiresAt: timestamp('lease_expires_at', { withTimezone: true }),
     createdBy: text('created_by').notNull().default(''),
     createdAt: timestamp('created_at', { withTimezone: true })
       .notNull()
@@ -99,6 +101,47 @@ export class DrizzleScheduledTaskStore implements ScheduledTaskStore {
       )
       .orderBy(asc(scheduledTasks.nextRunAt));
     return rows.map(toTask);
+  }
+
+  public async claimDue(input: {
+    owner: string;
+    nowMs: number;
+    leaseMs: number;
+  }): Promise<ScheduledTask[]> {
+    const now = new Date(input.nowMs);
+    return this.db.transaction(async (tx) => {
+      const candidates = await tx
+        .select()
+        .from(scheduledTasks)
+        .where(
+          and(
+            eq(scheduledTasks.enabled, true),
+            lte(scheduledTasks.nextRunAt, now),
+            or(
+              isNull(scheduledTasks.leaseExpiresAt),
+              lt(scheduledTasks.leaseExpiresAt, now),
+            ),
+          ),
+        )
+        .orderBy(asc(scheduledTasks.nextRunAt))
+        .limit(10)
+        .for('update', { skipLocked: true });
+      if (candidates.length === 0) return [];
+      await tx
+        .update(scheduledTasks)
+        .set({
+          leaseOwner: input.owner,
+          leaseExpiresAt: new Date(input.nowMs + input.leaseMs),
+          updatedAt: now,
+        })
+        .where(
+          inArray(
+            scheduledTasks.id,
+            candidates.map((row) => row.id),
+          ),
+        );
+      return candidates.map(toTask);
+    });
   }
 
   public async create(
@@ -170,6 +213,8 @@ export class DrizzleScheduledTaskStore implements ScheduledTaskStore {
       .set({
         lastRunAt: new Date(lastRunAtMs),
         nextRunAt: nextRunAtMs === null ? null : new Date(nextRunAtMs),
+        leaseOwner: null,
+        leaseExpiresAt: null,
         updatedAt: new Date(),
       })
       .where(eq(scheduledTasks.id, id));

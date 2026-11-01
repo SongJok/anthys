@@ -513,6 +513,12 @@ export class DynamicConfigCenter
       ...(input.convergenceCheck !== undefined
         ? { convergenceCheck: input.convergenceCheck }
         : {}),
+      ...(input.maxIterations !== undefined
+        ? { maxIterations: Math.max(1, input.maxIterations) }
+        : {}),
+      ...(input.maxParallelTools !== undefined
+        ? { maxParallelTools: Math.max(1, input.maxParallelTools) }
+        : {}),
     };
     await this.persist('loopPolicy', next);
     this.state = { ...this.state, loopPolicy: next };

@@ -88,6 +88,10 @@ export interface DynamicLoopPolicy {
   maxTotalTokens: number;
   maxConsecutiveSameTool: number;
   convergenceCheck: boolean;
+  /** 单次运行最多模型轮数；缺省 40 */
+  maxIterations?: number;
+  /** 同一轮工具调用的最大并发数；缺省 4 */
+  maxParallelTools?: number;
 }
 
 /** 流式引用（RAG / MCP 结果出处） */
@@ -183,6 +187,10 @@ export interface ExecutionContext {
   signal?: AbortSignal;
   /** 是否为群聊主动回复，供模型路由与用量归因使用 */
   proactive?: boolean;
+  /** 后台任务执行上下文；普通消息不设置 */
+  jobId?: string;
+  jobKind?: string;
+  worker?: string;
   /** 运行中向当前会话追加一条文本提醒（工具需要用户干预时使用） */
   notify?: (text: string) => Promise<void> | void;
 }

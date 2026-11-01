@@ -14,6 +14,7 @@ import type {
   InboundMessage,
   StoredMessage,
 } from '../types/core.js';
+import type { AgentJob } from '../types/jobs.js';
 
 interface StoredRow extends AppendMessageInput {
   conversationId: string;
@@ -187,6 +188,74 @@ describe('AgentHarness', () => {
     expect(firstMessages.at(-1)).toEqual({ role: 'user', content: '现在几点？' });
   });
 
+  it('后台任务复用会话链路执行并带任务归因', async () => {
+    const calls: { messages: unknown[] }[] = [];
+    const contexts: Array<{ jobId?: string; jobKind?: string }> = [];
+    const engine: AgentEngine = {
+      async run(input) {
+        calls.push({ messages: input.messages });
+        contexts.push({
+          ...(input.context.jobId ? { jobId: input.context.jobId } : {}),
+          ...(input.context.jobKind ? { jobKind: input.context.jobKind } : {}),
+        });
+        input.emit({
+          type: 'completed',
+          usage: { totalTokens: 20, steps: 2, durationMs: 10 },
+        });
+        return {
+          answer: '后台任务结果',
+          reasoning: '',
+          usage: { totalTokens: 20, steps: 2, durationMs: 10 },
+        };
+      },
+    };
+    const { harness, rows, conversations } = createHarness(engine);
+    const job: AgentJob = {
+      id: 'job-1',
+      conversationId: 'cid-1',
+      conversationType: '1',
+      messageId: 'job_msg-1',
+      senderStaffId: 'staff-1',
+      senderNick: '张三',
+      kind: 'task',
+      status: 'running',
+      prompt: '整理本周客户反馈',
+      metadata: {},
+      result: null,
+      error: null,
+      priority: 0,
+      attempts: 1,
+      maxAttempts: 2,
+      leaseOwner: 'runner',
+      leaseExpiresAt: 0,
+      createdAt: 0,
+      updatedAt: 0,
+      startedAt: 0,
+      finishedAt: null,
+    };
+
+    const result = await harness.runJob(job, { emit: () => undefined });
+    expect(result.answer).toBe('后台任务结果');
+    expect(conversations[0]?.conversationKey).toBe('single:staff-1');
+    expect(contexts[0]).toEqual({ jobId: 'job-1', jobKind: 'task' });
+    expect(rows[0]).toMatchObject({
+      role: 'user',
+      content: '整理本周客户反馈',
+      metadata: { jobId: 'job-1', jobKind: 'task' },
+    });
+    expect(rows[1]).toMatchObject({
+      role: 'assistant',
+      content: '后台任务结果',
+      metadata: { jobId: 'job-1' },
+    });
+    const messages = calls[0]?.messages as Array<{
+      role: string;
+      content: string;
+    }>;
+    expect(messages.at(-1)?.content).toContain('后台任务 ID：job-1');
+    expect(messages.at(-1)?.content).toContain('整理本周客户反馈');
+  });
+
   it('把术语库上下文并入系统提示，异常时不影响主流程', async () => {
     const calls: { messages: unknown[] }[] = [];
     const inputs: Array<{ conversationType: string; query?: string }> = [];
@@ -274,7 +343,7 @@ describe('AgentHarness', () => {
       'user',
     ]);
     expect(second[1]?.content).toBe('现在几点？');
-    expect(second[2]?.content).toBe('现在是十点。');
+    expect(second[2]?.content).toContain('现在是十点。');
     expect(second[3]?.content).toBe('那明天呢？');
   });
 

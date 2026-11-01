@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import { readFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import { DWClient } from 'dingtalk-stream';
 import { EnvConfigProvider } from './config/EnvConfigProvider.js';
@@ -56,6 +57,15 @@ import { UsageGuard } from './billing/UsageGuard.js';
 import { formatShanghaiDateTime } from './time/shanghaiTime.js';
 import { DrizzleUsageLedgerStore } from './db/usageSchema.js';
 import { DrizzleScheduledTaskStore } from './db/schedulerSchema.js';
+import { DrizzleAgentJobStore } from './db/jobSchema.js';
+import { DrizzlePendingActionPersistence } from './db/approvalSchema.js';
+import { JobRunner } from './jobs/JobRunner.js';
+import {
+  formatJob,
+  formatJobList,
+  formatJobResultNotice,
+  formatJobStatus,
+} from './jobs/JobService.js';
 import {
   ScheduledTaskScheduler,
   computeNextRun,
@@ -163,6 +173,7 @@ import type {
   ScheduledTaskUpdate,
 } from './types/admin-and-console.js';
 import type { BystanderEvaluationResult } from './types/bystander-and-memory.js';
+import type { AgentJob } from './types/jobs.js';
 import type { EnterpriseMcpServerConfig } from './types/mcp-and-sandbox.js';
 import type {
   PluginAdminPort,
@@ -848,7 +859,10 @@ async function main(): Promise<void> {
       ttlMs:
         Math.max(30, Number(process.env.TOOL_CONFIRMATION_TTL_SECONDS ?? 300)) *
         1000,
+      persistence: new DrizzlePendingActionPersistence(dbHandle.db),
+      logger: harnessLogger,
     });
+    await pendingActions.hydrate();
     const approvalGate = createToolApprovalGate({
       store: pendingActions,
       enabled: envEnabled(process.env.TOOL_CONFIRMATION_ENABLED, true),
@@ -1437,6 +1451,84 @@ async function main(): Promise<void> {
       },
     });
 
+    const jobStore = new DrizzleAgentJobStore(dbHandle.db);
+    const notifyJobOwner = async (
+      job: AgentJob,
+      text: string,
+    ): Promise<void> => {
+      const staffId = job.senderStaffId.trim();
+      if (!staffId || staffId === 'scheduler' || staffId === 'admin-api') return;
+      try {
+        const sent = await adminTextSender.send([staffId], text);
+        if (!sent.ok) {
+          logger.warn(
+            { jobId: job.id, failed: sent.failed },
+            'job result notification failed',
+          );
+        }
+      } catch (error) {
+        logger.warn(
+          { jobId: job.id, error: errorText(error) },
+          'job result notification failed',
+        );
+      }
+    };
+    const jobRunner = new JobRunner({
+      store: jobStore,
+      logger: harnessLogger,
+      intervalMs: envSeconds(process.env.JOB_RUNNER_INTERVAL_SECONDS, 5) * 1_000,
+      leaseMs: envSeconds(process.env.JOB_LEASE_SECONDS, 1_800) * 1_000,
+      maxConcurrency: envCount(process.env.JOB_MAX_CONCURRENCY, 2),
+      execute: async (job, context) => {
+        const result = await harness.runJob(job, {
+          emit: context.emit,
+          signal: context.signal,
+        });
+        return {
+          answer: result.answer,
+          reasoning: result.reasoning,
+          ...(result.model ? { model: result.model } : {}),
+          usage: result.usage,
+        };
+      },
+      onCompleted: async (job) => {
+        metrics.inc('agent_jobs_total', {
+          kind: job.kind,
+          status: 'succeeded',
+        });
+        await notifyJobOwner(job, formatJobResultNotice(job));
+      },
+      onFailed: async (job, error) => {
+        metrics.inc('agent_jobs_total', { kind: job.kind, status: job.status });
+        await notifyJobOwner(
+          job,
+          `后台任务 ${job.id.slice(0, 8)} 执行失败：${error.slice(0, 500)}`,
+        );
+      },
+    });
+
+    const resolveJobForMessage = async (
+      message: InboundMessage,
+      id: string,
+    ): Promise<{ job: AgentJob } | { error: string }> => {
+      const needle = id.trim().toLowerCase();
+      if (!needle) return { error: '请输入任务 ID 前缀。' };
+      const jobs = await jobStore.list({
+        conversationId: message.conversationId,
+        limit: 100,
+      });
+      const exact = jobs.find((job) => job.id.toLowerCase() === needle);
+      if (exact) return { job: exact };
+      const matches = jobs.filter((job) =>
+        job.id.toLowerCase().startsWith(needle),
+      );
+      if (matches.length === 1 && matches[0]) return { job: matches[0] };
+      if (matches.length > 1) {
+        return { error: `ID 前缀 ${id} 匹配到多个任务，请多输入几位。` };
+      }
+      return { error: `未找到任务 ${id}，发送 /jobs 查看本会话任务。` };
+    };
+
     const cardApiRef: { current: OpenApiCardApi } = {
       current: new OpenApiCardApi({
         clientId: configCenter.getDingTalkConfig().clientId,
@@ -1841,6 +1933,65 @@ async function main(): Promise<void> {
         personalAssistant.handleRemindCommand(message, args),
       reports: (message, args) =>
         personalAssistant.handleReportCommand(message, args),
+      submitJob: async (message, prompt) => {
+        const job = await jobStore.enqueue({
+          conversationId: message.conversationId,
+          conversationType: message.conversationType,
+          messageId: `job_${randomUUID()}`,
+          senderStaffId: message.senderStaffId,
+          senderNick: message.senderNick,
+          kind: 'task',
+          prompt,
+          metadata: { source: 'command', requestedAt: Date.now() },
+        });
+        metrics.inc('agent_jobs_total', { kind: 'task', status: 'queued' });
+        logger.info(
+          { jobId: job.id, conversationId: job.conversationId },
+          'agent job enqueued',
+        );
+        return [
+          `已提交后台任务 ${job.id.slice(0, 8)}，完成后会通过机器人单聊通知你。`,
+          '查看进度：`/jobs`；查看详情：`/job-status <id>`；取消：`/job-cancel <id>`。',
+        ].join('\n');
+      },
+      listJobs: async (message) =>
+        formatJobList(
+          await jobStore.list({
+            conversationId: message.conversationId,
+            limit: 10,
+          }),
+        ),
+      jobStatus: async (message, id) => {
+        const resolved = await resolveJobForMessage(message, id);
+        if ('error' in resolved) return resolved.error;
+        return formatJob(resolved.job);
+      },
+      cancelJob: async (message, id) => {
+        const resolved = await resolveJobForMessage(message, id);
+        if ('error' in resolved) return resolved.error;
+        const { job } = resolved;
+        if (
+          job.senderStaffId !== message.senderStaffId &&
+          !configCenter.isAdmin(message.senderStaffId)
+        ) {
+          return '只有任务发起人或管理员可以取消该任务。';
+        }
+        if (
+          job.status === 'succeeded' ||
+          job.status === 'failed' ||
+          job.status === 'cancelled'
+        ) {
+          return `任务 ${job.id.slice(0, 8)} 已${formatJobStatus(job.status)}，无需取消。`;
+        }
+        const cancelled = await jobStore.cancel(job.id);
+        if (!cancelled) return '任务状态已变化，请发送 /jobs 重新查看。';
+        metrics.inc('agent_jobs_total', {
+          kind: cancelled.kind,
+          status: 'cancelled',
+        });
+        logger.info({ jobId: job.id }, 'agent job cancelled');
+        return `已取消后台任务 ${job.id.slice(0, 8)}。`;
+      },
       reply: replyTo,
     });
 
@@ -2534,6 +2685,8 @@ async function main(): Promise<void> {
         onAcquired: async () => {
           await startGatewayIfLeader();
           startProjectSync();
+          taskScheduler.start();
+          jobRunner.start();
           void startBystanderListener().catch((error) =>
             logger.error(
               { error: errorText(error) },
@@ -2548,6 +2701,8 @@ async function main(): Promise<void> {
           gateway = undefined;
           stopBystanderListener();
           stopProjectSync();
+          void taskScheduler.stop();
+          void jobRunner.stop();
           runControl.stopAll();
           logger.warn({}, 'cluster leadership lost, stream stopped');
         },
@@ -2575,6 +2730,8 @@ async function main(): Promise<void> {
       );
     } else {
       await startGateway();
+      taskScheduler.start();
+      jobRunner.start();
       void startBystanderListener().catch((error) =>
         logger.error(
           { error: errorText(error) },
@@ -2583,7 +2740,6 @@ async function main(): Promise<void> {
       );
     }
     metrics.set('scheduler_enabled', 1);
-    taskScheduler.start();
     retentionService.start(
       envSeconds(process.env.DATA_CLEANUP_INTERVAL_SECONDS, 86_400) * 1_000,
     );
@@ -2885,6 +3041,7 @@ async function main(): Promise<void> {
       dwsAuth?.dispose();
       dwsIdentity?.dispose();
       await taskScheduler.stop();
+      await jobRunner.stop();
       retentionService?.stop();
       gateway?.stop();
       stopBystanderListener();

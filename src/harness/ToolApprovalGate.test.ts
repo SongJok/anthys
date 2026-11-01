@@ -50,6 +50,49 @@ describe('PendingActionStore', () => {
     expect(store.peek('cid-1')).toBeNull();
   });
 
+  it('通过持久层恢复未过期的待确认动作', async () => {
+    const saved = new Map<
+      string,
+      NonNullable<ReturnType<PendingActionStore['peek']>>
+    >();
+    const persistence = {
+      async load(nowMs: number) {
+        return [...saved.values()].filter((item) => item.expiresAt > nowMs);
+      },
+      async save(action: NonNullable<ReturnType<PendingActionStore['peek']>>) {
+        saved.set(action.conversationId, action);
+      },
+      async remove(conversationId: string) {
+        saved.delete(conversationId);
+      },
+    };
+    const first = new PendingActionStore({
+      ttlMs: 1_000,
+      now: () => 100,
+      persistence,
+    });
+    const action = first.put({
+      conversationId: 'cid-1',
+      toolName: 'create_ticket',
+      args: { title: 'a' },
+      risk: 'write',
+      requestedBy: { staffId: 'staff-1' },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const restored = new PendingActionStore({
+      ttlMs: 1_000,
+      now: () => 200,
+      persistence,
+    });
+    await restored.hydrate();
+    expect(restored.peek('cid-1')?.id).toBe(action.id);
+
+    restored.take('cid-1');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(saved.size).toBe(0);
+  });
+
   it('过期动作会被清理', () => {
     let now = 0;
     const store = new PendingActionStore({ ttlMs: 1_000, now: () => now });

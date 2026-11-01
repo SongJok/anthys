@@ -69,6 +69,14 @@ function runtime(overrides: Partial<CommandRuntime> = {}): {
       calls.reports.push([msg.messageId, args]);
       return '已创建定时报告。';
     },
+    submitJob: async (msg, prompt) => {
+      calls.job = calls.job ?? [];
+      calls.job.push([msg.messageId, prompt]);
+      return `已提交后台任务 ${prompt.slice(0, 4)}。`;
+    },
+    listJobs: async () => '本会话暂无后台任务。',
+    jobStatus: async (_msg, id) => `任务 ${id} 详情。`,
+    cancelJob: async (_msg, id) => `已取消后台任务 ${id}。`,
     reply: async (_message, text) => {
       replies.push(text);
     },
@@ -176,6 +184,28 @@ describe('CommandRouter', () => {
     expect(calls.reports).toEqual([['msg-1', ['daily', '09:00']]]);
     expect(replies[0]).toContain('已设置提醒');
     expect(replies[1]).toContain('已创建定时报告');
+  });
+
+  it('/job 系列转发给后台任务运行时', async () => {
+    const { router, calls, replies } = runtime();
+    await router.tryHandle(message({ text: '/job' }));
+    expect(replies[0]).toContain('用法');
+    await router.tryHandle(
+      message({ text: '/job 整理本周客户反馈并输出结论' }),
+    );
+    expect(calls.job).toEqual([
+      ['msg-1', '整理本周客户反馈并输出结论'],
+    ]);
+    expect(replies[1]).toContain('已提交后台任务');
+
+    await router.tryHandle(message({ text: '/jobs' }));
+    expect(replies[2]).toContain('暂无后台任务');
+
+    await router.tryHandle(message({ text: '/job-status 1234abcd' }));
+    expect(replies[3]).toContain('1234abcd');
+
+    await router.tryHandle(message({ text: '/job-cancel 1234abcd' }));
+    expect(replies[4]).toContain('已取消');
   });
 
   it('未知指令给出帮助提示', async () => {

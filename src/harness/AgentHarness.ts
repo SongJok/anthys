@@ -24,6 +24,7 @@ import type {
   RunResult,
   RunUsage,
 } from '../types/core.js';
+import type { AgentJob } from '../types/jobs.js';
 import { QuotaExceededError } from '../billing/UsageGuard.js';
 import {
   assessRequestAdmission,
@@ -91,6 +92,9 @@ export interface AgentHarnessOptions {
       steps: number;
       durationMs: number;
       proactive: boolean;
+      jobId?: string;
+      jobKind?: string;
+      worker?: string;
     }): Promise<void>;
   };
 }
@@ -109,6 +113,14 @@ export interface ProactiveHandleOptions {
   emit: (event: AgentStreamEvent) => void;
   signal?: AbortSignal;
   notify?: (text: string) => Promise<void> | void;
+}
+
+export interface JobHandleOptions {
+  emit: (event: AgentStreamEvent) => void;
+  signal?: AbortSignal;
+  notify?: (text: string) => Promise<void> | void;
+  /** Worker 名称，用于用量归因 */
+  worker?: string;
 }
 
 function emptyUsage(): RunUsage {
@@ -427,6 +439,162 @@ export class AgentHarness {
     return result;
   }
 
+  /**
+   * 后台任务入口：由持久化任务队列在独立上下文中调用。
+   * 与即时对话共享会话、记忆与用量链路，但不占用用户请求队列。
+   */
+  public async runJob(
+    job: AgentJob,
+    handle: JobHandleOptions,
+  ): Promise<RunResult> {
+    const text = job.prompt.trim();
+    if (!text) throw new Error('后台任务缺少需求描述');
+
+    const message: InboundMessage = {
+      messageId: job.messageId || `job_${job.id}`,
+      conversationId: job.conversationId,
+      conversationType: job.conversationType,
+      senderStaffId: job.senderStaffId || 'job-runner',
+      senderNick: job.senderNick || '后台任务',
+      isAtBot: true,
+      text,
+      rawPayload: {
+        source: 'agent_job',
+        jobId: job.id,
+        jobKind: job.kind,
+        ...(handle.worker ? { worker: handle.worker } : {}),
+      },
+      timestamp: job.createdAt,
+    };
+    const proactive = job.metadata.proactive === true;
+
+    const quotaAnswer = await this.enforceQuota(message, handle.emit, false);
+    if (quotaAnswer) return quotaAnswer;
+
+    const { repository, assembler, engine, policy, persona } = this.options;
+    const conversation = await repository.ensureConversation({
+      conversationKey: conversationKeyFor(message),
+      conversationType: message.conversationType,
+      title: conversationTitleFor(message),
+      metadata: {
+        conversationId: message.conversationId,
+        senderStaffId: message.senderStaffId,
+      },
+    });
+
+    const history = await repository.recentMessages(
+      conversation.id,
+      this.options.windowMessages,
+    );
+    const memoryContext = await this.buildMemoryContext(
+      message,
+      conversation.id,
+      text,
+    );
+    const extraSystemPrompt = await this.buildExtraSystemPrompt(
+      message,
+      text,
+      proactive,
+    );
+    const jobInstruction = [
+      `这是一个后台任务（${job.kind}），用户不会实时查看执行过程。`,
+      '请独立完成需求，在最终回答中给出可交付结果、关键依据与后续建议；不要输出“稍后马上”之类的过程承诺。',
+      `后台任务 ID：${job.id}`,
+      `任务需求：${text}`,
+    ].join('\n');
+    const messages = assembler.build({
+      persona,
+      history,
+      userText: jobInstruction,
+      now: this.now,
+      memoryContext,
+      ...(extraSystemPrompt ? { extraSystemPrompt } : {}),
+      groupChat: message.conversationType === '2',
+      ...(message.conversationType === '1'
+        ? { userSpeaker: message.senderNick }
+        : {}),
+    });
+
+    await repository.appendMessage({
+      conversationId: conversation.id,
+      role: 'user',
+      content: text,
+      metadata: {
+        messageId: message.messageId,
+        senderStaffId: message.senderStaffId,
+        senderNick: message.senderNick,
+        conversationType: message.conversationType,
+        jobId: job.id,
+        jobKind: job.kind,
+        ...(handle.worker ? { worker: handle.worker } : {}),
+      },
+    });
+
+    const startedAt = this.now();
+    const result = await engine.run({
+      messages,
+      context: {
+        conversationId: message.conversationId,
+        messageId: message.messageId,
+        senderStaffId: message.senderStaffId,
+        senderNick: message.senderNick,
+        conversationType: message.conversationType,
+        deadlineAt: startedAt + policy.maxWallTimeMs,
+        now: this.now,
+        proactive,
+        jobId: job.id,
+        jobKind: job.kind,
+        ...(handle.worker ? { worker: handle.worker } : {}),
+        ...(handle.notify ? { notify: handle.notify } : {}),
+      },
+      emit: handle.emit,
+      signal: handle.signal,
+    });
+    await this.recordUsage(message, result, proactive, {
+      jobId: job.id,
+      jobKind: job.kind,
+      ...(handle.worker ? { worker: handle.worker } : {}),
+    });
+
+    await repository.appendMessage({
+      conversationId: conversation.id,
+      role: 'assistant',
+      content: result.answer,
+      reasoning: result.reasoning || null,
+      tokenCount: result.usage.totalTokens,
+      metadata: {
+        messageId: message.messageId,
+        jobId: job.id,
+        jobKind: job.kind,
+        ...(handle.worker ? { worker: handle.worker } : {}),
+        steps: result.usage.steps,
+        durationMs: result.usage.durationMs,
+        ...(result.model ? { model: result.model } : {}),
+      },
+    });
+
+    this.options.logger?.info(
+      {
+        conversationKey: conversation.conversationKey,
+        jobId: job.id,
+        jobKind: job.kind,
+        ...(handle.worker ? { worker: handle.worker } : {}),
+        steps: result.usage.steps,
+        tokens: result.usage.totalTokens,
+        durationMs: result.usage.durationMs,
+      },
+      'agent job completed',
+    );
+
+    this.scheduleMemoryMaintenance(
+      conversation.id,
+      message,
+      text,
+      result.answer,
+    );
+    return result;
+  }
+
   /** 测试与优雅停机时等待后台摘要/画像抽取完成 */
   public async flushMemoryTasks(): Promise<void> {
     await Promise.allSettled([...this.memoryTasks]);
@@ -633,6 +801,7 @@ export class AgentHarness {
     message: InboundMessage,
     result: RunResult,
     proactive: boolean,
+    attribution: { jobId?: string; jobKind?: string; worker?: string } = {},
   ): Promise<void> {
     const guard = this.options.usageGuard;
     if (!guard) return;
@@ -647,6 +816,9 @@ export class AgentHarness {
         steps: result.usage.steps,
         durationMs: result.usage.durationMs,
         proactive,
+        ...(attribution.jobId ? { jobId: attribution.jobId } : {}),
+        ...(attribution.jobKind ? { jobKind: attribution.jobKind } : {}),
+        ...(attribution.worker ? { worker: attribution.worker } : {}),
       });
     } catch (error) {
       this.options.logger?.warn(

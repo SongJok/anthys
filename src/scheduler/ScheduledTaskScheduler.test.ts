@@ -135,6 +135,41 @@ describe('ScheduledTaskScheduler', () => {
     expect(store.runs.map(([id]) => id)).toEqual(['bad', 'good']);
   });
 
+  it('store 支持 claimDue 时按租约原子领取', async () => {
+    const claimed: Array<{
+      owner: string;
+      nowMs: number;
+      leaseMs: number;
+    }> = [];
+    class ClaimStore extends FakeStore {
+      async claimDue(input: {
+        owner: string;
+        nowMs: number;
+        leaseMs: number;
+      }): Promise<ScheduledTask[]> {
+        claimed.push(input);
+        return this.due;
+      }
+    }
+    const store = new ClaimStore([task({ intervalSeconds: 60 })]);
+    const executed: string[] = [];
+    const scheduler = new ScheduledTaskScheduler({
+      store,
+      execute: async (item) => {
+        executed.push(item.id);
+      },
+      owner: 'scheduler-a',
+      leaseMs: 60_000,
+      now: () => 10_000,
+    });
+
+    await scheduler.tick();
+    expect(claimed).toEqual([
+      { owner: 'scheduler-a', nowMs: 10_000, leaseMs: 60_000 },
+    ]);
+    expect(executed).toEqual(['task-1']);
+  });
+
   it('重复 tick 复用进行中的执行，避免并发重复播报', async () => {
     const store = new FakeStore([task({ intervalSeconds: 60 })]);
     let release: (() => void) | undefined;

@@ -35,6 +35,14 @@ export interface CommandRuntime {
   remind(message: InboundMessage, args: string[]): Promise<string>;
   /** 创建/预览/取消个人日周月报（仅单聊） */
   reports(message: InboundMessage, args: string[]): Promise<string>;
+  /** 提交后台任务并返回受理结果 */
+  submitJob(message: InboundMessage, prompt: string): Promise<string>;
+  /** 查看本会话最近的后台任务 */
+  listJobs(message: InboundMessage): Promise<string>;
+  /** 查看指定后台任务详情（支持 ID 前缀） */
+  jobStatus(message: InboundMessage, id: string): Promise<string>;
+  /** 取消指定后台任务（支持 ID 前缀） */
+  cancelJob(message: InboundMessage, id: string): Promise<string>;
   reply(message: InboundMessage, text: string): Promise<void>;
 }
 
@@ -64,6 +72,10 @@ const HELP_TEXT = [
   '- `/cancel` 取消等待确认的写操作',
   '- `/remind 25分钟后 开会` 创建个人提醒（单聊）',
   '- `/report daily 09:00` 定时推送日/周/月报（单聊）',
+  '- `/job <需求>` 提交后台长任务，完成后主动通知',
+  '- `/jobs` 查看本会话最近的后台任务',
+  '- `/job-status <id>` 查看任务详情',
+  '- `/job-cancel <id>` 取消排队或执行中的任务',
 ].join('\n');
 
 export function parseCommand(text: string): ParsedCommand | null {
@@ -210,6 +222,37 @@ export class CommandRouter {
           message,
           await runtime.reports(message, command.args),
         );
+        return true;
+      }
+      case 'job': {
+        const prompt = command.args.join(' ').trim();
+        if (!prompt) {
+          await runtime.reply(message, '用法：`/job 需要后台执行的任务需求`');
+          return true;
+        }
+        await runtime.reply(message, await runtime.submitJob(message, prompt));
+        return true;
+      }
+      case 'jobs': {
+        await runtime.reply(message, await runtime.listJobs(message));
+        return true;
+      }
+      case 'job-status': {
+        const id = command.args[0]?.trim();
+        if (!id) {
+          await runtime.reply(message, '用法：`/job-status <任务 ID>`');
+          return true;
+        }
+        await runtime.reply(message, await runtime.jobStatus(message, id));
+        return true;
+      }
+      case 'job-cancel': {
+        const id = command.args[0]?.trim();
+        if (!id) {
+          await runtime.reply(message, '用法：`/job-cancel <任务 ID>`');
+          return true;
+        }
+        await runtime.reply(message, await runtime.cancelJob(message, id));
         return true;
       }
       case 'feedback': {

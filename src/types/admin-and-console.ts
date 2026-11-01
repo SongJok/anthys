@@ -235,6 +235,11 @@ export interface UsageLedgerInput {
   steps: number;
   durationMs: number;
   proactive: boolean;
+  /** 后台任务归因；普通消息为空 */
+  jobId?: string;
+  jobKind?: string;
+  /** Worker 名称（research/ops/report），普通对话为空 */
+  worker?: string;
 }
 
 export interface UsageLedgerEntry extends UsageLedgerInput {
@@ -323,6 +328,12 @@ export interface ScheduledTaskUpdate {
 export interface ScheduledTaskStore {
   list(): Promise<ScheduledTask[]>;
   listDue(atMs: number): Promise<ScheduledTask[]>;
+  /** 集群下原子领取到期任务，避免多实例重复执行 */
+  claimDue?(input: {
+    owner: string;
+    nowMs: number;
+    leaseMs: number;
+  }): Promise<ScheduledTask[]>;
   create(
     input: ScheduledTaskInput,
     nextRunAtMs: number | null,

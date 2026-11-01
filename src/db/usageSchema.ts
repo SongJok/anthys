@@ -33,6 +33,9 @@ export const usageLedger = pgTable(
     steps: integer('steps').notNull().default(0),
     durationMs: integer('duration_ms').notNull().default(0),
     proactive: boolean('proactive').notNull().default(false),
+    jobId: text('job_id'),
+    jobKind: varchar('job_kind', { length: 24 }),
+    worker: varchar('worker', { length: 24 }),
     createdAt: timestamp('created_at', { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -69,6 +72,9 @@ export class DrizzleUsageLedgerStore implements UsageLedgerStore {
       steps: Math.max(0, Math.round(input.steps)),
       durationMs: Math.max(0, Math.round(input.durationMs)),
       proactive: input.proactive,
+      ...(input.jobId ? { jobId: input.jobId } : {}),
+      ...(input.jobKind ? { jobKind: input.jobKind } : {}),
+      ...(input.worker ? { worker: input.worker } : {}),
     });
   }
 

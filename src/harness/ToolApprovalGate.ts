@@ -21,12 +21,23 @@ export interface PendingToolAction {
   expiresAt: number;
 }
 
+export interface PendingActionPersistence {
+  load(nowMs: number): Promise<PendingToolAction[]>;
+  save(action: PendingToolAction): Promise<void>;
+  remove(conversationId: string): Promise<void>;
+}
+
 export interface PendingActionStoreOptions {
   /** 确认有效期，默认 5 分钟 */
   ttlMs?: number;
   now?: () => number;
   /** 最多保留的会话数，超出时淘汰最旧记录 */
   limit?: number;
+  /** 持久化后端；重启后未过期的待确认操作可以恢复 */
+  persistence?: PendingActionPersistence;
+  logger?: {
+    warn(obj: Record<string, unknown>, msg: string): void;
+  };
 }
 
 /** 每个会话只保留一个待确认写操作，新请求覆盖旧请求 */
@@ -35,11 +46,59 @@ export class PendingActionStore {
   private readonly ttlMs: number;
   private readonly now: () => number;
   private readonly limit: number;
+  private readonly persistence?: PendingActionPersistence;
+  private readonly logger?: PendingActionStoreOptions['logger'];
 
   constructor(options: PendingActionStoreOptions = {}) {
     this.ttlMs = options.ttlMs ?? 5 * 60_000;
     this.now = options.now ?? Date.now;
     this.limit = options.limit ?? 500;
+    this.persistence = options.persistence;
+    this.logger = options.logger;
+  }
+
+  /** 从持久层恢复未过期的待确认操作（应在开始服务前调用） */
+  public async hydrate(): Promise<void> {
+    const persistence = this.persistence;
+    if (!persistence) return;
+    try {
+      const now = this.now();
+      for (const action of await persistence.load(now)) {
+        if (action.expiresAt > now) {
+          this.actions.set(action.conversationId, action);
+        }
+      }
+      this.trim();
+    } catch (error) {
+      this.logger?.warn(
+        { error: error instanceof Error ? error.message : String(error) },
+        'failed to hydrate pending tool actions',
+      );
+    }
+  }
+
+  private persistSave(action: PendingToolAction): void {
+    void this.persistence?.save(action).catch((error) => {
+      this.logger?.warn(
+        {
+          conversationId: action.conversationId,
+          error: error instanceof Error ? error.message : String(error),
+        },
+        'failed to persist pending tool action',
+      );
+    });
+  }
+
+  private persistRemove(conversationId: string): void {
+    void this.persistence?.remove(conversationId).catch((error) => {
+      this.logger?.warn(
+        {
+          conversationId,
+          error: error instanceof Error ? error.message : String(error),
+        },
+        'failed to remove persisted pending tool action',
+      );
+    });
   }
 
   public put(input: {
@@ -63,6 +122,7 @@ export class PendingActionStore {
     };
     this.actions.set(input.conversationId, action);
     this.trim();
+    this.persistSave(action);
     return action;
   }
 
@@ -76,12 +136,15 @@ export class PendingActionStore {
     const action = this.actions.get(conversationId);
     if (!action) return null;
     this.actions.delete(conversationId);
+    this.persistRemove(conversationId);
     return action;
   }
 
   public cancel(conversationId: string): boolean {
     this.prune();
-    return this.actions.delete(conversationId);
+    const removed = this.actions.delete(conversationId);
+    if (removed) this.persistRemove(conversationId);
+    return removed;
   }
 
   public get size(): number {

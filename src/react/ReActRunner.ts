@@ -164,6 +164,31 @@ function isAbortError(error: unknown): boolean {
   );
 }
 
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  run: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let cursor = 0;
+  const worker = async (): Promise<void> => {
+    while (cursor < items.length) {
+      const index = cursor;
+      cursor += 1;
+      const item = items[index];
+      if (item === undefined) return;
+      results[index] = await run(item);
+    }
+  };
+  await Promise.all(
+    Array.from(
+      { length: Math.min(Math.max(1, limit), items.length) },
+      () => worker(),
+    ),
+  );
+  return results;
+}
+
 class ToolTimeoutError extends Error {
   constructor(timeoutMs: number) {
     super(`tool timeout after ${timeoutMs}ms`);
@@ -219,6 +244,8 @@ export class ReActRunner implements AgentEngine {
       ? Math.min(input.context.deadlineAt, startedAt + policy.maxWallTimeMs)
       : startedAt + policy.maxWallTimeMs;
     const guard = new DynamicLoopGuard(policy, { now: this.now });
+    const maxIterations = Math.max(1, policy.maxIterations ?? 40);
+    const maxParallelTools = Math.max(1, policy.maxParallelTools ?? 4);
 
     const runController = new AbortController();
     const forwardAbort = () => runController.abort();
@@ -303,6 +330,11 @@ export class ReActRunner implements AgentEngine {
           skipFinalTurn = true;
           break;
         }
+        if (steps >= maxIterations) {
+          refusal = `机器人已达到单次运行的最大推理轮数（${maxIterations}），已停止执行。请缩小问题范围或拆成更小的任务后重试。`;
+          skipFinalTurn = true;
+          break;
+        }
 
         steps += 1;
         const turn = await this.streamTurn({
@@ -358,6 +390,7 @@ export class ReActRunner implements AgentEngine {
           context,
           emit,
           turn.turnId,
+          maxParallelTools,
         );
         messages.push({
           role: 'assistant',
@@ -603,6 +636,7 @@ export class ReActRunner implements AgentEngine {
     context: ExecutionContext,
     emit: (event: AgentStreamEvent) => void,
     turnId: string,
+    maxParallelTools: number,
   ): Promise<ToolExecutionResult[]> {
     const prepared = calls.map((call, index) => {
       let args: Record<string, unknown> = {};
@@ -631,10 +665,10 @@ export class ReActRunner implements AgentEngine {
       });
     }
 
-    const results = await Promise.all(
-      prepared.map((item) =>
-        this.executeTool(item, toolMap, context, emit, turnId),
-      ),
+    const results = await mapWithConcurrency(
+      prepared,
+      maxParallelTools,
+      (item) => this.executeTool(item, toolMap, context, emit, turnId),
     );
 
     for (const result of results) {
