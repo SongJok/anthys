@@ -12,6 +12,7 @@ import type {
   WebSearchResult,
 } from './WebSearchClient.js';
 import { WebSearchError } from './WebSearchClient.js';
+import { formatShanghaiDate } from '../../time/shanghaiTime.js';
 
 export interface WebSearchToolLogger {
   info?(obj: Record<string, unknown>, msg: string): void;
@@ -102,8 +103,7 @@ function normalizeSite(value: string): string {
 }
 
 function localDayStamp(now: number): string {
-  const date = new Date(now);
-  return `${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()}`;
+  return formatShanghaiDate(now);
 }
 
 function toCitation(

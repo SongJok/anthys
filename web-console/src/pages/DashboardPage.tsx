@@ -15,6 +15,7 @@ import {
 } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
 import { api } from '../api';
+import { formatShanghaiDateTime } from '../time';
 import type { AuditLog, DashboardPayload, McpServerStatus } from '../types';
 
 const ACTION_LABEL: Record<AuditLog['actionType'], string> = {
@@ -177,7 +178,7 @@ export default function DashboardPage() {
                         {log.adminNick || log.adminStaffId}
                       </Typography.Text>
                       <Typography.Text type="secondary">
-                        {new Date(log.createdAt).toLocaleString()}
+                        {formatShanghaiDateTime(log.createdAt)}
                       </Typography.Text>
                     </Space>
                   </div>

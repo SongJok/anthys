@@ -6,6 +6,7 @@ import type {
 } from '../../types/core.js';
 import type { ProjectService } from '../../projects/ProjectService.js';
 import type { ProjectMemberContextInput } from '../../types/skills-plugins-projects.js';
+import { formatShanghaiMinute } from '../../time/shanghaiTime.js';
 
 export interface ProjectToolProviderOptions {
   service: ProjectService;
@@ -51,7 +52,7 @@ function clip(text: string, limit: number): string {
 
 function dateOf(ms: number | undefined): string {
   if (!ms) return '未同步';
-  return new Date(ms).toISOString().slice(0, 16).replace('T', ' ');
+  return `${formatShanghaiMinute(ms)}（Asia/Shanghai）`;
 }
 
 function memberOf(

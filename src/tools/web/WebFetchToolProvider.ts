@@ -7,6 +7,7 @@ import type {
 } from '../../types/core.js';
 import type { FetchedPage, WebFetchExecutor } from './WebFetchClient.js';
 import { WebFetchError } from './WebFetchClient.js';
+import { formatShanghaiDate } from '../../time/shanghaiTime.js';
 
 export interface WebFetchToolLogger {
   info?(obj: Record<string, unknown>, msg: string): void;
@@ -61,8 +62,7 @@ function compact(value: string): string {
 }
 
 function localDayStamp(now: number): string {
-  const date = new Date(now);
-  return `${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()}`;
+  return formatShanghaiDate(now);
 }
 
 function hostnameOf(value: string): string {

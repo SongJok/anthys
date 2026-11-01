@@ -322,6 +322,21 @@ describe('HierarchicalMemoryManager', () => {
     expect(memory.activeTurnMessages).toHaveLength(1);
   });
 
+  it('情景摘要注入时标注生成时间并提示相对时间已过期', async () => {
+    const ctx = setup();
+    await ctx.summaryStore.appendSummary({
+      conversationId: 'conv-1',
+      summary: '【排查结论】支付网关超时已定位为连接池打满',
+      coveredMessageIds: ['old-1'],
+      tokenCount: 120,
+    });
+
+    const summary = await ctx.manager.latestEpisodicSummary('conv-1');
+    expect(summary).toContain('摘要生成于');
+    expect(summary).toContain('相对时间仅指生成当时');
+    expect(summary).toContain('连接池打满');
+  });
+
   it('不同会话的同一员工画像可跨实例召回', async () => {
     const ctx = setup();
     await ctx.manager.remember([

@@ -22,6 +22,7 @@ import {
 } from 'antd';
 import { PlusOutlined, ReloadOutlined, SafetyOutlined } from '@ant-design/icons';
 import { api } from '../api';
+import { formatShanghaiDateTime } from '../time';
 import type {
   GlossarySensitivity,
   GlossaryStats,
@@ -96,7 +97,7 @@ const EMPTY_FILTERS: Filters = {
 };
 
 function formatTime(ms: number): string {
-  return new Date(ms).toLocaleString('zh-CN', { hour12: false });
+  return formatShanghaiDateTime(ms);
 }
 
 /** 与机器人注入、RAG 命中、工具返回完全一致的固定模板 */

@@ -13,6 +13,10 @@ import type {
   SemanticMemoryStore,
 } from '../db/memorySchema.js';
 import type { EmbeddingClient } from './EmbeddingClient.js';
+import {
+  formatShanghaiDateTime,
+  formatShanghaiMessageStamp,
+} from '../time/shanghaiTime.js';
 
 export interface MemoryLogger {
   info(obj: Record<string, unknown>, msg: string): void;
@@ -33,13 +37,18 @@ const SUMMARY_SYSTEM_PROMPT = [
   '你是企业对话记忆压缩器。把给定历史对话压缩成结构化摘要，只输出摘要正文，不要客套话。',
   '必须保留：1) 关键线上指标与数值；2) 已确认的排查结论；3) 未决事项与待办；',
   '4) 重要业务术语、项目代号和人名职责。控制在 800 字以内。',
+  '时间一律写成绝对日期（Asia/Shanghai，YYYY-MM-DD HH:mm），不要保留“今天/明天/昨天”等相对说法。',
 ].join('\n');
 
 function renderMessages(messages: StoredMessage[]): string {
   return messages
     .map((message) => {
       const speaker = message.role === 'user' ? '用户' : '助手';
-      return `${speaker}: ${message.content}`;
+      const stamp =
+        message.createdAt > 0
+          ? `[${formatShanghaiMessageStamp(message.createdAt)}] `
+          : '';
+      return `${stamp}${speaker}: ${message.content}`;
     })
     .join('\n');
 }
@@ -401,7 +410,16 @@ export class HierarchicalMemoryManager {
     );
     if (summaries.length === 0) return '';
     return summaries
-      .map((summary) => summary.summary)
+      .map((summary) => {
+        const stamp =
+          summary.createdAt > 0
+            ? formatShanghaiDateTime(summary.createdAt)
+            : '未知时间';
+        return [
+          `【摘要生成于 ${stamp}；其中“今天/明天”等相对时间仅指生成当时】`,
+          summary.summary,
+        ].join('\n');
+      })
       .join('\n---\n')
       .slice(-6_000);
   }

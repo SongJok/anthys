@@ -28,6 +28,7 @@ import {
   type GlossaryValidationIssue,
   type GlossaryValidationReport,
 } from '../types/glossary.js';
+import { formatShanghaiDateTime } from '../time/shanghaiTime.js';
 
 export interface GlossaryLogger {
   info(obj: Record<string, unknown>, msg: string): void;
@@ -94,10 +95,7 @@ function isValidDocLink(value: string): boolean {
 }
 
 function formatTime(epochMs: number): string {
-  return new Date(epochMs).toLocaleString('zh-CN', {
-    timeZone: 'Asia/Shanghai',
-    hour12: false,
-  });
+  return formatShanghaiDateTime(epochMs);
 }
 
 /**

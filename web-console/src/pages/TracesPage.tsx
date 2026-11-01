@@ -12,6 +12,7 @@ import {
   message,
 } from 'antd';
 import { api } from '../api';
+import { formatShanghaiDateTime } from '../time';
 import type { ReActTrace, ReActTraceStep, TracePage } from '../types';
 
 const STEP_LABEL: Record<ReActTraceStep['type'], string> = {
@@ -127,8 +128,8 @@ export default function TracesPage() {
                 <Descriptions.Item label="Token">{record.totalTokens}</Descriptions.Item>
                 <Descriptions.Item label="步骤">{record.stepCount}</Descriptions.Item>
                 <Descriptions.Item label="耗时">{record.durationMs} ms</Descriptions.Item>
-                <Descriptions.Item label="耗时">
-                  {new Date(record.createdAt).toLocaleString()}
+                <Descriptions.Item label="时间">
+                  {formatShanghaiDateTime(record.createdAt)}
                 </Descriptions.Item>
               </Descriptions>
               <Collapse
@@ -148,7 +149,7 @@ export default function TracesPage() {
           {
             title: '时间',
             dataIndex: 'createdAt',
-            render: (value: string) => new Date(value).toLocaleString(),
+            render: (value: string) => formatShanghaiDateTime(value),
             width: 180,
           },
           { title: '会话', dataIndex: 'conversationId', ellipsis: true },

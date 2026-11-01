@@ -10,6 +10,7 @@ import type {
   ReActTraceStore,
 } from '../../types/admin-and-console.js';
 import type { DynamicLoopPolicy } from '../../types/core.js';
+import { startOfShanghaiDay } from '../../time/shanghaiTime.js';
 
 export interface ConfigRouteDeps {
   configCenter: DynamicConfigCenter;
@@ -32,9 +33,7 @@ export interface ConfigRouteDeps {
 }
 
 function startOfDay(nowMs: number): number {
-  const date = new Date(nowMs);
-  date.setHours(0, 0, 0, 0);
-  return date.getTime();
+  return startOfShanghaiDay(nowMs);
 }
 
 export async function readJsonBody(c: {

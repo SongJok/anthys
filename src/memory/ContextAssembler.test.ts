@@ -44,7 +44,10 @@ describe('ContextAssembler', () => {
     expect(system?.content).toContain('先结论后要点');
     expect(system?.content).toContain('优先调用可用工具');
     expect(system?.content).toContain('未标记错误的工具返回就是真实数据');
-    expect(system?.content).toContain('当前时间：');
+    expect(system?.content).toContain('当前时间（Asia/Shanghai，UTC+08:00）');
+    expect(system?.content).toContain('今天是 2026-10-30（周五）');
+    expect(system?.content).toContain('明天是 2026-10-31（周六）');
+    expect(system?.content).toContain('只在其消息标注的日期成立');
     expect(messages[1]).toEqual({ role: 'user', content: '你好' });
   });
 
@@ -84,8 +87,8 @@ describe('ContextAssembler', () => {
 
     const conversational = messages.filter((m) => m.role !== 'system');
     expect(conversational).toEqual([
-      { role: 'user', content: '第二句' },
-      { role: 'assistant', content: '第二答' },
+      { role: 'user', content: '[2026-10-30 09:00 周五] 第二句' },
+      { role: 'assistant', content: '[2026-10-30 09:00 周五] 第二答' },
       { role: 'user', content: '第三句' },
     ]);
   });
@@ -102,7 +105,7 @@ describe('ContextAssembler', () => {
     });
     expect(messages.map((m) => m.content)).toEqual([
       expect.stringContaining('小钉'),
-      '旧回答',
+      '[2026-10-30 09:00 周五] 旧回答',
       '新问题',
     ]);
   });
@@ -128,7 +131,10 @@ describe('ContextAssembler', () => {
     });
 
     expect(messages[1]).toEqual({ role: 'user', content: '张三：部署失败了吗' });
-    expect(messages[2]).toEqual({ role: 'assistant', content: '正在排查' });
+    expect(messages[2]).toEqual({
+      role: 'assistant',
+      content: '[2026-10-30 09:00 周五] 正在排查',
+    });
     expect(messages[3]).toEqual({ role: 'user', content: '李四：看下日志' });
   });
 

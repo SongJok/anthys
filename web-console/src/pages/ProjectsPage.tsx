@@ -32,6 +32,7 @@ import {
   ReloadOutlined,
 } from '@ant-design/icons';
 import { api } from '../api';
+import { formatShanghaiDateTime } from '../time';
 import type {
   GithubAdminStatus,
   GithubConnectionTestResult,
@@ -118,7 +119,7 @@ const HANDBOOK_SECTION_OPTIONS: Array<{
 
 function formatTime(ms: number | null | undefined): string {
   if (!ms) return '—';
-  return new Date(ms).toLocaleString('zh-CN', { hour12: false });
+  return formatShanghaiDateTime(ms);
 }
 
 function formatBytes(bytes: number): string {

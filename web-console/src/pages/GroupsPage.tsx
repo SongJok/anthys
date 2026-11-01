@@ -17,6 +17,7 @@ import {
   message,
 } from 'antd';
 import { api } from '../api';
+import { formatShanghaiDateTime } from '../time';
 import type { DefaultGroupPolicy, GroupPolicy, KnownGroup } from '../types';
 
 interface PolicyForm {
@@ -206,7 +207,7 @@ export default function GroupsPage() {
               title: '最近活跃',
               dataIndex: 'lastActiveAt',
               render: (value: number | null) =>
-                value ? new Date(value).toLocaleString() : '-',
+                value ? formatShanghaiDateTime(value) : '-',
             },
             {
               title: '操作',

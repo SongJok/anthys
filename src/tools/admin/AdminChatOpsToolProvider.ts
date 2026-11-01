@@ -11,6 +11,7 @@ import type {
   ReActTraceStore,
 } from '../../types/admin-and-console.js';
 import type { GroupBystanderPolicy } from '../../types/bystander-and-memory.js';
+import { startOfShanghaiDay } from '../../time/shanghaiTime.js';
 
 export interface AdminChatOpsDeps {
   configCenter: DynamicConfigCenter;
@@ -80,9 +81,7 @@ function optionalBoolean(
 }
 
 function startOfDay(nowMs: number): number {
-  const date = new Date(nowMs);
-  date.setHours(0, 0, 0, 0);
-  return date.getTime();
+  return startOfShanghaiDay(nowMs);
 }
 
 /**

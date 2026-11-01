@@ -1,5 +1,9 @@
 import type { ChatMessage, StoredMessage } from '../types/core.js';
 import type { AssembledMemoryContext } from '../types/bystander-and-memory.js';
+import {
+  formatShanghaiMessageStamp,
+  shanghaiPromptClock,
+} from '../time/shanghaiTime.js';
 
 export interface PersonaInput {
   name: string;
@@ -34,10 +38,6 @@ export function buildSystemPrompt(
   persona: PersonaInput,
   now: () => number = Date.now,
 ): string {
-  const timestamp = new Date(now()).toLocaleString('zh-CN', {
-    timeZone: 'Asia/Shanghai',
-    hour12: false,
-  });
   return [
     `你是「${persona.name}」，企业内部钉钉智能助手。`,
     persona.rolePrompt,
@@ -45,7 +45,7 @@ export function buildSystemPrompt(
     '',
     TOOL_GUIDANCE,
     '',
-    `当前时间：${timestamp}（Asia/Shanghai）`,
+    shanghaiPromptClock(now()),
   ].join('\n');
 }
 
@@ -79,15 +79,22 @@ export class ContextAssembler {
     const window = Math.max(1, this.options.windowMessages);
     const history = input.history.slice(-window);
     for (const item of history) {
+      const stamp =
+        item.createdAt > 0
+          ? `[${formatShanghaiMessageStamp(item.createdAt)}] `
+          : '';
       if (item.role === 'user') {
         const speaker =
           input.groupChat && item.senderNick ? `${item.senderNick}：` : '';
-        messages.push({ role: 'user', content: `${speaker}${item.content}` });
+        messages.push({
+          role: 'user',
+          content: `${stamp}${speaker}${item.content}`,
+        });
         continue;
       }
       messages.push({
         role: 'assistant',
-        content: item.content,
+        content: `${stamp}${item.content}`,
       });
     }
 
