@@ -28,6 +28,8 @@ export interface MemoryConfig {
 export interface BystanderConfig {
   bystanderEnabled: boolean;
   proactiveReplyEnabled: boolean;
+  /** 允许对 SILENT 消息做只读后台调查，证据足够才可能浮出回复 */
+  silentInvestigationEnabled: boolean;
   slidingWindowSize: number;
   cooldownSeconds: number;
   confidenceThreshold: number;

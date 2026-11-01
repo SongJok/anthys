@@ -71,6 +71,11 @@ export interface ReActRunnerOptions {
   ) => Promise<ToolApprovalDecision>;
   /** 复杂问题先规划再执行；返回 null 表示不需要计划 */
   planner?: Planner;
+  /** 执行层工具白名单：返回 false 的工具不会暴露给模型 */
+  toolFilter?: (
+    tool: ToolDefinition,
+    context: ExecutionContext,
+  ) => boolean;
   /** 丢弃 / 截断技能指令时的告警回调，用于审计与排查 */
   instructionWarning?: (message: string) => void;
 }
@@ -627,7 +632,8 @@ export class ReActRunner implements AgentEngine {
       seen.add(tool.name);
       tools.push(tool);
     }
-    return tools;
+    const filter = this.options.toolFilter;
+    return filter ? tools.filter((tool) => filter(tool, context)) : tools;
   }
 
   private async executeTools(

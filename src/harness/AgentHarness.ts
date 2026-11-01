@@ -60,6 +60,8 @@ export interface ExtensionPromptProvider {
 
 export interface AgentHarnessOptions {
   engine: AgentEngine;
+  /** 只读调查引擎（工具白名单在执行层过滤）；缺省回退主引擎 */
+  investigationEngine?: AgentEngine;
   repository: ConversationRepository;
   assembler: ContextAssembler;
   persona: PersonaInput;
@@ -121,6 +123,15 @@ export interface JobHandleOptions {
   notify?: (text: string) => Promise<void> | void;
   /** Worker 名称，用于用量归因 */
   worker?: string;
+}
+
+export interface InvestigationHandleOptions {
+  query: string;
+  signal?: AbortSignal;
+  /** 默认丢弃过程事件；需要排查时可临时接入 */
+  emit?: (event: AgentStreamEvent) => void;
+  /** 调查墙钟预算，缺省复用循环策略 */
+  maxWallTimeMs?: number;
 }
 
 function emptyUsage(): RunUsage {
@@ -435,6 +446,92 @@ export class AgentHarness {
       message,
       text,
       result.answer,
+    );
+    return result;
+  }
+
+  /**
+   * 静默调查入口：对群里未触发主动回复的疑点做只读查证。
+   * 不写会话历史、不流式打扰群成员，仅记录用量归因；是否浮出由调用方决定。
+   */
+  public async investigate(
+    message: InboundMessage,
+    input: InvestigationHandleOptions,
+  ): Promise<RunResult> {
+    const query = input.query.trim();
+    if (!query) throw new Error('静默调查缺少待核实的问题');
+    const engine = this.options.investigationEngine ?? this.options.engine;
+    const { repository, assembler, policy, persona } = this.options;
+
+    const conversation = await repository.ensureConversation({
+      conversationKey: conversationKeyFor(message),
+      conversationType: message.conversationType,
+      title: conversationTitleFor(message),
+      metadata: {
+        conversationId: message.conversationId,
+        senderStaffId: message.senderStaffId,
+      },
+    });
+    const memoryContext = await this.buildMemoryContext(
+      message,
+      conversation.id,
+      query,
+      message.messageId,
+    );
+    const extensionPrompt = await this.buildExtensionPrompt(message, query, true);
+    const instruction = [
+      '你正在钉钉群里做静默调查（只读），群成员看不到调查过程。',
+      '只使用只读工具（检索、读取、查询）核实事实；不要声称已执行任何写操作，不要编造数据。',
+      '最多进行 3 轮工具调用；证据不足就停止，不要反复搜索。',
+      '最终只输出一个 JSON 对象，不要输出 JSON 之外的文字：',
+      '{"confidence":0到1的数字,"findings":["可核实的事实"],"sources":["链接或数据来源"],"answer":"可直接发到群里的简洁答复"}',
+      '若证据不足：confidence 低于 0.4，findings 与 sources 留空，answer 说明无法确认。',
+      `待核实问题：${query}`,
+    ].join('\n');
+    const messages = assembler.build({
+      persona,
+      history: [],
+      userText: instruction,
+      now: this.now,
+      memoryContext,
+      ...(extensionPrompt ? { extraSystemPrompt: extensionPrompt } : {}),
+      groupChat: true,
+    });
+
+    const startedAt = this.now();
+    const deadlineMs = input.maxWallTimeMs ?? policy.maxWallTimeMs;
+    const emit = input.emit ?? ((): void => {});
+    const result = await engine.run({
+      messages,
+      context: {
+        conversationId: message.conversationId,
+        messageId: message.messageId,
+        senderStaffId: message.senderStaffId,
+        senderNick: message.senderNick,
+        conversationType: message.conversationType,
+        deadlineAt: startedAt + deadlineMs,
+        now: this.now,
+        proactive: true,
+        jobKind: 'investigation',
+        worker: 'research',
+      },
+      emit,
+      ...(input.signal ? { signal: input.signal } : {}),
+    });
+    await this.recordUsage(message, result, true, {
+      jobKind: 'investigation',
+      worker: 'research',
+    });
+
+    this.options.logger?.info(
+      {
+        conversationId: message.conversationId,
+        messageId: message.messageId,
+        steps: result.usage.steps,
+        tokens: result.usage.totalTokens,
+        durationMs: result.usage.durationMs,
+      },
+      'silent investigation turn completed',
     );
     return result;
   }

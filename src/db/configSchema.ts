@@ -341,6 +341,7 @@ function toGroupPolicy(
     conversationId: row.conversationId,
     bystanderEnabled: row.bystanderEnabled,
     proactiveReplyEnabled: row.proactiveReplyEnabled,
+    silentInvestigationEnabled: row.silentInvestigationEnabled,
     slidingWindowSize: row.slidingWindowSize,
     cooldownSeconds: row.cooldownSeconds,
     confidenceThreshold: row.confidenceThreshold,
@@ -369,6 +370,7 @@ export class DrizzleGroupPolicyStore implements GroupPolicyStore {
         conversationId: policy.conversationId,
         bystanderEnabled: policy.bystanderEnabled,
         proactiveReplyEnabled: policy.proactiveReplyEnabled,
+        silentInvestigationEnabled: policy.silentInvestigationEnabled,
         slidingWindowSize: policy.slidingWindowSize,
         cooldownSeconds: policy.cooldownSeconds,
         confidenceThreshold: policy.confidenceThreshold,
@@ -379,6 +381,7 @@ export class DrizzleGroupPolicyStore implements GroupPolicyStore {
         set: {
           bystanderEnabled: policy.bystanderEnabled,
           proactiveReplyEnabled: policy.proactiveReplyEnabled,
+          silentInvestigationEnabled: policy.silentInvestigationEnabled,
           slidingWindowSize: policy.slidingWindowSize,
           cooldownSeconds: policy.cooldownSeconds,
           confidenceThreshold: policy.confidenceThreshold,

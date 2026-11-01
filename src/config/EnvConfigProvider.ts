@@ -303,6 +303,10 @@ export class EnvConfigProvider implements IConfigProvider {
         this.env.BYSTANDER_PROACTIVE_REPLY,
         true,
       ),
+      silentInvestigationEnabled: parseBoolean(
+        this.env.BYSTANDER_SILENT_INVESTIGATION_ENABLED,
+        true,
+      ),
       slidingWindowSize: Math.max(
         1,
         parseNumber(

@@ -84,6 +84,9 @@ export const bystanderPolicies = pgTable('bystander_policies', {
   proactiveReplyEnabled: boolean('proactive_reply_enabled')
     .notNull()
     .default(true),
+  silentInvestigationEnabled: boolean('silent_investigation_enabled')
+    .notNull()
+    .default(true),
   slidingWindowSize: integer('sliding_window_size').notNull().default(20),
   cooldownSeconds: integer('cooldown_seconds').notNull().default(180),
   confidenceThreshold: real('confidence_threshold').notNull().default(0.82),
@@ -312,6 +315,7 @@ export class DrizzleMemoryStore
       conversationId: row.conversationId,
       bystanderEnabled: row.bystanderEnabled,
       proactiveReplyEnabled: row.proactiveReplyEnabled,
+      silentInvestigationEnabled: row.silentInvestigationEnabled,
       slidingWindowSize: row.slidingWindowSize,
       cooldownSeconds: row.cooldownSeconds,
       confidenceThreshold: row.confidenceThreshold,
@@ -326,6 +330,7 @@ export class DrizzleMemoryStore
         conversationId: policy.conversationId,
         bystanderEnabled: policy.bystanderEnabled,
         proactiveReplyEnabled: policy.proactiveReplyEnabled,
+        silentInvestigationEnabled: policy.silentInvestigationEnabled,
         slidingWindowSize: policy.slidingWindowSize,
         cooldownSeconds: policy.cooldownSeconds,
         confidenceThreshold: policy.confidenceThreshold,
@@ -336,6 +341,7 @@ export class DrizzleMemoryStore
         set: {
           bystanderEnabled: policy.bystanderEnabled,
           proactiveReplyEnabled: policy.proactiveReplyEnabled,
+          silentInvestigationEnabled: policy.silentInvestigationEnabled,
           slidingWindowSize: policy.slidingWindowSize,
           cooldownSeconds: policy.cooldownSeconds,
           confidenceThreshold: policy.confidenceThreshold,

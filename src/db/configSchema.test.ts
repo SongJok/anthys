@@ -10,6 +10,7 @@ function policy(
     conversationId,
     bystanderEnabled: true,
     proactiveReplyEnabled: true,
+    silentInvestigationEnabled: true,
     slidingWindowSize: 20,
     cooldownSeconds: 180,
     confidenceThreshold: 0.82,

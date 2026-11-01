@@ -401,6 +401,14 @@ export function createConfigRoutes(deps: ConfigRouteDeps): Hono {
               )!,
             }
           : {}),
+        ...(readBoolean(body, 'silentInvestigationEnabled') !== undefined
+          ? {
+              silentInvestigationEnabled: readBoolean(
+                body,
+                'silentInvestigationEnabled',
+              )!,
+            }
+          : {}),
         ...(readNumber(body, 'cooldownSeconds') !== undefined
           ? { cooldownSeconds: readNumber(body, 'cooldownSeconds')! }
           : {}),

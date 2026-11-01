@@ -312,6 +312,7 @@ pnpm run db:seed      # 可选：预写入默认人设与模型配置，已有�
 | --- | --- | --- |
 | `BYSTANDER_ENABLED` | `true` | 是否开启群聊旁听 |
 | `BYSTANDER_PROACTIVE_REPLY` | `true` | 是否允许非 @ 主动回复 |
+| `BYSTANDER_SILENT_INVESTIGATION_ENABLED` | `true` | 群级默认：是否允许对 SILENT 消息做只读后台调查 |
 | `BYSTANDER_SLIDING_WINDOW_SIZE` | `20` | 每群保留的旁听条数 |
 | `BYSTANDER_COOLDOWN_SECONDS` | `180` | 同群两次主动回复的最小间隔 |
 | `BYSTANDER_CONFIDENCE_THRESHOLD` | `0.82` | 触发主动回复的最低置信度 |
@@ -585,12 +586,32 @@ sudo cp deploy/nginx.conf /etc/nginx/conf.d/ && sudo nginx -t && sudo systemctl 
 | --- | --- |
 | 旁听开关 | 是否对该群启用旁听判定与主动回复 |
 | 非 @ 自主回复 | 是否允许主动发言 |
+| 静默调查 | 是否对未触发主动回复的可疑消息做只读后台查证 |
 | 冷却时间 | 同群两次主动回复的最小间隔 |
 | 滑动窗口 | 判定时参考的最近消息条数 |
 | 置信度阈值 | 主动回复的最低把握 |
 | 触发话题 | 重点关注的主题 |
 
 管理员还可以一键**紧急静音**：关闭全部群的旁听与主动回复，机器人退回仅响应 @ 的状态。
+
+**静默调查（只读）**：如果模型判定某条消息「可疑但不该主动插话」，机器人可以把它转入后台调查，而不是直接放弃：
+
+- 调查使用独立的低温度引擎，执行层通过 `toolFilter` 只暴露 `risk=read` 的工具；即使模型被群消息诱导，也看不到写操作或审批入口。
+- 调查不写会话历史、不向群里流式输出过程，只在用量流水中归因为 `jobKind=investigation`、`worker=research`。
+- 输出必须是结构化 JSON：`confidence`、`findings`、`sources`、`answer`。系统按确定性规则评分：模型自评占 35%，可核实 findings 与 sources 占其余部分，并对「无法确认/不确定」等对冲表述降权。
+- 证据分达到 `SILENT_INVESTIGATION_EVIDENCE_THRESHOLD` 才浮出发言；否则静默丢弃，连「我查过」都不会说。
+- 每次真实调查都写入 `silent_investigations` 审计表（状态、证据分、Token、耗时、丢弃原因），便于复盘误报与成本。
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `SILENT_INVESTIGATION_ENABLED` | `true` | 静默调查总开关 |
+| `SILENT_INVESTIGATION_MIN_CONFIDENCE` | `0.65` | 旁听判定置信度低于该值不启动调查 |
+| `SILENT_INVESTIGATION_EVIDENCE_THRESHOLD` | `0.65` | 证据分达到该值才浮出 |
+| `SILENT_INVESTIGATION_MAX_TOKENS` | `8000` | 单次调查 Token 预算，超出即丢弃 |
+| `SILENT_INVESTIGATION_MAX_WALL_TIME_SECONDS` | `45` | 单次调查墙钟上限 |
+| `SILENT_INVESTIGATION_COOLDOWN_SECONDS` | `600` | 同群两次调查的最小间隔 |
+| `SILENT_INVESTIGATION_MIN_QUERY_CHARS` | `10` | 待核实问题的最短字符数 |
+| `SILENT_INVESTIGATION_MAX_CONCURRENCY` | `1` | 进程内同时执行的调查数量上限 |
 
 ### 三层记忆
 

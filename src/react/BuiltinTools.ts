@@ -175,6 +175,7 @@ export class BuiltinToolProvider implements IToolProvider {
       name: 'current_time',
       description:
         '获取当前日期与时间，可指定时区（Asia/Shanghai 或 UTC）。用于回答“现在几点”“今天几号”等与实时时间相关的问题。',
+      risk: 'read',
       parametersJsonSchema: {
         type: 'object',
         properties: {
@@ -216,6 +217,7 @@ export class BuiltinToolProvider implements IToolProvider {
       name: 'calculator',
       description:
         '计算基础数学表达式，支持 + - * / % ^ 与括号，例如 "(12+8)*3/2" 或 "2^10"。用于需要精确数值计算的场景。',
+      risk: 'read',
       parametersJsonSchema: {
         type: 'object',
         properties: {
@@ -243,6 +245,7 @@ export class BuiltinToolProvider implements IToolProvider {
       name: 'system_status',
       description:
         '查看智能体运行环境状态：Node 版本、进程内存、运行时长、主机与负载。用于回答运行状态或排查问题。',
+      risk: 'read',
       parametersJsonSchema: {
         type: 'object',
         properties: {},

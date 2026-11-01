@@ -50,6 +50,7 @@ export class BystanderPolicyProvider {
       conversationId,
       bystanderEnabled: defaults.bystanderEnabled,
       proactiveReplyEnabled: defaults.proactiveReplyEnabled,
+      silentInvestigationEnabled: defaults.silentInvestigationEnabled,
       slidingWindowSize: defaults.slidingWindowSize,
       cooldownSeconds: defaults.cooldownSeconds,
       confidenceThreshold: defaults.confidenceThreshold,

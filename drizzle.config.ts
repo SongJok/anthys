@@ -17,6 +17,7 @@ export default defineConfig({
     './src/db/projectSchema.ts',
     './src/db/jobSchema.ts',
     './src/db/approvalSchema.ts',
+    './src/db/investigationSchema.ts',
   ],
   out: './drizzle',
   dialect: 'postgresql',

@@ -94,6 +94,8 @@ export interface GroupPolicy {
   conversationId: string;
   bystanderEnabled: boolean;
   proactiveReplyEnabled: boolean;
+  /** 对 SILENT 消息做只读后台调查，证据达标才浮出 */
+  silentInvestigationEnabled: boolean;
   slidingWindowSize: number;
   cooldownSeconds: number;
   confidenceThreshold: number;

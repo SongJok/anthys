@@ -303,6 +303,29 @@ describe('ReActRunner', () => {
     ).toHaveLength(3);
   });
 
+  it('工具白名单在执行层隐藏未授权工具', async () => {
+    const model = new ScriptedModel([
+      [{ contentDelta: '完成' }, { finishReason: 'stop' }],
+    ]);
+    const runner = new ReActRunner({
+      model,
+      toolProviders: [new BuiltinToolProvider()],
+      policy,
+      toolFilter: (tool) => tool.name !== 'calculator',
+    });
+
+    await runner.run({
+      messages: userMessages,
+      context: makeContext(),
+      emit: () => undefined,
+    });
+
+    expect(model.requests[0]?.tools.map((tool) => tool.function.name)).toEqual([
+      'current_time',
+      'system_status',
+    ]);
+  });
+
   it('达到单次运行最大轮数时拒接并停止', async () => {
     const model = new ScriptedModel([
       toolTurn([{ index: 0, id: 'c1', name: 'current_time', args: {} }]),

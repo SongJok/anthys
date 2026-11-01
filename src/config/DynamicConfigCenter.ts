@@ -346,6 +346,8 @@ export class DynamicConfigCenter
       bystanderEnabled: this.state.defaultBystanderPolicy.bystanderEnabled,
       proactiveReplyEnabled:
         this.state.defaultBystanderPolicy.proactiveReplyEnabled,
+      silentInvestigationEnabled:
+        this.state.defaultBystanderPolicy.silentInvestigationEnabled,
       slidingWindowSize: this.state.defaultBystanderPolicy.slidingWindowSize,
       cooldownSeconds: this.state.defaultBystanderPolicy.cooldownSeconds,
       confidenceThreshold:
@@ -595,6 +597,9 @@ export class DynamicConfigCenter
       ...(input.proactiveReplyEnabled !== undefined
         ? { proactiveReplyEnabled: input.proactiveReplyEnabled }
         : {}),
+      ...(input.silentInvestigationEnabled !== undefined
+        ? { silentInvestigationEnabled: input.silentInvestigationEnabled }
+        : {}),
       ...(input.slidingWindowSize !== undefined
         ? {
             slidingWindowSize: Math.max(
@@ -704,6 +709,9 @@ export class DynamicConfigCenter
       ...(input.proactiveReplyEnabled !== undefined
         ? { proactiveReplyEnabled: input.proactiveReplyEnabled }
         : {}),
+      ...(input.silentInvestigationEnabled !== undefined
+        ? { silentInvestigationEnabled: input.silentInvestigationEnabled }
+        : {}),
       ...(input.slidingWindowSize !== undefined
         ? {
             slidingWindowSize: Math.max(
@@ -806,6 +814,7 @@ export class DynamicConfigCenter
       defaultBystanderPolicy: {
         bystanderEnabled: bystander.bystanderEnabled,
         proactiveReplyEnabled: bystander.proactiveReplyEnabled,
+        silentInvestigationEnabled: bystander.silentInvestigationEnabled,
         slidingWindowSize: Math.max(
           1,
           bystander.slidingWindowSize || DEFAULT_SLIDING_WINDOW_SIZE,

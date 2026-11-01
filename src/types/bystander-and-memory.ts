@@ -7,6 +7,8 @@ export interface GroupBystanderPolicy {
   conversationId: string;
   bystanderEnabled: boolean;
   proactiveReplyEnabled: boolean;
+  /** 是否允许对 SILENT 消息做只读后台调查（证据足够才可能浮出） */
+  silentInvestigationEnabled: boolean;
   slidingWindowSize: number;
   cooldownSeconds: number;
   confidenceThreshold: number;
@@ -108,6 +110,7 @@ export function createDefaultBystanderPolicy(
     conversationId,
     bystanderEnabled: true,
     proactiveReplyEnabled: true,
+    silentInvestigationEnabled: true,
     slidingWindowSize: DEFAULT_SLIDING_WINDOW_SIZE,
     cooldownSeconds: DEFAULT_COOLDOWN_SECONDS,
     confidenceThreshold: DEFAULT_CONFIDENCE_THRESHOLD,

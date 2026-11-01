@@ -399,6 +399,7 @@ export class AdminChatOpsToolProvider implements IToolProvider {
           },
           bystanderEnabled: { type: 'boolean' },
           proactiveReplyEnabled: { type: 'boolean' },
+          silentInvestigationEnabled: { type: 'boolean' },
           cooldownSeconds: { type: 'number' },
           slidingWindowSize: { type: 'number' },
           confidenceThreshold: { type: 'number' },
@@ -475,6 +476,15 @@ export class AdminChatOpsToolProvider implements IToolProvider {
                     proactiveReplyEnabled: optionalBoolean(
                       args,
                       'proactiveReplyEnabled',
+                    ),
+                  }
+                : {}),
+              ...(optionalBoolean(args, 'silentInvestigationEnabled') !==
+              undefined
+                ? {
+                    silentInvestigationEnabled: optionalBoolean(
+                      args,
+                      'silentInvestigationEnabled',
                     ),
                   }
                 : {}),
@@ -602,6 +612,7 @@ export class AdminChatOpsToolProvider implements IToolProvider {
       conversationId: policy.conversationId,
       bystanderEnabled: policy.bystanderEnabled,
       proactiveReplyEnabled: policy.proactiveReplyEnabled,
+      silentInvestigationEnabled: policy.silentInvestigationEnabled,
       cooldownSeconds: policy.cooldownSeconds,
       slidingWindowSize: policy.slidingWindowSize,
       confidenceThreshold: policy.confidenceThreshold,

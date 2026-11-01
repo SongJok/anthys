@@ -59,6 +59,7 @@ import { DrizzleUsageLedgerStore } from './db/usageSchema.js';
 import { DrizzleScheduledTaskStore } from './db/schedulerSchema.js';
 import { DrizzleAgentJobStore } from './db/jobSchema.js';
 import { DrizzlePendingActionPersistence } from './db/approvalSchema.js';
+import { DrizzleSilentInvestigationStore } from './db/investigationSchema.js';
 import { JobRunner } from './jobs/JobRunner.js';
 import {
   formatJob,
@@ -98,6 +99,10 @@ import {
   BystanderTriageEngine,
   LlmBystanderClassifier,
 } from './bystander/BystanderTriageEngine.js';
+import {
+  SilentInvestigationService,
+  resolveSilentInvestigationConfig,
+} from './bystander/SilentInvestigationService.js';
 import { ContextAssembler } from './memory/ContextAssembler.js';
 import { DrizzleConversationRepository } from './memory/ConversationRepository.js';
 import {
@@ -1295,6 +1300,18 @@ async function main(): Promise<void> {
       ...(planner ? { planner } : {}),
     });
 
+    // 静默调查只允许只读工具，执行层过滤保证模型即使被诱导也看不到写操作
+    const investigationEngine = new ReActRunner({
+      model: proactiveModel,
+      toolProviders,
+      policy: configCenter.getLoopPolicy(),
+      temperature: 0,
+      enableNativeReasoning: false,
+      approval: resolveToolApproval,
+      toolTimeoutMs,
+      toolFilter: (tool) => tool.risk === 'read',
+    });
+
     const routedEngines = new Map<ModelRole, ReActRunner>();
     const runnerForRole = (role: ModelRole): ReActRunner => {
       if (role === 'default') return engine;
@@ -1380,6 +1397,7 @@ async function main(): Promise<void> {
     const repository = new DrizzleConversationRepository(dbHandle.db);
     const harness = new AgentHarness({
       engine: routingEngine,
+      investigationEngine,
       repository,
       assembler: new ContextAssembler({
         windowMessages: memoryConfig.windowMessages,
@@ -1620,6 +1638,46 @@ async function main(): Promise<void> {
       streamer.handle({ type: 'answer_delta', content: text });
       await streamer.finish();
     };
+
+    const surfaceSilentInvestigation = async (
+      message: InboundMessage,
+      text: string,
+    ): Promise<void> => {
+      const webhook = message.rawPayload.sessionWebhook;
+      if (typeof webhook === 'string' && webhook) {
+        await sendSessionWebhook(message, text, cardLogger, { mention: false });
+        return;
+      }
+      const streamer = createStreamer(message);
+      await streamer.start();
+      streamer.handle({ type: 'answer_delta', content: text });
+      await streamer.finish();
+      if (!streamer.isAvailable) {
+        throw new Error('卡片创建失败，且该消息没有可用的 sessionWebhook');
+      }
+    };
+
+    const silentInvestigationConfig = resolveSilentInvestigationConfig(
+      process.env,
+    );
+    const silentInvestigation = new SilentInvestigationService({
+      config: silentInvestigationConfig,
+      cooldown: new CooldownLimiter(),
+      investigate: ({ message, query, signal, maxWallTimeMs }) =>
+        harness.investigate(message, {
+          query,
+          maxWallTimeMs,
+          ...(signal ? { signal } : {}),
+        }),
+      surface: surfaceSilentInvestigation,
+      auditStore: new DrizzleSilentInvestigationStore(dbHandle.db),
+      logger: harnessLogger,
+      onSurfaced: (message) => cooldown.markReplied(message.conversationId),
+    });
+    logger.info(
+      { ...silentInvestigationConfig },
+      'silent investigation configured',
+    );
 
     const makeEmit = (
       collector: TraceCollector,
@@ -2537,8 +2595,16 @@ async function main(): Promise<void> {
         },
         'bystander evaluation finished',
       );
-      if (decision.action !== 'PROACTIVE_REPLY') return;
-      await runProactiveTurn(message, decision);
+      if (decision.action === 'PROACTIVE_REPLY') {
+        await runProactiveTurn(message, decision);
+        return;
+      }
+      // SILENT 不打扰群成员，但可疑问题转入只读后台调查，证据达标才浮出
+      void silentInvestigation.consider({
+        message,
+        decision,
+        policy: groupPolicy,
+      });
     };
 
     const gatewayOptions = () => ({

@@ -102,10 +102,12 @@ function createHarness(
   engine: AgentEngine,
   usageGuard?: ConstructorParameters<typeof AgentHarness>[0]['usageGuard'],
   glossary?: ConstructorParameters<typeof AgentHarness>[0]['glossary'],
+  investigationEngine?: AgentEngine,
 ) {
   const { repository, conversations, rows } = createRepository();
   const harness = new AgentHarness({
     engine,
+    ...(investigationEngine ? { investigationEngine } : {}),
     ...(usageGuard ? { usageGuard } : {}),
     ...(glossary ? { glossary } : {}),
     repository,
@@ -254,6 +256,69 @@ describe('AgentHarness', () => {
     }>;
     expect(messages.at(-1)?.content).toContain('后台任务 ID：job-1');
     expect(messages.at(-1)?.content).toContain('整理本周客户反馈');
+  });
+
+  it('静默调查使用只读引擎且不写会话历史', async () => {
+    const mainCalls: { messages: unknown[] }[] = [];
+    const investigationCalls: Array<{
+      jobKind?: string;
+      worker?: string;
+      deadlineAt: number;
+    }> = [];
+    const records: Array<{ jobKind?: string; worker?: string }> = [];
+    const investigationEngine: AgentEngine = {
+      async run(input) {
+        investigationCalls.push({
+          ...(input.context.jobKind
+            ? { jobKind: input.context.jobKind }
+            : {}),
+          ...(input.context.worker ? { worker: input.context.worker } : {}),
+          deadlineAt: input.context.deadlineAt,
+        });
+        input.emit({
+          type: 'completed',
+          usage: { totalTokens: 30, steps: 2, durationMs: 12 },
+        });
+        return {
+          answer: '{"confidence":0.9,"findings":["网关超时 3 秒"],"sources":[],"answer":"建议调大网关超时"}',
+          reasoning: '',
+          usage: { totalTokens: 30, steps: 2, durationMs: 12 },
+        };
+      },
+    };
+    const { harness, rows, conversations } = createHarness(
+      scriptedEngine(mainCalls),
+      {
+        async assertWithinQuota() {},
+        async record(input) {
+          records.push({
+            ...(input.jobKind ? { jobKind: input.jobKind } : {}),
+            ...(input.worker ? { worker: input.worker } : {}),
+          });
+        },
+      },
+      undefined,
+      investigationEngine,
+    );
+    const message = inbound({
+      conversationType: '2',
+      isAtBot: false,
+      text: '订单服务 502 是不是网关超时？',
+    });
+
+    const result = await harness.investigate(message, {
+      query: '订单服务 502 是否与网关超时有关',
+      maxWallTimeMs: 20_000,
+    });
+
+    expect(result.answer).toContain('"confidence"');
+    expect(mainCalls).toHaveLength(0);
+    expect(investigationCalls).toEqual([
+      { jobKind: 'investigation', worker: 'research', deadlineAt: 21_000 },
+    ]);
+    expect(records).toEqual([{ jobKind: 'investigation', worker: 'research' }]);
+    expect(rows).toHaveLength(0);
+    expect(conversations[0]?.conversationKey).toBe('group:cid-1');
   });
 
   it('把术语库上下文并入系统提示，异常时不影响主流程', async () => {

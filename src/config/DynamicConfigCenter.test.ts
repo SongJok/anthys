@@ -119,6 +119,7 @@ function fakeDefaults(
     getBystanderConfig: () => ({
       bystanderEnabled: env.BYSTANDER_ENABLED === 'true',
       proactiveReplyEnabled: env.BYSTANDER_PROACTIVE_REPLY === 'true',
+      silentInvestigationEnabled: true,
       slidingWindowSize: Number(env.BYSTANDER_SLIDING_WINDOW_SIZE),
       cooldownSeconds: Number(env.BYSTANDER_COOLDOWN_SECONDS),
       confidenceThreshold: Number(env.BYSTANDER_CONFIDENCE_THRESHOLD),

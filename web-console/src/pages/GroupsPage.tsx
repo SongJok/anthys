@@ -23,6 +23,7 @@ import type { DefaultGroupPolicy, GroupPolicy, KnownGroup } from '../types';
 interface PolicyForm {
   bystanderEnabled: boolean;
   proactiveReplyEnabled: boolean;
+  silentInvestigationEnabled: boolean;
   cooldownSeconds: number;
   slidingWindowSize: number;
   confidenceThreshold: number;
@@ -61,6 +62,10 @@ export default function GroupsPage() {
       bystanderEnabled: source?.bystanderEnabled ?? defaults?.bystanderEnabled ?? true,
       proactiveReplyEnabled:
         source?.proactiveReplyEnabled ?? defaults?.proactiveReplyEnabled ?? true,
+      silentInvestigationEnabled:
+        source?.silentInvestigationEnabled ??
+        defaults?.silentInvestigationEnabled ??
+        true,
       cooldownSeconds: source?.cooldownSeconds ?? defaults?.cooldownSeconds ?? 180,
       slidingWindowSize: source?.slidingWindowSize ?? defaults?.slidingWindowSize ?? 20,
       confidenceThreshold:
@@ -117,6 +122,13 @@ export default function GroupsPage() {
             </Descriptions.Item>
             <Descriptions.Item label="非@主动回复">
               {defaults.proactiveReplyEnabled ? (
+                <Tag color="green">开启</Tag>
+              ) : (
+                <Tag>关闭</Tag>
+              )}
+            </Descriptions.Item>
+            <Descriptions.Item label="静默调查">
+              {defaults.silentInvestigationEnabled ? (
                 <Tag color="green">开启</Tag>
               ) : (
                 <Tag>关闭</Tag>
@@ -198,6 +210,17 @@ export default function GroupsPage() {
                 ),
             },
             {
+              title: '静默调查',
+              key: 'investigation',
+              render: (_, row) =>
+                (row.policy?.silentInvestigationEnabled ??
+                defaults?.silentInvestigationEnabled) ? (
+                  <Tag color="green">开启</Tag>
+                ) : (
+                  <Tag>关闭</Tag>
+                ),
+            },
+            {
               title: '冷却时间',
               key: 'cooldown',
               render: (_, row) =>
@@ -247,6 +270,14 @@ export default function GroupsPage() {
             label="非@主动回复"
             name="proactiveReplyEnabled"
             valuePropName="checked"
+          >
+            <Switch />
+          </Form.Item>
+          <Form.Item
+            label="静默只读调查"
+            name="silentInvestigationEnabled"
+            valuePropName="checked"
+            extra="对未触发主动回复的可疑消息做只读查证，证据达标才浮出；关闭可省下模型预算。"
           >
             <Switch />
           </Form.Item>
