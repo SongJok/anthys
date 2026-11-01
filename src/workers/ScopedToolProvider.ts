@@ -5,18 +5,15 @@ import type {
 } from '../types/core.js';
 import type { WorkerToolScope } from '../types/workers.js';
 import { isReadOnlyTool } from '../tools/toolRisk.js';
+import { matchesToolPattern } from '../harness/ToolPattern.js';
+
+export { matchesToolPattern } from '../harness/ToolPattern.js';
 
 export interface ScopedToolProviderOptions {
   /** 每次 getTools 时解析，确保后注册的工具（如子代理）也能即时生效 */
   providers: () => IToolProvider[];
   scope: WorkerToolScope;
   providerName?: string;
-}
-
-/** 名单项支持精确匹配与结尾 `*` 前缀匹配，例如 `mcp__code__*` */
-export function matchesToolPattern(pattern: string, name: string): boolean {
-  if (pattern.endsWith('*')) return name.startsWith(pattern.slice(0, -1));
-  return pattern === name;
 }
 
 /**

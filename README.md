@@ -305,6 +305,8 @@ pnpm run db:seed      # 可选：预写入默认人设与模型配置，已有�
 | --- | --- | --- |
 | `TOOL_CONFIRMATION_ENABLED` | `true` | 是否要求写操作先经 `/confirm` 确认；关闭后全部工具直接执行 |
 | `TOOL_CONFIRMATION_TTL_SECONDS` | `300` | 待确认动作的有效期（秒） |
+| `TOOL_EXECUTION_ALLOWLIST` | 空 | 只允许执行的工具名单（逗号分隔，支持结尾 `*`）；留空不限制 |
+| `TOOL_EXECUTION_DENYLIST` | 空 | 禁止执行的工具名单，优先级高于 allow；确认路径同样拦截 |
 
 **群聊旁听**
 
@@ -494,6 +496,7 @@ sudo cp deploy/nginx.conf /etc/nginx/conf.d/ && sudo nginx -t && sudo systemctl 
 - 待确认动作只允许发起人或管理员确认；确认时执行的是登记时缓存的参数，不会让模型重新生成一遍调用。
 - 待确认动作持久化在 `pending_actions` 表，进程重启后未过期的请求仍可继续 `/confirm`。
 - 设置 `TOOL_CONFIRMATION_ENABLED=false` 可关闭闸门，所有工具直接执行。
+- 执行层另有一道全局白名单：`TOOL_EXECUTION_ALLOWLIST` / `TOOL_EXECUTION_DENYLIST` 在工具提供方外层统一过滤，主代理、静默调查、Worker 与子代理都看不到被禁工具；`/confirm` 执行前会再次校验，避免策略变更后旧待确认动作绕过限制。
 - 工具输出中的 URL 会自动提取为「参考来源」：去重、保留前若干个，并随 `citation` 事件推送到卡片引用区与轨迹。
 
 ### 对话内命令

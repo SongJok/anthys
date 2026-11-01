@@ -54,6 +54,10 @@ import {
   PendingActionStore,
 } from './harness/ToolApprovalGate.js';
 import { ModelRoutingEngine } from './harness/ModelRoutingEngine.js';
+import {
+  parseToolExecutionPolicy,
+  PolicyToolProvider,
+} from './harness/ToolExecutionPolicy.js';
 import { UsageGuard } from './billing/UsageGuard.js';
 import { parseModelPricing } from './billing/ModelPricing.js';
 import { formatShanghaiDateTime } from './time/shanghaiTime.js';
@@ -180,6 +184,7 @@ import type {
   RunResult,
   ToolApprovalDecision,
   ToolApprovalRequest,
+  IToolProvider,
 } from './types/core.js';
 import type {
   LlmSandboxTestResult,
@@ -1061,6 +1066,14 @@ async function main(): Promise<void> {
           logger: harnessLogger,
         })
       : null;
+    const executionPolicy = parseToolExecutionPolicy(process.env);
+    logger.info(
+      {
+        ...executionPolicy.describe(),
+        enabled: !executionPolicy.isDefault(),
+      },
+      'tool execution policy resolved',
+    );
 
     toolRegistry = await ToolRegistry.create({
       mcpServers: await mergeMcpServers(),
@@ -1192,6 +1205,17 @@ async function main(): Promise<void> {
     }
 
     const toolProviders = toolRegistry.providers;
+    const applyExecutionPolicy = (
+      providers: () => IToolProvider[],
+    ): IToolProvider[] =>
+      executionPolicy.isDefault()
+        ? providers()
+        : [
+            new PolicyToolProvider({
+              providers,
+              policy: executionPolicy,
+            }),
+          ];
     const attachmentDir = resolve(toolRegistry.workspace.hostDir, 'attachments');
     const attachmentStore = new AttachmentStore({
       rootDir: attachmentDir,
@@ -1302,7 +1326,10 @@ async function main(): Promise<void> {
       let subagent: SubagentToolProvider | undefined;
       subagent = new SubagentToolProvider({
         model: adminModel,
-        providers: () => toolProviders.filter((provider) => provider !== subagent),
+        providers: () =>
+          applyExecutionPolicy(() =>
+            toolProviders.filter((provider) => provider !== subagent),
+          ),
         policy: () => configCenter.getLoopPolicy(),
         timeoutMs:
           envSeconds(process.env.SUBAGENT_TIMEOUT_SECONDS, 90) * 1_000,
@@ -1337,7 +1364,7 @@ async function main(): Promise<void> {
     logger.info({ policy: watchdogPolicy }, 'run watchdog configured');
     const engine = new ReActRunner({
       model: chatModel,
-      toolProviders,
+      toolProviders: applyExecutionPolicy(() => toolProviders),
       policy: configCenter.getLoopPolicy(),
       temperature: llmConfig.temperature,
       enableNativeReasoning:
@@ -1353,7 +1380,7 @@ async function main(): Promise<void> {
     // 静默调查只允许只读工具，执行层过滤保证模型即使被诱导也看不到写操作
     const investigationEngine = new ReActRunner({
       model: proactiveModel,
-      toolProviders,
+      toolProviders: applyExecutionPolicy(() => toolProviders),
       policy: configCenter.getLoopPolicy(),
       temperature: 0,
       enableNativeReasoning: false,
@@ -1371,7 +1398,7 @@ async function main(): Promise<void> {
     const workerRuntimes: Partial<Record<WorkerName, WorkerRuntime>> = {};
     for (const profile of workerRegistry.list()) {
       const scopedProvider = new ScopedToolProvider({
-        providers: () => toolProviders,
+        providers: () => applyExecutionPolicy(() => toolProviders),
         scope: profile.scope,
         providerName: `worker:${profile.name}`,
       });
@@ -1412,7 +1439,7 @@ async function main(): Promise<void> {
       const profile = configCenter.getModelProfiles()[role];
       const runner = new ReActRunner({
         model: chatModelFor(role),
-        toolProviders,
+        toolProviders: applyExecutionPolicy(() => toolProviders),
         policy: configCenter.getLoopPolicy(),
         temperature: profile.temperature,
         enableNativeReasoning: profile.thinking !== 'off',
@@ -2148,6 +2175,10 @@ async function main(): Promise<void> {
           return '只有发起人或管理员可以确认该操作。';
         }
         pendingActions.take(message.conversationId);
+        if (!executionPolicy.allows(action.toolName)) {
+          metrics.inc('agent_tool_confirmations_total', { result: 'blocked' });
+          return `工具 \`${action.toolName}\` 已被执行策略禁用，操作已取消。`;
+        }
         const registry = toolRegistry;
         if (!registry) return '工具注册表尚未就绪，操作已取消。';
         const ctx: ExecutionContext = {
