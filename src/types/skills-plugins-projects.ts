@@ -167,7 +167,13 @@ export interface SkillAdminPort {
 /* 声明式插件                                                          */
 /* ------------------------------------------------------------------ */
 
-export type PluginStatus = 'installed' | 'enabled' | 'disabled' | 'error';
+export type PluginStatus =
+  | 'installed'
+  | 'enabled'
+  | 'disabled'
+  | 'error'
+  | 'degraded';
+export type PluginVersionStatus = PluginStatus | 'superseded';
 export type PluginTrust = 'declarative';
 
 export interface PluginMcpServerDecl {
@@ -212,6 +218,8 @@ export interface PluginManifest {
   mcpServers?: PluginMcpServerDecl[];
   secrets?: PluginSecretDecl[];
   permissions?: PluginPermissions;
+  /** 可选 JSON Schema；第一期只展示，不注入提示词 */
+  config?: Record<string, unknown>;
 }
 
 export interface PluginRecord {
@@ -232,7 +240,7 @@ export interface PluginVersionRecord {
   manifest: PluginManifest;
   dir: string;
   checksum: string;
-  status: PluginStatus;
+  status: PluginVersionStatus;
   installedAt: number;
 }
 
@@ -248,10 +256,12 @@ export interface PluginInstallInput {
   installedBy: string;
   /** 覆盖安装时允许同版本重装 */
   force?: boolean;
+  /** 允许缺失必需密钥先装后配；插件保持禁用 */
+  allowMissingSecrets?: boolean;
 }
 
 export interface PluginInstallResult {
-  plugin: PluginRecord;
+  plugin: PluginAdminView;
   version: PluginVersionRecord;
   skills: string[];
   mcpServers: string[];

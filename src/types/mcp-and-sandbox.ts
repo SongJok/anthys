@@ -14,6 +14,9 @@ export interface EnterpriseMcpServerConfig {
   timeoutMs: number;
   enabled: boolean;
   maxResultChars: number;
+  /** 运行时合并来源；手工配置省略。插件服务只用于展示与审计 */
+  source?: 'manual' | 'plugin';
+  pluginId?: string;
 }
 
 /** 2. 钉钉原生 DWS CLI 执行契约 */

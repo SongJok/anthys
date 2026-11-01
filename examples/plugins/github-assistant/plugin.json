@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "id": "com.example.github-assistant",
+  "name": "GitHub 项目助手",
+  "version": "1.2.0",
+  "description": "查看 GitHub 仓库、评审 PR、生成项目导读；所有能力均为声明式技能与 MCP 配置",
+  "publisher": "example-team",
+  "homepage": "https://github.com/example/github-assistant",
+  "license": "MIT",
+  "engines": { "agent": ">=0.1.0" },
+  "trust": "declarative",
+  "skills": [
+    "skills/repo-review",
+    "skills/github-project-scan"
+  ],
+  "mcpServers": [
+    {
+      "id": "github",
+      "name": "GitHub",
+      "domain": "code",
+      "transport": "stdio",
+      "endpointOrCommand": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-github@0.6.2"
+      ],
+      "envOrHeaders": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}"
+      },
+      "timeoutMs": 60000,
+      "maxResultChars": 12000,
+      "enabled": true
+    }
+  ],
+  "secrets": [
+    {
+      "key": "GITHUB_TOKEN",
+      "required": true,
+      "description": "只读 GitHub Personal Access Token"
+    }
+  ],
+  "permissions": {
+    "network": ["api.github.com", "github.com"],
+    "filesystem": "none"
+  }
+}
