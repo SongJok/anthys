@@ -14,12 +14,15 @@ import type {
   EnterpriseBotSystemConfig,
   GroupBystanderPolicy,
   McpToolAccessPolicy,
-  ModelRoutingPolicy,
   UsagePolicy,
 } from '../types/admin-and-console.js';
 import type {
   DynamicLoopPolicy,
   LLMAndPersonaConfig,
+  ModelConfigSource,
+  ModelProfile,
+  ModelProfiles,
+  ModelRole,
 } from '../types/core.js';
 import type { EnterpriseMcpServerConfig } from '../types/mcp-and-sandbox.js';
 import {
@@ -104,6 +107,14 @@ export function maskSecret(secret: string): string {
 function clamp(value: number, min: number, max: number): number {
   if (!Number.isFinite(value)) return min;
   return Math.min(max, Math.max(min, value));
+}
+
+function inferDialect(baseUrl: string): ModelProfile['dialect'] {
+  const url = baseUrl.toLowerCase();
+  if (url.includes('deepseek')) return 'deepseek';
+  if (url.includes('moonshot') || url.includes('kimi')) return 'moonshot';
+  if (url.includes('bigmodel') || url.includes('zhipu')) return 'zhipu';
+  return 'openai';
 }
 
 function sanitizeStaffIds(ids: string[]): string[] {
@@ -213,7 +224,59 @@ export class DynamicConfigCenter
       defaultBystanderPolicy: clone(this.state.defaultBystanderPolicy),
       mcpAccessPolicies: clone(this.state.mcpAccessPolicies),
       extensions: clone(this.state.extensions),
+      modelSource: this.getModelConfigSource(),
+      modelProfiles: this.summarizeModelProfiles(),
     };
+  }
+
+  public getModelConfigSource(): ModelConfigSource {
+    return this.defaults.getModelConfigSource?.() ?? 'database';
+  }
+
+  public getModelProfiles(): ModelProfiles {
+    const llm = this.state.llm;
+    const fallbackProfiles = this.defaults.getModelProfiles?.();
+    const defaultProfile: ModelProfile = {
+      provider: llm.provider,
+      dialect:
+        this.getModelConfigSource() === 'env' && fallbackProfiles?.default
+          ? fallbackProfiles.default.dialect
+          : inferDialect(llm.baseUrl),
+      baseUrl: llm.baseUrl,
+      apiKey: llm.apiKey,
+      model: llm.model,
+      temperature: llm.temperature,
+      thinking: llm.thinking ?? (llm.enableNativeReasoning ? 'auto' : 'off'),
+      ...(llm.maxTokens ? { maxTokens: llm.maxTokens } : {}),
+    };
+    return {
+      default: defaultProfile,
+      admin: fallbackProfiles?.admin ?? defaultProfile,
+      proactive: fallbackProfiles?.proactive ?? defaultProfile,
+      fallbacks: fallbackProfiles?.fallbacks ?? {},
+    };
+  }
+
+  private summarizeModelProfiles(): EnterpriseBotSystemConfig['modelProfiles'] {
+    const profiles = this.getModelProfiles();
+    const roles: ModelRole[] = ['default', 'admin', 'proactive'];
+    return roles.map((role) => {
+      const profile = profiles[role];
+      return {
+        role,
+        provider: profile.provider,
+        dialect: profile.dialect,
+        baseUrl: profile.baseUrl,
+        model: profile.model,
+        thinking: profile.thinking,
+        temperature: profile.temperature,
+        ...(profile.maxTokens ? { maxTokens: profile.maxTokens } : {}),
+        apiKeyConfigured: Boolean(profile.apiKey),
+        ...(profiles.fallbacks[role]
+          ? { fallback: profiles.fallbacks[role] }
+          : {}),
+      };
+    });
   }
 
   public getMcpServers(): EnterpriseMcpServerConfig[] {
@@ -253,10 +316,6 @@ export class DynamicConfigCenter
         dailyTokensPerConversation: 0,
       }
     );
-  }
-
-  public getModelRouting(): ModelRoutingPolicy {
-    return this.defaults.getModelRouting?.() ?? {};
   }
 
   public getEmbeddingConfig() {
@@ -301,7 +360,7 @@ export class DynamicConfigCenter
 
   public assertReady(): void {
     const ding = this.getDingTalkConfig();
-    const llm = this.getLLMConfig();
+    const llm = this.getModelProfiles().default;
     const missing: string[] = [];
     if (!ding.clientId) missing.push('dingtalk.clientId');
     if (!ding.clientSecret) missing.push('dingtalk.clientSecret');
@@ -309,6 +368,7 @@ export class DynamicConfigCenter
     if (!ding.cardTemplateId) missing.push('dingtalk.aiCardTemplateId');
     if (!llm.baseUrl) missing.push('llm.baseUrl');
     if (!llm.apiKey) missing.push('llm.apiKey');
+    if (!llm.model) missing.push('llm.model');
     if (missing.length > 0) {
       throw new Error(`缺少必需配置: ${missing.join(', ')}`);
     }
@@ -353,6 +413,9 @@ export class DynamicConfigCenter
     actorStaffId?: string,
   ): Promise<void> {
     const before = clone(this.state.llm);
+    if (this.getModelConfigSource() === 'env') {
+      this.assertEnvManagedModelFieldsUnchanged(input, before);
+    }
     if (
       input.provider !== undefined &&
       input.provider !== 'openai-compatible' &&
@@ -386,6 +449,49 @@ export class DynamicConfigCenter
     await this.persist('llm', next);
     this.state = { ...this.state, llm: next };
     this.emitChange('llm', before, next, actorStaffId);
+  }
+
+  private assertEnvManagedModelFieldsUnchanged(
+    input: LLMUpdateInput,
+    before: LLMAndPersonaConfig,
+  ): void {
+    const conflicts: string[] = [];
+    if (input.provider !== undefined && input.provider !== before.provider) {
+      conflicts.push('provider');
+    }
+    if (
+      input.baseUrl !== undefined &&
+      input.baseUrl.trim() !== before.baseUrl
+    ) {
+      conflicts.push('baseUrl');
+    }
+    if (input.model !== undefined && input.model.trim() !== before.model) {
+      conflicts.push('model');
+    }
+    if (
+      input.apiKey !== undefined &&
+      input.apiKey.trim().length > 0 &&
+      input.apiKey.trim() !== before.apiKey
+    ) {
+      conflicts.push('apiKey');
+    }
+    if (
+      input.temperature !== undefined &&
+      clamp(input.temperature, 0, 2) !== before.temperature
+    ) {
+      conflicts.push('temperature');
+    }
+    if (
+      input.enableNativeReasoning !== undefined &&
+      input.enableNativeReasoning !== before.enableNativeReasoning
+    ) {
+      conflicts.push('enableNativeReasoning');
+    }
+    if (conflicts.length > 0) {
+      throw new Error(
+        `模型与密钥由 .env 管理（LLM_MODEL_SOURCE=env），控制台不能修改 ${conflicts.join('、')}；请修改 .env 并重启`,
+      );
+    }
   }
 
   public async updateLoopPolicy(
@@ -736,15 +842,24 @@ export class DynamicConfigCenter
           sections.dingtalk?.adminStaffIds ?? base.dingtalk.adminStaffIds,
         ),
       },
-      llm: {
-        ...base.llm,
-        ...(sections.llm ?? {}),
-        persona: {
-          ...base.llm.persona,
-          ...(sections.llm?.persona ?? {}),
-        },
-        apiKey: sections.llm?.apiKey || base.llm.apiKey,
-      },
+      llm:
+        this.getModelConfigSource() === 'env'
+          ? {
+              ...base.llm,
+              persona: {
+                ...base.llm.persona,
+                ...(sections.llm?.persona ?? {}),
+              },
+            }
+          : {
+              ...base.llm,
+              ...(sections.llm ?? {}),
+              persona: {
+                ...base.llm.persona,
+                ...(sections.llm?.persona ?? {}),
+              },
+              apiKey: sections.llm?.apiKey || base.llm.apiKey,
+            },
       loopPolicy: {
         ...base.loopPolicy,
         ...(sections.loopPolicy ?? {}),

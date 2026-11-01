@@ -1,7 +1,14 @@
 /**
  * 阶段四：管理员单聊管控（ChatOps）与 Web 管理后台的公共契约。
  */
-import type { DynamicLoopPolicy, LLMAndPersonaConfig } from './core.js';
+import type {
+  DynamicLoopPolicy,
+  LLMAndPersonaConfig,
+  LlmDialect,
+  ModelConfigSource,
+  ModelRole,
+  ThinkingMode,
+} from './core.js';
 import type { EnterpriseMcpServerConfig } from './mcp-and-sandbox.js';
 import type { GroupBystanderPolicy } from './bystander-and-memory.js';
 import type { ExtensionsConfig } from './skills-plugins-projects.js';
@@ -35,6 +42,20 @@ export interface McpToolAccessPolicy {
   enabled: boolean;
 }
 
+/** 控制台只读展示的角色模型摘要，不含密钥 */
+export interface ModelRoleSummary {
+  role: ModelRole;
+  provider: 'openai-compatible' | 'anthropic';
+  dialect: LlmDialect;
+  baseUrl: string;
+  model: string;
+  thinking: ThinkingMode;
+  temperature: number;
+  maxTokens?: number;
+  apiKeyConfigured: boolean;
+  fallback?: string;
+}
+
 /** 1. 全局系统动态配置聚合契约（持久于 sys_configs 表） */
 export interface EnterpriseBotSystemConfig {
   dingtalk: DingTalkEnterpriseConfig;
@@ -44,6 +65,9 @@ export interface EnterpriseBotSystemConfig {
   defaultBystanderPolicy: Omit<GroupBystanderPolicy, 'conversationId'>;
   mcpAccessPolicies: McpToolAccessPolicy[];
   extensions: ExtensionsConfig;
+  /** env 时模型与密钥由 .env 管理，控制台不能改模型字段 */
+  modelSource: ModelConfigSource;
+  modelProfiles: ModelRoleSummary[];
 }
 
 export type AdminActionType =
@@ -199,13 +223,6 @@ export interface UsagePolicy {
   dailyTokensPerUser: number;
   /** 单个群每日 Token 上限，0 表示不限 */
   dailyTokensPerConversation: number;
-}
-
-/** 按场景选择模型；空字符串表示沿用全局 llm.model */
-export interface ModelRoutingPolicy {
-  defaultModel?: string;
-  proactiveModel?: string;
-  adminModel?: string;
 }
 
 export interface UsageLedgerInput {

@@ -56,7 +56,10 @@ class MemoryAuditStore {
   }
 }
 
-function fakeDefaults(overrides: Record<string, string> = {}): IConfigProvider {
+function fakeDefaults(
+  overrides: Record<string, string> = {},
+  options: { modelSource?: 'env' | 'database' } = {},
+): IConfigProvider {
   const env = {
     LLM_PROVIDER: 'openai-compatible',
     LLM_BASE_URL: 'https://api.deepseek.com/v1',
@@ -87,6 +90,8 @@ function fakeDefaults(overrides: Record<string, string> = {}): IConfigProvider {
       model: env.LLM_MODEL,
       enableNativeReasoning: env.LLM_ENABLE_NATIVE_REASONING === 'true',
       temperature: Number(env.LLM_TEMPERATURE),
+      thinking: 'high' as const,
+      maxTokens: 8192,
       persona: {
         name: env.PERSONA_NAME,
         rolePrompt: env.PERSONA_ROLE_PROMPT,
@@ -133,6 +138,41 @@ function fakeDefaults(overrides: Record<string, string> = {}): IConfigProvider {
       maxCallsPerHour: 30,
       dailyLimit: 500,
     }),
+    getModelConfigSource: () => options.modelSource ?? 'database',
+    getModelProfiles: () => {
+      const shared = {
+        provider: 'openai-compatible' as const,
+        temperature: Number(env.LLM_TEMPERATURE),
+        thinking: 'high' as const,
+        maxTokens: 8192,
+      };
+      return {
+        default: {
+          ...shared,
+          dialect: 'deepseek' as const,
+          baseUrl: env.LLM_BASE_URL,
+          apiKey: env.LLM_API_KEY,
+          model: 'deepseek-flash',
+        },
+        admin: {
+          ...shared,
+          dialect: 'moonshot' as const,
+          baseUrl: 'https://api.moonshot.cn/v1',
+          apiKey: 'sk-kimi-secret',
+          model: 'kimi-k3.1-pro',
+          temperature: 1,
+        },
+        proactive: {
+          ...shared,
+          dialect: 'zhipu' as const,
+          baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+          apiKey: 'sk-glm-secret',
+          model: 'glm-5.3-flash',
+          maxTokens: 4096,
+        },
+        fallbacks: { admin: 'LLM_ADMIN_* 回退默认模型' },
+      };
+    },
     getDatabaseUrl: () => 'postgres://localhost:5432/test',
     assertReady: () => undefined,
   };
@@ -142,6 +182,7 @@ function createCenter(options: {
   store?: MemoryConfigStore;
   groups?: MemoryGroupPolicyStore;
   audit?: MemoryAuditStore;
+  modelSource?: 'env' | 'database';
 } = {}): {
   center: DynamicConfigCenter;
   store: MemoryConfigStore;
@@ -152,7 +193,7 @@ function createCenter(options: {
   const groups = options.groups ?? new MemoryGroupPolicyStore();
   const audit = options.audit ?? new MemoryAuditStore();
   const center = new DynamicConfigCenter({
-    defaults: fakeDefaults(),
+    defaults: fakeDefaults({}, { modelSource: options.modelSource }),
     store,
     groupPolicies: groups,
     auditStore: audit,
@@ -209,6 +250,85 @@ describe('DynamicConfigCenter', () => {
     expect(center.isAdmin('admin-002')).toBe(true);
     expect(center.isAdmin('employee-9')).toBe(false);
     expect(center.isAdmin('  ')).toBe(false);
+  });
+
+  it('env 模式下忽略数据库模型字段但保留人设覆盖', async () => {
+    const store = new MemoryConfigStore({
+      llm: {
+        provider: 'openai-compatible',
+        baseUrl: 'https://api.deepseek.com/v1',
+        apiKey: 'sk-db-secret-key-123456',
+        model: 'deepseek-chat',
+        enableNativeReasoning: false,
+        temperature: 0.7,
+        persona: {
+          name: '小钉',
+          rolePrompt: '数据库人设',
+          speakingStyle: '简洁',
+        },
+      },
+    });
+    const { center } = createCenter({ store, modelSource: 'env' });
+    await center.init();
+
+    const config = center.getSystemConfig();
+    expect(config.modelSource).toBe('env');
+    expect(config.llm.model).toBe('deepseek-reasoner');
+    expect(config.llm.temperature).toBe(0.3);
+    expect(config.llm.apiKey).toBe(maskSecret('sk-env-secret-key'));
+    expect(config.llm.persona.rolePrompt).toBe('数据库人设');
+    expect(config.modelProfiles.map((item) => item.role)).toEqual([
+      'default',
+      'admin',
+      'proactive',
+    ]);
+    expect(config.modelProfiles[0]).toMatchObject({
+      model: 'deepseek-reasoner',
+      dialect: 'deepseek',
+      thinking: 'high',
+      maxTokens: 8192,
+      apiKeyConfigured: true,
+    });
+    expect(config.modelProfiles[1]).toMatchObject({
+      model: 'kimi-k3.1-pro',
+      dialect: 'moonshot',
+      baseUrl: 'https://api.moonshot.cn/v1',
+      fallback: 'LLM_ADMIN_* 回退默认模型',
+    });
+    expect(config.modelProfiles[2]).toMatchObject({
+      model: 'glm-5.3-flash',
+      dialect: 'zhipu',
+      maxTokens: 4096,
+    });
+  });
+
+  it('env 模式下拒绝控制台修改模型字段但允许修改人设', async () => {
+    const { center, store } = createCenter({ modelSource: 'env' });
+    await center.init();
+
+    await expect(center.updateLLM({ model: 'gpt-5' })).rejects.toThrow(
+      /LLM_MODEL_SOURCE=env/,
+    );
+    await expect(center.updateLLM({ temperature: 0.9 })).rejects.toThrow(
+      /temperature/,
+    );
+    await expect(
+      center.updateLLM({
+        provider: 'anthropic',
+        baseUrl: 'https://api.anthropic.com',
+        apiKey: 'sk-other',
+      }),
+    ).rejects.toThrow(/provider/);
+    expect(store.writes).toHaveLength(0);
+
+    await center.updateLLM({ model: 'deepseek-reasoner' });
+    await center.updateLLM({
+      persona: { speakingStyle: '幽默', rolePrompt: '新的人设' },
+    });
+    expect(center.getLLMConfig().model).toBe('deepseek-reasoner');
+    expect(center.getLLMConfig().persona.speakingStyle).toBe('幽默');
+    expect(center.getLLMConfig().persona.rolePrompt).toBe('新的人设');
+    expect(store.writes).toHaveLength(2);
   });
 
   it('persists LLM changes and broadcasts hot-reload events', async () => {

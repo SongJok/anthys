@@ -1,8 +1,10 @@
-import type { DynamicLoopPolicy, LLMAndPersonaConfig } from '../types/core.js';
 import type {
-  ModelRoutingPolicy,
-  UsagePolicy,
-} from '../types/admin-and-console.js';
+  DynamicLoopPolicy,
+  LLMAndPersonaConfig,
+  ModelConfigSource,
+  ModelProfiles,
+} from '../types/core.js';
+import type { UsagePolicy } from '../types/admin-and-console.js';
 import type { ExtensionsConfig } from '../types/skills-plugins-projects.js';
 
 export interface DingTalkConfig {
@@ -85,8 +87,10 @@ export interface IConfigProvider {
   getBystanderConfig(): BystanderConfig;
   /** 每日 Token 配额，默认关闭 */
   getUsagePolicy?(): UsagePolicy;
-  /** 按场景选择模型，默认沿用全局模型 */
-  getModelRouting?(): ModelRoutingPolicy;
+  /** 按角色解析出的多供应商模型配置；未实现时所有角色沿用主模型 */
+  getModelProfiles?(): ModelProfiles;
+  /** env 表示模型与密钥由 .env 管理，数据库中的模型覆盖不生效 */
+  getModelConfigSource?(): ModelConfigSource;
   /** 向量检索配置；未配置或关闭时回退关键词召回 */
   getEmbeddingConfig?(): EmbeddingConfig | undefined;
   /** 图片理解模型；未配置时图片只落盘不识别 */

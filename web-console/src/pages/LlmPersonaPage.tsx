@@ -167,7 +167,7 @@ export default function LlmPersonaPage() {
                 name="model"
                 rules={[{ required: true, message: '请输入模型名称' }]}
               >
-                <Input placeholder="deepseek-reasoner" />
+                <Input placeholder="deepseek-flash" />
               </Form.Item>
             </Col>
           </Row>

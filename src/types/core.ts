@@ -30,6 +30,37 @@ export interface InboundMessage {
   timestamp: number;
 }
 
+/** 原生思维链强度；off 表示尽量关闭，auto 表示沿用供应商默认 */
+export type ThinkingMode = 'off' | 'auto' | 'low' | 'high' | 'max';
+
+/** OpenAI 兼容接口的供应商方言，用于决定 thinking / temperature / 字段名 */
+export type LlmDialect = 'openai' | 'deepseek' | 'moonshot' | 'zhipu';
+
+/** 按角色选择模型：默认、管理员单聊、旁听与主动回复 */
+export type ModelRole = 'default' | 'admin' | 'proactive';
+
+export interface ModelProfile {
+  provider: 'openai-compatible' | 'anthropic';
+  dialect: LlmDialect;
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  temperature: number;
+  thinking: ThinkingMode;
+  maxTokens?: number;
+}
+
+export interface ModelProfiles {
+  default: ModelProfile;
+  admin: ModelProfile;
+  proactive: ModelProfile;
+  /** 角色回退原因，启动日志与控制台展示 */
+  fallbacks: Partial<Record<ModelRole, string>>;
+}
+
+/** 模型配置来源：env 时 .env 角色配置优先，database 时兼容旧版数据库覆盖 */
+export type ModelConfigSource = 'env' | 'database';
+
 /**
  * 2. 人设与大模型配置契约
  */
@@ -40,6 +71,8 @@ export interface LLMAndPersonaConfig {
   model: string;
   enableNativeReasoning: boolean;
   temperature: number;
+  thinking?: ThinkingMode;
+  maxTokens?: number;
   persona: {
     name: string;
     rolePrompt: string;
@@ -247,6 +280,8 @@ export interface ChatMessage {
   toolCalls?: ChatToolCall[];
   toolCallId?: string;
   toolName?: string;
+  /** 供应商要求多轮工具调用回传的思维链（DeepSeek / Kimi） */
+  reasoning?: string;
 }
 
 /**
@@ -271,6 +306,8 @@ export interface ChatCompletionRequest {
   toolChoice: 'auto' | 'none';
   temperature: number;
   enableNativeReasoning: boolean;
+  /** 单次调用覆盖角色默认的最大输出 token */
+  maxTokens?: number;
 }
 
 export interface ChatModel {

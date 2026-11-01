@@ -53,6 +53,7 @@ import {
 } from './harness/ToolApprovalGate.js';
 import { ModelRoutingEngine } from './harness/ModelRoutingEngine.js';
 import { UsageGuard } from './billing/UsageGuard.js';
+import { formatShanghaiDateTime } from './time/shanghaiTime.js';
 import { DrizzleUsageLedgerStore } from './db/usageSchema.js';
 import { DrizzleScheduledTaskStore } from './db/schedulerSchema.js';
 import {
@@ -147,6 +148,8 @@ import type {
   ExecutionContext,
   InboundMessage,
   LLMAndPersonaConfig,
+  ModelProfile,
+  ModelRole,
   RunResult,
   ToolApprovalDecision,
   ToolApprovalRequest,
@@ -354,19 +357,25 @@ async function main(): Promise<void> {
 
   try {
     const baseLLM = baseConfig.getLLMConfig();
+    const modelSource = baseConfig.getModelConfigSource();
     await seedAgentConfigs(dbHandle.db, baseLLM);
-    const seededLLM = applyLLMOverrides(
-      baseLLM,
-      await loadLLMOverrides(dbHandle.db),
-    );
+    const seededLLM =
+      modelSource === 'env'
+        ? baseLLM
+        : applyLLMOverrides(baseLLM, await loadLLMOverrides(dbHandle.db));
     const defaults: IConfigProvider = {
       getLLMConfig: () => seededLLM,
       getLoopPolicy: () => baseConfig.getLoopPolicy(),
       getDingTalkConfig: () => baseConfig.getDingTalkConfig(),
       getMemoryConfig: () => baseConfig.getMemoryConfig(),
       getBystanderConfig: () => baseConfig.getBystanderConfig(),
+      getUsagePolicy: () => baseConfig.getUsagePolicy(),
+      getModelProfiles: () => baseConfig.getModelProfiles(),
+      getModelConfigSource: () => modelSource,
+      getEmbeddingConfig: () => baseConfig.getEmbeddingConfig(),
       getVisionConfig: () => baseConfig.getVisionConfig(),
       getWebSearchConfig: () => baseConfig.getWebSearchConfig(),
+      getExtensionsConfig: () => baseConfig.getExtensionsConfig(),
       getDatabaseUrl: () => baseConfig.getDatabaseUrl(),
       assertReady: () => baseConfig.assertReady(),
     };
@@ -1193,19 +1202,48 @@ async function main(): Promise<void> {
         'VISION_ENABLED 已开启但缺少 API Key，图片只落盘不识别',
       );
     }
-    const modelRef: { current: ChatModel } = {
-      current: createChatModel(configCenter.getLLMConfig()),
+    const initialProfiles = configCenter.getModelProfiles();
+    const llmConfig = configCenter.getLLMConfig();
+    const roleModelRefs: Record<ModelRole, { current: ChatModel }> = {
+      default: { current: createChatModel(initialProfiles.default) },
+      admin: { current: createChatModel(initialProfiles.admin) },
+      proactive: { current: createChatModel(initialProfiles.proactive) },
     };
-    const chatModel: ChatModel = {
+    const defaultModelRef = roleModelRefs.default;
+    const chatModelFor = (role: ModelRole): ChatModel => ({
       get modelName() {
-        return modelRef.current.modelName;
+        return roleModelRefs[role].current.modelName;
       },
       streamChat: (request, signal) =>
-        modelRef.current.streamChat(request, signal),
-    };
+        roleModelRefs[role].current.streamChat(request, signal),
+    });
+    const chatModel = chatModelFor('default');
+    const adminModel = chatModelFor('admin');
+    const proactiveModel = chatModelFor('proactive');
+    const describeProfile = (profile: ModelProfile) => ({
+      provider: profile.provider,
+      model: profile.model,
+      baseUrl: profile.baseUrl,
+      thinking: profile.thinking,
+      temperature: profile.temperature,
+      maxTokens: profile.maxTokens,
+      apiKeyConfigured: Boolean(profile.apiKey),
+    });
+    logger.info(
+      {
+        modelSource: configCenter.getModelConfigSource(),
+        profiles: {
+          default: describeProfile(initialProfiles.default),
+          admin: describeProfile(initialProfiles.admin),
+          proactive: describeProfile(initialProfiles.proactive),
+        },
+        modelFallbacks: initialProfiles.fallbacks,
+      },
+      'model routing resolved',
+    );
 
     const planner = createPlanner({
-      model: chatModel,
+      model: proactiveModel,
       enabled: envEnabled(process.env.PLANNER_ENABLED, false),
       minQuestionChars: envCount(process.env.PLANNER_MIN_CHARS, 80),
       minTools: envCount(process.env.PLANNER_MIN_TOOLS, 8),
@@ -1214,7 +1252,7 @@ async function main(): Promise<void> {
     if (envEnabled(process.env.SUBAGENT_ENABLED, false)) {
       let subagent: SubagentToolProvider | undefined;
       subagent = new SubagentToolProvider({
-        model: chatModel,
+        model: adminModel,
         providers: () => toolProviders.filter((provider) => provider !== subagent),
         policy: () => configCenter.getLoopPolicy(),
         timeoutMs:
@@ -1233,36 +1271,39 @@ async function main(): Promise<void> {
       model: chatModel,
       toolProviders,
       policy: configCenter.getLoopPolicy(),
-      temperature: configCenter.getLLMConfig().temperature,
+      temperature: llmConfig.temperature,
       enableNativeReasoning:
-        configCenter.getLLMConfig().enableNativeReasoning,
+        (llmConfig.thinking ??
+          (llmConfig.enableNativeReasoning ? 'auto' : 'off')) !== 'off',
+      ...(llmConfig.maxTokens ? { maxTokens: llmConfig.maxTokens } : {}),
       approval: resolveToolApproval,
       toolTimeoutMs,
       ...(planner ? { planner } : {}),
     });
 
-    const routedEngines = new Map<string, ReActRunner>();
-    const runnerForModel = (model: string): ReActRunner => {
-      const cached = routedEngines.get(model);
+    const routedEngines = new Map<ModelRole, ReActRunner>();
+    const runnerForRole = (role: ModelRole): ReActRunner => {
+      if (role === 'default') return engine;
+      const cached = routedEngines.get(role);
       if (cached) return cached;
-      const llm = configCenter.getLLMConfig();
+      const profile = configCenter.getModelProfiles()[role];
       const runner = new ReActRunner({
-        model: createChatModel({ ...llm, model }),
+        model: chatModelFor(role),
         toolProviders,
         policy: configCenter.getLoopPolicy(),
-        temperature: llm.temperature,
-        enableNativeReasoning: llm.enableNativeReasoning,
+        temperature: profile.temperature,
+        enableNativeReasoning: profile.thinking !== 'off',
+        ...(profile.maxTokens ? { maxTokens: profile.maxTokens } : {}),
         approval: resolveToolApproval,
         toolTimeoutMs,
         ...(planner ? { planner } : {}),
       });
-      routedEngines.set(model, runner);
+      routedEngines.set(role, runner);
       return runner;
     };
     const routingEngine = new ModelRoutingEngine({
       fallback: engine,
-      engineForModel: runnerForModel,
-      routing: () => configCenter.getModelRouting(),
+      engineForRole: runnerForRole,
       isAdmin: (staffId) => configCenter.isAdmin(staffId),
     });
 
@@ -1302,7 +1343,7 @@ async function main(): Promise<void> {
       buffer: transcriptBuffer,
       cooldown,
       classifier: new LlmBystanderClassifier({
-        model: chatModel,
+        model: proactiveModel,
         temperature: 0,
         logger: harnessLogger,
       }),
@@ -1312,8 +1353,8 @@ async function main(): Promise<void> {
     const hierarchicalMemory = new HierarchicalMemoryManager({
       summaryStore: memoryStore,
       semanticStore: memoryStore,
-      summarizer: new LlmEpisodeSummarizer({ model: chatModel }),
-      extractor: new LlmSemanticFactExtractor({ model: chatModel }),
+      summarizer: new LlmEpisodeSummarizer({ model: proactiveModel }),
+      extractor: new LlmSemanticFactExtractor({ model: proactiveModel }),
       compressionThresholdTokens: memoryConfig.compressionThresholdTokens,
       compressionRatio: memoryConfig.compressionRatio,
       semanticLimit: memoryConfig.semanticLimit,
@@ -1543,10 +1584,7 @@ async function main(): Promise<void> {
         });
         const latest = page.items[0];
         if (!latest) return '本会话暂无执行轨迹。';
-        const at = new Date(latest.createdAt).toLocaleString('zh-CN', {
-          timeZone: 'Asia/Shanghai',
-          hour12: false,
-        });
+        const at = formatShanghaiDateTime(Date.parse(latest.createdAt));
         return [
           `最近一次执行：${at}`,
           `问题：${latest.question.slice(0, 120)}`,
@@ -2552,10 +2590,17 @@ async function main(): Promise<void> {
 
     configCenter.on('llm:changed', (event) => {
       const next = event.after as LLMAndPersonaConfig;
-      modelRef.current = createChatModel(next);
+      const profiles = configCenter.getModelProfiles();
+      defaultModelRef.current = createChatModel(profiles.default);
+      roleModelRefs.admin.current = createChatModel(profiles.admin);
+      roleModelRefs.proactive.current = createChatModel(profiles.proactive);
       routedEngines.clear();
       engine.updateTemperature(next.temperature);
-      engine.updateNativeReasoning(next.enableNativeReasoning);
+      engine.updateNativeReasoning(
+        (next.thinking ?? (next.enableNativeReasoning ? 'auto' : 'off')) !==
+          'off',
+      );
+      engine.updateMaxTokens(next.maxTokens);
       Object.assign(personaRef, next.persona);
       logger.info(
         { model: next.model, provider: next.provider },
@@ -2625,7 +2670,7 @@ async function main(): Promise<void> {
       let answer = '';
       let reasoning = '';
       let totalTokens = 0;
-      const stream = modelRef.current.streamChat({
+      const stream = defaultModelRef.current.streamChat({
         messages: [
           {
             role: 'system',
@@ -2691,11 +2736,12 @@ async function main(): Promise<void> {
       const startedAt = Date.now();
       const turnId = `console_${startedAt}`;
       const current = configCenter.getLLMConfig();
+      const adminProfile = configCenter.getModelProfiles().admin;
       emit({ type: 'turn_start', turnId, step: 1 });
       let totalTokens = 0;
       metrics.inc('console_chat_turns_total');
       try {
-        const stream = modelRef.current.streamChat(
+        const stream = adminModel.streamChat(
           {
             messages: [
               {
@@ -2706,8 +2752,11 @@ async function main(): Promise<void> {
             ],
             tools: [],
             toolChoice: 'none',
-            temperature: current.temperature,
-            enableNativeReasoning: current.enableNativeReasoning,
+            temperature: adminProfile.temperature,
+            enableNativeReasoning: adminProfile.thinking !== 'off',
+            ...(adminProfile.maxTokens
+              ? { maxTokens: adminProfile.maxTokens }
+              : {}),
           },
           input.signal,
         );

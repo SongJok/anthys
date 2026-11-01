@@ -95,6 +95,51 @@ describe('toOpenAIMessages', () => {
       { role: 'user', content: '谢谢' },
     ]);
   });
+
+  it('keeps assistant reasoning only when the dialect requires passback', () => {
+    const messages: ChatMessage[] = [
+      {
+        role: 'assistant',
+        content: '',
+        reasoning: '先查时间',
+        toolCalls: [
+          {
+            id: 'call_1',
+            type: 'function',
+            function: { name: 'current_time', arguments: '{}' },
+          },
+        ],
+      },
+    ];
+
+    expect(toOpenAIMessages(messages)).toEqual([
+      {
+        role: 'assistant',
+        content: null,
+        tool_calls: [
+          {
+            id: 'call_1',
+            type: 'function',
+            function: { name: 'current_time', arguments: '{}' },
+          },
+        ],
+      },
+    ]);
+    expect(toOpenAIMessages(messages, true)).toEqual([
+      {
+        role: 'assistant',
+        content: null,
+        tool_calls: [
+          {
+            id: 'call_1',
+            type: 'function',
+            function: { name: 'current_time', arguments: '{}' },
+          },
+        ],
+        reasoning_content: '先查时间',
+      },
+    ]);
+  });
 });
 
 describe('OpenAIChatModel', () => {
@@ -190,6 +235,146 @@ describe('OpenAIChatModel', () => {
     const payload = create.mock.calls[0]?.[0] as Record<string, unknown>;
     expect(payload).not.toHaveProperty('tools');
     expect(payload).not.toHaveProperty('tool_choice');
+  });
+
+  it('sends DeepSeek thinking params, output cap and reasoning passback', async () => {
+    const create = vi.fn(
+      async (_body: unknown, _options?: unknown) =>
+        asyncStream([
+          { choices: [{ delta: { content: '完成' }, finish_reason: 'stop' }] },
+        ]),
+    );
+    const client = {
+      chat: { completions: { create } },
+    } as unknown as OpenAI;
+    const model = new OpenAIChatModel({
+      baseUrl: 'https://api.deepseek.com/v1',
+      apiKey: 'sk-test',
+      model: 'deepseek-flash',
+      dialect: 'deepseek',
+      thinking: 'high',
+      maxTokens: 4096,
+      client,
+    });
+
+    await collect(
+      model.streamChat(
+        makeRequest({
+          messages: [
+            {
+              role: 'assistant',
+              content: '',
+              reasoning: '先查时间',
+              toolCalls: [
+                {
+                  id: 'call_1',
+                  type: 'function',
+                  function: { name: 'current_time', arguments: '{}' },
+                },
+              ],
+            },
+            { role: 'tool', content: '12:00', toolCallId: 'call_1' },
+          ],
+        }),
+      ),
+    );
+
+    const payload = create.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      model: 'deepseek-flash',
+      temperature: 0.3,
+      thinking: { type: 'enabled' },
+      reasoning_effort: 'high',
+      max_tokens: 4096,
+    });
+    expect(payload.messages).toEqual([
+      expect.objectContaining({ reasoning_content: '先查时间' }),
+      { role: 'tool', tool_call_id: 'call_1', content: '12:00' },
+    ]);
+  });
+
+  it('can disable DeepSeek thinking explicitly', async () => {
+    const create = vi.fn(
+      async (_body: unknown, _options?: unknown) =>
+        asyncStream([{ choices: [{ delta: { content: '好' } }] }]),
+    );
+    const client = {
+      chat: { completions: { create } },
+    } as unknown as OpenAI;
+    const model = new OpenAIChatModel({
+      baseUrl: 'https://api.deepseek.com/v1',
+      apiKey: 'sk-test',
+      model: 'deepseek-flash',
+      dialect: 'deepseek',
+      thinking: 'high',
+      client,
+    });
+
+    await collect(
+      model.streamChat(makeRequest({ enableNativeReasoning: false })),
+    );
+
+    const payload = create.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(payload).toMatchObject({ thinking: { type: 'disabled' } });
+    expect(payload).not.toHaveProperty('reasoning_effort');
+  });
+
+  it('omits Kimi temperature and uses max_completion_tokens', async () => {
+    const create = vi.fn(
+      async (_body: unknown, _options?: unknown) =>
+        asyncStream([{ choices: [{ delta: { content: '好' } }] }]),
+    );
+    const client = {
+      chat: { completions: { create } },
+    } as unknown as OpenAI;
+    const model = new OpenAIChatModel({
+      baseUrl: 'https://api.moonshot.cn/v1',
+      apiKey: 'sk-test',
+      model: 'kimi-k3.1-pro',
+      dialect: 'moonshot',
+      thinking: 'max',
+      maxTokens: 8192,
+      client,
+    });
+
+    await collect(model.streamChat(makeRequest()));
+
+    const payload = create.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(payload).not.toHaveProperty('temperature');
+    expect(payload).toMatchObject({
+      model: 'kimi-k3.1-pro',
+      reasoning_effort: 'max',
+      max_completion_tokens: 8192,
+    });
+    expect(payload).not.toHaveProperty('thinking');
+  });
+
+  it('sets GLM reasoning_effort and never sends disabled thinking', async () => {
+    const create = vi.fn(
+      async (_body: unknown, _options?: unknown) =>
+        asyncStream([{ choices: [{ delta: { content: '好' } }] }]),
+    );
+    const client = {
+      chat: { completions: { create } },
+    } as unknown as OpenAI;
+    const model = new OpenAIChatModel({
+      baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+      apiKey: 'sk-test',
+      model: 'glm-5.3-flash',
+      dialect: 'zhipu',
+      thinking: 'low',
+      client,
+    });
+
+    await collect(model.streamChat(makeRequest({ enableNativeReasoning: false })));
+    await collect(model.streamChat(makeRequest({ enableNativeReasoning: true })));
+
+    const first = create.mock.calls[0]?.[0] as Record<string, unknown>;
+    const second = create.mock.calls[1]?.[0] as Record<string, unknown>;
+    expect(first).toMatchObject({ reasoning_effort: 'low' });
+    expect(second).toMatchObject({ reasoning_effort: 'low' });
+    expect(first).not.toHaveProperty('thinking');
+    expect(second).not.toHaveProperty('thinking');
   });
 });
 

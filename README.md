@@ -37,7 +37,7 @@
 | 流程查询 | @ 机器人问「本周日程」「我的待办」「这份文档怎么规定的」，机器人调用 DWS 查询；确认后也可建日程、建待办、发审批 |
 | 代码理解 | 问「这个项目从哪开始读」「这个符号在哪定义」，机器人基于项目快照给出文件、行号与提交；也可同步 GitHub 仓库、查看 Issue 与 PR |
 | 知识沉淀 | 团队术语、同事职责、历史结论被逐步记住，后续回答不再从零解释 |
-| 运营管控 | 管理员随时切换模型、调预算、增删 MCP、调整群策略，或一键紧急静音 |
+| 运营管控 | 管理员调整人设、预算、MCP 与群策略，或一键紧急静音；模型与密钥在 `LLM_MODEL_SOURCE=env` 时由 `.env` 统一管理 |
 | 需求把关 | 超过 15 分钟 / 12 万 Token 或明文写着重活的需求，机器人直接说明不认可并停止执行，避免长时间空转 |
 
 ---
@@ -147,19 +147,32 @@ pnpm run db:seed      # 可选：预写入默认人设与模型配置，已有�
 | `DINGTALK_BOT_EMOTION_ENABLED` | `true` | 处理问题期间在用户消息上贴表情，回答交付后撤回 |
 | `DINGTALK_BOT_EMOTION_NAME` | `Like` | 贴的表情名（钉钉表情列表英文文案，`Like` 即「赞」） |
 
-**大模型与人设**
+**大模型与角色路由**
+
+模型与密钥默认由 `.env` 管理（`LLM_MODEL_SOURCE=env`），同一进程按角色使用不同供应商。控制台仍可修改人设，但模型、密钥与温度字段需改 `.env` 后重启。三个角色各自支持 `PROVIDER`、`BASE_URL`、`API_KEY`、`MODEL`、`TEMPERATURE`、`THINKING`、`MAX_TOKENS` 与 `DIALECT`。
 
 | 变量 | 默认值 | 说明 |
 | --- | --- | --- |
-| `LLM_PROVIDER` | `openai-compatible` | `openai-compatible` 或 `anthropic` |
-| `LLM_BASE_URL` | 必填 | 兼容接口地址，例如 `https://api.deepseek.com/v1` |
-| `LLM_API_KEY` | 必填 | 模型密钥，接口与审计中只显示掩码 |
-| `LLM_MODEL` | `deepseek-reasoner` | 模型名称 |
-| `LLM_TEMPERATURE` | `0.3` | 采样温度 |
-| `LLM_ENABLE_NATIVE_REASONING` | `true` | 是否请求原生思维链 |
+| `LLM_MODEL_SOURCE` | `env` | `env`：按角色读取 `.env`；`database`：兼容旧版，允许控制台保存的模型覆盖 |
+| `DEEPSEEK_API_KEY` | 空 | DeepSeek 密钥，默认角色通过 `${DEEPSEEK_API_KEY}` 引用 |
+| `KIMI_API_KEY` | 空 | Kimi / Moonshot 密钥，管理员角色通过 `${KIMI_API_KEY}` 引用 |
+| `GLM_API_KEY` | 空 | 智谱密钥，主动回复角色、视觉与联网搜索共用 |
+| `LLM_PROVIDER` | `openai-compatible` | 默认角色协议 |
+| `LLM_BASE_URL` | `https://api.deepseek.com/v1` | 默认角色接口地址 |
+| `LLM_API_KEY` | `${DEEPSEEK_API_KEY}` | 默认角色密钥，接口与审计中只显示掩码 |
+| `LLM_MODEL` | `deepseek-flash` | 默认角色：员工单聊、群聊 @ 与全量 ReAct（DeepSeek V4.1 Flash） |
+| `LLM_TEMPERATURE` | `0.3` | 默认角色采样温度 |
+| `LLM_THINKING` | `high` | 思维链强度：`off` / `auto` / `low` / `high` / `max` |
+| `LLM_MAX_TOKENS` | `8192` | 默认角色单次输出上限；留空用供应商默认 |
+| `LLM_DIALECT` | 空 | `openai` / `deepseek` / `moonshot` / `zhipu`；留空按 Base URL 推断 |
+| `LLM_ADMIN_*` | 见 `.env.example` | 管理员单聊与子代理：默认 Kimi `kimi-k3.1-pro` |
+| `LLM_PROACTIVE_*` | 见 `.env.example` | 旁听分类、主动回复、规划器与记忆摘要：默认 GLM `glm-5.3-flash`，`LLM_PROACTIVE_THINKING=low` 降低延迟 |
+| `LLM_ENABLE_NATIVE_REASONING` | `true` | 旧变量；仅在未设置 `LLM_THINKING` 时生效 |
 | `PERSONA_NAME` | `小钉` | 机器人名称 |
 | `PERSONA_ROLE_PROMPT` | 见示例 | 人设 Prompt |
 | `PERSONA_SPEAKING_STYLE` | 见示例 | 语气与表达风格 |
+
+`LLM_ADMIN_*` 与 `LLM_PROACTIVE_*` 使用与 `LLM_*` 相同的后缀。任一角色的 `BASE_URL` / `API_KEY` / `MODEL` 缺失时回退默认角色，默认角色不可用时回退 `LLM_PROACTIVE_*`，启动日志会写出回退原因。供应商方言影响请求格式：DeepSeek 发送 `thinking` 与 `reasoning_effort`，Kimi 省略 `temperature` 并使用 `max_completion_tokens`，GLM-5.3 系列强制思考、只能通过 `reasoning_effort` 调节强度（`off` 会降级为 `low`），工具循环会把 `reasoning_content` 原样回传。
 
 **公网搜索**
 
@@ -274,9 +287,9 @@ pnpm run db:seed      # 可选：预写入默认人设与模型配置，已有�
 | 变量 | 默认值 | 说明 |
 | --- | --- | --- |
 | `VISION_ENABLED` | `false` | 是否调用视觉模型把用户图片转成文字描述 |
-| `VISION_BASE_URL` | 沿用 `LLM_BASE_URL` | 视觉模型接口地址 |
-| `VISION_API_KEY` | 沿用 `LLM_API_KEY` | 视觉模型接口密钥 |
-| `VISION_MODEL` | 沿用 `LLM_MODEL` | 支持图片输入的模型名，如 `qwen-vl-max` |
+| `VISION_BASE_URL` | 存在 `GLM_API_KEY` 时为智谱地址，否则沿用 `LLM_BASE_URL` | 视觉模型接口地址 |
+| `VISION_API_KEY` | 沿用 `GLM_API_KEY`，再回退 `LLM_API_KEY` | 视觉模型接口密钥 |
+| `VISION_MODEL` | 存在 `GLM_API_KEY` 时为 `glm-5.3-flash`，否则沿用 `LLM_MODEL` | 支持图片输入的模型名 |
 | `ATTACHMENT_MAX_MB` | `20` | 入站附件大小上限 |
 | `ARTIFACT_DELIVERY_ENABLED` | `true` | 是否向模型暴露 `deliver_artifact` 文件回传工具 |
 | `ARTIFACT_MAX_MB` | `20` | 回传文件大小上限 |
@@ -315,11 +328,10 @@ pnpm run db:seed      # 可选：预写入默认人设与模型配置，已有�
 | `USAGE_QUOTA_ENABLED` | `false` | 是否启用每日 Token 配额；用量流水始终记录 |
 | `USAGE_DAILY_TOKENS_PER_USER` | `0` | 单员工每自然日 Token 上限，`0` 表示不限 |
 | `USAGE_DAILY_TOKENS_PER_CONVERSATION` | `0` | 单群每自然日 Token 上限，`0` 表示不限 |
-| `LLM_ROUTE_DEFAULT_MODEL` | 空 | 默认场景改用指定模型；空则沿用 `LLM_MODEL` |
-| `LLM_ROUTE_PROACTIVE_MODEL` | 空 | 群聊主动回复使用的模型，可用于降低成本 |
-| `LLM_ROUTE_ADMIN_MODEL` | 空 | 管理员单聊使用的模型，可用于提升质量 |
 
 配额按 Asia/Shanghai 自然日切分。超出配额时，@ 消息直接收到配额提示且不再调用模型，主动回复则静默跳过。
+
+模型按角色取自 `LLM_*`、`LLM_ADMIN_*`、`LLM_PROACTIVE_*`，详见「大模型与角色路由」。旧版 `LLM_ROUTE_*` 已移除且不再读取。
 
 **规划器与子代理**
 

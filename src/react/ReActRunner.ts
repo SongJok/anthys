@@ -48,6 +48,8 @@ export interface ReActRunnerOptions {
   policy: DynamicLoopPolicy;
   temperature?: number;
   enableNativeReasoning?: boolean;
+  /** 单次模型调用的最大输出 token；不设则用供应商默认 */
+  maxTokens?: number;
   now?: () => number;
   estimateTokens?: (input: ChatMessage[], output: string) => number;
   /** 单个工具的最长执行时间，默认 60s */
@@ -198,6 +200,10 @@ export class ReActRunner implements AgentEngine {
 
   public updateNativeReasoning(enabled: boolean): void {
     this.options.enableNativeReasoning = enabled;
+  }
+
+  public updateMaxTokens(maxTokens: number | undefined): void {
+    this.options.maxTokens = maxTokens;
   }
 
   public async run(input: {
@@ -357,6 +363,7 @@ export class ReActRunner implements AgentEngine {
           role: 'assistant',
           content: turn.content,
           toolCalls: turn.toolCalls,
+          ...(turn.reasoning ? { reasoning: turn.reasoning } : {}),
         });
         for (const execution of executions) {
           if (execution.citations?.length) addCitations(execution.citations);
@@ -895,6 +902,9 @@ export class ReActRunner implements AgentEngine {
         toolChoice: params.toolChoice,
         temperature: this.options.temperature ?? 0.3,
         enableNativeReasoning: this.options.enableNativeReasoning ?? true,
+        ...(this.options.maxTokens
+          ? { maxTokens: this.options.maxTokens }
+          : {}),
       },
       signal,
     );

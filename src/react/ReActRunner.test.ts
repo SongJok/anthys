@@ -167,6 +167,7 @@ describe('ReActRunner', () => {
     expect(assistantWithCalls?.toolCalls?.[0]?.function.name).toBe(
       'current_time',
     );
+    expect(assistantWithCalls?.reasoning).toBe('我需要先获取当前时间。');
   });
 
   it('不设置静态步数上限，可连续多步工具直到自然收敛', async () => {
