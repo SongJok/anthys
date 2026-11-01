@@ -1,6 +1,6 @@
--- 项目代码索引的扩展对象：Drizzle 无法生成 tsvector 生成列与 HNSW 索引。
--- 在 `pnpm run db:push` 之后执行，可重复运行：
---   psql "$DATABASE_URL" -f src/db/sql/project-index.sql
+-- 项目代码索引的扩展对象：tsv 生成列与 GIN/HNSW 索引已在 Drizzle schema 声明，
+-- db:push 会创建；本脚本负责启用 vector/pg_trgm 并为旧库幂等补齐缺失对象。
+-- 在 `pnpm run db:push` 之后执行，可重复运行：pnpm run db:extend
 
 CREATE EXTENSION IF NOT EXISTS vector;
 CREATE EXTENSION IF NOT EXISTS pg_trgm;

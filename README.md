@@ -108,13 +108,14 @@ flowchart LR
 pnpm install
 pnpm -C web-console install
 
-psql "postgres://localhost:5432/dingtalk_agent" -c "CREATE EXTENSION IF NOT EXISTS vector;"
-pnpm run db:push      # 创建会话、记忆、动态配置、审计、技能、插件与项目等数据表
-pnpm run db:extend    # 补齐项目检索的 tsvector / pg_trgm / HNSW 索引，可重复执行
+psql "postgres://localhost:5432/dingtalk_agent" -c "CREATE EXTENSION IF NOT EXISTS vector; CREATE EXTENSION IF NOT EXISTS pg_trgm;"
+pnpm run db:push      # 非交互应用表结构；仅在检测到删列等数据丢失语句时中断
+pnpm run db:extend    # 幂等补齐项目检索扩展与索引，旧库升级时使用
 pnpm run db:seed      # 可选：预写入默认人设与模型配置，已有记录不覆盖
 ```
 
 > 数据库连接串默认为 `postgres://localhost:5432/dingtalk_agent`，可通过 `DATABASE_URL` 覆盖；`psql` 命令请替换为实际连接串。
+> `db:push` 已关闭逐步确认（`strict: false`）：新增表/列会自动应用，真遇到数据丢失语句仍会中断，避免非交互部署误删数据。
 > 人设与模型配置在服务启动时也会自动补齐，`db:seed` 主要用于提前初始化或 CI 场景。
 
 ### 环境变量

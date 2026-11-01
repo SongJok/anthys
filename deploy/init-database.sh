@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 创建 PostgreSQL 角色与库，并启用 pgvector 扩展
+# 创建 PostgreSQL 角色与库，并启用 pgvector / pg_trgm 扩展
 # 用法：sudo bash deploy/init-database.sh
 # 密码来源优先级：命令行第一个参数 > DB_PASSWORD 环境变量 > 随机生成并打印
 set -euo pipefail
@@ -34,10 +34,10 @@ log "确保数据库 ${DB_NAME} 存在"
 psql_super -tAc "SELECT 1 FROM pg_database WHERE datname='${DB_NAME}'" | grep -q 1 \
   || psql_super -c "CREATE DATABASE ${DB_NAME} OWNER ${DB_USER} ENCODING 'UTF8'"
 
-log "启用 pgvector 扩展"
-psql_super -d "$DB_NAME" -c "CREATE EXTENSION IF NOT EXISTS vector;"
+log "启用 pgvector / pg_trgm 扩展"
+psql_super -d "$DB_NAME" -c "CREATE EXTENSION IF NOT EXISTS vector; CREATE EXTENSION IF NOT EXISTS pg_trgm;"
 
 log "确认扩展已就绪"
-psql_super -d "$DB_NAME" -tAc "SELECT extversion FROM pg_extension WHERE extname='vector'"
+psql_super -d "$DB_NAME" -tAc "SELECT extname, extversion FROM pg_extension WHERE extname IN ('vector','pg_trgm') ORDER BY extname"
 
 log "完成。DATABASE_URL 形如：postgres://${DB_USER}:<密码>@127.0.0.1:5432/${DB_NAME}"

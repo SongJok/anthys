@@ -1,5 +1,7 @@
+import { sql } from 'drizzle-orm';
 import {
   boolean,
+  customType,
   index,
   integer,
   jsonb,
@@ -11,12 +13,19 @@ import {
   vector,
   varchar,
 } from 'drizzle-orm/pg-core';
+
 import type {
   HandbookContent,
   HandbookSource,
   ProjectSource,
   ProjectSyncStats,
 } from '../types/skills-plugins-projects.js';
+
+const tsvector = customType<{ data: string; driverData: string }>({
+  dataType() {
+    return 'tsvector';
+  },
+});
 
 /** 项目登记：一个项目可有多个不可变快照 */
 export const projects = pgTable('projects', {
@@ -98,8 +107,8 @@ export const projectDocuments = pgTable(
 );
 
 /**
- * 检索代码块。embedding 由 pgvector 提供，tsv 与 HNSW 索引由
- * src/db/sql/project-index.sql 在 db:push 之后补齐。
+ * 检索代码块。tsv 生成列与 GIN/HNSW 索引必须在 schema 中声明，
+ * 否则 db:push 会把 src/db/sql/project-index.sql 建的索引判为待删除。
  */
 export const projectChunks = pgTable(
   'project_chunks',
@@ -116,10 +125,22 @@ export const projectChunks = pgTable(
     contentHash: text('content_hash').notNull().default(''),
     tokenCount: integer('token_count').notNull().default(0),
     embedding: vector('embedding', { dimensions: 1536 }),
+    tsv: tsvector('tsv').generatedAlwaysAs(
+      sql`to_tsvector('simple', coalesce(path, '') || ' ' || coalesce(symbol, '') || ' ' || coalesce(content, ''))`,
+    ),
   },
   (table) => [
     index('project_chunks_snapshot_path_idx').on(table.snapshotId, table.path),
     index('project_chunks_symbol_idx').on(table.snapshotId, table.symbol),
+    index('project_chunks_tsv_idx').using('gin', table.tsv),
+    index('project_chunks_trgm_idx').using(
+      'gin',
+      sql`${table.content} gin_trgm_ops`,
+    ),
+    index('project_chunks_embedding_idx').using(
+      'hnsw',
+      sql`${table.embedding} vector_cosine_ops`,
+    ),
   ],
 );
 

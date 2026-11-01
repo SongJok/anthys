@@ -68,7 +68,7 @@ if ! command -v psql >/dev/null 2>&1 || [ "$(psql --version | grep -oE '[0-9]+' 
         | $SUDO tee /etc/apt/sources.list.d/pgdg.list >/dev/null
       $SUDO apt-get update
     fi
-    $SUDO apt-get install -y "postgresql-${PG_MAJOR}" "postgresql-client-${PG_MAJOR}" "postgresql-server-dev-${PG_MAJOR}"
+    $SUDO apt-get install -y "postgresql-${PG_MAJOR}" "postgresql-client-${PG_MAJOR}" "postgresql-server-dev-${PG_MAJOR}" "postgresql-contrib-${PG_MAJOR}"
   else
     RHEL_MAJOR="$(. /etc/os-release && echo "${VERSION_ID%%.*}")"
     $SUDO dnf install -y "https://download.postgresql.org/pub/repos/yum/repos/pgdg-redhat-release-latest.noarch.rpm"

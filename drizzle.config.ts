@@ -26,6 +26,7 @@ export default defineConfig({
   dbCredentials: {
     url: process.env.DATABASE_URL ?? 'postgres://localhost:5432/dingtalk_agent',
   },
-  strict: true,
+  // 非交互部署可自动应用新增表/列；遇到数据丢失语句仍会要求确认并安全失败
+  strict: false,
   verbose: true,
 });
