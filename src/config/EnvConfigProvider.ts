@@ -17,6 +17,7 @@ import type {
   ModelRoutingPolicy,
   UsagePolicy,
 } from '../types/admin-and-console.js';
+import type { ExtensionsConfig } from '../types/skills-plugins-projects.js';
 import {
   DEFAULT_COOLDOWN_SECONDS,
   DEFAULT_CONFIDENCE_THRESHOLD,
@@ -268,6 +269,26 @@ export class EnvConfigProvider implements IConfigProvider {
       dailyLimit: Math.max(
         0,
         Math.trunc(parseNumber(this.env.WEB_SEARCH_DAILY_LIMIT, 500)),
+      ),
+    };
+  }
+
+  getExtensionsConfig(): ExtensionsConfig {
+    return {
+      skillsEnabled: parseBoolean(this.env.EXTENSIONS_SKILLS_ENABLED, true),
+      pluginsEnabled: parseBoolean(this.env.EXTENSIONS_PLUGINS_ENABLED, true),
+      projectsEnabled: parseBoolean(this.env.EXTENSIONS_PROJECTS_ENABLED, true),
+      defaultProjectId: (this.env.EXTENSIONS_DEFAULT_PROJECT_ID ?? '').trim(),
+      skillCatalogLimit: Math.min(
+        50,
+        Math.max(1, Math.trunc(parseNumber(this.env.SKILL_CATALOG_LIMIT, 20))),
+      ),
+      projectBriefMaxChars: Math.min(
+        8_000,
+        Math.max(
+          200,
+          Math.trunc(parseNumber(this.env.PROJECT_BRIEF_MAX_CHARS, 2_000)),
+        ),
       ),
     };
   }

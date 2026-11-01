@@ -1,0 +1,812 @@
+/**
+ * 技能、声明式插件与项目手册的公共契约。
+ *
+ * 约束：
+ * - 插件只允许声明式内容（技能 + MCP + 资源 + 密钥引用），不执行任意代码；
+ * - 技能正文只能通过 ToolExecutionOutput.instructions 进入系统提示词；
+ * - 项目快照不可变，所有索引数据都归属某个 snapshot。
+ */
+
+export type SkillSource = 'builtin' | 'local' | 'plugin';
+export type SkillVisibility = 'public' | 'admin';
+export type SkillRisk = 'read' | 'write' | 'destructive';
+
+export interface SkillFrontmatter {
+  name: string;
+  description: string;
+  version?: string;
+  when_to_use?: string;
+  tags?: string[];
+  allowed_tools?: string[];
+  risk?: SkillRisk;
+  visibility?: SkillVisibility;
+  max_instruction_chars?: number;
+}
+
+export interface SkillResourceInfo {
+  /** 相对技能目录的路径，例如 references/checklist.md */
+  path: string;
+  sizeBytes: number;
+}
+
+export interface SkillDefinition {
+  /** builtin:name | local:name | plugin:pluginId:name */
+  id: string;
+  name: string;
+  description: string;
+  version: string;
+  whenToUse: string;
+  tags: string[];
+  allowedTools: string[];
+  risk: SkillRisk;
+  visibility: SkillVisibility;
+  source: SkillSource;
+  pluginId?: string;
+  dir: string;
+  /** 已解析的 Markdown 正文 */
+  body: string;
+  bodyHash: string;
+  maxInstructionChars: number;
+  enabled: boolean;
+  resources: SkillResourceInfo[];
+  loadError?: string;
+}
+
+/** 常驻在系统提示词里的技能目录条目 */
+export interface SkillCatalogEntry {
+  id: string;
+  name: string;
+  description: string;
+  whenToUse: string;
+  source: SkillSource;
+  score?: number;
+}
+
+export interface SkillSearchMatch extends SkillCatalogEntry {
+  tags: string[];
+  allowedTools: string[];
+  score: number;
+}
+
+export interface SkillSearchResult {
+  matches: SkillSearchMatch[];
+  total: number;
+}
+
+export interface SkillCatalogResult {
+  /** 已渲染的“可用技能”提示词片段，未命中时为空字符串 */
+  prompt: string;
+  entries: SkillCatalogEntry[];
+  total: number;
+  truncated: boolean;
+}
+
+export interface SkillContextInput {
+  query?: string;
+  conversationType: '1' | '2';
+  isAdmin: boolean;
+  projectId?: string;
+  limit?: number;
+}
+
+export type SkillUsageAction = 'search' | 'load' | 'read';
+
+export interface SkillUsageRecord {
+  skillId: string;
+  conversationId: string;
+  senderStaffId: string;
+  action: SkillUsageAction;
+  createdAt: number;
+}
+
+export interface SkillUsageSummary {
+  skillId: string;
+  uses: number;
+  lastUsedAt: number | null;
+}
+
+export interface SkillLoadResult {
+  skill: SkillDefinition;
+  /** 受控注入正文；超长时为空，需要继续 skill_read */
+  instructions?: string;
+  /** 超长时返回的目录与资源清单 */
+  outline: string;
+  truncated: boolean;
+  resources: SkillResourceInfo[];
+}
+
+export interface SkillResourceReadRequest {
+  name: string;
+  path: string;
+  startLine?: number;
+  endLine?: number;
+  isAdmin: boolean;
+  conversationId?: string;
+  senderStaffId?: string;
+}
+
+export interface SkillResourceReadResult {
+  skillId: string;
+  path: string;
+  startLine: number;
+  endLine: number;
+  totalLines: number;
+  nextStartLine?: number;
+  content: string;
+  truncated: boolean;
+}
+
+export interface SkillPreviewEntry {
+  skill: SkillCatalogEntry;
+  score: number;
+  matched: boolean;
+}
+
+export interface SkillPreviewResult {
+  prompt: string;
+  entries: SkillPreviewEntry[];
+  truncated: boolean;
+}
+
+export interface SkillAdminView extends SkillDefinition {
+  lastUsedAt: number | null;
+  uses: number;
+}
+
+export interface SkillAdminPort {
+  list(): Promise<SkillAdminView[]>;
+  reload(): Promise<{ loaded: number; errors: string[] }>;
+  setEnabled(id: string, enabled: boolean): Promise<SkillDefinition>;
+  preview(input: SkillContextInput): Promise<SkillPreviewResult>;
+  readResource(
+    input: Omit<SkillResourceReadRequest, 'isAdmin'>,
+  ): Promise<SkillResourceReadResult>;
+}
+
+/* ------------------------------------------------------------------ */
+/* 声明式插件                                                          */
+/* ------------------------------------------------------------------ */
+
+export type PluginStatus = 'installed' | 'enabled' | 'disabled' | 'error';
+export type PluginTrust = 'declarative';
+
+export interface PluginMcpServerDecl {
+  id: string;
+  name: string;
+  domain: 'code' | 'data' | 'log' | 'apidoc' | 'business' | 'general';
+  transport: 'stdio' | 'sse' | 'streamable-http';
+  endpointOrCommand: string;
+  args?: string[];
+  envOrHeaders?: Record<string, string>;
+  timeoutMs?: number;
+  maxResultChars?: number;
+  enabled?: boolean;
+}
+
+export interface PluginSecretDecl {
+  /** 环境变量名，例如 GITHUB_TOKEN */
+  key: string;
+  description?: string;
+  required?: boolean;
+}
+
+export interface PluginPermissions {
+  /** 允许访问的主机名；仅作展示与审计，不改变运行时权限 */
+  network?: string[];
+  filesystem?: 'none';
+}
+
+export interface PluginManifest {
+  schemaVersion: 1;
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+  publisher?: string;
+  homepage?: string;
+  license?: string;
+  engines: { agent: string };
+  trust: PluginTrust;
+  /** 相对插件根目录的技能目录，默认 skills */
+  skills?: string[];
+  mcpServers?: PluginMcpServerDecl[];
+  secrets?: PluginSecretDecl[];
+  permissions?: PluginPermissions;
+}
+
+export interface PluginRecord {
+  id: string;
+  name: string;
+  activeVersion: string;
+  status: PluginStatus;
+  manifest: PluginManifest;
+  installedBy: string;
+  lastError: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface PluginVersionRecord {
+  pluginId: string;
+  version: string;
+  manifest: PluginManifest;
+  dir: string;
+  checksum: string;
+  status: PluginStatus;
+  installedAt: number;
+}
+
+export interface PluginValidationIssue {
+  severity: 'error' | 'warning';
+  path: string;
+  message: string;
+}
+
+export interface PluginInstallInput {
+  /** 已落盘的插件目录（zip 解包后） */
+  dir: string;
+  installedBy: string;
+  /** 覆盖安装时允许同版本重装 */
+  force?: boolean;
+}
+
+export interface PluginInstallResult {
+  plugin: PluginRecord;
+  version: PluginVersionRecord;
+  skills: string[];
+  mcpServers: string[];
+  warnings: PluginValidationIssue[];
+}
+
+export interface PluginAdminView extends PluginRecord {
+  skills: Array<{ id: string; name: string; enabled: boolean; loadError?: string }>;
+  mcpServerIds: string[];
+  missingSecrets: string[];
+  /** 当前生效的 MCP 是否已连接到运行时 */
+  runtimeApplied: boolean;
+}
+
+export interface PluginAdminPort {
+  list(): Promise<PluginAdminView[]>;
+  install(input: PluginInstallInput): Promise<PluginInstallResult>;
+  enable(id: string): Promise<PluginAdminView>;
+  disable(id: string): Promise<PluginAdminView>;
+  upgrade(input: PluginInstallInput): Promise<PluginInstallResult>;
+  rollback(id: string, version: string): Promise<PluginAdminView>;
+  uninstall(id: string): Promise<void>;
+}
+
+/* ------------------------------------------------------------------ */
+/* 项目与代码索引                                                      */
+/* ------------------------------------------------------------------ */
+
+export type ProjectSourceType = 'local' | 'github' | 'manual';
+export type ProjectVisibility = 'team' | 'private' | 'admin';
+export type ProjectSensitivity = 'team' | 'private';
+export type ProjectSnapshotStatus = 'building' | 'ready' | 'failed' | 'superseded';
+export type ProjectSyncStatus = 'queued' | 'running' | 'succeeded' | 'failed';
+export type ProjectDocumentKind = 'code' | 'doc' | 'config' | 'test' | 'other';
+
+export type ProjectSource =
+  | { type: 'local'; path: string; branch?: string }
+  | { type: 'github'; repo: string; ref?: string; depth?: number }
+  | { type: 'manual' };
+
+export interface ProjectRecord {
+  id: string;
+  name: string;
+  aliases: string[];
+  description: string;
+  source: ProjectSource;
+  defaultBranch: string;
+  ownerStaffIds: string[];
+  visibility: ProjectVisibility;
+  sensitivity: ProjectSensitivity;
+  isDefault: boolean;
+  enabled: boolean;
+  autoSyncMinutes: number;
+  activeSnapshotId?: string;
+  lastCommit: string;
+  lastSyncedAt?: number;
+  handbookVersion: number;
+  lastError?: string;
+}
+
+export interface ProjectCreateInput {
+  id: string;
+  name: string;
+  aliases?: string[];
+  description?: string;
+  source: ProjectSource;
+  defaultBranch?: string;
+  ownerStaffIds?: string[];
+  visibility?: ProjectVisibility;
+  sensitivity?: ProjectSensitivity;
+  isDefault?: boolean;
+  enabled?: boolean;
+  autoSyncMinutes?: number;
+}
+
+export type ProjectUpdateInput = Partial<
+  Omit<ProjectCreateInput, 'id'>
+>;
+
+export interface ProjectMemberContextInput {
+  senderStaffId: string;
+  isAdmin: boolean;
+  conversationType: '1' | '2';
+}
+
+export interface ProjectBriefInput extends ProjectMemberContextInput {
+  text: string;
+  maxChars?: number;
+}
+
+export interface ProjectSnapshot {
+  id: string;
+  projectId: string;
+  commitSha: string;
+  branch: string;
+  status: ProjectSnapshotStatus;
+  fileCount: number;
+  totalBytes: number;
+  symbolCount: number;
+  chunkCount: number;
+  stats: Record<string, unknown>;
+  error: string;
+  startedAt: number;
+  finishedAt?: number;
+}
+
+export interface ProjectDocument {
+  id: string;
+  projectId: string;
+  snapshotId: string;
+  path: string;
+  language: string;
+  kind: ProjectDocumentKind;
+  contentHash: string;
+  sizeBytes: number;
+  lineCount: number;
+  text: string;
+}
+
+export interface ProjectChunk {
+  id: string;
+  projectId: string;
+  snapshotId: string;
+  path: string;
+  startLine: number;
+  endLine: number;
+  symbol: string;
+  kind: ProjectDocumentKind;
+  content: string;
+  contentHash: string;
+  tokenCount: number;
+}
+
+export interface ProjectSymbol {
+  id: string;
+  projectId: string;
+  snapshotId: string;
+  path: string;
+  name: string;
+  kind: string;
+  startLine: number;
+  endLine: number;
+  signature: string;
+  parent: string;
+  exported: boolean;
+}
+
+export interface ProjectSyncStats {
+  files: number;
+  bytes: number;
+  symbols: number;
+  chunks: number;
+  skipped: number;
+  durationMs: number;
+}
+
+export interface ProjectSyncJob {
+  id: string;
+  projectId: string;
+  status: ProjectSyncStatus;
+  trigger: 'manual' | 'schedule' | 'startup';
+  snapshotId?: string;
+  stats?: ProjectSyncStats;
+  error: string;
+  createdAt: number;
+  startedAt?: number;
+  finishedAt?: number;
+}
+
+export interface ProjectSyncResult {
+  project: ProjectRecord;
+  snapshot: ProjectSnapshot;
+  stats: ProjectSyncStats;
+}
+
+export type ProjectSearchMode =
+  | 'hybrid'
+  | 'keyword'
+  | 'symbol'
+  | 'path';
+
+export interface ProjectSearchHit {
+  path: string;
+  startLine: number;
+  endLine: number;
+  symbol: string;
+  language: string;
+  score: number;
+  content: string;
+  match: 'fts' | 'trigram' | 'vector' | 'symbol' | 'path';
+}
+
+export interface ProjectSearchResult {
+  projectId: string;
+  commit: string;
+  hits: ProjectSearchHit[];
+  total: number;
+  truncated: boolean;
+  warning?: string;
+  stale?: boolean;
+}
+
+export interface ProjectFileEntry {
+  path: string;
+  language: string;
+  kind: ProjectDocumentKind;
+  sizeBytes: number;
+  lineCount: number;
+}
+
+export interface ProjectReadResult {
+  projectId: string;
+  commit: string;
+  path: string;
+  startLine: number;
+  endLine: number;
+  totalLines: number;
+  nextStartLine?: number;
+  content: string;
+  truncated: boolean;
+  stale?: boolean;
+}
+
+export interface ProjectSymbolResult {
+  projectId: string;
+  commit: string;
+  symbol: string;
+  definitions: ProjectSymbol[];
+  references: Array<{ path: string; line: number; snippet: string }>;
+}
+
+export interface ProjectMapNode {
+  path: string;
+  language: string;
+  symbols: Array<{ name: string; kind: string; startLine: number; exported: boolean }>;
+}
+
+export interface ProjectMapResult {
+  projectId: string;
+  commit: string;
+  modules: ProjectMapNode[];
+  totalFiles: number;
+  truncated: boolean;
+  /** 已渲染的目录树文本；模块列表用于结构化展示 */
+  text: string;
+  stale?: boolean;
+}
+
+export interface ProjectCommitEntry {
+  sha: string;
+  author: string;
+  date: string;
+  subject: string;
+}
+
+export interface ProjectHistoryResult {
+  projectId: string;
+  commit: string;
+  kind: 'commits' | 'blame' | 'issues' | 'prs';
+  commits: ProjectCommitEntry[];
+  note?: string;
+}
+
+export interface ProjectBrief {
+  projectId: string;
+  text: string;
+  commit: string;
+  handbookVersion: number;
+  stale: boolean;
+}
+
+export interface ProjectMemberContext {
+  senderStaffId: string;
+  isAdmin: boolean;
+}
+
+/* ------------------------------------------------------------------ */
+/* 项目手册                                                            */
+/* ------------------------------------------------------------------ */
+
+export type HandbookSectionKey =
+  | 'overview'
+  | 'architecture'
+  | 'modules'
+  | 'data_model'
+  | 'config'
+  | 'deploy'
+  | 'operations'
+  | 'conventions'
+  | 'testing'
+  | 'decisions'
+  | 'faq'
+  | 'risks';
+
+export interface HandbookSource {
+  path?: string;
+  startLine?: number;
+  endLine?: number;
+  url?: string;
+  commit?: string;
+  note?: string;
+}
+
+export interface HandbookSection {
+  key: HandbookSectionKey;
+  title: string;
+  markdown: string;
+  /** deterministic：扫描器生成；curated：人工维护；generated：模型生成后发布 */
+  origin: 'deterministic' | 'curated' | 'generated';
+  sources: HandbookSource[];
+  updatedAt?: number;
+}
+
+export interface HandbookContent {
+  sections: HandbookSection[];
+  generatedAt: number;
+  commit: string;
+}
+
+export type HandbookStatus = 'draft' | 'published' | 'archived';
+export type HandbookGeneratedBy = 'manual' | 'facts' | 'llm';
+
+export interface ProjectHandbookRecord {
+  id: string;
+  projectId: string;
+  version: number;
+  status: HandbookStatus;
+  commitSha: string;
+  content: HandbookContent;
+  sources: HandbookSource[];
+  generatedBy: HandbookGeneratedBy;
+  createdBy: string;
+  createdAt: number;
+  publishedAt?: number;
+}
+
+export interface ProjectHandbookResult {
+  projectId: string;
+  version: number;
+  status: HandbookStatus;
+  commit: string;
+  stale: boolean;
+  content: HandbookContent;
+  manualEntries: ProjectManualEntry[];
+}
+
+export interface ProjectManualEntry {
+  id: string;
+  projectId: string;
+  section: HandbookSectionKey;
+  title: string;
+  markdown: string;
+  visibility: ProjectVisibility;
+  sensitivity: ProjectSensitivity;
+  injectToBrief: boolean;
+  priority: number;
+  updatedBy: string;
+  updatedAt: number;
+}
+
+export interface ProjectManualEntryInput {
+  section: HandbookSectionKey;
+  title: string;
+  markdown: string;
+  visibility?: ProjectVisibility;
+  sensitivity?: ProjectSensitivity;
+  injectToBrief?: boolean;
+  priority?: number;
+}
+
+export type ProjectManualEntryPatch = Partial<ProjectManualEntryInput>;
+
+/* ------------------------------------------------------------------ */
+/* GitHub                                                              */
+/* ------------------------------------------------------------------ */
+
+export interface GithubRepoRef {
+  owner: string;
+  repo: string;
+}
+
+export interface GithubRepoInfo {
+  owner: string;
+  name: string;
+  fullName: string;
+  description: string;
+  defaultBranch: string;
+  private: boolean;
+  htmlUrl: string;
+  stars: number;
+  updatedAt: string;
+  topics: string[];
+  language: string;
+}
+
+export interface GithubTreeEntry {
+  path: string;
+  type: 'blob' | 'tree';
+  size?: number;
+  sha: string;
+}
+
+export interface GithubFileResult {
+  path: string;
+  sha: string;
+  size: number;
+  encoding: string;
+  content: string;
+  truncated: boolean;
+}
+
+export interface GithubPullRequestInfo {
+  number: number;
+  title: string;
+  state: string;
+  draft: boolean;
+  author: string;
+  head: string;
+  base: string;
+  htmlUrl: string;
+  body: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface GithubIssueInfo {
+  number: number;
+  title: string;
+  state: string;
+  author: string;
+  labels: string[];
+  htmlUrl: string;
+  body: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface GithubSearchItem {
+  name: string;
+  fullName: string;
+  description: string;
+  stars: number;
+  language: string;
+  htmlUrl: string;
+  updatedAt: string;
+}
+
+export interface GithubSearchResult {
+  items: GithubSearchItem[];
+  total: number;
+}
+
+/* ------------------------------------------------------------------ */
+/* 配置与校验辅助                                                      */
+/* ------------------------------------------------------------------ */
+
+export interface ExtensionsConfig {
+  skillsEnabled: boolean;
+  pluginsEnabled: boolean;
+  projectsEnabled: boolean;
+  defaultProjectId: string;
+  skillCatalogLimit: number;
+  projectBriefMaxChars: number;
+}
+
+export const DEFAULT_EXTENSIONS_CONFIG: ExtensionsConfig = {
+  skillsEnabled: true,
+  pluginsEnabled: true,
+  projectsEnabled: true,
+  defaultProjectId: '',
+  skillCatalogLimit: 20,
+  projectBriefMaxChars: 2_000,
+};
+
+export const SKILL_ID_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/u;
+export const PLUGIN_ID_PATTERN = /^[a-z0-9][a-z0-9_-]{1,63}$/u;
+export const PROJECT_ID_PATTERN = /^[a-z0-9][a-z0-9_-]{1,63}$/u;
+
+const SKILL_SOURCES: readonly SkillSource[] = ['builtin', 'local', 'plugin'];
+const SKILL_VISIBILITIES: readonly SkillVisibility[] = ['public', 'admin'];
+const SKILL_RISKS: readonly SkillRisk[] = ['read', 'write', 'destructive'];
+const PROJECT_VISIBILITIES: readonly ProjectVisibility[] = [
+  'team',
+  'private',
+  'admin',
+];
+const PROJECT_SENSITIVITIES: readonly ProjectSensitivity[] = ['team', 'private'];
+const HANDBOOK_SECTIONS: readonly HandbookSectionKey[] = [
+  'overview',
+  'architecture',
+  'modules',
+  'data_model',
+  'config',
+  'deploy',
+  'operations',
+  'conventions',
+  'testing',
+  'decisions',
+  'faq',
+  'risks',
+];
+
+export function isSkillSource(value: unknown): value is SkillSource {
+  return SKILL_SOURCES.includes(value as SkillSource);
+}
+
+export function isSkillVisibility(value: unknown): value is SkillVisibility {
+  return SKILL_VISIBILITIES.includes(value as SkillVisibility);
+}
+
+export function isSkillRisk(value: unknown): value is SkillRisk {
+  return SKILL_RISKS.includes(value as SkillRisk);
+}
+
+export function isProjectVisibility(
+  value: unknown,
+): value is ProjectVisibility {
+  return PROJECT_VISIBILITIES.includes(value as ProjectVisibility);
+}
+
+export function isProjectSensitivity(
+  value: unknown,
+): value is ProjectSensitivity {
+  return PROJECT_SENSITIVITIES.includes(value as ProjectSensitivity);
+}
+
+export function isHandbookSectionKey(
+  value: unknown,
+): value is HandbookSectionKey {
+  return HANDBOOK_SECTIONS.includes(value as HandbookSectionKey);
+}
+
+export const HANDBOOK_SECTION_TITLES: Record<HandbookSectionKey, string> = {
+  overview: '项目概览',
+  architecture: '架构设计',
+  modules: '模块地图',
+  data_model: '数据模型',
+  config: '配置与密钥',
+  deploy: '构建与部署',
+  operations: '运维与故障',
+  conventions: '编码约定',
+  testing: '测试与验收',
+  decisions: '历史决策',
+  faq: '常见问题',
+  risks: '风险与边界',
+};
+
+export function buildSkillId(
+  source: SkillSource,
+  name: string,
+  pluginId?: string,
+): string {
+  if (source === 'plugin') {
+    if (!pluginId) throw new Error('插件技能缺少 pluginId');
+    return `plugin:${pluginId}:${name}`;
+  }
+  return `${source}:${name}`;
+}

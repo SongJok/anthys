@@ -154,6 +154,21 @@ export interface ExecutionContext {
   notify?: (text: string) => Promise<void> | void;
 }
 
+/**
+ * 受信任的指令正文：只能由技能 / 已启用插件技能返回。
+ * ReActRunner 会把它作为 system message 注入，而不是混进不可信工具结果。
+ */
+export interface ToolInstruction {
+  /** 指令正文（Markdown） */
+  text: string;
+  /** 来源类型，用于信任提示与审计 */
+  source: 'skill' | 'plugin-skill';
+  /** 技能 ID，例如 local:repo-review */
+  id: string;
+  /** admin：管理员维护；plugin：已安装第三方插件 */
+  trust: 'admin' | 'plugin';
+}
+
 /** 工具的结构化返回值：文本 + 引用 / 卸载信息 */
 export interface ToolExecutionOutput {
   text: string;
@@ -162,6 +177,8 @@ export interface ToolExecutionOutput {
   truncated?: boolean;
   /** 覆盖默认摘要（展示在卡片的工具轨迹里） */
   summary?: string;
+  /** 仅受信任的 Provider 可以返回；ReActRunner 按来源白名单校验后注入 */
+  instructions?: ToolInstruction[];
 }
 
 /** 写操作确认：调用方在工具执行前决定是否放行 */

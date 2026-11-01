@@ -23,6 +23,10 @@ import type {
 } from '../types/core.js';
 import type { EnterpriseMcpServerConfig } from '../types/mcp-and-sandbox.js';
 import {
+  DEFAULT_EXTENSIONS_CONFIG,
+  type ExtensionsConfig,
+} from '../types/skills-plugins-projects.js';
+import {
   DEFAULT_COOLDOWN_SECONDS,
   DEFAULT_SLIDING_WINDOW_SIZE,
 } from '../types/bystander-and-memory.js';
@@ -78,6 +82,7 @@ interface CenterState {
   mcpServers: EnterpriseMcpServerConfig[];
   defaultBystanderPolicy: Omit<GroupBystanderPolicy, 'conversationId'>;
   mcpAccessPolicies: McpToolAccessPolicy[];
+  extensions: ExtensionsConfig;
 }
 
 export type DynamicConfigCenterEvent = 'changed' | `${ConfigScope}:changed`;
@@ -173,6 +178,7 @@ export class DynamicConfigCenter
       'mcpServers',
       'mcpAccessPolicies',
       'defaultBystanderPolicy',
+      'extensions',
     ] as const satisfies readonly ConfigScope[];
     for (const scope of scopes) {
       if (JSON.stringify(before[scope]) === JSON.stringify(after[scope])) {
@@ -206,6 +212,7 @@ export class DynamicConfigCenter
       mcpServers: clone(this.state.mcpServers),
       defaultBystanderPolicy: clone(this.state.defaultBystanderPolicy),
       mcpAccessPolicies: clone(this.state.mcpAccessPolicies),
+      extensions: clone(this.state.extensions),
     };
   }
 
@@ -267,6 +274,10 @@ export class DynamicConfigCenter
       ...defaults,
       enabled: this.state.dingtalk.webSearchEnabled,
     };
+  }
+
+  public getExtensionsConfig(): ExtensionsConfig {
+    return clone(this.state.extensions);
   }
 
   public getBystanderConfig(): BystanderConfig {
@@ -499,6 +510,48 @@ export class DynamicConfigCenter
     this.emitChange('defaultBystanderPolicy', before, next, actorStaffId);
   }
 
+  public async updateExtensions(
+    input: Partial<ExtensionsConfig>,
+    actorStaffId?: string,
+  ): Promise<ExtensionsConfig> {
+    const before = clone(this.state.extensions);
+    const next: ExtensionsConfig = {
+      ...before,
+      ...(input.skillsEnabled !== undefined
+        ? { skillsEnabled: input.skillsEnabled }
+        : {}),
+      ...(input.pluginsEnabled !== undefined
+        ? { pluginsEnabled: input.pluginsEnabled }
+        : {}),
+      ...(input.projectsEnabled !== undefined
+        ? { projectsEnabled: input.projectsEnabled }
+        : {}),
+      ...(input.defaultProjectId !== undefined
+        ? { defaultProjectId: input.defaultProjectId.trim() }
+        : {}),
+      ...(input.skillCatalogLimit !== undefined
+        ? {
+            skillCatalogLimit: Math.min(
+              50,
+              Math.max(1, Math.trunc(input.skillCatalogLimit)),
+            ),
+          }
+        : {}),
+      ...(input.projectBriefMaxChars !== undefined
+        ? {
+            projectBriefMaxChars: Math.min(
+              8_000,
+              Math.max(200, Math.trunc(input.projectBriefMaxChars)),
+            ),
+          }
+        : {}),
+    };
+    await this.persist('extensions', next);
+    this.state = { ...this.state, extensions: next };
+    this.emitChange('extensions', before, next, actorStaffId);
+    return clone(next);
+  }
+
   public async getGroupPolicy(
     conversationId: string,
   ): Promise<GroupBystanderPolicy> {
@@ -653,6 +706,9 @@ export class DynamicConfigCenter
         triggerTopics: [...bystander.triggerTopics],
       },
       mcpAccessPolicies: [],
+      extensions:
+        this.defaults.getExtensionsConfig?.() ??
+        clone(DEFAULT_EXTENSIONS_CONFIG),
     };
   }
 
@@ -705,6 +761,10 @@ export class DynamicConfigCenter
         sections.mcpAccessPolicies !== undefined
           ? clone(sections.mcpAccessPolicies)
           : base.mcpAccessPolicies,
+      extensions: {
+        ...base.extensions,
+        ...(sections.extensions ?? {}),
+      },
     };
   }
 

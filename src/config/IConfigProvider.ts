@@ -3,6 +3,7 @@ import type {
   ModelRoutingPolicy,
   UsagePolicy,
 } from '../types/admin-and-console.js';
+import type { ExtensionsConfig } from '../types/skills-plugins-projects.js';
 
 export interface DingTalkConfig {
   clientId: string;
@@ -92,6 +93,8 @@ export interface IConfigProvider {
   getVisionConfig?(): VisionConfig | undefined;
   /** 公网搜索；未配置时不下发 web_search 工具 */
   getWebSearchConfig?(): WebSearchConfig | undefined;
+  /** 技能 / 插件 / 项目手册总开关与预算 */
+  getExtensionsConfig?(): ExtensionsConfig;
   getDatabaseUrl(): string;
   /** 校验启动必需配置，缺失时抛出可读错误 */
   assertReady(): void;

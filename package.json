@@ -19,6 +19,7 @@
     "build:server": "tsc",
     "typecheck": "tsc --noEmit",
     "db:push": "drizzle-kit push",
+    "db:extend": "tsx src/db/extend.ts",
     "db:generate": "drizzle-kit generate",
     "db:seed": "tsx src/db/seed.ts",
     "test": "vitest run"

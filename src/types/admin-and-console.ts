@@ -4,6 +4,7 @@
 import type { DynamicLoopPolicy, LLMAndPersonaConfig } from './core.js';
 import type { EnterpriseMcpServerConfig } from './mcp-and-sandbox.js';
 import type { GroupBystanderPolicy } from './bystander-and-memory.js';
+import type { ExtensionsConfig } from './skills-plugins-projects.js';
 
 export type { GroupBystanderPolicy } from './bystander-and-memory.js';
 
@@ -42,6 +43,7 @@ export interface EnterpriseBotSystemConfig {
   mcpServers: EnterpriseMcpServerConfig[];
   defaultBystanderPolicy: Omit<GroupBystanderPolicy, 'conversationId'>;
   mcpAccessPolicies: McpToolAccessPolicy[];
+  extensions: ExtensionsConfig;
 }
 
 export type AdminActionType =
@@ -56,7 +58,22 @@ export type AdminActionType =
   | 'PURGE_DATA'
   | 'DELETE_USER_DATA'
   | 'UPDATE_GLOSSARY'
-  | 'QUERY_STATS';
+  | 'QUERY_STATS'
+  | 'UPDATE_EXTENSIONS'
+  | 'UPDATE_SKILL'
+  | 'RELOAD_SKILLS'
+  | 'INSTALL_PLUGIN'
+  | 'ENABLE_PLUGIN'
+  | 'DISABLE_PLUGIN'
+  | 'UPGRADE_PLUGIN'
+  | 'ROLLBACK_PLUGIN'
+  | 'UNINSTALL_PLUGIN'
+  | 'CREATE_PROJECT'
+  | 'UPDATE_PROJECT'
+  | 'SYNC_PROJECT'
+  | 'DELETE_PROJECT'
+  | 'PUBLISH_PROJECT_HANDBOOK'
+  | 'UPDATE_PROJECT_MANUAL';
 
 /** 2. 管理员单聊管控审计记录契约 */
 export interface AdminAuditLog {
@@ -85,7 +102,8 @@ export type ConfigScope =
   | 'mcpServers'
   | 'mcpAccessPolicies'
   | 'defaultBystanderPolicy'
-  | 'groupPolicy';
+  | 'groupPolicy'
+  | 'extensions';
 
 export interface ConfigChangeEvent {
   scope: ConfigScope;

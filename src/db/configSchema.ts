@@ -33,6 +33,9 @@ import type {
 } from '../types/admin-and-console.js';
 import type { DynamicLoopPolicy, LLMAndPersonaConfig } from '../types/core.js';
 import type { EnterpriseMcpServerConfig } from '../types/mcp-and-sandbox.js';
+import type { ExtensionsConfig } from '../types/skills-plugins-projects.js';
+
+export type { ExtensionsConfig } from '../types/skills-plugins-projects.js';
 
 export type { AdminAuditInput, AdminAuditLog } from '../types/admin-and-console.js';
 
@@ -118,6 +121,7 @@ export interface ConfigSectionMap {
   mcpServers: EnterpriseMcpServerConfig[];
   defaultBystanderPolicy: Omit<GroupBystanderPolicy, 'conversationId'>;
   mcpAccessPolicies: McpToolAccessPolicy[];
+  extensions: ExtensionsConfig;
 }
 
 export type ConfigSectionKey = keyof ConfigSectionMap;
@@ -171,7 +175,8 @@ export function isConfigSectionKey(value: string): value is ConfigSectionKey {
     value === 'loopPolicy' ||
     value === 'mcpServers' ||
     value === 'defaultBystanderPolicy' ||
-    value === 'mcpAccessPolicies'
+    value === 'mcpAccessPolicies' ||
+    value === 'extensions'
   );
 }
 
