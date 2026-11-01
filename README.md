@@ -126,6 +126,8 @@ pnpm run db:seed      # 可选：预写入默认人设与模型配置，已有�
 | --- | --- | --- |
 | `NODE_ENV` | `development` | 运行环境标识 |
 | `LOG_LEVEL` | `info` | 日志级别 |
+| `AGENT_STATE_DIR` | `.state` | 运行期状态根目录（插件安装、项目快照与索引等） |
+| `AGENT_WORKSPACE_DIR` | `.workspace` | 工具工作区根目录（`deliver_artifact` 与沙箱共享） |
 | `DATABASE_URL` | `postgres://localhost:5432/dingtalk_agent` | PostgreSQL 连接串 |
 
 **钉钉接入**
