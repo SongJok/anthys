@@ -513,6 +513,11 @@ sudo cp deploy/nginx.conf /etc/nginx/conf.d/ && sudo nginx -t && sudo systemctl 
 | `/report <周期> <时间>` | 单聊内订阅日 / 周 / 月工作简报；`/report list`、`/report preview [weekly\|monthly]`、`/report cancel <ID>` |
 | `/job <需求>` | 提交后台任务，完成后机器人单聊通知结果；任务持久化到 `agent_jobs`，进程重启不丢 |
 | `/worker <research\|ops\|report> <需求>` | 交给指定 Worker 执行：独立工具白名单、预算与结构化回执 |
+| `/task new <需求>` | 创建任务线程并提交后台任务，自动关联来源消息、会话与作业 |
+| `/task list`、`/task show <ID>` | 查看本会话任务线程与详情（ID 支持前缀） |
+| `/task link <ID> <类型> <引用> [说明]` | 关联 URL、文档、议题、卡片或已有后台任务 |
+| `/task subscribe <ID>`、`/task unsubscribe <ID>` | 订阅 / 取消订阅线程更新 |
+| `/task close <ID>` | 关闭任务线程（不会自动取消后台任务） |
 | `/jobs` | 查看本会话最近的后台任务 |
 | `/job-status <ID>` | 查看后台任务状态、耗时与结果摘要（ID 支持前缀） |
 | `/job-cancel <ID>` | 取消排队或执行中的后台任务（仅发起人或管理员） |
@@ -554,6 +559,15 @@ sudo cp deploy/nginx.conf /etc/nginx/conf.d/ && sudo nginx -t && sudo systemctl 
 | `WORKER_<NAME>_MAX_ITERATIONS` | 见上表 | 单个 Worker 任务的最大模型轮数 |
 | `WORKER_OPS_READ_ONLY` / `WORKER_REPORT_READ_ONLY` | `false` / `true` | 是否强制只读；`research` 恒为只读 |
 | `WORKER_<NAME>_TOOL_ALLOWLIST` / `WORKER_<NAME>_TOOL_DENYLIST` | 空 | 逗号分隔的工具名单，结尾 `*` 为前缀匹配 |
+
+### 任务线程与订阅
+
+`/task new` 把一次后台需求升级为可追踪的线程，写入 `agent_tasks`，并自动建立三类关联：来源消息（`message`）、所属会话（`conversation`）与派生后台任务（`job`）。发起人自动订阅，群内其他成员可用 `/task subscribe` 跟进。
+
+- 后台任务完成或失败时，线程状态与摘要同步更新；订阅者收到机器人单聊通知，发起人沿用原任务通知，不会重复发送。任务被取消时线程标记为失败并记录“后台任务已取消”。
+- `/task link` 可把 `url`、`doc`、`issue`、`card`、`message`、`job`、`conversation`、`other` 绑定到线程，同一线程内相同 `kind + ref` 幂等；`/task show` 展示全部链接与订阅者。
+- `/task close` 只关闭线程，不会隐式取消仍在执行的后台任务；任务详情与通知会显示线程 ID，便于回到 `/task show`。
+- 新增 `agent_tasks`、`agent_task_links`、`agent_task_subscriptions` 三张表；升级部署后需执行 `pnpm db:push`。
 
 ### 个人提醒与工作报告
 

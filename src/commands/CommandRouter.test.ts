@@ -79,6 +79,11 @@ function runtime(overrides: Partial<CommandRuntime> = {}): {
       calls.worker.push([msg.messageId, worker, prompt]);
       return `已提交 ${worker} Worker 任务。`;
     },
+    tasks: async (msg, args) => {
+      calls.tasks = calls.tasks ?? [];
+      calls.tasks.push([msg.messageId, args]);
+      return `任务命令：${args.join(' ')}`;
+    },
     listJobs: async () => '本会话暂无后台任务。',
     jobStatus: async (_msg, id) => `任务 ${id} 详情。`,
     cancelJob: async (_msg, id) => `已取消后台任务 ${id}。`,
@@ -228,6 +233,17 @@ describe('CommandRouter', () => {
       ['msg-1', 'research', '查一下网关超时原因'],
     ]);
     expect(replies[2]).toContain('research Worker');
+  });
+
+  it('/task 转发任务线程参数', async () => {
+    const { router, calls, replies } = runtime();
+    await router.tryHandle(
+      message({ text: '/task new 整理本周客户反馈并输出结论' }),
+    );
+    expect(calls.tasks).toEqual([
+      ['msg-1', ['new', '整理本周客户反馈并输出结论']],
+    ]);
+    expect(replies[0]).toContain('任务命令');
   });
 
   it('未知指令给出帮助提示', async () => {

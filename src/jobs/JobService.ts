@@ -17,6 +17,13 @@ const WORKER_STATUS_LABELS: Record<WorkerRunStatus, string> = {
   blocked: '待确认或受阻',
 };
 
+function taskIdOf(job: AgentJob): string | undefined {
+  const taskId = job.metadata.taskId;
+  return typeof taskId === 'string' && taskId.trim()
+    ? taskId.trim()
+    : undefined;
+}
+
 function workerNameOf(job: AgentJob): string | undefined {
   const worker = job.metadata.worker;
   return typeof worker === 'string' && worker.trim() ? worker.trim() : undefined;
@@ -53,8 +60,9 @@ export function formatJobDuration(job: AgentJob): string {
 export function formatJob(job: AgentJob): string {
   const worker = workerNameOf(job);
   const workerOutput = workerOutputOf(job);
+  const taskId = taskIdOf(job);
   const lines = [
-    `任务 ${job.id.slice(0, 8)} · ${formatJobStatus(job.status)}${worker ? ` · ${worker} Worker` : ''}`,
+    `任务 ${job.id.slice(0, 8)} · ${formatJobStatus(job.status)}${worker ? ` · ${worker} Worker` : ''}${taskId ? ` · 线程:${taskId.slice(0, 8)}` : ''}`,
     `需求：${job.prompt.replace(/\s+/gu, ' ').slice(0, 160)}`,
     `创建：${formatShanghaiDateTime(job.createdAt)} · 耗时：${formatJobDuration(job)}`,
   ];
@@ -79,7 +87,8 @@ export function formatJobList(jobs: AgentJob[]): string {
     '本会话最近的后台任务：',
     ...jobs.map((job) => {
       const worker = workerNameOf(job);
-      return `- ${job.id.slice(0, 8)} · ${formatJobStatus(job.status)}${worker ? ` · ${worker}` : ''} · ${formatJobDuration(job)} · ${job.prompt.replace(/\s+/gu, ' ').slice(0, 60)}`;
+      const taskId = taskIdOf(job);
+      return `- ${job.id.slice(0, 8)} · ${formatJobStatus(job.status)}${worker ? ` · ${worker}` : ''}${taskId ? ` · 线程:${taskId.slice(0, 8)}` : ''} · ${formatJobDuration(job)} · ${job.prompt.replace(/\s+/gu, ' ').slice(0, 60)}`;
     }),
     '查看详情：`/job-status <id>`；取消：`/job-cancel <id>`。',
   ].join('\n');
@@ -89,6 +98,7 @@ export function formatJobResultNotice(job: AgentJob): string {
   const answer = job.result?.answer?.trim();
   const worker = workerNameOf(job);
   const workerOutput = workerOutputOf(job);
+  const taskId = taskIdOf(job);
   const findings = Array.isArray(workerOutput?.findings)
     ? workerOutput.findings.slice(0, 3)
     : [];
@@ -101,6 +111,9 @@ export function formatJobResultNotice(job: AgentJob): string {
       worker ? `执行单元：${worker} Worker` : '',
       workerOutput
         ? `Worker 状态：${WORKER_STATUS_LABELS[workerOutput.status]}`
+        : '',
+      taskId
+        ? `任务线程：${taskId.slice(0, 8)}（\`/task show ${taskId.slice(0, 8)}\`）`
         : '',
     ]
       .filter(Boolean)

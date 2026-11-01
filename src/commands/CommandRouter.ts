@@ -44,6 +44,8 @@ export interface CommandRuntime {
     worker: string,
     prompt: string,
   ): Promise<string>;
+  /** 任务线程：创建/查看/关联/订阅/关闭 */
+  tasks(message: InboundMessage, args: string[]): Promise<string>;
   /** 查看本会话最近的后台任务 */
   listJobs(message: InboundMessage): Promise<string>;
   /** 查看指定后台任务详情（支持 ID 前缀） */
@@ -81,6 +83,8 @@ const HELP_TEXT = [
   '- `/report daily 09:00` 定时推送日/周/月报（单聊）',
   '- `/job <需求>` 提交后台长任务，完成后主动通知',
   '- `/worker <research|ops|report> <需求>` 提交指定 Worker 的后台任务',
+  '- `/task new <需求>` 创建任务线程；`/task list`、`/task show <ID>` 查看',
+  '- `/task link <ID> <类型> <引用>` 关联外部实体；`/task subscribe|unsubscribe <ID>` 订阅更新',
   '- `/jobs` 查看本会话最近的后台任务',
   '- `/job-status <id>` 查看任务详情',
   '- `/job-cancel <id>` 取消排队或执行中的任务',
@@ -239,6 +243,10 @@ export class CommandRouter {
           return true;
         }
         await runtime.reply(message, await runtime.submitJob(message, prompt));
+        return true;
+      }
+      case 'task': {
+        await runtime.reply(message, await runtime.tasks(message, command.args));
         return true;
       }
       case 'jobs': {

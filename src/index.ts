@@ -59,6 +59,8 @@ import { formatShanghaiDateTime } from './time/shanghaiTime.js';
 import { DrizzleUsageLedgerStore } from './db/usageSchema.js';
 import { DrizzleScheduledTaskStore } from './db/schedulerSchema.js';
 import { DrizzleAgentJobStore } from './db/jobSchema.js';
+import { DrizzleAgentTaskStore } from './db/taskSchema.js';
+import { TaskService, taskIdFromJob } from './tasks/TaskService.js';
 import { DrizzlePendingActionPersistence } from './db/approvalSchema.js';
 import { DrizzleSilentInvestigationStore } from './db/investigationSchema.js';
 import { JobRunner } from './jobs/JobRunner.js';
@@ -1515,6 +1517,26 @@ async function main(): Promise<void> {
     });
 
     const jobStore = new DrizzleAgentJobStore(dbHandle.db);
+    const taskStore = new DrizzleAgentTaskStore(dbHandle.db);
+    const taskService = new TaskService({
+      store: taskStore,
+      isAdmin: (staffId) => configCenter.isAdmin(staffId),
+      enqueue: async (message, prompt, taskId) =>
+        jobStore.enqueue({
+          conversationId: message.conversationId,
+          conversationType: message.conversationType,
+          messageId: `job_${randomUUID()}`,
+          senderStaffId: message.senderStaffId,
+          senderNick: message.senderNick,
+          kind: 'task',
+          prompt,
+          metadata: {
+            source: 'task',
+            taskId,
+            requestedAt: Date.now(),
+          },
+        }),
+    });
     const notifyJobOwner = async (
       job: AgentJob,
       text: string,
@@ -1533,6 +1555,46 @@ async function main(): Promise<void> {
         logger.warn(
           { jobId: job.id, error: errorText(error) },
           'job result notification failed',
+        );
+      }
+    };
+    const syncTaskForJob = async (
+      job: AgentJob,
+      status: 'completed' | 'failed',
+      summary: string | null,
+    ): Promise<void> => {
+      const taskId = taskIdFromJob(job);
+      if (!taskId) return;
+      try {
+        const task = await taskService.completeForJob(job, status, summary);
+        if (!task) return;
+        const subscribers = await taskService.subscribers(task.id);
+        const targets = subscribers.filter(
+          (sub) => sub.staffId && sub.staffId !== job.senderStaffId,
+        );
+        if (targets.length === 0) return;
+        const text = [
+          `任务线程「${task.title}」有更新。`,
+          formatJobResultNotice(job),
+        ].join('\n\n');
+        for (const sub of targets) {
+          const sent = await adminTextSender.send([sub.staffId], text);
+          if (!sent.ok) {
+            logger.warn(
+              {
+                jobId: job.id,
+                taskId: task.id,
+                staffId: sub.staffId,
+                failed: sent.failed,
+              },
+              'task subscriber notification failed',
+            );
+          }
+        }
+      } catch (error) {
+        logger.warn(
+          { jobId: job.id, taskId, error: errorText(error) },
+          'failed to sync task thread',
         );
       }
     };
@@ -1577,6 +1639,7 @@ async function main(): Promise<void> {
           ...(worker ? { worker } : {}),
         });
         await notifyJobOwner(job, formatJobResultNotice(job));
+        await syncTaskForJob(job, 'completed', job.result?.answer ?? null);
       },
       onFailed: async (job, error) => {
         const worker =
@@ -1590,6 +1653,7 @@ async function main(): Promise<void> {
           job,
           `后台任务 ${job.id.slice(0, 8)} 执行失败：${error.slice(0, 500)}`,
         );
+        await syncTaskForJob(job, 'failed', error);
       },
     });
 
@@ -2117,6 +2181,7 @@ async function main(): Promise<void> {
           `执行范围：${profile.description}。查看进度：\`/jobs\`；详情：\`/job-status <id>\`；取消：\`/job-cancel <id>\`。`,
         ].join('\n');
       },
+      tasks: (message, args) => taskService.handleCommand(message, args),
       listJobs: async (message) =>
         formatJobList(
           await jobStore.list({
@@ -2153,6 +2218,18 @@ async function main(): Promise<void> {
           status: 'cancelled',
         });
         logger.info({ jobId: job.id }, 'agent job cancelled');
+        try {
+          await taskService.completeForJob(
+            cancelled,
+            'failed',
+            '后台任务已取消',
+          );
+        } catch (error) {
+          logger.warn(
+            { jobId: job.id, error: errorText(error) },
+            'failed to sync cancelled task thread',
+          );
+        }
         return `已取消后台任务 ${job.id.slice(0, 8)}。`;
       },
       reply: replyTo,
