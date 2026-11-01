@@ -512,6 +512,7 @@ sudo cp deploy/nginx.conf /etc/nginx/conf.d/ && sudo nginx -t && sudo systemctl 
 | `/remind <时间> <内容>` | 单聊内创建一次性提醒，到点用机器人单聊推送；`/remind list`、`/remind cancel <ID>` |
 | `/report <周期> <时间>` | 单聊内订阅日 / 周 / 月工作简报；`/report list`、`/report preview [weekly\|monthly]`、`/report cancel <ID>` |
 | `/job <需求>` | 提交后台任务，完成后机器人单聊通知结果；任务持久化到 `agent_jobs`，进程重启不丢 |
+| `/worker <research\|ops\|report> <需求>` | 交给指定 Worker 执行：独立工具白名单、预算与结构化回执 |
 | `/jobs` | 查看本会话最近的后台任务 |
 | `/job-status <ID>` | 查看后台任务状态、耗时与结果摘要（ID 支持前缀） |
 | `/job-cancel <ID>` | 取消排队或执行中的后台任务（仅发起人或管理员） |
@@ -533,6 +534,26 @@ sudo cp deploy/nginx.conf /etc/nginx/conf.d/ && sudo nginx -t && sudo systemctl 
 | `JOB_RUNNER_INTERVAL_SECONDS` | `5` | 后台任务轮询间隔（秒） |
 | `JOB_LEASE_SECONDS` | `1800` | 任务执行租约，需大于单任务最长执行时间；租约过期可被重新领取 |
 | `JOB_MAX_CONCURRENCY` | `2` | 单实例同时执行的后台任务数 |
+
+**Worker 化执行**：`/worker <research|ops|report> <需求>` 把任务交给带独立画像的执行单元。三类 Worker 共用持久化队列、租约与用量归因，但各自拥有工具白名单、独立预算和结构化回执：
+
+| Worker | 工具范围 | 默认预算（墙钟 / Token / 轮数） |
+| --- | --- | --- |
+| `research` | 只读工具；排除管理工具、破坏性工具与递归委派 | 600s / 100k / 20 |
+| `ops` | 业务工具（破坏性工具除外），写操作仍需 `/confirm` | 900s / 160k / 30 |
+| `report` | 默认只读，只汇总数据源并生成报告 | 900s / 120k / 25 |
+
+- 工具过滤在执行层完成：`ScopedToolProvider` 只向 Worker 暴露白名单内工具，模型即使被提示词诱导也看不到写工具或管理工具；`research` 始终只读，无法通过配置放开。
+- Worker 最终输出 JSON 回执（`status` / `summary` / `findings` / `actions` / `sources` / `openQuestions`）。机器人以 `summary` 作为任务结果，并在 `/job-status` 与完成通知中展示状态、关键发现与来源；解析失败时回退为原始回答，不会让任务失败。
+- 用量流水会记录 `worker=research|ops|report`，便于按执行单元核算成本；任务详情会标注 Worker 与结构化状态。
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `WORKER_<NAME>_MAX_WALL_SECONDS` | 见上表 | 单个 Worker 任务的墙钟上限 |
+| `WORKER_<NAME>_MAX_TOKENS` | 见上表 | 单个 Worker 任务的 Token 预算 |
+| `WORKER_<NAME>_MAX_ITERATIONS` | 见上表 | 单个 Worker 任务的最大模型轮数 |
+| `WORKER_OPS_READ_ONLY` / `WORKER_REPORT_READ_ONLY` | `false` / `true` | 是否强制只读；`research` 恒为只读 |
+| `WORKER_<NAME>_TOOL_ALLOWLIST` / `WORKER_<NAME>_TOOL_DENYLIST` | 空 | 逗号分隔的工具名单，结尾 `*` 为前缀匹配 |
 
 ### 个人提醒与工作报告
 

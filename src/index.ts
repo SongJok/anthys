@@ -43,6 +43,7 @@ import {
   conversationKeyFor,
   conversationTitleFor,
   type HarnessLogger,
+  type WorkerRuntime,
 } from './harness/AgentHarness.js';
 import {
   RunControlRegistry,
@@ -61,6 +62,9 @@ import { DrizzleAgentJobStore } from './db/jobSchema.js';
 import { DrizzlePendingActionPersistence } from './db/approvalSchema.js';
 import { DrizzleSilentInvestigationStore } from './db/investigationSchema.js';
 import { JobRunner } from './jobs/JobRunner.js';
+import { createWorkerRegistry } from './workers/WorkerRegistry.js';
+import { ScopedToolProvider } from './workers/ScopedToolProvider.js';
+import { isWorkerName, type WorkerName } from './types/workers.js';
 import {
   formatJob,
   formatJobList,
@@ -1312,6 +1316,46 @@ async function main(): Promise<void> {
       toolFilter: (tool) => tool.risk === 'read',
     });
 
+    // 后台 Worker：独立画像、工具白名单与预算；研究/报表走只读，执行单元写操作仍需确认
+    const workerRegistry = createWorkerRegistry({
+      basePolicy: configCenter.getLoopPolicy(),
+      env: process.env,
+    });
+    const workerRuntimes: Partial<Record<WorkerName, WorkerRuntime>> = {};
+    for (const profile of workerRegistry.list()) {
+      const scopedProvider = new ScopedToolProvider({
+        providers: () => toolProviders,
+        scope: profile.scope,
+        providerName: `worker:${profile.name}`,
+      });
+      workerRuntimes[profile.name] = {
+        profile,
+        engine: new ReActRunner({
+          model: profile.name === 'ops' ? adminModel : proactiveModel,
+          toolProviders: [scopedProvider],
+          policy: profile.policy,
+          temperature: 0,
+          enableNativeReasoning: false,
+          approval: resolveToolApproval,
+          toolTimeoutMs,
+        }),
+      };
+    }
+    logger.info(
+      {
+        workers: workerRegistry.list().map((profile) => ({
+          name: profile.name,
+          readOnly: profile.scope.readOnly,
+          maxWallTimeMs: profile.policy.maxWallTimeMs,
+          maxTotalTokens: profile.policy.maxTotalTokens,
+          maxIterations: profile.policy.maxIterations,
+          allow: profile.scope.allow,
+          deny: profile.scope.deny,
+        })),
+      },
+      'worker runtimes initialized',
+    );
+
     const routedEngines = new Map<ModelRole, ReActRunner>();
     const runnerForRole = (role: ModelRole): ReActRunner => {
       if (role === 'default') return engine;
@@ -1398,6 +1442,7 @@ async function main(): Promise<void> {
     const harness = new AgentHarness({
       engine: routingEngine,
       investigationEngine,
+      workerRuntimes,
       repository,
       assembler: new ContextAssembler({
         windowMessages: memoryConfig.windowMessages,
@@ -1498,26 +1543,49 @@ async function main(): Promise<void> {
       leaseMs: envSeconds(process.env.JOB_LEASE_SECONDS, 1_800) * 1_000,
       maxConcurrency: envCount(process.env.JOB_MAX_CONCURRENCY, 2),
       execute: async (job, context) => {
+        const worker =
+          typeof job.metadata.worker === 'string' &&
+          isWorkerName(job.metadata.worker)
+            ? job.metadata.worker
+            : undefined;
         const result = await harness.runJob(job, {
           emit: context.emit,
           signal: context.signal,
+          ...(worker ? { worker } : {}),
         });
         return {
           answer: result.answer,
           reasoning: result.reasoning,
           ...(result.model ? { model: result.model } : {}),
           usage: result.usage,
+          ...(result.workerOutput
+            ? {
+                metadata: {
+                  ...(worker ? { worker } : {}),
+                  workerOutput: result.workerOutput,
+                },
+              }
+            : {}),
         };
       },
       onCompleted: async (job) => {
+        const worker =
+          typeof job.metadata.worker === 'string' ? job.metadata.worker : undefined;
         metrics.inc('agent_jobs_total', {
           kind: job.kind,
           status: 'succeeded',
+          ...(worker ? { worker } : {}),
         });
         await notifyJobOwner(job, formatJobResultNotice(job));
       },
       onFailed: async (job, error) => {
-        metrics.inc('agent_jobs_total', { kind: job.kind, status: job.status });
+        const worker =
+          typeof job.metadata.worker === 'string' ? job.metadata.worker : undefined;
+        metrics.inc('agent_jobs_total', {
+          kind: job.kind,
+          status: job.status,
+          ...(worker ? { worker } : {}),
+        });
         await notifyJobOwner(
           job,
           `后台任务 ${job.id.slice(0, 8)} 执行失败：${error.slice(0, 500)}`,
@@ -2010,6 +2078,43 @@ async function main(): Promise<void> {
         return [
           `已提交后台任务 ${job.id.slice(0, 8)}，完成后会通过机器人单聊通知你。`,
           '查看进度：`/jobs`；查看详情：`/job-status <id>`；取消：`/job-cancel <id>`。',
+        ].join('\n');
+      },
+      submitWorker: async (message, worker, prompt) => {
+        if (!isWorkerName(worker)) {
+          return '未知 Worker，可选：research、ops、report。';
+        }
+        const profile = workerRegistry.get(worker);
+        const job = await jobStore.enqueue({
+          conversationId: message.conversationId,
+          conversationType: message.conversationType,
+          messageId: `job_${randomUUID()}`,
+          senderStaffId: message.senderStaffId,
+          senderNick: message.senderNick,
+          kind: 'worker',
+          prompt,
+          metadata: {
+            source: 'command',
+            worker,
+            requestedAt: Date.now(),
+          },
+        });
+        metrics.inc('agent_jobs_total', {
+          kind: 'worker',
+          status: 'queued',
+          worker,
+        });
+        logger.info(
+          {
+            jobId: job.id,
+            conversationId: job.conversationId,
+            worker,
+          },
+          'worker job enqueued',
+        );
+        return [
+          `已提交 ${profile.title} 任务 ${job.id.slice(0, 8)}，完成后会通过机器人单聊通知你。`,
+          `执行范围：${profile.description}。查看进度：\`/jobs\`；详情：\`/job-status <id>\`；取消：\`/job-cancel <id>\`。`,
         ].join('\n');
       },
       listJobs: async (message) =>

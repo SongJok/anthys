@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { SubagentToolProvider, isReadOnlyTool } from './SubagentToolProvider.js';
+import { SubagentToolProvider } from './SubagentToolProvider.js';
+import { isReadOnlyTool } from '../tools/toolRisk.js';
 import type {
   ChatCompletionRequest,
   ChatModel,

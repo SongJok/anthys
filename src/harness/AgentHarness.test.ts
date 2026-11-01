@@ -103,11 +103,15 @@ function createHarness(
   usageGuard?: ConstructorParameters<typeof AgentHarness>[0]['usageGuard'],
   glossary?: ConstructorParameters<typeof AgentHarness>[0]['glossary'],
   investigationEngine?: AgentEngine,
+  workerRuntimes?: ConstructorParameters<
+    typeof AgentHarness
+  >[0]['workerRuntimes'],
 ) {
   const { repository, conversations, rows } = createRepository();
   const harness = new AgentHarness({
     engine,
     ...(investigationEngine ? { investigationEngine } : {}),
+    ...(workerRuntimes ? { workerRuntimes } : {}),
     ...(usageGuard ? { usageGuard } : {}),
     ...(glossary ? { glossary } : {}),
     repository,
@@ -256,6 +260,199 @@ describe('AgentHarness', () => {
     }>;
     expect(messages.at(-1)?.content).toContain('后台任务 ID：job-1');
     expect(messages.at(-1)?.content).toContain('整理本周客户反馈');
+  });
+
+  it('Worker 任务使用专属引擎、预算与结构化输出', async () => {
+    const mainCalls: { messages: unknown[] }[] = [];
+    const workerCalls: Array<{
+      jobKind?: string;
+      worker?: string;
+      deadlineAt: number;
+      messages: unknown[];
+    }> = [];
+    const records: Array<{ jobKind?: string; worker?: string }> = [];
+    const workerEngine: AgentEngine = {
+      async run(input) {
+        workerCalls.push({
+          ...(input.context.jobKind
+            ? { jobKind: input.context.jobKind }
+            : {}),
+          ...(input.context.worker ? { worker: input.context.worker } : {}),
+          deadlineAt: input.context.deadlineAt,
+          messages: input.messages,
+        });
+        input.emit({
+          type: 'completed',
+          usage: { totalTokens: 25, steps: 3, durationMs: 14 },
+        });
+        return {
+          answer: JSON.stringify({
+            status: 'completed',
+            summary: '网关超时要调大',
+            findings: [{ claim: '超时阈值为 3 秒', source: '监控面板' }],
+            actions: [],
+            sources: ['https://monitor.example.com'],
+            openQuestions: [],
+          }),
+          reasoning: '',
+          usage: { totalTokens: 25, steps: 3, durationMs: 14 },
+        };
+      },
+    };
+    const { harness, rows } = createHarness(
+      scriptedEngine(mainCalls),
+      {
+        async assertWithinQuota() {},
+        async record(input) {
+          records.push({
+            ...(input.jobKind ? { jobKind: input.jobKind } : {}),
+            ...(input.worker ? { worker: input.worker } : {}),
+          });
+        },
+      },
+      undefined,
+      undefined,
+      {
+        research: {
+          profile: {
+            name: 'research',
+            title: '研究 Worker',
+            description: '只读查证',
+            scope: { readOnly: true },
+            policy: {
+              maxWallTimeMs: 2_000,
+              maxTotalTokens: 500,
+              maxConsecutiveSameTool: 2,
+              convergenceCheck: true,
+              maxIterations: 5,
+            },
+            instruction: '只做只读查证，不要执行写操作。',
+          },
+          engine: workerEngine,
+        },
+      },
+    );
+    const job: AgentJob = {
+      id: 'job-worker-1',
+      conversationId: 'cid-1',
+      conversationType: '1',
+      messageId: 'job_msg-worker-1',
+      senderStaffId: 'staff-1',
+      senderNick: '张三',
+      kind: 'worker',
+      status: 'running',
+      prompt: '查一下网关超时原因',
+      metadata: { worker: 'research' },
+      result: null,
+      error: null,
+      priority: 0,
+      attempts: 1,
+      maxAttempts: 2,
+      leaseOwner: 'runner',
+      leaseExpiresAt: 0,
+      createdAt: 0,
+      updatedAt: 0,
+      startedAt: 0,
+      finishedAt: null,
+    };
+
+    const result = await harness.runJob(job, {
+      emit: () => undefined,
+      worker: 'research',
+    });
+    expect(mainCalls).toHaveLength(0);
+    expect(workerCalls[0]).toMatchObject({
+      jobKind: 'worker',
+      worker: 'research',
+      deadlineAt: 3_000,
+    });
+    expect(result.answer).toBe('网关超时要调大');
+    expect(result.workerOutput).toMatchObject({
+      status: 'completed',
+      findings: [{ claim: '超时阈值为 3 秒', source: '监控面板' }],
+      sources: ['https://monitor.example.com'],
+    });
+    expect(records[0]).toEqual({ jobKind: 'worker', worker: 'research' });
+    expect(rows[1]).toMatchObject({
+      role: 'assistant',
+      content: '网关超时要调大',
+      metadata: { worker: 'research', workerStatus: 'completed' },
+    });
+    const prompt = (
+      workerCalls[0]?.messages.at(-1) as { content: string } | undefined
+    )?.content;
+    expect(prompt).toContain('只做只读查证，不要执行写操作。');
+    expect(prompt).toContain('"status":"completed|partial|blocked"');
+  });
+
+  it('Worker 输出不是 JSON 时回退原始回答', async () => {
+    const workerEngine: AgentEngine = {
+      async run() {
+        return {
+          answer: '网关超时集中在 10 点',
+          reasoning: '',
+          usage: { totalTokens: 8, steps: 1, durationMs: 5 },
+        };
+      },
+    };
+    const { harness, rows } = createHarness(
+      scriptedEngine([]),
+      undefined,
+      undefined,
+      undefined,
+      {
+        research: {
+          profile: {
+            name: 'research',
+            title: '研究 Worker',
+            description: '只读查证',
+            scope: { readOnly: true },
+            policy: {
+              maxWallTimeMs: 2_000,
+              maxTotalTokens: 500,
+              maxConsecutiveSameTool: 2,
+              convergenceCheck: true,
+              maxIterations: 5,
+            },
+            instruction: '只做只读查证。',
+          },
+          engine: workerEngine,
+        },
+      },
+    );
+    const job: AgentJob = {
+      id: 'job-worker-2',
+      conversationId: 'cid-1',
+      conversationType: '1',
+      messageId: 'job_msg-worker-2',
+      senderStaffId: 'staff-1',
+      senderNick: '张三',
+      kind: 'worker',
+      status: 'running',
+      prompt: '查一下网关超时原因',
+      metadata: { worker: 'research' },
+      result: null,
+      error: null,
+      priority: 0,
+      attempts: 1,
+      maxAttempts: 2,
+      leaseOwner: 'runner',
+      leaseExpiresAt: 0,
+      createdAt: 0,
+      updatedAt: 0,
+      startedAt: 0,
+      finishedAt: null,
+    };
+    const result = await harness.runJob(job, {
+      emit: () => undefined,
+      worker: 'research',
+    });
+    expect(result.answer).toBe('网关超时集中在 10 点');
+    expect(result.workerOutput).toBeUndefined();
+    expect(rows[1]).toMatchObject({
+      role: 'assistant',
+      content: '网关超时集中在 10 点',
+    });
   });
 
   it('静默调查使用只读引擎且不写会话历史', async () => {

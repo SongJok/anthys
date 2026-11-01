@@ -25,6 +25,16 @@ import type {
   RunUsage,
 } from '../types/core.js';
 import type { AgentJob } from '../types/jobs.js';
+import {
+  isWorkerName,
+  type WorkerName,
+  type WorkerOutput,
+} from '../types/workers.js';
+import type { WorkerProfile } from '../workers/WorkerRegistry.js';
+import {
+  WORKER_OUTPUT_CONTRACT,
+  parseWorkerOutput,
+} from '../workers/WorkerOutput.js';
 import { QuotaExceededError } from '../billing/UsageGuard.js';
 import {
   assessRequestAdmission,
@@ -62,6 +72,8 @@ export interface AgentHarnessOptions {
   engine: AgentEngine;
   /** 只读调查引擎（工具白名单在执行层过滤）；缺省回退主引擎 */
   investigationEngine?: AgentEngine;
+  /** Worker 专用引擎与画像；未配置的 Worker 回退主引擎 */
+  workerRuntimes?: Partial<Record<WorkerName, WorkerRuntime>>;
   repository: ConversationRepository;
   assembler: ContextAssembler;
   persona: PersonaInput;
@@ -121,8 +133,18 @@ export interface JobHandleOptions {
   emit: (event: AgentStreamEvent) => void;
   signal?: AbortSignal;
   notify?: (text: string) => Promise<void> | void;
-  /** Worker 名称，用于用量归因 */
+  /** Worker 名称，用于用量归因、预算与结构化输出 */
   worker?: string;
+}
+
+export interface WorkerRuntime {
+  profile: WorkerProfile;
+  engine: AgentEngine;
+}
+
+export interface JobRunResult extends RunResult {
+  /** Worker 结构化回执；普通后台任务不返回 */
+  workerOutput?: WorkerOutput;
 }
 
 export interface InvestigationHandleOptions {
@@ -543,9 +565,23 @@ export class AgentHarness {
   public async runJob(
     job: AgentJob,
     handle: JobHandleOptions,
-  ): Promise<RunResult> {
+  ): Promise<JobRunResult> {
     const text = job.prompt.trim();
     if (!text) throw new Error('后台任务缺少需求描述');
+    const workerName =
+      handle.worker !== undefined && isWorkerName(handle.worker)
+        ? handle.worker
+        : undefined;
+    const workerRuntime = workerName
+      ? this.options.workerRuntimes?.[workerName]
+      : undefined;
+    const workerProfile = workerRuntime?.profile;
+    if (handle.worker && !workerRuntime) {
+      this.options.logger?.warn(
+        { jobId: job.id, worker: handle.worker },
+        'unknown worker, falling back to main engine',
+      );
+    }
 
     const message: InboundMessage = {
       messageId: job.messageId || `job_${job.id}`,
@@ -559,7 +595,7 @@ export class AgentHarness {
         source: 'agent_job',
         jobId: job.id,
         jobKind: job.kind,
-        ...(handle.worker ? { worker: handle.worker } : {}),
+        ...(workerName ? { worker: workerName } : {}),
       },
       timestamp: job.createdAt,
     };
@@ -568,7 +604,9 @@ export class AgentHarness {
     const quotaAnswer = await this.enforceQuota(message, handle.emit, false);
     if (quotaAnswer) return quotaAnswer;
 
-    const { repository, assembler, engine, policy, persona } = this.options;
+    const { repository, assembler, persona } = this.options;
+    const engine = workerRuntime?.engine ?? this.options.engine;
+    const policy = workerProfile?.policy ?? this.options.policy;
     const conversation = await repository.ensureConversation({
       conversationKey: conversationKeyFor(message),
       conversationType: message.conversationType,
@@ -595,6 +633,13 @@ export class AgentHarness {
     );
     const jobInstruction = [
       `这是一个后台任务（${job.kind}），用户不会实时查看执行过程。`,
+      ...(workerProfile
+        ? [
+            `执行单元：${workerProfile.title}（${workerProfile.name}）`,
+            workerProfile.instruction,
+            WORKER_OUTPUT_CONTRACT,
+          ]
+        : []),
       '请独立完成需求，在最终回答中给出可交付结果、关键依据与后续建议；不要输出“稍后马上”之类的过程承诺。',
       `后台任务 ID：${job.id}`,
       `任务需求：${text}`,
@@ -623,7 +668,7 @@ export class AgentHarness {
         conversationType: message.conversationType,
         jobId: job.id,
         jobKind: job.kind,
-        ...(handle.worker ? { worker: handle.worker } : {}),
+        ...(workerName ? { worker: workerName } : {}),
       },
     });
 
@@ -641,7 +686,7 @@ export class AgentHarness {
         proactive,
         jobId: job.id,
         jobKind: job.kind,
-        ...(handle.worker ? { worker: handle.worker } : {}),
+        ...(workerName ? { worker: workerName } : {}),
         ...(handle.notify ? { notify: handle.notify } : {}),
       },
       emit: handle.emit,
@@ -650,20 +695,33 @@ export class AgentHarness {
     await this.recordUsage(message, result, proactive, {
       jobId: job.id,
       jobKind: job.kind,
-      ...(handle.worker ? { worker: handle.worker } : {}),
+      ...(workerName ? { worker: workerName } : {}),
     });
+
+    let workerOutput: WorkerOutput | undefined;
+    if (workerProfile) {
+      workerOutput = parseWorkerOutput(result.answer) ?? undefined;
+      if (!workerOutput) {
+        this.options.logger?.warn(
+          { jobId: job.id, worker: workerProfile.name },
+          'worker output is not structured JSON, falling back to raw answer',
+        );
+      }
+    }
+    const finalAnswer = workerOutput?.summary ?? result.answer;
 
     await repository.appendMessage({
       conversationId: conversation.id,
       role: 'assistant',
-      content: result.answer,
+      content: finalAnswer,
       reasoning: result.reasoning || null,
       tokenCount: result.usage.totalTokens,
       metadata: {
         messageId: message.messageId,
         jobId: job.id,
         jobKind: job.kind,
-        ...(handle.worker ? { worker: handle.worker } : {}),
+        ...(workerName ? { worker: workerName } : {}),
+        ...(workerOutput ? { workerStatus: workerOutput.status } : {}),
         steps: result.usage.steps,
         durationMs: result.usage.durationMs,
         ...(result.model ? { model: result.model } : {}),
@@ -675,7 +733,8 @@ export class AgentHarness {
         conversationKey: conversation.conversationKey,
         jobId: job.id,
         jobKind: job.kind,
-        ...(handle.worker ? { worker: handle.worker } : {}),
+        ...(workerName ? { worker: workerName } : {}),
+        ...(workerOutput ? { workerStatus: workerOutput.status } : {}),
         steps: result.usage.steps,
         tokens: result.usage.totalTokens,
         durationMs: result.usage.durationMs,
@@ -687,9 +746,13 @@ export class AgentHarness {
       conversation.id,
       message,
       text,
-      result.answer,
+      finalAnswer,
     );
-    return result;
+    return {
+      ...result,
+      answer: finalAnswer,
+      ...(workerOutput ? { workerOutput } : {}),
+    };
   }
 
   /** 测试与优雅停机时等待后台摘要/画像抽取完成 */

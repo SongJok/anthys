@@ -74,6 +74,11 @@ function runtime(overrides: Partial<CommandRuntime> = {}): {
       calls.job.push([msg.messageId, prompt]);
       return `已提交后台任务 ${prompt.slice(0, 4)}。`;
     },
+    submitWorker: async (msg, worker, prompt) => {
+      calls.worker = calls.worker ?? [];
+      calls.worker.push([msg.messageId, worker, prompt]);
+      return `已提交 ${worker} Worker 任务。`;
+    },
     listJobs: async () => '本会话暂无后台任务。',
     jobStatus: async (_msg, id) => `任务 ${id} 详情。`,
     cancelJob: async (_msg, id) => `已取消后台任务 ${id}。`,
@@ -206,6 +211,23 @@ describe('CommandRouter', () => {
 
     await router.tryHandle(message({ text: '/job-cancel 1234abcd' }));
     expect(replies[4]).toContain('已取消');
+  });
+
+  it('/worker 校验 Worker 名称并转发需求', async () => {
+    const { router, calls, replies } = runtime();
+    await router.tryHandle(message({ text: '/worker' }));
+    expect(replies[0]).toContain('research|ops|report');
+    await router.tryHandle(message({ text: '/worker unknown 查一下网关' }));
+    expect(replies[1]).toContain('research|ops|report');
+    expect(calls.worker).toBeUndefined();
+
+    await router.tryHandle(
+      message({ text: '/worker Research 查一下网关超时原因' }),
+    );
+    expect(calls.worker).toEqual([
+      ['msg-1', 'research', '查一下网关超时原因'],
+    ]);
+    expect(replies[2]).toContain('research Worker');
   });
 
   it('未知指令给出帮助提示', async () => {

@@ -1,4 +1,5 @@
 import type { InboundMessage } from '../types/core.js';
+import { WORKER_NAMES, isWorkerName } from '../types/workers.js';
 
 export interface CommandRuntime {
   isAdmin(staffId: string): boolean;
@@ -37,6 +38,12 @@ export interface CommandRuntime {
   reports(message: InboundMessage, args: string[]): Promise<string>;
   /** 提交后台任务并返回受理结果 */
   submitJob(message: InboundMessage, prompt: string): Promise<string>;
+  /** 提交指定 Worker（research/ops/report）的后台任务 */
+  submitWorker(
+    message: InboundMessage,
+    worker: string,
+    prompt: string,
+  ): Promise<string>;
   /** 查看本会话最近的后台任务 */
   listJobs(message: InboundMessage): Promise<string>;
   /** 查看指定后台任务详情（支持 ID 前缀） */
@@ -73,6 +80,7 @@ const HELP_TEXT = [
   '- `/remind 25分钟后 开会` 创建个人提醒（单聊）',
   '- `/report daily 09:00` 定时推送日/周/月报（单聊）',
   '- `/job <需求>` 提交后台长任务，完成后主动通知',
+  '- `/worker <research|ops|report> <需求>` 提交指定 Worker 的后台任务',
   '- `/jobs` 查看本会话最近的后台任务',
   '- `/job-status <id>` 查看任务详情',
   '- `/job-cancel <id>` 取消排队或执行中的任务',
@@ -235,6 +243,23 @@ export class CommandRouter {
       }
       case 'jobs': {
         await runtime.reply(message, await runtime.listJobs(message));
+        return true;
+      }
+      case 'worker': {
+        const [workerToken, ...rest] = command.args;
+        const worker = workerToken?.toLowerCase();
+        const prompt = rest.join(' ').trim();
+        if (!worker || !isWorkerName(worker) || !prompt) {
+          await runtime.reply(
+            message,
+            `用法：\`/worker <${WORKER_NAMES.join('|')}> <需求>\``,
+          );
+          return true;
+        }
+        await runtime.reply(
+          message,
+          await runtime.submitWorker(message, worker, prompt),
+        );
         return true;
       }
       case 'job-status': {

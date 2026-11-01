@@ -8,6 +8,7 @@ import type {
   ToolExecutionOutput,
 } from '../types/core.js';
 import { ReActRunner } from './ReActRunner.js';
+import { isReadOnlyTool } from '../tools/toolRisk.js';
 
 export interface SubagentLogger {
   info(obj: Record<string, unknown>, msg: string): void;
@@ -29,16 +30,6 @@ export interface SubagentToolProviderOptions {
 const DEFAULT_SUBAGENT_TIMEOUT_MS = 90_000;
 const DEFAULT_SUBAGENT_MAX_TOKENS = 20_000;
 const SUBAGENT_TOOL_NAME = 'delegate_research';
-const WRITE_TOOL_PATTERN =
-  /(^|[^a-z])(delete|remove|drop|purge|destroy|revoke|terminate|truncate|reset|unbind|wipe|uninstall|create|update|upsert|insert|set|add|write|upload|send|post|publish|move|rename|import|apply|execute|run|approve|reject|grant|assign|enable|disable|start|stop|restart|mute|cancel|manage|configure|modify|change|edit|patch|deploy|install|archive)([^a-z]|$)/i;
-
-/** 子代理只做研究：读写风险的工具一律不暴露，管理工具也不下放 */
-export function isReadOnlyTool(tool: ToolDefinition): boolean {
-  if (tool.name === SUBAGENT_TOOL_NAME) return false;
-  if (tool.name.startsWith('admin_')) return false;
-  if (tool.risk && tool.risk !== 'read') return false;
-  return !WRITE_TOOL_PATTERN.test(tool.name);
-}
 
 function toReadOnlyProvider(
   providers: IToolProvider[],
