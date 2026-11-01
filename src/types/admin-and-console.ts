@@ -374,6 +374,8 @@ export interface McpServerStatusView {
   connected: boolean;
   toolCount: number;
   lastError: string | null;
+  source?: 'manual' | 'plugin';
+  pluginId?: string;
 }
 
 /** ChatOps / Web 共用的 MCP 管控端口 */

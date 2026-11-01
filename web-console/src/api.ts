@@ -20,8 +20,25 @@ import type {
   McpServerConfig,
   McpServerStatus,
   McpTestResult,
+  PluginAdminView,
+  PluginPackagePreview,
+  PluginValidationIssue,
+  PluginVersionRecord,
+  ProjectAdminEntry,
+  ProjectHandbookResult,
+  ProjectRecord,
+  ProjectSearchResult,
+  ProjectSnapshot,
+  ProjectSyncJob,
   RetentionPolicy,
   RetentionStats,
+  SkillAdminView,
+  SkillDraftInput,
+  SkillPreviewResult,
+  SkillResourceReadResult,
+  SkillResourceInfo,
+  SkillUsageSummary,
+  SkillValidationResult,
   StreamStatus,
   TracePage,
 } from './types';
@@ -38,6 +55,17 @@ export function setToken(token: string): void {
   else localStorage.removeItem(TOKEN_KEY);
 }
 
+async function parsePayload<T>(response: Response): Promise<T> {
+  const payload = (await response.json().catch(() => ({}))) as {
+    ok?: boolean;
+    error?: string;
+  };
+  if (!response.ok || payload.ok === false) {
+    throw new Error(payload.error ?? `请求失败 (${response.status})`);
+  }
+  return payload as T;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const token = getToken();
   const response = await fetch(`${BASE}${path}`, {
@@ -48,14 +76,17 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       ...(init?.headers as Record<string, string> | undefined),
     },
   });
-  const payload = (await response.json().catch(() => ({}))) as {
-    ok?: boolean;
-    error?: string;
-  };
-  if (!response.ok || payload.ok === false) {
-    throw new Error(payload.error ?? `请求失败 (${response.status})`);
-  }
-  return payload as T;
+  return parsePayload<T>(response);
+}
+
+async function postForm<T>(path: string, form: FormData): Promise<T> {
+  const token = getToken();
+  const response = await fetch(`${BASE}${path}`, {
+    method: 'POST',
+    headers: token ? { authorization: `Bearer ${token}` } : undefined,
+    body: form,
+  });
+  return parsePayload<T>(response);
 }
 
 export const api = {
@@ -243,6 +274,209 @@ export const api = {
     request<{ removed: boolean }>(`/glossary/${encodeURIComponent(id)}`, {
       method: 'DELETE',
     }),
+
+  skills: (params: { query?: string; source?: string; enabled?: boolean } = {}) => {
+    const search = new URLSearchParams();
+    if (params.query) search.set('query', params.query);
+    if (params.source) search.set('source', params.source);
+    if (params.enabled !== undefined) search.set('enabled', String(params.enabled));
+    const suffix = search.toString();
+    return request<{ skills: SkillAdminView[]; total: number }>(
+      `/skills${suffix ? `?${suffix}` : ''}`,
+    );
+  },
+  skill: (id: string) =>
+    request<{ skill: SkillAdminView }>(`/skills/${encodeURIComponent(id)}`),
+  createSkill: (body: SkillDraftInput) =>
+    request<{ skill: SkillAdminView }>('/skills', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  updateSkill: (id: string, body: SkillDraftInput) =>
+    request<{ skill: SkillAdminView }>(`/skills/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
+  deleteSkill: (id: string) =>
+    request<{ ok: boolean }>(`/skills/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    }),
+  setSkillEnabled: (id: string, enabled: boolean) =>
+    request<{ skill: SkillAdminView }>(
+      `/skills/${encodeURIComponent(id)}/${enabled ? 'enable' : 'disable'}`,
+      { method: 'POST' },
+    ),
+  reloadSkills: () =>
+    request<{ loaded: number; errors: string[] }>('/skills/reload', {
+      method: 'POST',
+    }),
+  validateSkill: (body: SkillDraftInput) =>
+    request<{ result: SkillValidationResult }>('/skills/validate', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  previewSkills: (body: {
+    query: string;
+    conversationType?: '1' | '2';
+    isAdmin?: boolean;
+    projectId?: string;
+    limit?: number;
+  }) =>
+    request<SkillPreviewResult>('/skills/preview', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  skillUsage: (days = 7) =>
+    request<{ days: number; usage: Record<string, SkillUsageSummary> }>(
+      `/skills/usage?days=${days}`,
+    ),
+  readSkillResource: (id: string, resourcePath: string) =>
+    request<{ resource: SkillResourceReadResult }>(
+      `/skills/${encodeURIComponent(id)}/resource?path=${encodeURIComponent(resourcePath)}`,
+    ),
+  writeSkillResource: (id: string, path: string, content: string) =>
+    request<{ resource: SkillResourceInfo }>(
+      `/skills/${encodeURIComponent(id)}/resource`,
+      { method: 'PUT', body: JSON.stringify({ path, content }) },
+    ),
+  deleteSkillResource: (id: string, resourcePath: string) =>
+    request<{ ok: boolean }>(
+      `/skills/${encodeURIComponent(id)}/resource?path=${encodeURIComponent(resourcePath)}`,
+      { method: 'DELETE' },
+    ),
+
+  plugins: (params: { query?: string; status?: string } = {}) => {
+    const search = new URLSearchParams();
+    if (params.query) search.set('query', params.query);
+    if (params.status) search.set('status', params.status);
+    const suffix = search.toString();
+    return request<{ plugins: PluginAdminView[]; total: number }>(
+      `/plugins${suffix ? `?${suffix}` : ''}`,
+    );
+  },
+  plugin: (id: string) =>
+    request<{ plugin: PluginAdminView }>(`/plugins/${encodeURIComponent(id)}`),
+  pluginVersions: (id: string) =>
+    request<{ versions: PluginVersionRecord[] }>(
+      `/plugins/${encodeURIComponent(id)}/versions`,
+    ),
+  validatePlugin: (body: { path?: string; dir?: string }) =>
+    request<{ preview: PluginPackagePreview }>('/plugins/validate', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  validatePluginFile: (file: File) => {
+    const form = new FormData();
+    form.append('file', file);
+    return postForm<{ preview: PluginPackagePreview }>('/plugins/validate', form);
+  },
+  uploadPlugin: (
+    file: File,
+    options: { force?: boolean; allowMissingSecrets?: boolean; mode?: 'install' | 'upgrade'; id?: string },
+  ) => {
+    const form = new FormData();
+    form.append('file', file);
+    if (options.force !== undefined) form.append('force', String(options.force));
+    if (options.allowMissingSecrets !== undefined) {
+      form.append('allowMissingSecrets', String(options.allowMissingSecrets));
+    }
+    const path =
+      options.mode === 'upgrade' && options.id
+        ? `/plugins/${encodeURIComponent(options.id)}/upgrade`
+        : '/plugins/install';
+    return postForm<{ plugin: PluginAdminView; warnings: PluginValidationIssue[] }>(
+      path,
+      form,
+    );
+  },
+  installPluginPath: (body: {
+    path?: string;
+    dir?: string;
+    force?: boolean;
+    allowMissingSecrets?: boolean;
+  }) =>
+    request<{ plugin: PluginAdminView; warnings: PluginValidationIssue[] }>(
+      '/plugins/install',
+      { method: 'POST', body: JSON.stringify(body) },
+    ),
+  upgradePluginPath: (
+    id: string,
+    body: { path?: string; dir?: string; force?: boolean; allowMissingSecrets?: boolean },
+  ) =>
+    request<{ plugin: PluginAdminView; warnings: PluginValidationIssue[] }>(
+      `/plugins/${encodeURIComponent(id)}/upgrade`,
+      { method: 'POST', body: JSON.stringify(body) },
+    ),
+  enablePlugin: (id: string) =>
+    request<{ plugin: PluginAdminView }>(
+      `/plugins/${encodeURIComponent(id)}/enable`,
+      { method: 'POST' },
+    ),
+  disablePlugin: (id: string) =>
+    request<{ plugin: PluginAdminView }>(
+      `/plugins/${encodeURIComponent(id)}/disable`,
+      { method: 'POST' },
+    ),
+  rollbackPlugin: (id: string, version: string) =>
+    request<{ plugin: PluginAdminView }>(
+      `/plugins/${encodeURIComponent(id)}/rollback`,
+      { method: 'POST', body: JSON.stringify({ version }) },
+    ),
+  uninstallPlugin: (id: string, deleteFiles = false) =>
+    request<{ ok: boolean }>(
+      `/plugins/${encodeURIComponent(id)}?deleteFiles=${deleteFiles}`,
+      { method: 'DELETE' },
+    ),
+
+  projects: (params: { query?: string } = {}) => {
+    const suffix = params.query
+      ? `?query=${encodeURIComponent(params.query)}`
+      : '';
+    return request<{ projects: ProjectAdminEntry[]; total: number }>(
+      `/projects${suffix}`,
+    );
+  },
+  project: (id: string) =>
+    request<{ project: ProjectRecord }>(`/projects/${encodeURIComponent(id)}`),
+  createProject: (body: Record<string, unknown>) =>
+    request<{ project: ProjectRecord }>('/projects', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  updateProject: (id: string, body: Record<string, unknown>) =>
+    request<{ project: ProjectRecord }>(`/projects/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
+  deleteProject: (id: string) =>
+    request<{ ok: boolean }>(`/projects/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    }),
+  syncProject: (id: string) =>
+    request<{ job: ProjectSyncJob }>(
+      `/projects/${encodeURIComponent(id)}/sync`,
+      { method: 'POST' },
+    ),
+  projectSyncJobs: (id: string, limit = 20) =>
+    request<{ jobs: ProjectSyncJob[] }>(
+      `/projects/${encodeURIComponent(id)}/sync-jobs?limit=${limit}`,
+    ),
+  projectSnapshots: (id: string, limit = 10) =>
+    request<{ snapshots: ProjectSnapshot[] }>(
+      `/projects/${encodeURIComponent(id)}/snapshots?limit=${limit}`,
+    ),
+  searchProject: (id: string, query: string, limit = 10) =>
+    request<{ result: ProjectSearchResult }>(
+      `/projects/${encodeURIComponent(id)}/search?q=${encodeURIComponent(query)}&limit=${limit}`,
+    ),
+  projectHandbook: (id: string) =>
+    request<{ handbook: ProjectHandbookResult }>(
+      `/projects/${encodeURIComponent(id)}/handbook`,
+    ),
+  projectManualEntries: (id: string) =>
+    request<{ entries: ProjectHandbookResult['manualEntries'] }>(
+      `/projects/${encodeURIComponent(id)}/manual-entries`,
+    ),
 };
 
 /** EventSource 无法携带 Authorize 头，改用一次性票据订阅 SSE */

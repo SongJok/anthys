@@ -206,6 +206,7 @@ export interface ProjectStore {
   createSyncJob(
     projectId: string,
     trigger: ProjectSyncJob['trigger'],
+    status?: ProjectSyncStatus,
   ): Promise<ProjectSyncJob>;
   updateSyncJob(
     id: string,
@@ -935,10 +936,16 @@ export class DrizzleProjectStore implements ProjectStore {
   public async createSyncJob(
     projectId: string,
     trigger: ProjectSyncJob['trigger'],
+    status: ProjectSyncStatus = 'running',
   ): Promise<ProjectSyncJob> {
     const [row] = await this.db
       .insert(projectSyncJobs)
-      .values({ projectId, status: 'running', trigger, startedAt: new Date() })
+      .values({
+        projectId,
+        status,
+        trigger,
+        ...(status === 'queued' ? {} : { startedAt: new Date() }),
+      })
       .returning();
     return toSyncJob(row);
   }

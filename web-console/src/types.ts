@@ -315,3 +315,380 @@ export interface GlossaryPromptPreview {
   prompt: string;
   terms: GlossaryTerm[];
 }
+
+/* ------------------------------------------------------------------ */
+/* 技能、插件与项目手册                                                */
+/* ------------------------------------------------------------------ */
+
+export type SkillSource = 'builtin' | 'local' | 'plugin';
+export type SkillRisk = 'read' | 'write' | 'destructive';
+export type SkillVisibility = 'public' | 'admin';
+
+export interface SkillResourceInfo {
+  path: string;
+  sizeBytes: number;
+}
+
+export interface SkillDefinition {
+  id: string;
+  name: string;
+  description: string;
+  version: string;
+  whenToUse: string;
+  tags: string[];
+  allowedTools: string[];
+  risk: SkillRisk;
+  visibility: SkillVisibility;
+  source: SkillSource;
+  pluginId?: string;
+  dir: string;
+  body: string;
+  bodyHash: string;
+  maxInstructionChars: number;
+  enabled: boolean;
+  resources: SkillResourceInfo[];
+  loadError?: string;
+}
+
+export interface SkillAdminView extends SkillDefinition {
+  lastUsedAt: number | null;
+  uses: number;
+}
+
+export interface SkillDraftInput {
+  name: string;
+  description: string;
+  version?: string;
+  whenToUse: string;
+  tags?: string[];
+  allowedTools?: string[];
+  risk?: SkillRisk;
+  visibility?: SkillVisibility;
+  maxInstructionChars?: number;
+  body: string;
+}
+
+export interface SkillValidationResult {
+  ok: boolean;
+  errors: string[];
+  warnings: string[];
+  bodyBytes: number;
+  frontmatter?: {
+    name: string;
+    description: string;
+    version?: string;
+    when_to_use?: string;
+    tags?: string[];
+    allowed_tools?: string[];
+    risk?: SkillRisk;
+    visibility?: SkillVisibility;
+    max_instruction_chars?: number;
+  };
+}
+
+export interface SkillCatalogEntry {
+  id: string;
+  name: string;
+  description: string;
+  whenToUse: string;
+  source: SkillSource;
+  score?: number;
+}
+
+export interface SkillPreviewEntry {
+  skill: SkillCatalogEntry;
+  score: number;
+  matched: boolean;
+}
+
+export interface SkillPreviewResult {
+  prompt: string;
+  entries: SkillPreviewEntry[];
+  truncated: boolean;
+}
+
+export interface SkillUsageSummary {
+  skillId: string;
+  uses: number;
+  lastUsedAt: number | null;
+}
+
+export interface SkillResourceReadResult {
+  skillId: string;
+  path: string;
+  startLine: number;
+  endLine: number;
+  totalLines: number;
+  nextStartLine?: number;
+  content: string;
+  truncated: boolean;
+}
+
+export type PluginStatus =
+  | 'installed'
+  | 'enabled'
+  | 'disabled'
+  | 'error'
+  | 'degraded';
+export type PluginVersionStatus = PluginStatus | 'superseded';
+export type PluginMcpDomain =
+  | 'code'
+  | 'data'
+  | 'log'
+  | 'apidoc'
+  | 'business'
+  | 'general';
+export type PluginMcpTransport = 'stdio' | 'sse' | 'streamable-http';
+
+export interface PluginMcpServerDecl {
+  id: string;
+  name: string;
+  domain: PluginMcpDomain;
+  transport: PluginMcpTransport;
+  endpointOrCommand: string;
+  args?: string[];
+  envOrHeaders?: Record<string, string>;
+  timeoutMs?: number;
+  maxResultChars?: number;
+  enabled?: boolean;
+}
+
+export interface PluginSecretDecl {
+  key: string;
+  description?: string;
+  required?: boolean;
+}
+
+export interface PluginManifest {
+  schemaVersion: 1;
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+  publisher?: string;
+  homepage?: string;
+  license?: string;
+  engines: { agent: string };
+  trust: 'declarative';
+  skills?: string[];
+  mcpServers?: PluginMcpServerDecl[];
+  secrets?: PluginSecretDecl[];
+  permissions?: { network?: string[]; filesystem?: 'none' };
+  config?: Record<string, unknown>;
+}
+
+export interface PluginAdminView {
+  id: string;
+  name: string;
+  activeVersion: string;
+  status: PluginStatus;
+  manifest: PluginManifest;
+  installedBy: string;
+  lastError: string;
+  createdAt: number;
+  updatedAt: number;
+  skills: Array<{
+    id: string;
+    name: string;
+    enabled: boolean;
+    loadError?: string;
+  }>;
+  mcpServerIds: string[];
+  missingSecrets: string[];
+  runtimeApplied: boolean;
+}
+
+export interface PluginVersionRecord {
+  pluginId: string;
+  version: string;
+  manifest: PluginManifest;
+  dir: string;
+  checksum: string;
+  status: PluginVersionStatus;
+  installedAt: number;
+}
+
+export interface PluginValidationIssue {
+  severity: 'error' | 'warning';
+  path: string;
+  message: string;
+}
+
+export interface PluginSkillPreview {
+  id: string;
+  name: string;
+  description: string;
+  version: string;
+  path: string;
+  error?: string;
+}
+
+export interface PluginMcpPreview {
+  id: string;
+  name: string;
+  transport: PluginMcpTransport;
+  domain: PluginMcpDomain;
+}
+
+export interface PluginPackagePreview {
+  manifest: PluginManifest;
+  checksum: string;
+  skills: PluginSkillPreview[];
+  mcpServers: PluginMcpPreview[];
+  warnings: PluginValidationIssue[];
+  conflicts: PluginValidationIssue[];
+  missingSecrets: string[];
+  alreadyInstalled: { version: string; status: PluginStatus } | null;
+  packageBytes: number;
+}
+
+export type ProjectSourceType = 'local' | 'github' | 'manual';
+export type ProjectVisibility = 'team' | 'private' | 'admin';
+export type ProjectSensitivity = 'team' | 'private';
+export type ProjectSnapshotStatus =
+  | 'building'
+  | 'ready'
+  | 'failed'
+  | 'superseded';
+export type ProjectSyncStatus = 'queued' | 'running' | 'succeeded' | 'failed';
+
+export interface ProjectSource {
+  type: ProjectSourceType;
+  path?: string;
+  branch?: string;
+  repo?: string;
+  ref?: string;
+  depth?: number;
+}
+
+export interface ProjectRecord {
+  id: string;
+  name: string;
+  aliases: string[];
+  description: string;
+  source: ProjectSource;
+  defaultBranch: string;
+  ownerStaffIds: string[];
+  visibility: ProjectVisibility;
+  sensitivity: ProjectSensitivity;
+  isDefault: boolean;
+  enabled: boolean;
+  autoSyncMinutes: number;
+  activeSnapshotId?: string;
+  lastCommit: string;
+  lastSyncedAt?: number;
+  handbookVersion: number;
+  lastError?: string;
+}
+
+export interface ProjectSnapshot {
+  id: string;
+  projectId: string;
+  commitSha: string;
+  branch: string;
+  status: ProjectSnapshotStatus;
+  fileCount: number;
+  totalBytes: number;
+  symbolCount: number;
+  chunkCount: number;
+  stats: Record<string, unknown>;
+  error: string;
+  startedAt: number;
+  finishedAt?: number;
+}
+
+export interface ProjectSyncJob {
+  id: string;
+  projectId: string;
+  status: ProjectSyncStatus;
+  trigger: 'manual' | 'schedule' | 'startup';
+  snapshotId?: string;
+  stats?: {
+    files: number;
+    bytes: number;
+    symbols: number;
+    chunks: number;
+    skipped: number;
+    durationMs: number;
+  };
+  error: string;
+  createdAt: number;
+  startedAt?: number;
+  finishedAt?: number;
+}
+
+export interface ProjectAdminEntry {
+  project: ProjectRecord;
+  snapshot: ProjectSnapshot | null;
+  stale: boolean;
+}
+
+export interface ProjectSearchHit {
+  path: string;
+  startLine: number;
+  endLine: number;
+  symbol: string;
+  language: string;
+  score: number;
+  content: string;
+  match: 'fts' | 'trigram' | 'vector' | 'symbol' | 'path';
+}
+
+export interface ProjectSearchResult {
+  projectId: string;
+  commit: string;
+  hits: ProjectSearchHit[];
+  total: number;
+  truncated: boolean;
+  warning?: string;
+  stale?: boolean;
+}
+
+export type HandbookSectionKey =
+  | 'overview'
+  | 'architecture'
+  | 'modules'
+  | 'data_model'
+  | 'config'
+  | 'deploy'
+  | 'operations'
+  | 'conventions'
+  | 'testing'
+  | 'decisions'
+  | 'faq'
+  | 'risks';
+
+export interface HandbookSection {
+  key: HandbookSectionKey;
+  title: string;
+  markdown: string;
+  origin: 'deterministic' | 'curated' | 'generated';
+  sources: Array<Record<string, unknown>>;
+  updatedAt?: number;
+}
+
+export interface ProjectHandbookResult {
+  projectId: string;
+  version: number;
+  status: 'draft' | 'published' | 'archived';
+  commit: string;
+  stale: boolean;
+  content: {
+    sections: HandbookSection[];
+    generatedAt: number;
+    commit: string;
+  };
+  manualEntries: Array<{
+    id: string;
+    projectId: string;
+    section: HandbookSectionKey;
+    title: string;
+    markdown: string;
+    visibility: ProjectVisibility;
+    sensitivity: ProjectSensitivity;
+    injectToBrief: boolean;
+    priority: number;
+    updatedBy: string;
+    updatedAt: number;
+  }>;
+}

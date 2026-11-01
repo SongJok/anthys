@@ -41,6 +41,8 @@ export interface McpServerStatus {
   toolCount: number;
   toolsFetchedAt: number | null;
   lastError: string | null;
+  source?: 'manual' | 'plugin';
+  pluginId?: string;
 }
 
 export interface McpHealthResult {
@@ -268,6 +270,8 @@ export class McpClientPool {
       toolCount: state.tools.length,
       toolsFetchedAt: state.toolsFetchedAt,
       lastError: state.lastError,
+      ...(state.config.source ? { source: state.config.source } : {}),
+      ...(state.config.pluginId ? { pluginId: state.config.pluginId } : {}),
     }));
   }
 

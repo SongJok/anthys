@@ -405,6 +405,64 @@ export class ProjectService {
     await this.store.deleteProject(id);
   }
 
+  public async getProject(id: string): Promise<ProjectRecord | null> {
+    return this.store.getProject(id);
+  }
+
+  public async listSnapshots(
+    projectId: string,
+    limit = 10,
+  ): Promise<ProjectSnapshot[]> {
+    const project = await this.store.getProject(projectId);
+    if (!project) throw new ProjectNotFoundError(`未找到项目：${projectId}`);
+    return this.store.listSnapshots(
+      projectId,
+      Math.min(Math.max(Math.trunc(limit), 1), 50),
+    );
+  }
+
+  public async listSyncJobs(
+    projectId: string,
+    limit = 20,
+  ): Promise<ProjectSyncJob[]> {
+    const project = await this.store.getProject(projectId);
+    if (!project) throw new ProjectNotFoundError(`未找到项目：${projectId}`);
+    return this.store.listSyncJobs(
+      projectId,
+      Math.min(Math.max(Math.trunc(limit), 1), 100),
+    );
+  }
+
+  /** 立即返回排队任务，实际同步在后台执行；已有任务在跑时复用 */
+  public async queueSync(
+    projectId: string,
+    trigger: ProjectSyncJob['trigger'] = 'manual',
+  ): Promise<ProjectSyncJob> {
+    const running = this.locks.get(projectId);
+    if (running) {
+      const jobs = await this.store.listSyncJobs(projectId, 1);
+      const latest = jobs[0];
+      if (latest) return latest;
+    }
+    const project = await this.store.getProject(projectId);
+    if (!project) throw new ProjectNotFoundError(`未找到项目：${projectId}`);
+    if (project.source.type === 'manual') {
+      throw new ProjectSourceError('manual 项目没有代码仓库，无需同步');
+    }
+    const job = await this.store.createSyncJob(projectId, trigger, 'queued');
+    const promise = this.runSync(projectId, trigger, job).finally(() => {
+      this.locks.delete(projectId);
+    });
+    this.locks.set(projectId, promise);
+    void promise.catch((error) => {
+      this.logger?.warn(
+        { projectId, jobId: job.id, error: errorMessage(error) },
+        'queued project sync failed',
+      );
+    });
+    return job;
+  }
+
   public async sync(
     projectId: string,
     trigger: ProjectSyncJob['trigger'] = 'manual',
@@ -740,6 +798,7 @@ export class ProjectService {
   private async runSync(
     projectId: string,
     trigger: ProjectSyncJob['trigger'],
+    queuedJob?: ProjectSyncJob,
   ): Promise<ProjectSyncResult> {
     const startedAt = this.now();
     const initial = await this.store.getProject(projectId);
@@ -747,7 +806,14 @@ export class ProjectService {
     if (initial.source.type === 'manual') {
       throw new ProjectSourceError('manual 项目没有代码仓库，无需同步');
     }
-    const job = await this.store.createSyncJob(projectId, trigger);
+    const job =
+      queuedJob ?? (await this.store.createSyncJob(projectId, trigger));
+    if (queuedJob) {
+      await this.store.updateSyncJob(job.id, {
+        status: 'running',
+        startedAt,
+      });
+    }
     let snapshot: ProjectSnapshot | undefined;
     try {
       const prepared = await this.repoSource.prepare(initial);

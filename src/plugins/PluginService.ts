@@ -20,7 +20,10 @@ import type {
   PluginInstallResult,
   PluginManifest,
   PluginMcpServerDecl,
+  PluginPackagePreview,
   PluginRecord,
+  PluginSkillPreview,
+  PluginValidateInput,
   PluginValidationIssue,
   PluginVersionRecord,
 } from '../types/skills-plugins-projects.js';
@@ -191,6 +194,78 @@ export class PluginService {
 
   public async versions(id: string): Promise<PluginVersionRecord[]> {
     return this.store.listVersions(id);
+  }
+
+  /**
+   * 只校验不落库：解包、清单检查、技能解析、命名空间冲突与密钥缺失。
+   * zip 包在临时目录中进行，完成后立即删除。
+   */
+  public async validatePackage(
+    input: PluginValidateInput,
+  ): Promise<PluginPackagePreview> {
+    let tempDir: string | undefined;
+    try {
+      let sourceDir = input.dir?.trim();
+      let packageBytes: number;
+      if (sourceDir) {
+        const inspected = await inspectPluginDir(sourceDir);
+        sourceDir = inspected.root;
+        packageBytes = inspected.totalBytes;
+      } else if (input.zipPath?.trim()) {
+        const archiveInfo = await stat(input.zipPath);
+        if (!archiveInfo.isFile()) {
+          throw new PluginError('package', '插件包不是文件');
+        }
+        packageBytes = archiveInfo.size;
+        tempDir = await mkdtemp(path.join(os.tmpdir(), 'plugin-validate-'));
+        await extractPluginZip(input.zipPath, tempDir);
+        const root = await locatePluginRoot(tempDir);
+        const inspected = await inspectPluginDir(root);
+        packageBytes = Math.max(packageBytes, inspected.totalBytes);
+        sourceDir = root;
+      } else {
+        throw new PluginError('package', '请提供插件目录或 zip 文件');
+      }
+
+      const parsed = await loadPluginManifest(sourceDir, {
+        ...(await this.manifestContext({
+          dir: sourceDir,
+          installedBy: '',
+          allowMissingSecrets: true,
+        })),
+        allowMissingSecrets: true,
+      });
+      const manifest = parsed.manifest;
+      const conflicts = await this.namespaceConflicts(manifest, manifest.id);
+      const skills = await this.previewSkills(sourceDir, manifest, conflicts);
+      const existing = await this.store.getPlugin(manifest.id);
+      return {
+        manifest,
+        checksum: await checksumPluginDir(sourceDir),
+        skills,
+        mcpServers: (manifest.mcpServers ?? []).map((server) => ({
+          id: pluginMcpServerId(manifest.id, server.id),
+          name: server.name,
+          transport: server.transport,
+          domain: server.domain,
+        })),
+        warnings: parsed.warnings,
+        conflicts,
+        missingSecrets: this.missingSecrets(manifest),
+        alreadyInstalled: existing
+          ? { version: existing.activeVersion, status: existing.status }
+          : null,
+        packageBytes,
+      };
+    } catch (error) {
+      throw this.normalizeError(error, 'package');
+    } finally {
+      if (tempDir) {
+        await rm(tempDir, { recursive: true, force: true }).catch(
+          () => undefined,
+        );
+      }
+    }
   }
 
   public async install(input: PluginInstallInput): Promise<PluginInstallResult> {
@@ -864,6 +939,64 @@ export class PluginService {
         record.status === 'enabled' &&
         this.applied.has(`${record.id}@${record.activeVersion}`),
     };
+  }
+
+  private async previewSkills(
+    root: string,
+    manifest: PluginManifest,
+    conflicts: PluginValidationIssue[],
+  ): Promise<PluginSkillPreview[]> {
+    const resolvedRoot = path.resolve(root);
+    const result: PluginSkillPreview[] = [];
+    const seen = new Set<string>();
+    for (const relativeDir of manifest.skills ?? []) {
+      const dir = path.resolve(resolvedRoot, relativeDir);
+      const fallbackName = path.basename(dir);
+      if (!isInside(resolvedRoot, dir)) {
+        conflicts.push({
+          severity: 'error',
+          path: relativeDir,
+          message: '技能目录逃逸插件根目录',
+        });
+        continue;
+      }
+      const relative = path
+        .relative(resolvedRoot, path.join(dir, 'SKILL.md'))
+        .split(path.sep)
+        .join('/');
+      try {
+        const raw = await readFile(path.join(dir, 'SKILL.md'), 'utf8');
+        const parsed = parseSkillMarkdown(raw, fallbackName);
+        const name = parsed.frontmatter.name;
+        if (seen.has(name)) {
+          conflicts.push({
+            severity: 'error',
+            path: relative,
+            message: `技能名 ${name} 在插件内重复`,
+          });
+        }
+        seen.add(name);
+        result.push({
+          id: `plugin:${manifest.id}:${name}`,
+          name,
+          description: parsed.frontmatter.description,
+          version: parsed.frontmatter.version ?? manifest.version,
+          path: relative,
+        });
+      } catch (error) {
+        const message = errorMessage(error);
+        conflicts.push({ severity: 'error', path: relative, message });
+        result.push({
+          id: `plugin:${manifest.id}:${fallbackName}`,
+          name: fallbackName,
+          description: '',
+          version: manifest.version,
+          path: relative,
+          error: message,
+        });
+      }
+    }
+    return result;
   }
 
   private async describeSkills(

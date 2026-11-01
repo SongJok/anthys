@@ -62,6 +62,7 @@ import { CommandRouter, parseCommand } from './commands/CommandRouter.js';
 import { ToolRegistry, loadMcpServerConfigs } from './harness/ToolRegistry.js';
 import { SkillService } from './skills/SkillService.js';
 import { DrizzleSkillStore } from './skills/SkillStore.js';
+import { LocalSkillManager } from './skills/LocalSkillManager.js';
 import { SkillToolProvider } from './tools/skills/SkillToolProvider.js';
 import { PluginService } from './plugins/PluginService.js';
 import { DrizzlePluginStore } from './plugins/PluginStore.js';
@@ -150,6 +151,13 @@ import type {
 } from './types/admin-and-console.js';
 import type { BystanderEvaluationResult } from './types/bystander-and-memory.js';
 import type { EnterpriseMcpServerConfig } from './types/mcp-and-sandbox.js';
+import type {
+  PluginAdminPort,
+  ProjectAdminPort,
+  ProjectMemberContextInput,
+  SkillAdminPort,
+  SkillFileAdminPort,
+} from './types/skills-plugins-projects.js';
 
 const FALLBACK_ERROR_TEXT = '抱歉，处理这条消息时出现异常，请稍后重试。';
 const EMPTY_RESULT: RunResult = {
@@ -553,6 +561,58 @@ async function main(): Promise<void> {
       },
       'extension services configured',
     );
+
+    const adminProjectMember: ProjectMemberContextInput = {
+      senderStaffId: 'admin-console',
+      isAdmin: true,
+      conversationType: '1',
+    };
+    const skillAdminPort: SkillAdminPort = {
+      list: () => skills.listAdmin(),
+      reload: () => skills.reload(),
+      setEnabled: (id, enabled) => skills.setEnabled(id, enabled),
+      preview: async (input) => skills.preview(input),
+      readResource: (input) => skills.readResource({ ...input, isAdmin: true }),
+      usage: async (days) => Object.fromEntries(await skills.usageSince(days)),
+    };
+    const skillFilePort: SkillFileAdminPort = new LocalSkillManager({
+      root: localSkillsDir,
+      service: skills,
+      logger: harnessLogger,
+    });
+    const pluginAdminPort: PluginAdminPort = {
+      list: () => plugins.list(),
+      get: (id) => plugins.get(id),
+      versions: (id) => plugins.versions(id),
+      validatePackage: (input) => plugins.validatePackage(input),
+      install: (input) => plugins.install(input),
+      installFromZip: (input) => plugins.installFromZip(input),
+      enable: (id) => plugins.enable(id),
+      disable: (id) => plugins.disable(id),
+      upgrade: (input) => plugins.upgrade(input),
+      rollback: (id, version) => plugins.rollback(id, version),
+      uninstall: (id, options) => plugins.uninstall(id, options),
+    };
+    const projectAdminPort: ProjectAdminPort = {
+      list: (includeUnavailable) =>
+        projects.listProjects(adminProjectMember, includeUnavailable !== false),
+      get: (id) => projects.getProject(id),
+      create: (input) => projects.createProject(input),
+      update: (id, patch) => projects.updateProject(id, patch),
+      remove: (id) => projects.deleteProject(id),
+      queueSync: (id, trigger) => projects.queueSync(id, trigger),
+      listSyncJobs: (id, limit) => projects.listSyncJobs(id, limit),
+      listSnapshots: (id, limit) => projects.listSnapshots(id, limit),
+      search: (id, query, limit) =>
+        projects.searchProject({
+          projectRef: id,
+          query,
+          ...(limit !== undefined ? { limit } : {}),
+          member: adminProjectMember,
+        }),
+      handbook: (id) =>
+        projects.getHandbook({ projectRef: id, member: adminProjectMember }),
+    };
 
     const projectSyncIntervalSeconds = Math.max(
       60,
@@ -2495,6 +2555,10 @@ async function main(): Promise<void> {
       groups: groupDirectory,
       listeningGroups: () => bystanderListener?.allowedConversations ?? [],
       glossary,
+      skills: skillAdminPort,
+      skillFiles: skillFilePort,
+      plugins: pluginAdminPort,
+      projects: projectAdminPort,
       mcp: {
         status: () => mcpPort.status(),
         applyServers: (servers) => mcpPort.applyServers(servers),

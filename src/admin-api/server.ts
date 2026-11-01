@@ -18,9 +18,18 @@ import type {
 } from '../types/admin-and-console.js';
 import type { EnterpriseMcpServerConfig } from '../types/mcp-and-sandbox.js';
 import type { GlossaryAdminPort } from '../types/glossary.js';
+import type {
+  PluginAdminPort,
+  ProjectAdminPort,
+  SkillAdminPort,
+  SkillFileAdminPort,
+} from '../types/skills-plugins-projects.js';
 import { createConfigRoutes } from './routes/configRoutes.js';
 import { createMcpRoutes } from './routes/mcpRoutes.js';
 import { createGlossaryRoutes } from './routes/glossaryRoutes.js';
+import { createSkillRoutes } from './routes/skillRoutes.js';
+import { createPluginRoutes } from './routes/pluginRoutes.js';
+import { createProjectRoutes } from './routes/projectRoutes.js';
 import { createGovernanceRoutes } from '../governance/governanceRoutes.js';
 import type { DataGovernancePort } from '../governance/DataRetention.js';
 import {
@@ -86,6 +95,14 @@ export interface AdminApiOptions {
   governance?: DataGovernancePort;
   /** 术语知识库管理 */
   glossary?: GlossaryAdminPort;
+  /** 技能管理：列表、启停、预览与资源读取 */
+  skills?: SkillAdminPort;
+  /** 本地技能文件编辑（创建 / 更新 / 删除 / 资源写入） */
+  skillFiles?: SkillFileAdminPort;
+  /** 声明式插件管理 */
+  plugins?: PluginAdminPort;
+  /** 项目登记、同步与检索管理 */
+  projects?: ProjectAdminPort;
 }
 
 export interface AdminServerOptions extends AdminApiOptions {
@@ -189,6 +206,35 @@ export function createAdminApp(options: AdminApiOptions): Hono {
       '/',
       createGlossaryRoutes({
         glossary: options.glossary,
+        configCenter: options.configCenter,
+      }),
+    );
+  }
+  if (options.skills) {
+    admin.route(
+      '/',
+      createSkillRoutes({
+        skills: options.skills,
+        ...(options.skillFiles ? { skillFiles: options.skillFiles } : {}),
+        configCenter: options.configCenter,
+      }),
+    );
+  }
+  if (options.plugins) {
+    admin.route(
+      '/',
+      createPluginRoutes({
+        plugins: options.plugins,
+        configCenter: options.configCenter,
+        ...(logger ? { logger } : {}),
+      }),
+    );
+  }
+  if (options.projects) {
+    admin.route(
+      '/',
+      createProjectRoutes({
+        projects: options.projects,
         configCenter: options.configCenter,
       }),
     );

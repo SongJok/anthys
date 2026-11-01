@@ -37,6 +37,8 @@ export function createMcpAdminPort(
         connected: server.connected,
         toolCount: server.toolCount,
         lastError: server.lastError,
+        ...(server.source ? { source: server.source } : {}),
+        ...(server.pluginId ? { pluginId: server.pluginId } : {}),
       }));
     },
     healthCheck: async () => {

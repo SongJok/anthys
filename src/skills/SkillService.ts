@@ -466,6 +466,25 @@ export class SkillService {
     };
   }
 
+  /** 管理端使用统计；不传天数时按默认 7 天窗口 */
+  public async usageSince(days?: number): Promise<Map<string, SkillUsageSummary>> {
+    if (!this.store) return new Map();
+    const windowDays = Math.min(
+      90,
+      Math.max(1, Math.trunc(days ?? USAGE_WINDOW_MS / (24 * 60 * 60 * 1000))),
+    );
+    const since = this.now() - windowDays * 24 * 60 * 60 * 1000;
+    try {
+      return await this.store.usageSince(since);
+    } catch (error) {
+      this.logger?.warn(
+        { error: errorMessage(error) },
+        'failed to load skill usage window',
+      );
+      return new Map();
+    }
+  }
+
   public async refreshUsage(): Promise<void> {
     if (!this.store) return;
     try {

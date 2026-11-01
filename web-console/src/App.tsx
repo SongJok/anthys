@@ -11,7 +11,10 @@ import {
 } from 'antd';
 import {
   ApiOutlined,
+  AppstoreOutlined,
+  BookOutlined,
   BranchesOutlined,
+  BulbOutlined,
   DashboardOutlined,
   DatabaseOutlined,
   MessageOutlined,
@@ -30,6 +33,9 @@ import TracesPage from './pages/TracesPage';
 import ChatPage from './pages/ChatPage';
 import DataGovernancePage from './pages/DataGovernancePage';
 import GlossaryPage from './pages/GlossaryPage';
+import SkillsPage from './pages/SkillsPage';
+import PluginsPage from './pages/PluginsPage';
+import ProjectsPage from './pages/ProjectsPage';
 
 const { Header, Sider, Content } = Layout;
 
@@ -42,6 +48,9 @@ const MENU = [
   { key: 'groups', icon: <TeamOutlined />, label: '群聊旁听策略' },
   { key: 'traces', icon: <BranchesOutlined />, label: 'ReAct 审计轨迹' },
   { key: 'glossary', icon: <ReadOutlined />, label: '术语知识库' },
+  { key: 'skills', icon: <BulbOutlined />, label: '技能 Skills' },
+  { key: 'plugins', icon: <AppstoreOutlined />, label: '声明式插件' },
+  { key: 'projects', icon: <BookOutlined />, label: '项目手册' },
   { key: 'governance', icon: <DatabaseOutlined />, label: '数据治理' },
 ];
 
@@ -54,6 +63,9 @@ const PAGE_TITLES: Record<string, string> = {
   groups: '群聊旁听与主动回复策略',
   traces: 'ReAct 全链路审计',
   glossary: '企业术语知识库',
+  skills: '技能管理与目录预览',
+  plugins: '声明式插件管理',
+  projects: '项目手册与代码理解',
   governance: '数据治理与脱敏',
 };
 
@@ -109,6 +121,9 @@ export default function App() {
           {active === 'groups' && <GroupsPage />}
           {active === 'traces' && <TracesPage />}
           {active === 'glossary' && <GlossaryPage />}
+          {active === 'skills' && <SkillsPage />}
+          {active === 'plugins' && <PluginsPage />}
+          {active === 'projects' && <ProjectsPage />}
           {active === 'governance' && <DataGovernancePage />}
         </Content>
       </Layout>

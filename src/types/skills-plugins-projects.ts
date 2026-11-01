@@ -161,6 +161,46 @@ export interface SkillAdminPort {
   readResource(
     input: Omit<SkillResourceReadRequest, 'isAdmin'>,
   ): Promise<SkillResourceReadResult>;
+  usage?(days?: number): Promise<Record<string, SkillUsageSummary>>;
+}
+
+export interface SkillDraftInput {
+  name: string;
+  description: string;
+  version?: string;
+  whenToUse: string;
+  tags?: string[];
+  allowedTools?: string[];
+  risk?: SkillRisk;
+  visibility?: SkillVisibility;
+  maxInstructionChars?: number;
+  body: string;
+}
+
+export interface SkillValidationResult {
+  ok: boolean;
+  errors: string[];
+  warnings: string[];
+  frontmatter?: SkillFrontmatter;
+  bodyBytes: number;
+}
+
+export interface SkillResourceWriteInput {
+  path: string;
+  content: string;
+}
+
+/** 管理员维护 skills/local 下的技能文件；内置与插件技能只读 */
+export interface SkillFileAdminPort {
+  create(input: SkillDraftInput): Promise<SkillDefinition>;
+  update(id: string, input: SkillDraftInput): Promise<SkillDefinition>;
+  remove(id: string): Promise<void>;
+  validate(input: SkillDraftInput): SkillValidationResult;
+  writeResource(
+    id: string,
+    input: SkillResourceWriteInput,
+  ): Promise<SkillResourceInfo>;
+  removeResource(id: string, path: string): Promise<void>;
 }
 
 /* ------------------------------------------------------------------ */
@@ -276,14 +316,62 @@ export interface PluginAdminView extends PluginRecord {
   runtimeApplied: boolean;
 }
 
+export interface PluginSkillPreview {
+  id: string;
+  name: string;
+  description: string;
+  version: string;
+  path: string;
+  error?: string;
+}
+
+export interface PluginMcpPreview {
+  id: string;
+  name: string;
+  transport: PluginMcpServerDecl['transport'];
+  domain: PluginMcpServerDecl['domain'];
+}
+
+export interface PluginPackagePreview {
+  manifest: PluginManifest;
+  checksum: string;
+  skills: PluginSkillPreview[];
+  mcpServers: PluginMcpPreview[];
+  warnings: PluginValidationIssue[];
+  /** 命名空间或技能名冲突；存在 error 级问题时不能安装 */
+  conflicts: PluginValidationIssue[];
+  missingSecrets: string[];
+  alreadyInstalled: { version: string; status: PluginStatus } | null;
+  packageBytes: number;
+}
+
+export interface PluginValidateInput {
+  /** 已解包的插件目录；与 zipPath 二选一 */
+  dir?: string;
+  zipPath?: string;
+  allowMissingSecrets?: boolean;
+}
+
+export interface PluginZipInstallInput {
+  zipPath: string;
+  installedBy: string;
+  force?: boolean;
+  allowMissingSecrets?: boolean;
+  mode?: 'install' | 'upgrade';
+}
+
 export interface PluginAdminPort {
   list(): Promise<PluginAdminView[]>;
+  get?(id: string): Promise<PluginAdminView>;
+  versions?(id: string): Promise<PluginVersionRecord[]>;
+  validatePackage?(input: PluginValidateInput): Promise<PluginPackagePreview>;
   install(input: PluginInstallInput): Promise<PluginInstallResult>;
+  installFromZip?(input: PluginZipInstallInput): Promise<PluginInstallResult>;
   enable(id: string): Promise<PluginAdminView>;
   disable(id: string): Promise<PluginAdminView>;
   upgrade(input: PluginInstallInput): Promise<PluginInstallResult>;
   rollback(id: string, version: string): Promise<PluginAdminView>;
-  uninstall(id: string): Promise<void>;
+  uninstall(id: string, options?: { deleteFiles?: boolean }): Promise<void>;
 }
 
 /* ------------------------------------------------------------------ */
@@ -633,6 +721,28 @@ export interface ProjectManualEntryInput {
 }
 
 export type ProjectManualEntryPatch = Partial<ProjectManualEntryInput>;
+
+export interface ProjectAdminEntry {
+  project: ProjectRecord;
+  snapshot: ProjectSnapshot | null;
+  stale: boolean;
+}
+
+/** 管理控制台使用的项目端口；成员过滤由适配器以管理员上下文处理 */
+export interface ProjectAdminPort {
+  list(includeUnavailable?: boolean): Promise<ProjectAdminEntry[]>;
+  get(id: string): Promise<ProjectRecord | null>;
+  create(input: ProjectCreateInput): Promise<ProjectRecord>;
+  update(id: string, patch: ProjectUpdateInput): Promise<ProjectRecord>;
+  remove(id: string): Promise<void>;
+  /** 创建排队任务并异步执行，立即返回任务记录 */
+  queueSync(id: string, trigger?: ProjectSyncJob['trigger']): Promise<ProjectSyncJob>;
+  listSyncJobs(id: string, limit?: number): Promise<ProjectSyncJob[]>;
+  listSnapshots(id: string, limit?: number): Promise<ProjectSnapshot[]>;
+  search(id: string, query: string, limit?: number): Promise<ProjectSearchResult>;
+  handbook?(id: string): Promise<ProjectHandbookResult>;
+  manualEntries?(id: string): Promise<ProjectManualEntry[]>;
+}
 
 /* ------------------------------------------------------------------ */
 /* GitHub                                                              */
