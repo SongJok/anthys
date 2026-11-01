@@ -13,6 +13,7 @@ import type {
 import type {
   EpisodicSummaryRecord,
   SemanticMemoryRecord,
+  SemanticMemoryUpsertInput,
   SemanticRecallQuery,
 } from '../types/bystander-and-memory.js';
 import type {
@@ -52,14 +53,9 @@ class InMemorySemanticStore implements SemanticMemoryStore {
   public records: SemanticMemoryRecord[] = [];
   public queries: SemanticRecallQuery[] = [];
 
-  public async upsert(input: {
-    scope: SemanticMemoryRecord['scope'];
-    subjectKey: string;
-    kind: SemanticMemoryRecord['kind'];
-    content: string;
-    keywords: string[];
-    embedding?: number[] | null;
-  }): Promise<SemanticMemoryRecord> {
+  public async upsert(
+    input: SemanticMemoryUpsertInput,
+  ): Promise<SemanticMemoryRecord> {
     const existing = this.records.find(
       (record) =>
         record.scope === input.scope &&
@@ -70,6 +66,24 @@ class InMemorySemanticStore implements SemanticMemoryStore {
     if (existing) {
       existing.keywords = input.keywords;
       existing.embedding = input.embedding ?? null;
+      if (input.shareableInGroup !== undefined) {
+        existing.shareableInGroup = input.shareableInGroup;
+      }
+      if (input.sensitivity !== undefined) {
+        existing.sensitivity = input.sensitivity;
+      }
+      if (input.status !== undefined) existing.status = input.status;
+      if (input.sourceConversationId !== undefined) {
+        existing.sourceConversationId = input.sourceConversationId;
+      }
+      if (input.sourceConversationType !== undefined) {
+        existing.sourceConversationType = input.sourceConversationType;
+      }
+      if (input.sourceMessageId !== undefined) {
+        existing.sourceMessageId = input.sourceMessageId;
+      }
+      if (input.confidence !== undefined) existing.confidence = input.confidence;
+      if (input.expiresAt !== undefined) existing.expiresAt = input.expiresAt;
       existing.updatedAt += 1;
       return { ...existing };
     }
@@ -81,6 +95,17 @@ class InMemorySemanticStore implements SemanticMemoryStore {
       content: input.content,
       keywords: input.keywords,
       embedding: input.embedding ?? null,
+      shareableInGroup:
+        input.shareableInGroup ?? input.scope !== 'user',
+      sensitivity:
+        input.sensitivity ?? (input.scope === 'user' ? 'private' : 'normal'),
+      status: input.status ?? 'active',
+      sourceConversationId: input.sourceConversationId ?? null,
+      sourceConversationType: input.sourceConversationType ?? null,
+      sourceMessageId: input.sourceMessageId ?? null,
+      confidence: input.confidence ?? 0.8,
+      expiresAt: input.expiresAt ?? null,
+      createdAt: this.records.length + 1,
       updatedAt: this.records.length + 1,
     };
     this.records.push(record);
@@ -95,12 +120,21 @@ class InMemorySemanticStore implements SemanticMemoryStore {
       .split(/[\s,，。;；、/]+/u)
       .map((term) => term.trim())
       .filter(Boolean);
+    const now = query.now ?? Date.now();
     return this.records
       .filter((record) => {
-        if (!query.scope) return true;
+        if (record.status !== 'active') return false;
+        if (record.expiresAt !== null && record.expiresAt <= now) return false;
+        return true;
+      })
+      .filter((record) => {
+        if (!query.scope) {
+          return !query.shareableOnly || record.shareableInGroup;
+        }
         const inScope =
           record.scope === query.scope &&
-          (!query.subjectKey || record.subjectKey === query.subjectKey);
+          (!query.subjectKey || record.subjectKey === query.subjectKey) &&
+          (!query.shareableOnly || record.shareableInGroup);
         return inScope || record.scope === 'global';
       })
       .filter((record) => {
@@ -291,6 +325,7 @@ describe('HierarchicalMemoryManager', () => {
         kind: 'profile',
         content: '张三负责支付网关研发',
         keywords: ['张三', '支付网关'],
+        shareableInGroup: true,
       },
       {
         scope: 'group',
@@ -320,6 +355,86 @@ describe('HierarchicalMemoryManager', () => {
     expect(memory.groupRecentTranscript).toContain('订单接口一直报 504');
     expect(memory.episodicSummary).toContain('连接池打满');
     expect(memory.activeTurnMessages).toHaveLength(1);
+  });
+
+  it('群聊只召回标记共享的个人记忆，单聊可召回全部个人记忆', async () => {
+    const ctx = setup();
+    await ctx.manager.remember([
+      {
+        scope: 'user',
+        subjectKey: 'staff-1',
+        kind: 'profile',
+        content: '张三的私人偏好：不喜欢周会',
+        keywords: ['偏好'],
+      },
+      {
+        scope: 'user',
+        subjectKey: 'staff-1',
+        kind: 'profile',
+        content: '张三负责支付网关研发',
+        keywords: ['支付网关'],
+        shareableInGroup: true,
+      },
+    ]);
+
+    const group = await ctx.manager.assemble({
+      personaSystemPrompt: 'system',
+      userId: 'staff-1',
+      speakerNick: '张三',
+      groupConversationId: 'cid-1',
+      audience: 'group',
+      semanticQuery: '支付网关 偏好',
+    });
+    expect(group.userSemanticProfile).toContain('张三负责支付网关研发');
+    expect(group.userSemanticProfile).not.toContain('不喜欢周会');
+
+    const single = await ctx.manager.assemble({
+      personaSystemPrompt: 'system',
+      userId: 'staff-1',
+      speakerNick: '张三',
+      audience: 'single',
+      semanticQuery: '支付网关 偏好',
+    });
+    expect(single.userSemanticProfile).toContain('张三负责支付网关研发');
+    expect(single.userSemanticProfile).toContain('不喜欢周会');
+  });
+
+  it('停用或已过期的记忆不参与召回', async () => {
+    const ctx = setup();
+    await ctx.manager.remember([
+      {
+        scope: 'user',
+        subjectKey: 'staff-1',
+        kind: 'profile',
+        content: '已停用的偏好记忆',
+        keywords: ['偏好'],
+      },
+      {
+        scope: 'user',
+        subjectKey: 'staff-1',
+        kind: 'profile',
+        content: '已过期的偏好记忆',
+        keywords: ['偏好'],
+      },
+      {
+        scope: 'user',
+        subjectKey: 'staff-1',
+        kind: 'profile',
+        content: '仍然有效的偏好记忆',
+        keywords: ['偏好'],
+        shareableInGroup: true,
+      },
+    ]);
+    ctx.semanticStore.records[0]!.status = 'retired';
+    ctx.semanticStore.records[1]!.expiresAt = 500;
+
+    const recall = await ctx.manager.recall({
+      query: '偏好',
+      scope: 'user',
+      subjectKey: 'staff-1',
+      now: 1_000,
+    });
+    expect(recall.profileLines).toEqual(['- 仍然有效的偏好记忆']);
   });
 
   it('情景摘要注入时标注生成时间并提示相对时间已过期', async () => {
@@ -390,6 +505,7 @@ describe('HierarchicalMemoryManager', () => {
       conversationType: '2',
       userText: '我是张三，负责支付网关研发',
       assistantText: '了解，已记录。',
+      sourceMessageId: 'm-42',
     });
 
     expect(saved).toHaveLength(2);
@@ -397,11 +513,21 @@ describe('HierarchicalMemoryManager', () => {
       scope: 'user',
       subjectKey: 'staff-1',
       kind: 'profile',
+      shareableInGroup: false,
+      sensitivity: 'private',
+      confidence: 0.8,
+      sourceConversationId: 'cid-1',
+      sourceConversationType: '2',
+      sourceMessageId: 'm-42',
+      status: 'active',
     });
     expect(ctx.semanticStore.records[1]).toMatchObject({
       scope: 'group',
       subjectKey: 'cid-1',
       kind: 'terminology',
+      shareableInGroup: true,
+      sensitivity: 'normal',
+      sourceMessageId: 'm-42',
     });
     expect(ctx.manager.shouldExtractSemantic('我是张三，负责支付网关')).toBe(
       true,

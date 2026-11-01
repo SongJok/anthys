@@ -1,4 +1,14 @@
-import { and, desc, eq, ilike, or, sql } from 'drizzle-orm';
+import {
+  and,
+  count,
+  desc,
+  eq,
+  gt,
+  ilike,
+  isNull,
+  or,
+  sql,
+} from 'drizzle-orm';
 import {
   boolean,
   index,
@@ -18,7 +28,11 @@ import { conversations } from './schema.js';
 import type {
   EpisodicSummaryRecord,
   GroupBystanderPolicy,
+  SemanticMemoryAdminFilter,
+  SemanticMemoryAdminPort,
+  SemanticMemoryPatch,
   SemanticMemoryRecord,
+  SemanticMemoryUpsertInput,
   SemanticRecallQuery,
 } from '../types/bystander-and-memory.js';
 
@@ -62,6 +76,20 @@ export const semanticMemories = pgTable(
     content: text('content').notNull(),
     keywords: jsonb('keywords').$type<string[]>().notNull().default([]),
     embedding: vector('embedding', { dimensions: 1536 }),
+    /** 用户级记忆是否允许在该用户所在的群聊中召回 */
+    shareableInGroup: boolean('shareable_in_group').notNull().default(false),
+    sensitivity: varchar('sensitivity', { length: 16 })
+      .notNull()
+      .default('normal'),
+    status: varchar('status', { length: 16 }).notNull().default('active'),
+    sourceConversationId: text('source_conversation_id'),
+    sourceConversationType: varchar('source_conversation_type', { length: 2 }),
+    sourceMessageId: text('source_message_id'),
+    confidence: real('confidence').notNull().default(0.8),
+    expiresAt: timestamp('expires_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -110,14 +138,7 @@ export interface EpisodicSummaryStore {
 }
 
 export interface SemanticMemoryStore {
-  upsert(input: {
-    scope: SemanticMemoryRecord['scope'];
-    subjectKey: string;
-    kind: SemanticMemoryRecord['kind'];
-    content: string;
-    keywords: string[];
-    embedding?: number[] | null;
-  }): Promise<SemanticMemoryRecord>;
+  upsert(input: SemanticMemoryUpsertInput): Promise<SemanticMemoryRecord>;
   search(query: SemanticRecallQuery): Promise<SemanticMemoryRecord[]>;
 }
 
@@ -152,6 +173,15 @@ function toSemanticRecord(row: {
   content: string;
   keywords: string[];
   embedding: number[] | null;
+  shareableInGroup: boolean;
+  sensitivity: string;
+  status: string;
+  sourceConversationId: string | null;
+  sourceConversationType: string | null;
+  sourceMessageId: string | null;
+  confidence: number;
+  expiresAt: Date | null;
+  createdAt: Date;
   updatedAt: Date;
 }): SemanticMemoryRecord {
   return {
@@ -162,13 +192,29 @@ function toSemanticRecord(row: {
     content: row.content,
     keywords: row.keywords,
     embedding: row.embedding,
+    shareableInGroup: row.shareableInGroup,
+    sensitivity: row.sensitivity as SemanticMemoryRecord['sensitivity'],
+    status: row.status as SemanticMemoryRecord['status'],
+    sourceConversationId: row.sourceConversationId,
+    sourceConversationType:
+      row.sourceConversationType === '1' || row.sourceConversationType === '2'
+        ? row.sourceConversationType
+        : null,
+    sourceMessageId: row.sourceMessageId,
+    confidence: row.confidence,
+    expiresAt: row.expiresAt ? row.expiresAt.getTime() : null,
+    createdAt: row.createdAt.getTime(),
     updatedAt: row.updatedAt.getTime(),
   };
 }
 
 /** PostgreSQL 持久化实现：情景摘要、语义召回与旁听策略 */
 export class DrizzleMemoryStore
-  implements EpisodicSummaryStore, SemanticMemoryStore, BystanderPolicyStore
+  implements
+    EpisodicSummaryStore,
+    SemanticMemoryStore,
+    SemanticMemoryAdminPort,
+    BystanderPolicyStore
 {
   constructor(private readonly db: Database) {}
 
@@ -205,14 +251,13 @@ export class DrizzleMemoryStore
     return rows.reverse().map(toSummaryRecord);
   }
 
-  public async upsert(input: {
-    scope: SemanticMemoryRecord['scope'];
-    subjectKey: string;
-    kind: SemanticMemoryRecord['kind'];
-    content: string;
-    keywords: string[];
-    embedding?: number[] | null;
-  }): Promise<SemanticMemoryRecord> {
+  public async upsert(
+    input: SemanticMemoryUpsertInput,
+  ): Promise<SemanticMemoryRecord> {
+    const shareableInGroup =
+      input.shareableInGroup ?? input.scope !== 'user';
+    const sensitivity =
+      input.sensitivity ?? (input.scope === 'user' ? 'private' : 'normal');
     const rows = await this.db
       .insert(semanticMemories)
       .values({
@@ -222,6 +267,17 @@ export class DrizzleMemoryStore
         content: input.content,
         keywords: input.keywords,
         embedding: input.embedding ?? null,
+        shareableInGroup,
+        sensitivity,
+        status: input.status ?? 'active',
+        sourceConversationId: input.sourceConversationId ?? null,
+        sourceConversationType: input.sourceConversationType ?? null,
+        sourceMessageId: input.sourceMessageId ?? null,
+        confidence: input.confidence ?? 0.8,
+        expiresAt:
+          input.expiresAt === null || input.expiresAt === undefined
+            ? null
+            : new Date(input.expiresAt),
       })
       .onConflictDoUpdate({
         target: [
@@ -234,6 +290,29 @@ export class DrizzleMemoryStore
           keywords: input.keywords,
           embedding: input.embedding ?? null,
           updatedAt: new Date(),
+          ...(input.shareableInGroup !== undefined
+            ? { shareableInGroup }
+            : {}),
+          ...(input.sensitivity !== undefined ? { sensitivity } : {}),
+          ...(input.status !== undefined ? { status: input.status } : {}),
+          ...(input.sourceConversationId !== undefined
+            ? { sourceConversationId: input.sourceConversationId }
+            : {}),
+          ...(input.sourceConversationType !== undefined
+            ? { sourceConversationType: input.sourceConversationType }
+            : {}),
+          ...(input.sourceMessageId !== undefined
+            ? { sourceMessageId: input.sourceMessageId }
+            : {}),
+          ...(input.confidence !== undefined
+            ? { confidence: input.confidence }
+            : {}),
+          ...(input.expiresAt !== undefined
+            ? {
+                expiresAt:
+                  input.expiresAt === null ? null : new Date(input.expiresAt),
+              }
+            : {}),
         },
       })
       .returning();
@@ -247,6 +326,15 @@ export class DrizzleMemoryStore
   ): Promise<SemanticMemoryRecord[]> {
     const limit = Math.max(1, query.limit ?? 6);
     const conditions = [];
+    const now = new Date(query.now ?? Date.now());
+
+    conditions.push(eq(semanticMemories.status, 'active'));
+    conditions.push(
+      or(
+        isNull(semanticMemories.expiresAt),
+        gt(semanticMemories.expiresAt, now),
+      ),
+    );
 
     if (query.scope) {
       if (query.subjectKey) {
@@ -255,13 +343,21 @@ export class DrizzleMemoryStore
             and(
               eq(semanticMemories.scope, query.scope),
               eq(semanticMemories.subjectKey, query.subjectKey),
+              ...(query.shareableOnly
+                ? [eq(semanticMemories.shareableInGroup, true)]
+                : []),
             ),
             eq(semanticMemories.scope, 'global'),
           ),
         );
       } else {
         conditions.push(eq(semanticMemories.scope, query.scope));
+        if (query.shareableOnly) {
+          conditions.push(eq(semanticMemories.shareableInGroup, true));
+        }
       }
+    } else if (query.shareableOnly) {
+      conditions.push(eq(semanticMemories.shareableInGroup, true));
     }
 
     const terms = query.query
@@ -299,6 +395,147 @@ export class DrizzleMemoryStore
       .limit(limit);
 
     return rows.map(toSemanticRecord);
+  }
+
+  public async list(
+    filter: SemanticMemoryAdminFilter,
+  ): Promise<{ total: number; items: SemanticMemoryRecord[] }> {
+    const conditions = [];
+    if (filter.scope) {
+      conditions.push(eq(semanticMemories.scope, filter.scope));
+    }
+    if (filter.subjectKey) {
+      conditions.push(eq(semanticMemories.subjectKey, filter.subjectKey));
+    }
+    if (filter.kind) {
+      conditions.push(eq(semanticMemories.kind, filter.kind));
+    }
+    if (filter.status) {
+      conditions.push(eq(semanticMemories.status, filter.status));
+    }
+    const query = filter.query?.trim();
+    if (query) {
+      conditions.push(
+        or(
+          ilike(semanticMemories.content, `%${query}%`),
+          ilike(semanticMemories.subjectKey, `%${query}%`),
+          sql`${semanticMemories.keywords} ? ${query}`,
+        ),
+      );
+    }
+    const where =
+      conditions.length === 0
+        ? undefined
+        : conditions.length === 1
+          ? conditions[0]
+          : and(...conditions);
+    const limit = Math.min(200, Math.max(1, filter.limit ?? 50));
+    const offset = Math.max(0, filter.offset ?? 0);
+    const [totalRows, rows] = await Promise.all([
+      this.db.select({ value: count() }).from(semanticMemories).where(where),
+      this.db
+        .select()
+        .from(semanticMemories)
+        .where(where)
+        .orderBy(desc(semanticMemories.updatedAt))
+        .limit(limit)
+        .offset(offset),
+    ]);
+    return {
+      total: Number(totalRows[0]?.value ?? 0),
+      items: rows.map(toSemanticRecord),
+    };
+  }
+
+  public async get(id: string): Promise<SemanticMemoryRecord | null> {
+    const rows = await this.db
+      .select()
+      .from(semanticMemories)
+      .where(eq(semanticMemories.id, id))
+      .limit(1);
+    const row = rows[0];
+    return row ? toSemanticRecord(row) : null;
+  }
+
+  public async update(
+    id: string,
+    patch: SemanticMemoryPatch,
+  ): Promise<SemanticMemoryRecord> {
+    const existingRows = await this.db
+      .select()
+      .from(semanticMemories)
+      .where(eq(semanticMemories.id, id))
+      .limit(1);
+    const existing = existingRows[0];
+    if (!existing) throw new Error('未找到语义记忆');
+    const rows = await this.db
+      .update(semanticMemories)
+      .set({
+        ...(patch.content !== undefined ? { content: patch.content } : {}),
+        ...(patch.keywords !== undefined ? { keywords: patch.keywords } : {}),
+        ...(patch.shareableInGroup !== undefined
+          ? { shareableInGroup: patch.shareableInGroup }
+          : {}),
+        ...(patch.sensitivity !== undefined
+          ? { sensitivity: patch.sensitivity }
+          : {}),
+        ...(patch.status !== undefined ? { status: patch.status } : {}),
+        ...(patch.confidence !== undefined
+          ? { confidence: patch.confidence }
+          : {}),
+        ...(patch.expiresAt !== undefined
+          ? {
+              expiresAt:
+                patch.expiresAt === null ? null : new Date(patch.expiresAt),
+            }
+          : {}),
+        ...(patch.content !== undefined && patch.content !== existing.content
+          ? { embedding: null }
+          : {}),
+        updatedAt: new Date(),
+      })
+      .where(eq(semanticMemories.id, id))
+      .returning();
+    const row = rows[0];
+    if (!row) throw new Error('未找到语义记忆');
+    return toSemanticRecord(row);
+  }
+
+  public async remove(id: string): Promise<boolean> {
+    const rows = await this.db
+      .delete(semanticMemories)
+      .where(eq(semanticMemories.id, id))
+      .returning({ id: semanticMemories.id });
+    return rows.length > 0;
+  }
+
+  /** 身份绑定后把旧 personKey 的用户级记忆并入新身份，并清理重复条目 */
+  public async reassignSubjectKey(
+    from: string,
+    to: string,
+  ): Promise<number> {
+    if (from === to) return 0;
+    await this.db.execute(sql`
+      DELETE FROM semantic_memories AS source
+      USING semantic_memories AS target
+      WHERE source.scope = 'user'
+        AND target.scope = 'user'
+        AND source.subject_key = ${from}
+        AND target.subject_key = ${to}
+        AND source.kind = target.kind
+        AND source.content = target.content
+    `);
+    const rows = await this.db
+      .update(semanticMemories)
+      .set({ subjectKey: to, updatedAt: new Date() })
+      .where(
+        and(
+          eq(semanticMemories.scope, 'user'),
+          eq(semanticMemories.subjectKey, from),
+        ),
+      )
+      .returning({ id: semanticMemories.id });
+    return rows.length;
   }
 
   public async getPolicy(

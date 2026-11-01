@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { AgentHarness, conversationTitleFor } from './AgentHarness.js';
 import { ContextAssembler } from '../memory/ContextAssembler.js';
+import { PersonaResolver } from '../persona/PersonaResolver.js';
+import type { HierarchicalMemoryManager } from '../memory/HierarchicalMemoryManager.js';
+import type { PersonaProfileStore } from '../types/persona-and-identity.js';
 import { QuotaExceededError } from '../billing/UsageGuard.js';
 import type {
   AppendMessageInput,
@@ -106,6 +109,11 @@ function createHarness(
   workerRuntimes?: ConstructorParameters<
     typeof AgentHarness
   >[0]['workerRuntimes'],
+  extras?: {
+    memory?: HierarchicalMemoryManager;
+    personas?: PersonaResolver;
+    identity?: ConstructorParameters<typeof AgentHarness>[0]['identity'];
+  },
 ) {
   const { repository, conversations, rows } = createRepository();
   const harness = new AgentHarness({
@@ -114,6 +122,9 @@ function createHarness(
     ...(workerRuntimes ? { workerRuntimes } : {}),
     ...(usageGuard ? { usageGuard } : {}),
     ...(glossary ? { glossary } : {}),
+    ...(extras?.memory ? { memory: extras.memory } : {}),
+    ...(extras?.personas ? { personas: extras.personas } : {}),
+    ...(extras?.identity ? { identity: extras.identity } : {}),
     repository,
     assembler: new ContextAssembler({ windowMessages: 20, now: () => 0 }),
     persona,
@@ -192,6 +203,128 @@ describe('AgentHarness', () => {
     expect(firstMessages[0]?.role).toBe('system');
     expect(firstMessages[0]?.content).toContain('小钉');
     expect(firstMessages.at(-1)).toEqual({ role: 'user', content: '现在几点？' });
+  });
+
+  it('分层人设与归一身份贯穿上下文和记忆归属', async () => {
+    const calls: { messages: unknown[] }[] = [];
+    const memoryInputs: Array<
+      Parameters<HierarchicalMemoryManager['assemble']>[0]
+    > = [];
+    const memory = {
+      async assemble(
+        input: Parameters<HierarchicalMemoryManager['assemble']>[0],
+      ) {
+        memoryInputs.push(input);
+        return {
+          personaSystemPrompt: input.personaSystemPrompt,
+          userSemanticProfile: '',
+          groupRecentTranscript: '',
+          episodicSummary: '',
+          activeTurnMessages: input.activeTurnMessages ?? [],
+        };
+      },
+      async maybeCompress() {
+        return { compressed: false };
+      },
+      shouldExtractSemantic() {
+        return false;
+      },
+      async captureSemantic() {
+        return [];
+      },
+    } as unknown as HierarchicalMemoryManager;
+    const personaStore: PersonaProfileStore = {
+      async list() {
+        return [];
+      },
+      async get(scope, subjectKey) {
+        if (scope === 'group' && subjectKey === 'cid-group') {
+          return {
+            scope: 'group',
+            subjectKey,
+            name: '支付群助手',
+            rolePrompt: '只回答支付网关与结算问题',
+            speakingStyle: '简洁',
+            enabled: true,
+            updatedBy: 'admin',
+            createdAt: 0,
+            updatedAt: 0,
+          };
+        }
+        if (scope === 'user' && subjectKey === 'staff:canonical') {
+          return {
+            scope: 'user',
+            subjectKey,
+            name: '个人助手',
+            rolePrompt: '个人事务',
+            speakingStyle: '幽默',
+            enabled: true,
+            updatedBy: 'admin',
+            createdAt: 0,
+            updatedAt: 0,
+          };
+        }
+        return null;
+      },
+      async upsert(profile) {
+        return profile;
+      },
+      async remove() {
+        return false;
+      },
+      async reassignSubjectKey() {
+        return 0;
+      },
+    };
+    const resolved: string[] = [];
+    const identity = {
+      async resolve(message: InboundMessage) {
+        resolved.push(message.messageId);
+        return {
+          personKey: 'staff:canonical',
+          displayName: '张三',
+          alias: 'open:abc',
+          source: 'open' as const,
+          bound: true,
+        };
+      },
+    };
+    const { harness } = createHarness(
+      scriptedEngine(calls),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        memory,
+        personas: new PersonaResolver({
+          store: personaStore,
+          fallback: () => persona,
+        }),
+        identity,
+      },
+    );
+
+    await harness.handleMessage(
+      inbound({ conversationType: '2', conversationId: 'cid-group' }),
+      { emit: () => undefined },
+    );
+    await harness.flushMemoryTasks();
+
+    const system = (
+      calls[0]?.messages as Array<{ role: string; content: string }>
+    ).find((message) => message.role === 'system');
+    expect(system?.content).toContain('你是「支付群助手」');
+    expect(system?.content).toContain('只回答支付网关与结算问题');
+    expect(system?.content).toContain('说话风格：幽默');
+    expect(system?.content).not.toContain('个人事务');
+    expect(resolved).toEqual(['msg-1']);
+    expect(memoryInputs).toHaveLength(1);
+    expect(memoryInputs[0]).toMatchObject({
+      userId: 'staff:canonical',
+      audience: 'group',
+      groupConversationId: 'cid-group',
+    });
   });
 
   it('后台任务复用会话链路执行并带任务归因', async () => {

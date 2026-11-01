@@ -23,6 +23,10 @@ import type {
   McpServerConfig,
   McpServerStatus,
   McpTestResult,
+  PersonIdentity,
+  PersonIdentityBindResult,
+  PersonaProfile,
+  PersonaScope,
   PluginAdminView,
   PluginPackagePreview,
   PluginValidationIssue,
@@ -39,6 +43,12 @@ import type {
   ProjectSyncJob,
   RetentionPolicy,
   RetentionStats,
+  SemanticMemory,
+  SemanticMemoryKind,
+  SemanticMemoryPage,
+  SemanticMemorySensitivity,
+  SemanticMemoryScope,
+  SemanticMemoryStatus,
   SkillAdminView,
   SkillDraftInput,
   SkillPreviewResult,
@@ -193,6 +203,85 @@ export const api = {
     request<{ muted: string[]; defaultMuted: boolean }>(
       '/groups/emergency-mute',
       { method: 'POST', body: JSON.stringify({ conversationId }) },
+    ),
+
+  personas: (scope?: PersonaScope) =>
+    request<{ profiles: PersonaProfile[] }>(
+      `/personas${scope ? `?scope=${scope}` : ''}`,
+    ),
+  savePersona: (
+    scope: PersonaScope,
+    subjectKey: string,
+    body: Partial<
+      Pick<
+        PersonaProfile,
+        'name' | 'rolePrompt' | 'speakingStyle' | 'enabled'
+      >
+    >,
+  ) =>
+    request<{ profile: PersonaProfile }>(
+      `/personas/${scope}/${encodeURIComponent(subjectKey)}`,
+      { method: 'PUT', body: JSON.stringify(body) },
+    ),
+  deletePersona: (scope: PersonaScope, subjectKey: string) =>
+    request<{ ok: boolean; removed: boolean }>(
+      `/personas/${scope}/${encodeURIComponent(subjectKey)}`,
+      { method: 'DELETE' },
+    ),
+
+  identities: (query?: string) =>
+    request<{ people: PersonIdentity[] }>(
+      `/identities${query?.trim() ? `?query=${encodeURIComponent(query.trim())}` : ''}`,
+    ),
+  bindIdentity: (body: {
+    alias: string;
+    source?: 'staff' | 'open' | 'external' | 'manual';
+    staffId?: string;
+    personKey?: string;
+    displayName?: string;
+    mergeMemories?: boolean;
+  }) =>
+    request<PersonIdentityBindResult & { ok: boolean }>('/identities/bind', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  memories: (params: {
+    scope?: SemanticMemoryScope;
+    subjectKey?: string;
+    kind?: SemanticMemoryKind;
+    status?: SemanticMemoryStatus;
+    query?: string;
+    limit?: number;
+    offset?: number;
+  } = {}) => {
+    const search = new URLSearchParams();
+    for (const [key, value] of Object.entries(params)) {
+      if (value !== undefined && value !== '') search.set(key, String(value));
+    }
+    const suffix = search.toString();
+    return request<SemanticMemoryPage>(`/memories${suffix ? `?${suffix}` : ''}`);
+  },
+  updateMemory: (
+    id: string,
+    body: {
+      content?: string;
+      keywords?: string[];
+      shareableInGroup?: boolean;
+      sensitivity?: SemanticMemorySensitivity;
+      status?: SemanticMemoryStatus;
+      confidence?: number;
+      expiresAt?: number | null;
+    },
+  ) =>
+    request<{ memory: SemanticMemory }>(
+      `/memories/${encodeURIComponent(id)}`,
+      { method: 'PATCH', body: JSON.stringify(body) },
+    ),
+  deleteMemory: (id: string) =>
+    request<{ ok: boolean; removed: boolean }>(
+      `/memories/${encodeURIComponent(id)}`,
+      { method: 'DELETE' },
     ),
 
   traces: (params: {

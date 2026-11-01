@@ -53,6 +53,11 @@ const ACTION_LABEL: Record<AuditLog['actionType'], string> = {
   UPDATE_PROJECT_HANDBOOK: '保存手册草稿',
   PUBLISH_PROJECT_HANDBOOK: '发布项目手册',
   UPDATE_PROJECT_MANUAL: '维护人工条目',
+  UPDATE_PERSONA: '更新分层人设',
+  DELETE_PERSONA: '删除分层人设',
+  BIND_PERSON_IDENTITY: '绑定人员身份',
+  UPDATE_SEMANTIC_MEMORY: '治理语义记忆',
+  DELETE_SEMANTIC_MEMORY: '删除语义记忆',
   TEST_GITHUB: '测试 GitHub',
 };
 

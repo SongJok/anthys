@@ -62,18 +62,48 @@ export interface EpisodicSummaryRecord {
 
 export type SemanticMemoryScope = 'global' | 'group' | 'user';
 export type SemanticMemoryKind = 'terminology' | 'profile';
+export type SemanticMemoryStatus = 'active' | 'retired';
+export type SemanticMemorySensitivity = 'normal' | 'private' | 'sensitive';
 
 /** 语义记忆：企业黑话/项目代号映射或员工职责画像 */
 export interface SemanticMemoryRecord {
   id: string;
   scope: SemanticMemoryScope;
-  /** group 会话 ID、user staffId 或 'global' */
+  /** group 会话 ID、canonical personKey 或 'global' */
   subjectKey: string;
   kind: SemanticMemoryKind;
   content: string;
   keywords: string[];
   embedding: number[] | null;
+  /** 用户级记忆是否允许在该用户所在的群聊中召回 */
+  shareableInGroup: boolean;
+  sensitivity: SemanticMemorySensitivity;
+  status: SemanticMemoryStatus;
+  sourceConversationId: string | null;
+  sourceConversationType: '1' | '2' | null;
+  sourceMessageId: string | null;
+  confidence: number;
+  /** epoch ms；null 表示长期有效 */
+  expiresAt: number | null;
+  createdAt: number;
   updatedAt: number;
+}
+
+export interface SemanticMemoryUpsertInput {
+  scope: SemanticMemoryScope;
+  subjectKey: string;
+  kind: SemanticMemoryKind;
+  content: string;
+  keywords: string[];
+  embedding?: number[] | null;
+  shareableInGroup?: boolean;
+  sensitivity?: SemanticMemorySensitivity;
+  status?: SemanticMemoryStatus;
+  sourceConversationId?: string | null;
+  sourceConversationType?: '1' | '2' | null;
+  sourceMessageId?: string | null;
+  confidence?: number;
+  expiresAt?: number | null;
 }
 
 export interface SemanticRecallQuery {
@@ -83,6 +113,40 @@ export interface SemanticRecallQuery {
   limit?: number;
   /** 有值时按 pgvector 余弦距离排序 */
   embedding?: number[];
+  /** 群聊召回用户级记忆时只取明确可共享的条目 */
+  shareableOnly?: boolean;
+  /** 过期判断基准，默认当前时间 */
+  now?: number;
+}
+
+export interface SemanticMemoryPatch {
+  content?: string;
+  keywords?: string[];
+  shareableInGroup?: boolean;
+  sensitivity?: SemanticMemorySensitivity;
+  status?: SemanticMemoryStatus;
+  confidence?: number;
+  expiresAt?: number | null;
+}
+
+export interface SemanticMemoryAdminFilter {
+  scope?: SemanticMemoryScope;
+  subjectKey?: string;
+  kind?: SemanticMemoryKind;
+  status?: SemanticMemoryStatus;
+  query?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface SemanticMemoryAdminPort {
+  list(
+    filter: SemanticMemoryAdminFilter,
+  ): Promise<{ total: number; items: SemanticMemoryRecord[] }>;
+  get(id: string): Promise<SemanticMemoryRecord | null>;
+  update(id: string, patch: SemanticMemoryPatch): Promise<SemanticMemoryRecord>;
+  remove(id: string): Promise<boolean>;
+  reassignSubjectKey(from: string, to: string): Promise<number>;
 }
 
 export interface SemanticRecallResult {

@@ -239,6 +239,11 @@ export interface AuditLog {
     | 'UPDATE_PROJECT_HANDBOOK'
     | 'PUBLISH_PROJECT_HANDBOOK'
     | 'UPDATE_PROJECT_MANUAL'
+    | 'UPDATE_PERSONA'
+    | 'DELETE_PERSONA'
+    | 'BIND_PERSON_IDENTITY'
+    | 'UPDATE_SEMANTIC_MEMORY'
+    | 'DELETE_SEMANTIC_MEMORY'
     | 'TEST_GITHUB';
   beforeSnapshot: Record<string, unknown>;
   afterSnapshot: Record<string, unknown>;
@@ -831,4 +836,74 @@ export interface ProjectHandbookResult {
     commit: string;
   };
   manualEntries: ProjectManualEntry[];
+}
+
+export type PersonaScope = 'group' | 'user';
+
+export interface PersonaProfile {
+  scope: PersonaScope;
+  subjectKey: string;
+  name: string;
+  rolePrompt: string;
+  speakingStyle: string;
+  enabled: boolean;
+  updatedBy: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export type PersonIdentityAliasSource = 'staff' | 'open' | 'external' | 'manual';
+
+export interface PersonIdentityAlias {
+  alias: string;
+  personKey: string;
+  source: PersonIdentityAliasSource;
+  displayName: string;
+  updatedAt: number;
+}
+
+export interface PersonIdentity {
+  personKey: string;
+  displayName: string;
+  aliases: PersonIdentityAlias[];
+  mergedInto: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface PersonIdentityBindResult {
+  personKey: string;
+  previousPersonKey: string | null;
+  migratedMemories: number;
+  migratedPersonas: number;
+}
+
+export type SemanticMemoryScope = 'global' | 'group' | 'user';
+export type SemanticMemoryKind = 'terminology' | 'profile';
+export type SemanticMemoryStatus = 'active' | 'retired';
+export type SemanticMemorySensitivity = 'normal' | 'private' | 'sensitive';
+
+export interface SemanticMemory {
+  id: string;
+  scope: SemanticMemoryScope;
+  subjectKey: string;
+  kind: SemanticMemoryKind;
+  content: string;
+  keywords: string[];
+  embedding: number[] | null;
+  shareableInGroup: boolean;
+  sensitivity: SemanticMemorySensitivity;
+  status: SemanticMemoryStatus;
+  sourceConversationId: string | null;
+  sourceConversationType: '1' | '2' | null;
+  sourceMessageId: string | null;
+  confidence: number;
+  expiresAt: number | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface SemanticMemoryPage {
+  total: number;
+  items: SemanticMemory[];
 }

@@ -17,9 +17,11 @@ import {
   BulbOutlined,
   DashboardOutlined,
   DatabaseOutlined,
+  IdcardOutlined,
   MessageOutlined,
   ReadOutlined,
   RobotOutlined,
+  SafetyCertificateOutlined,
   SettingOutlined,
   TeamOutlined,
 } from '@ant-design/icons';
@@ -36,6 +38,8 @@ import GlossaryPage from './pages/GlossaryPage';
 import SkillsPage from './pages/SkillsPage';
 import PluginsPage from './pages/PluginsPage';
 import ProjectsPage from './pages/ProjectsPage';
+import PersonaLayersPage from './pages/PersonaLayersPage';
+import MemoryGovernancePage from './pages/MemoryGovernancePage';
 
 const { Header, Sider, Content } = Layout;
 
@@ -44,8 +48,10 @@ const MENU = [
   { key: 'chat', icon: <MessageOutlined />, label: '在线对话' },
   { key: 'dingtalk', icon: <SettingOutlined />, label: '钉钉企业配置' },
   { key: 'llm', icon: <RobotOutlined />, label: '大模型与人设' },
+  { key: 'personas', icon: <IdcardOutlined />, label: '人设与身份' },
   { key: 'mcp', icon: <ApiOutlined />, label: '企业 MCP' },
   { key: 'groups', icon: <TeamOutlined />, label: '群聊旁听策略' },
+  { key: 'memories', icon: <SafetyCertificateOutlined />, label: '记忆治理' },
   { key: 'traces', icon: <BranchesOutlined />, label: 'ReAct 审计轨迹' },
   { key: 'glossary', icon: <ReadOutlined />, label: '术语知识库' },
   { key: 'skills', icon: <BulbOutlined />, label: '技能 Skills' },
@@ -59,8 +65,10 @@ const PAGE_TITLES: Record<string, string> = {
   chat: '在线对话（SSE 流式）',
   dingtalk: '钉钉企业配置',
   llm: '大模型与人设配置',
+  personas: '人设分层与身份归并',
   mcp: '企业内部 MCP 配置',
   groups: '群聊旁听与主动回复策略',
+  memories: '语义记忆召回与治理',
   traces: 'ReAct 全链路审计',
   glossary: '企业术语知识库',
   skills: '技能管理与目录预览',
@@ -117,8 +125,10 @@ export default function App() {
           {active === 'chat' && <ChatPage />}
           {active === 'dingtalk' && <SystemSettingsPage />}
           {active === 'llm' && <LlmPersonaPage />}
+          {active === 'personas' && <PersonaLayersPage />}
           {active === 'mcp' && <McpConfigPage />}
           {active === 'groups' && <GroupsPage />}
+          {active === 'memories' && <MemoryGovernancePage />}
           {active === 'traces' && <TracesPage />}
           {active === 'glossary' && <GlossaryPage />}
           {active === 'skills' && <SkillsPage />}

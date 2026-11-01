@@ -125,6 +125,12 @@ import {
   LlmSemanticFactExtractor,
 } from './memory/HierarchicalMemoryManager.js';
 import { DrizzleMemoryStore } from './db/memorySchema.js';
+import {
+  DrizzlePersonIdentityStore,
+  DrizzlePersonaProfileStore,
+} from './db/personSchema.js';
+import { PersonIdentityService } from './identity/PersonIdentityService.js';
+import { PersonaResolver } from './persona/PersonaResolver.js';
 import { DrizzleGlossaryStore } from './db/glossarySchema.js';
 import { GlossaryService } from './glossary/GlossaryService.js';
 import { GlossaryToolProvider } from './tools/glossary/GlossaryToolProvider.js';
@@ -1459,6 +1465,8 @@ async function main(): Promise<void> {
     });
 
     const memoryStore = new DrizzleMemoryStore(dbHandle.db);
+    const personIdentityStore = new DrizzlePersonIdentityStore(dbHandle.db);
+    const personaProfileStore = new DrizzlePersonaProfileStore(dbHandle.db);
     const usageLedger = new DrizzleUsageLedgerStore(dbHandle.db);
     const modelPricing = parseModelPricing(process.env.MODEL_PRICING_JSON);
     const usageGuard = new UsageGuard({
@@ -1516,6 +1524,17 @@ async function main(): Promise<void> {
     });
 
     const personaRef = { ...configCenter.getLLMConfig().persona };
+    const personaResolver = new PersonaResolver({
+      store: personaProfileStore,
+      fallback: () => personaRef,
+    });
+    const personIdentity = new PersonIdentityService({
+      store: personIdentityStore,
+      memories: memoryStore,
+      personas: personaProfileStore,
+      logger: harnessLogger,
+      onBind: () => personaResolver.invalidate(),
+    });
     const repository = new DrizzleConversationRepository(dbHandle.db);
     const harness = new AgentHarness({
       engine: routingEngine,
@@ -1526,6 +1545,8 @@ async function main(): Promise<void> {
         windowMessages: memoryConfig.windowMessages,
       }),
       persona: personaRef,
+      personas: personaResolver,
+      identity: personIdentity,
       policy: configCenter.getLoopPolicy(),
       windowMessages: memoryConfig.windowMessages,
       logger: harnessLogger,
@@ -3357,6 +3378,34 @@ async function main(): Promise<void> {
       plugins: pluginAdminPort,
       projects: projectAdminPort,
       github: githubAdminPort,
+      personas: {
+        list: (scope) => personaProfileStore.list(scope),
+        get: (scope, subjectKey) =>
+          personaProfileStore.get(scope, subjectKey),
+        upsert: async (scope, subjectKey, input, actor) => {
+          const before = await personaProfileStore.get(scope, subjectKey);
+          const saved = await personaProfileStore.upsert({
+            scope,
+            subjectKey,
+            name: input.name ?? before?.name ?? '',
+            rolePrompt: input.rolePrompt ?? before?.rolePrompt ?? '',
+            speakingStyle: input.speakingStyle ?? before?.speakingStyle ?? '',
+            enabled: input.enabled ?? before?.enabled ?? true,
+            updatedBy: actor,
+            createdAt: before?.createdAt ?? Date.now(),
+            updatedAt: Date.now(),
+          });
+          personaResolver.invalidate(scope, subjectKey);
+          return saved;
+        },
+        remove: async (scope, subjectKey) => {
+          const removed = await personaProfileStore.remove(scope, subjectKey);
+          if (removed) personaResolver.invalidate(scope, subjectKey);
+          return removed;
+        },
+      },
+      identities: personIdentity,
+      memories: memoryStore,
       mcp: {
         status: () => mcpPort.status(),
         applyServers: (servers) => mcpPort.applyServers(servers),

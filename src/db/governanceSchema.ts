@@ -181,6 +181,10 @@ export class PgRetentionStore implements RetentionStore {
           ? await this.optionalDelete(statement, params)
           : rowCount(await this.sql.query(statement, params));
     }
+    deleted.personas = await this.optionalDelete(
+      "DELETE FROM persona_profiles WHERE scope = 'group' AND subject_key = $1",
+      [conversationId],
+    );
     return { deleted, messageIds };
   }
 
@@ -232,7 +236,7 @@ export class PgRetentionStore implements RetentionStore {
       deleted.messages += groupMessages;
     }
 
-    const cascades: Array<[string, string]> = [
+    const cascades: Array<[string, string, unknown[]?]> = [
       ['traces', 'DELETE FROM react_traces WHERE sender_staff_id = $1'],
       ['usage', 'DELETE FROM usage_ledger WHERE sender_staff_id = $1'],
       ['taskResults', 'DELETE FROM task_results WHERE sender_staff_id = $1'],
@@ -240,13 +244,22 @@ export class PgRetentionStore implements RetentionStore {
       ['scheduledTasks', 'DELETE FROM scheduled_tasks WHERE created_by = $1'],
       [
         'semanticMemories',
-        "DELETE FROM semantic_memories WHERE scope = 'user' AND subject_key = $1",
+        "DELETE FROM semantic_memories WHERE scope = 'user' AND subject_key IN ($1, $2)",
+        [staffId, `staff:${staffId}`],
       ],
     ];
-    for (const [label, statement] of cascades) {
-      const result = await this.sql.query(statement, [staffId]);
+    for (const [label, statement, params] of cascades) {
+      const result = await this.sql.query(statement, params ?? [staffId]);
       deleted[label] = rowCount(result);
     }
+    deleted.personas = await this.optionalDelete(
+      "DELETE FROM persona_profiles WHERE scope = 'user' AND subject_key IN ($1, $2)",
+      [staffId, `staff:${staffId}`],
+    );
+    deleted.personIdentities = await this.optionalDelete(
+      'DELETE FROM person_identities WHERE person_key = $1',
+      [`staff:${staffId}`],
+    );
     return { deleted, messageIds };
   }
 

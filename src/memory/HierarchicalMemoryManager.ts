@@ -159,6 +159,7 @@ export interface SemanticExtractionInput {
   conversationType: '1' | '2';
   userText: string;
   assistantText: string;
+  sourceMessageId?: string;
 }
 
 export interface SemanticFactExtractor {
@@ -256,8 +257,10 @@ export interface AssembleMemoryInput {
   speakerNick: string;
   /** 数据库会话 ID，用于召回情景摘要；单聊/群聊均可 */
   conversationId?: string;
-  /** 钉钉群 conversationId，用于召回群级术语；缺省与 conversationId 一致 */
+  /** 钉钉群 conversationId，用于召回群级术语；仅群聊传入 */
   groupConversationId?: string;
+  /** 当前上下文受众；群聊会过滤未标记共享的用户级记忆 */
+  audience?: 'single' | 'group';
   groupRecentTranscript?: string;
   activeTurnMessages?: Array<{ role: 'user' | 'assistant'; content: string }>;
   semanticQuery?: string;
@@ -451,6 +454,13 @@ export class HierarchicalMemoryManager {
       content: string;
       keywords?: string[];
       embedding?: number[] | null;
+      shareableInGroup?: boolean;
+      sensitivity?: SemanticMemoryRecord['sensitivity'];
+      confidence?: number;
+      expiresAt?: number | null;
+      sourceConversationId?: string | null;
+      sourceConversationType?: '1' | '2' | null;
+      sourceMessageId?: string | null;
     }>,
   ): Promise<SemanticMemoryRecord[]> {
     const vectors = await this.embedTexts(facts.map((fact) => fact.content));
@@ -464,6 +474,25 @@ export class HierarchicalMemoryManager {
           content: fact.content,
           keywords: fact.keywords ?? [],
           embedding: fact.embedding ?? vectors?.[index] ?? null,
+          ...(fact.shareableInGroup !== undefined
+            ? { shareableInGroup: fact.shareableInGroup }
+            : {}),
+          ...(fact.sensitivity ? { sensitivity: fact.sensitivity } : {}),
+          ...(fact.confidence !== undefined
+            ? { confidence: fact.confidence }
+            : {}),
+          ...(fact.expiresAt !== undefined
+            ? { expiresAt: fact.expiresAt }
+            : {}),
+          ...(fact.sourceConversationId !== undefined
+            ? { sourceConversationId: fact.sourceConversationId }
+            : {}),
+          ...(fact.sourceConversationType !== undefined
+            ? { sourceConversationType: fact.sourceConversationType }
+            : {}),
+          ...(fact.sourceMessageId !== undefined
+            ? { sourceMessageId: fact.sourceMessageId }
+            : {}),
         }),
       );
     }
@@ -503,21 +532,25 @@ export class HierarchicalMemoryManager {
         .slice(-500);
 
     const queryVector = (await this.embedTexts([queryText]))?.[0];
+    const audience =
+      input.audience ?? (input.groupConversationId ? 'group' : 'single');
+    const inGroup = audience === 'group';
     const [userRecall, groupRecall, episodicSummary] = await Promise.all([
       this.recall(
         {
           query: queryText,
           scope: 'user',
           subjectKey: input.userId,
+          ...(inGroup ? { shareableOnly: true } : {}),
         },
         queryVector,
       ),
-      input.conversationId
+      inGroup && input.groupConversationId
         ? this.recall(
             {
               query: queryText,
               scope: 'group',
-              subjectKey: input.groupConversationId ?? input.conversationId,
+              subjectKey: input.groupConversationId,
             },
             queryVector,
           )
@@ -527,10 +560,10 @@ export class HierarchicalMemoryManager {
         : Promise.resolve(''),
     ]);
 
-    const profileLines = [
-      `发言人：${input.speakerNick}`,
-      ...userRecall.profileLines,
-    ];
+    const profileLines = [`发言人：${input.speakerNick}`];
+    for (const line of userRecall.profileLines) {
+      if (!profileLines.includes(line)) profileLines.push(line);
+    }
     if (userRecall.glossaryLines.length + groupRecall.glossaryLines.length > 0) {
       profileLines.push(
         '团队术语：',
@@ -539,8 +572,11 @@ export class HierarchicalMemoryManager {
         ),
       );
     }
-    if (groupRecall.profileLines.length > 0) {
-      profileLines.push('团队画像：', ...groupRecall.profileLines);
+    const groupProfileLines = groupRecall.profileLines.filter(
+      (line) => !profileLines.includes(line),
+    );
+    if (groupProfileLines.length > 0) {
+      profileLines.push('团队画像：', ...groupProfileLines);
     }
 
     return {
@@ -579,6 +615,13 @@ export class HierarchicalMemoryManager {
         kind: fact.kind,
         content: fact.content,
         keywords: fact.keywords,
+        // 私聊沉淀的个人事实默认不跨群共享，需管理员显式放开
+        shareableInGroup: fact.scope === 'user' ? false : true,
+        sensitivity: fact.scope === 'user' ? 'private' : 'normal',
+        confidence: 0.8,
+        sourceConversationId: input.conversationId,
+        sourceConversationType: input.conversationType,
+        sourceMessageId: input.sourceMessageId ?? null,
       })),
     );
   }

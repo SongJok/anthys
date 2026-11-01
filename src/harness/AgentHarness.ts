@@ -36,6 +36,9 @@ import {
   parseWorkerOutput,
 } from '../workers/WorkerOutput.js';
 import { QuotaExceededError } from '../billing/UsageGuard.js';
+import { defaultPersonKeyFor } from '../identity/PersonIdentityService.js';
+import type { PersonaResolver } from '../persona/PersonaResolver.js';
+import type { PersonIdentityResolver } from '../types/persona-and-identity.js';
 import {
   assessRequestAdmission,
   formatAdmissionRefusal,
@@ -76,7 +79,12 @@ export interface AgentHarnessOptions {
   workerRuntimes?: Partial<Record<WorkerName, WorkerRuntime>>;
   repository: ConversationRepository;
   assembler: ContextAssembler;
+  /** 管理员全局人设；未配置分层人设时作为唯一来源 */
   persona: PersonaInput;
+  /** 群 / 个人人设覆盖解析器 */
+  personas?: PersonaResolver;
+  /** staffId / openDingTalkId / 外部 ID 的统一身份解析 */
+  identity?: PersonIdentityResolver;
   policy: DynamicLoopPolicy;
   windowMessages: number;
   now?: () => number;
@@ -213,7 +221,8 @@ export class AgentHarness {
     );
     if (admissionAnswer) return admissionAnswer;
 
-    const { repository, assembler, engine, policy, persona } = this.options;
+    const { repository, assembler, engine, policy } = this.options;
+    const { persona, personKey } = await this.resolveTurnContext(message);
     const conversation = await repository.ensureConversation({
       conversationKey: conversationKeyFor(message),
       conversationType: message.conversationType,
@@ -228,12 +237,15 @@ export class AgentHarness {
       conversation.id,
       this.options.windowMessages,
     );
-    const memoryContext = await this.buildMemoryContext(
+    const memoryContext = await this.buildMemoryContext({
       message,
-      conversation.id,
-      text,
-      message.messageId,
-    );
+      dbConversationId: conversation.id,
+      userText: text,
+      personKey,
+      personaSystemPrompt: buildSystemPrompt(persona, this.now),
+      audience: message.conversationType === '2' ? 'group' : 'single',
+      excludeMessageId: message.messageId,
+    });
     const extraSystemPrompt = await this.buildExtraSystemPrompt(
       message,
       text,
@@ -311,6 +323,7 @@ export class AgentHarness {
       message,
       text,
       result.answer,
+      personKey,
     );
     return result;
   }
@@ -340,7 +353,8 @@ export class AgentHarness {
     }
     if (await this.enforceQuota(message, handle.emit, true)) return null;
 
-    const { repository, assembler, engine, policy, persona } = this.options;
+    const { repository, assembler, engine, policy } = this.options;
+    const { persona, personKey } = await this.resolveTurnContext(message);
     const policyConfig = await this.loadBystanderPolicy(message.conversationId);
     if (
       policyConfig &&
@@ -371,11 +385,14 @@ export class AgentHarness {
       conversation.id,
       this.options.windowMessages,
     );
-    const memoryContext = await this.buildMemoryContext(
+    const memoryContext = await this.buildMemoryContext({
       message,
-      conversation.id,
-      text,
-    );
+      dbConversationId: conversation.id,
+      userText: text,
+      personKey,
+      personaSystemPrompt: buildSystemPrompt(persona, this.now),
+      audience: 'group',
+    });
     const glossaryPrompt = await this.buildGlossaryPrompt(message, text);
     const proactiveInstruction = [
       '你正在钉钉群里主动提供帮助（并非被 @）。',
@@ -468,6 +485,7 @@ export class AgentHarness {
       message,
       text,
       result.answer,
+      personKey,
     );
     return result;
   }
@@ -483,7 +501,8 @@ export class AgentHarness {
     const query = input.query.trim();
     if (!query) throw new Error('静默调查缺少待核实的问题');
     const engine = this.options.investigationEngine ?? this.options.engine;
-    const { repository, assembler, policy, persona } = this.options;
+    const { repository, assembler, policy } = this.options;
+    const { persona, personKey } = await this.resolveTurnContext(message);
 
     const conversation = await repository.ensureConversation({
       conversationKey: conversationKeyFor(message),
@@ -494,12 +513,15 @@ export class AgentHarness {
         senderStaffId: message.senderStaffId,
       },
     });
-    const memoryContext = await this.buildMemoryContext(
+    const memoryContext = await this.buildMemoryContext({
       message,
-      conversation.id,
-      query,
-      message.messageId,
-    );
+      dbConversationId: conversation.id,
+      userText: query,
+      personKey,
+      personaSystemPrompt: buildSystemPrompt(persona, this.now),
+      audience: 'group',
+      excludeMessageId: message.messageId,
+    });
     const extensionPrompt = await this.buildExtensionPrompt(message, query, true);
     const instruction = [
       '你正在钉钉群里做静默调查（只读），群成员看不到调查过程。',
@@ -604,7 +626,8 @@ export class AgentHarness {
     const quotaAnswer = await this.enforceQuota(message, handle.emit, false);
     if (quotaAnswer) return quotaAnswer;
 
-    const { repository, assembler, persona } = this.options;
+    const { repository, assembler } = this.options;
+    const { persona, personKey } = await this.resolveTurnContext(message);
     const engine = workerRuntime?.engine ?? this.options.engine;
     const policy = workerProfile?.policy ?? this.options.policy;
     const conversation = await repository.ensureConversation({
@@ -621,11 +644,14 @@ export class AgentHarness {
       conversation.id,
       this.options.windowMessages,
     );
-    const memoryContext = await this.buildMemoryContext(
+    const memoryContext = await this.buildMemoryContext({
       message,
-      conversation.id,
-      text,
-    );
+      dbConversationId: conversation.id,
+      userText: text,
+      personKey,
+      personaSystemPrompt: buildSystemPrompt(persona, this.now),
+      audience: message.conversationType === '2' ? 'group' : 'single',
+    });
     const extraSystemPrompt = await this.buildExtraSystemPrompt(
       message,
       text,
@@ -763,6 +789,7 @@ export class AgentHarness {
         message,
         text,
         finalAnswer,
+        personKey,
       );
     }
     return {
@@ -787,39 +814,86 @@ export class AgentHarness {
     this.options.policy = policy;
   }
 
-  private async buildMemoryContext(
+  private async resolveTurnContext(
     message: InboundMessage,
-    dbConversationId: string,
-    userText: string,
-    excludeMessageId?: string,
-  ): Promise<AssembledMemoryContext | undefined> {
+  ): Promise<{ personKey: string; persona: PersonaInput }> {
+    let personKey = defaultPersonKeyFor(message);
+    if (this.options.identity) {
+      try {
+        personKey = (await this.options.identity.resolve(message)).personKey;
+      } catch (error) {
+        this.options.logger?.warn(
+          {
+            conversationId: message.conversationId,
+            senderStaffId: message.senderStaffId,
+            error: error instanceof Error ? error.message : String(error),
+          },
+          'person identity resolution failed, using isolated fallback',
+        );
+      }
+    }
+
+    let persona: PersonaInput = this.options.persona;
+    if (this.options.personas) {
+      try {
+        persona = await this.options.personas.resolve({
+          conversationType: message.conversationType,
+          conversationId: message.conversationId,
+          personKey,
+        });
+      } catch (error) {
+        this.options.logger?.warn(
+          {
+            conversationId: message.conversationId,
+            personKey,
+            error: error instanceof Error ? error.message : String(error),
+          },
+          'persona resolution failed, using system default',
+        );
+      }
+    }
+    return { personKey, persona };
+  }
+
+  private async buildMemoryContext(input: {
+    message: InboundMessage;
+    dbConversationId: string;
+    userText: string;
+    personKey: string;
+    personaSystemPrompt: string;
+    audience: 'single' | 'group';
+    excludeMessageId?: string;
+  }): Promise<AssembledMemoryContext | undefined> {
     const memory = this.options.memory;
     if (!memory) return undefined;
+    const { message, audience } = input;
 
     let groupTranscript = '';
-    if (message.conversationType === '2' && this.options.bystander) {
+    if (audience === 'group' && this.options.bystander) {
       const policy = await this.loadBystanderPolicy(message.conversationId);
       groupTranscript = this.options.bystander.buffer.format(
         message.conversationId,
         {
           limit: policy?.slidingWindowSize ?? 20,
-          excludeMessageId,
+          ...(input.excludeMessageId
+            ? { excludeMessageId: input.excludeMessageId }
+            : {}),
         },
       );
     }
 
     return memory.assemble({
-      personaSystemPrompt: buildSystemPrompt(
-        this.options.persona,
-        this.now,
-      ),
-      userId: message.senderStaffId,
+      personaSystemPrompt: input.personaSystemPrompt,
+      userId: input.personKey,
       speakerNick: message.senderNick,
-      conversationId: dbConversationId,
-      groupConversationId: message.conversationId,
+      conversationId: input.dbConversationId,
+      ...(audience === 'group'
+        ? { groupConversationId: message.conversationId }
+        : {}),
+      audience,
       groupRecentTranscript: groupTranscript,
-      activeTurnMessages: [{ role: 'user', content: userText }],
-      semanticQuery: userText,
+      activeTurnMessages: [{ role: 'user', content: input.userText }],
+      semanticQuery: input.userText,
     });
   }
 
@@ -1022,6 +1096,7 @@ export class AgentHarness {
     message: InboundMessage,
     userText: string,
     assistantText: string,
+    personKey: string,
   ): void {
     const memory = this.options.memory;
     if (!memory) return;
@@ -1035,12 +1110,13 @@ export class AgentHarness {
       await memory.maybeCompress(conversationId, history);
       if (memory.shouldExtractSemantic(userText)) {
         await memory.captureSemantic({
-          userId: message.senderStaffId,
+          userId: personKey,
           speakerNick: message.senderNick,
           conversationId: message.conversationId,
           conversationType: message.conversationType,
           userText,
           assistantText,
+          sourceMessageId: message.messageId,
         });
       }
     })()

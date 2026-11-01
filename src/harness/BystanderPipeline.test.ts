@@ -137,6 +137,18 @@ function createMemoryStores(): {
           ...input,
           id: `memory-${memories.length + 1}`,
           embedding: input.embedding ?? null,
+          shareableInGroup:
+            input.shareableInGroup ?? input.scope !== 'user',
+          sensitivity:
+            input.sensitivity ??
+            (input.scope === 'user' ? 'private' : 'normal'),
+          status: input.status ?? 'active',
+          sourceConversationId: input.sourceConversationId ?? null,
+          sourceConversationType: input.sourceConversationType ?? null,
+          sourceMessageId: input.sourceMessageId ?? null,
+          confidence: input.confidence ?? 0.8,
+          expiresAt: input.expiresAt ?? null,
+          createdAt: BASE_TIME,
           updatedAt: BASE_TIME,
         };
         memories.push(record);

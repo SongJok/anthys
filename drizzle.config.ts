@@ -8,6 +8,7 @@ export default defineConfig({
     './src/db/configSchema.ts',
     './src/db/schedulerSchema.ts',
     './src/db/dwsIdentitySchema.ts',
+    './src/db/personSchema.ts',
     './src/db/usageSchema.ts',
     './src/db/clusterSchema.ts',
     './src/db/governanceSchema.ts',

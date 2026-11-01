@@ -32,8 +32,15 @@ import { createSkillRoutes } from './routes/skillRoutes.js';
 import { createPluginRoutes } from './routes/pluginRoutes.js';
 import { createProjectRoutes } from './routes/projectRoutes.js';
 import { createGithubRoutes } from './routes/githubRoutes.js';
+import { createPersonaRoutes } from './routes/personaRoutes.js';
+import { createMemoryRoutes } from './routes/memoryRoutes.js';
 import { createGovernanceRoutes } from '../governance/governanceRoutes.js';
 import type { DataGovernancePort } from '../governance/DataRetention.js';
+import type {
+  PersonIdentityAdminPort,
+  PersonaAdminPort,
+} from '../types/persona-and-identity.js';
+import type { SemanticMemoryAdminPort } from '../types/bystander-and-memory.js';
 import {
   handleChatStream,
   OneTimeTicketStore,
@@ -107,6 +114,12 @@ export interface AdminApiOptions {
   projects?: ProjectAdminPort;
   /** GitHub 只读工具的真实运行状态与连通性测试 */
   github?: GithubAdminPort;
+  /** 群 / 个人人设覆盖 */
+  personas?: PersonaAdminPort;
+  /** 员工身份别名与绑定 */
+  identities?: PersonIdentityAdminPort;
+  /** 语义记忆治理：查看、修订、退役与删除 */
+  memories?: SemanticMemoryAdminPort;
 }
 
 export interface AdminServerOptions extends AdminApiOptions {
@@ -248,6 +261,25 @@ export function createAdminApp(options: AdminApiOptions): Hono {
       '/',
       createGithubRoutes({
         github: options.github,
+        configCenter: options.configCenter,
+      }),
+    );
+  }
+  if (options.personas && options.identities) {
+    admin.route(
+      '/',
+      createPersonaRoutes({
+        personas: options.personas,
+        identities: options.identities,
+        configCenter: options.configCenter,
+      }),
+    );
+  }
+  if (options.memories) {
+    admin.route(
+      '/',
+      createMemoryRoutes({
+        memories: options.memories,
         configCenter: options.configCenter,
       }),
     );
