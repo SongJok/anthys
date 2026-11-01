@@ -10,7 +10,8 @@ import type { ProjectMemberContextInput } from '../../types/skills-plugins-proje
 export interface ProjectToolProviderOptions {
   service: ProjectService;
   isAdmin: (staffId: string) => boolean;
-  enabled?: boolean;
+  /** 支持热开关；每次组装工具时求值 */
+  enabled?: boolean | (() => boolean);
 }
 
 const SEARCH_OUTPUT_BUDGET = 2_500;
@@ -84,7 +85,13 @@ export class ProjectToolProvider implements IToolProvider {
   constructor(private readonly options: ProjectToolProviderOptions) {}
 
   public async getTools(ctx: ExecutionContext): Promise<ToolDefinition[]> {
-    if (this.options.enabled === false) return [];
+    const enabled = this.options.enabled;
+    if (
+      enabled !== undefined &&
+      (typeof enabled === 'function' ? !enabled() : !enabled)
+    ) {
+      return [];
+    }
     const member = memberOf(this.options, ctx);
     return [
       {

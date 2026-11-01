@@ -44,6 +44,19 @@ export interface HarnessBystanderOptions {
   ) => Promise<GroupBystanderPolicy> | GroupBystanderPolicy;
 }
 
+export interface ExtensionPromptInput {
+  message: InboundMessage;
+  text: string;
+  proactive: boolean;
+}
+
+/** 技能目录、项目简报等随会话动态生成的系统提示词片段 */
+export interface ExtensionPromptProvider {
+  build(
+    input: ExtensionPromptInput,
+  ): Promise<string | undefined> | string | undefined;
+}
+
 export interface AgentHarnessOptions {
   engine: AgentEngine;
   repository: ConversationRepository;
@@ -57,6 +70,8 @@ export interface AgentHarnessOptions {
   bystander?: HarnessBystanderOptions;
   /** 术语知识库：高频注入 + 按问检索，命中后写入系统提示 */
   glossary?: GlossaryContextProvider;
+  /** 技能目录 / 项目手册简报等扩展系统提示词 */
+  extensions?: ExtensionPromptProvider;
   /** 压缩/摘要回看的历史消息上限，默认 200 */
   fullHistoryLimit?: number;
   /** 每日 Token 配额与用量记账 */
@@ -174,14 +189,18 @@ export class AgentHarness {
       text,
       message.messageId,
     );
-    const glossaryPrompt = await this.buildGlossaryPrompt(message, text);
+    const extraSystemPrompt = await this.buildExtraSystemPrompt(
+      message,
+      text,
+      handle.proactive ?? false,
+    );
     const messages = assembler.build({
       persona,
       history,
       userText: text,
       now: this.now,
       memoryContext,
-      ...(glossaryPrompt ? { extraSystemPrompt: glossaryPrompt } : {}),
+      ...(extraSystemPrompt ? { extraSystemPrompt } : {}),
       groupChat: message.conversationType === '2',
       userSpeaker: message.senderNick,
     });
@@ -319,13 +338,21 @@ export class AgentHarness {
       '不要说明你在旁听，不要复述整段群聊，保持简洁，避免刷屏。',
       `需要查证的问题：${text}`,
     ].join('\n');
+    const extensionPrompt = await this.buildExtensionPrompt(
+      message,
+      text,
+      true,
+    );
+    const extraSystemPrompt = [extensionPrompt, glossaryPrompt]
+      .filter((section): section is string => Boolean(section))
+      .join('\n\n');
     const messages = assembler.build({
       persona,
       history,
       userText: proactiveInstruction,
       now: this.now,
       memoryContext,
-      ...(glossaryPrompt ? { extraSystemPrompt: glossaryPrompt } : {}),
+      ...(extraSystemPrompt ? { extraSystemPrompt } : {}),
       groupChat: true,
       // 主动回复的 user 消息是系统指令，不使用成员昵称加前缀
     });
@@ -471,6 +498,46 @@ export class AgentHarness {
           error: error instanceof Error ? error.message : String(error),
         },
         'failed to build glossary prompt, continuing without it',
+      );
+      return undefined;
+    }
+  }
+
+  private async buildExtraSystemPrompt(
+    message: InboundMessage,
+    text: string,
+    proactive: boolean,
+  ): Promise<string | undefined> {
+    const extensionPrompt = await this.buildExtensionPrompt(
+      message,
+      text,
+      proactive,
+    );
+    const glossaryPrompt = await this.buildGlossaryPrompt(message, text);
+    const sections = [extensionPrompt, glossaryPrompt].filter(
+      (section): section is string => Boolean(section),
+    );
+    return sections.length > 0 ? sections.join('\n\n') : undefined;
+  }
+
+  private async buildExtensionPrompt(
+    message: InboundMessage,
+    text: string,
+    proactive: boolean,
+  ): Promise<string | undefined> {
+    const extensions = this.options.extensions;
+    if (!extensions) return undefined;
+    try {
+      const prompt = (await extensions.build({ message, text, proactive }))
+        ?.trim();
+      return prompt || undefined;
+    } catch (error) {
+      this.options.logger?.warn(
+        {
+          conversationId: message.conversationId,
+          error: error instanceof Error ? error.message : String(error),
+        },
+        'failed to build extension prompt, continuing without it',
       );
       return undefined;
     }

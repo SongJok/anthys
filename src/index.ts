@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { DWClient } from 'dingtalk-stream';
 import { EnvConfigProvider } from './config/EnvConfigProvider.js';
@@ -59,6 +60,16 @@ import {
 } from './scheduler/ScheduledTaskScheduler.js';
 import { CommandRouter, parseCommand } from './commands/CommandRouter.js';
 import { ToolRegistry, loadMcpServerConfigs } from './harness/ToolRegistry.js';
+import { SkillService } from './skills/SkillService.js';
+import { DrizzleSkillStore } from './skills/SkillStore.js';
+import { SkillToolProvider } from './tools/skills/SkillToolProvider.js';
+import { PluginService } from './plugins/PluginService.js';
+import { DrizzlePluginStore } from './plugins/PluginStore.js';
+import { ProjectService } from './projects/ProjectService.js';
+import { DrizzleProjectStore } from './projects/ProjectStore.js';
+import { RepoSource } from './projects/RepoSource.js';
+import { ProjectToolProvider } from './tools/projects/ProjectToolProvider.js';
+import type { SkillScanRoot } from './skills/SkillRegistry.js';
 import { GroupTranscriptBuffer } from './bystander/GroupTranscriptBuffer.js';
 import { CooldownLimiter } from './bystander/CooldownLimiter.js';
 import { DwsGroupMessageListener } from './bystander/DwsGroupMessageListener.js';
@@ -131,6 +142,7 @@ import type {
 } from './types/core.js';
 import type {
   LlmSandboxTestResult,
+  McpAdminPort,
   McpServerTestResult,
   ScheduledTask,
   ScheduledTaskInput,
@@ -148,6 +160,17 @@ const EMPTY_RESULT: RunResult = {
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.stack ?? error.message : String(error);
+}
+
+function readAgentVersion(): string {
+  try {
+    const parsed = JSON.parse(
+      readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
+    ) as { version?: unknown };
+    return typeof parsed.version === 'string' ? parsed.version : '0.0.0';
+  } catch {
+    return '0.0.0';
+  }
 }
 
 /** 钉钉单聊文本单条有长度上限，按行切块后分条发送 */
@@ -299,6 +322,11 @@ async function main(): Promise<void> {
   let retentionService: DataRetentionService | undefined;
   let dwsAuth: DwsAuthManager | undefined;
   let dwsIdentity: DwsIdentityService | undefined;
+  let skillService: SkillService | undefined;
+  let pluginService: PluginService | undefined;
+  let projectService: ProjectService | undefined;
+  let projectSyncTimer: ReturnType<typeof setInterval> | undefined;
+  let skillWatchStop: (() => void) | undefined;
   let streamConnected = false;
 
   try {
@@ -361,6 +389,211 @@ async function main(): Promise<void> {
           },
         })
       : undefined;
+
+    const extensionsConfig = configCenter.getExtensionsConfig();
+    const stateRoot = resolve(
+      process.cwd(),
+      process.env.AGENT_STATE_DIR?.trim() || '.state',
+    );
+    const builtinSkillsDir = resolve(
+      process.cwd(),
+      process.env.SKILLS_BUILTIN_DIR?.trim() || 'skills/builtin',
+    );
+    const localSkillsDir = resolve(
+      process.cwd(),
+      process.env.SKILLS_LOCAL_DIR?.trim() || 'skills/local',
+    );
+
+    const mergeMcpServers = async (
+      manual: EnterpriseMcpServerConfig[] = configCenter.getMcpServers(),
+    ): Promise<EnterpriseMcpServerConfig[]> => {
+      if (
+        !pluginService ||
+        !configCenter.getExtensionsConfig().pluginsEnabled
+      ) {
+        return manual;
+      }
+      try {
+        return [...manual, ...(await pluginService.getEnabledMcpServers())];
+      } catch (error) {
+        logger.warn(
+          { error: errorText(error) },
+          'failed to load plugin MCP servers',
+        );
+        return manual;
+      }
+    };
+
+    pluginService = new PluginService({
+      store: new DrizzlePluginStore(dbHandle.db),
+      pluginsRoot: resolve(stateRoot, 'plugins'),
+      agentVersion: readAgentVersion(),
+      env: process.env,
+      ...(process.env.PLUGIN_ALLOWED_COMMANDS?.trim()
+        ? {
+            allowedCommands: process.env.PLUGIN_ALLOWED_COMMANDS.split(',')
+              .map((item) => item.trim())
+              .filter(Boolean),
+          }
+        : {}),
+      reservedSkillNames: () =>
+        (skillService?.getAll() ?? [])
+          .filter((skill) => skill.source !== 'plugin')
+          .map((skill) => skill.name),
+      manualMcpServerIds: () =>
+        configCenter.getMcpServers().map((server) => server.id),
+      onChanged: async () => {
+        await skillService?.reload();
+        await applyMergedMcpServers();
+      },
+      allowMissingSecrets: envEnabled(
+        process.env.PLUGIN_ALLOW_MISSING_SECRETS,
+        false,
+      ),
+      logger: harnessLogger,
+    });
+    const plugins = pluginService;
+
+    skillService = new SkillService({
+      roots: async () => {
+        const roots: SkillScanRoot[] = [
+          { source: 'builtin', dir: builtinSkillsDir },
+          { source: 'local', dir: localSkillsDir },
+        ];
+        if (
+          plugins &&
+          configCenter.getExtensionsConfig().pluginsEnabled
+        ) {
+          try {
+            roots.push(...(await plugins.getSkillRoots()));
+          } catch (error) {
+            logger.warn(
+              { error: errorText(error) },
+              'failed to load plugin skill roots',
+            );
+          }
+        }
+        return roots;
+      },
+      store: new DrizzleSkillStore(dbHandle.db),
+      catalogLimit: extensionsConfig.skillCatalogLimit,
+      logger: harnessLogger,
+    });
+    const skills = skillService;
+    try {
+      await skills.init();
+      skillWatchStop = skills.startWatching(() => {
+        void skills
+          .reload()
+          .then((result) =>
+            logger.info(
+              { loaded: result.loaded, errors: result.errors.length },
+              'skills reloaded after directory change',
+            ),
+          )
+          .catch((error) =>
+            logger.warn(
+              { error: errorText(error) },
+              'skill reload after directory change failed',
+            ),
+          );
+      });
+      const loaded = skills.getAll();
+      const failed = loaded.filter((skill) => skill.loadError);
+      logger.info(
+        {
+          loaded: loaded.length - failed.length,
+          errors: failed.length,
+          sample: failed
+            .slice(0, 5)
+            .map((skill) => `${skill.id}: ${skill.loadError}`),
+          roots: [builtinSkillsDir, localSkillsDir],
+        },
+        'skill registry ready',
+      );
+    } catch (error) {
+      logger.error(
+        { error: errorText(error) },
+        'skill registry init failed, continuing without skills',
+      );
+    }
+
+    const projectAllowedRoots = (process.env.PROJECT_ALLOWED_ROOTS ?? '')
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .map((item) => resolve(process.cwd(), item));
+    projectService = new ProjectService({
+      store: new DrizzleProjectStore(dbHandle.db, harnessLogger),
+      repoSource: new RepoSource({
+        allowedRoots:
+          projectAllowedRoots.length > 0
+            ? projectAllowedRoots
+            : [process.cwd()],
+        stateDir: resolve(stateRoot, 'projects'),
+        logger: harnessLogger,
+      }),
+      defaultProjectId: () =>
+        configCenter.getExtensionsConfig().defaultProjectId,
+      logger: harnessLogger,
+      briefMaxChars: extensionsConfig.projectBriefMaxChars,
+    });
+    const projects = projectService;
+    logger.info(
+      {
+        skillsEnabled: extensionsConfig.skillsEnabled,
+        pluginsEnabled: extensionsConfig.pluginsEnabled,
+        pluginsRoot: resolve(stateRoot, 'plugins'),
+        projectsEnabled: extensionsConfig.projectsEnabled,
+        projectAllowedRoots:
+          projectAllowedRoots.length > 0
+            ? projectAllowedRoots
+            : [process.cwd()],
+        defaultProjectId: extensionsConfig.defaultProjectId,
+      },
+      'extension services configured',
+    );
+
+    const projectSyncIntervalSeconds = Math.max(
+      60,
+      envSeconds(process.env.PROJECT_SYNC_INTERVAL_SECONDS, 900),
+    );
+    const startProjectSync = (): void => {
+      if (projectSyncTimer) return;
+      projectSyncTimer = setInterval(() => {
+        void projects
+          .syncDueProjects('schedule')
+          .then((results) => {
+            if (results.length === 0) return;
+            const failed = results.filter((item) => !item.ok);
+            if (failed.length > 0) {
+              logger.warn(
+                { total: results.length, failed: failed.slice(0, 5) },
+                'project auto sync completed with failures',
+              );
+              return;
+            }
+            logger.info(
+              { synced: results.length },
+              'project auto sync completed',
+            );
+          })
+          .catch((error) =>
+            logger.warn(
+              { error: errorText(error) },
+              'project auto sync failed',
+            ),
+          );
+      }, projectSyncIntervalSeconds * 1_000);
+      projectSyncTimer.unref?.();
+    };
+    const stopProjectSync = (): void => {
+      if (!projectSyncTimer) return;
+      clearInterval(projectSyncTimer);
+      projectSyncTimer = undefined;
+    };
+    if (!clusterEnabled) startProjectSync();
+
     let activeClient: DWClient | undefined;
     let cachedToken: { value: string; expiresAt: number } | null = null;
     const getAccessToken = async (): Promise<string> => {
@@ -372,10 +605,18 @@ async function main(): Promise<void> {
       cachedToken = { value, expiresAt: Date.now() + 30 * 60_000 };
       return value;
     };
-    const mcpPort = createMcpAdminPort(
+    const baseMcpPort = createMcpAdminPort(
       () => toolRegistry?.pool ?? null,
       harnessLogger,
     );
+    const mcpPort: McpAdminPort = {
+      ...baseMcpPort,
+      applyServers: async (manual) =>
+        baseMcpPort.applyServers(await mergeMcpServers(manual)),
+    };
+    const applyMergedMcpServers = async (
+      manual: EnterpriseMcpServerConfig[] = configCenter.getMcpServers(),
+    ) => mcpPort.applyServers(manual);
     const pendingActions = new PendingActionStore({
       ttlMs:
         Math.max(30, Number(process.env.TOOL_CONFIRMATION_TTL_SECONDS ?? 300)) *
@@ -526,7 +767,7 @@ async function main(): Promise<void> {
     );
 
     toolRegistry = await ToolRegistry.create({
-      mcpServers: configCenter.getMcpServers(),
+      mcpServers: await mergeMcpServers(),
       enableDws: configCenter.getSystemConfig().dingtalk.dwsCliEnabled,
       dwsIdentity: identityService,
       dwsPersonalNotifier: async (staffId, text) => {
@@ -575,6 +816,16 @@ async function main(): Promise<void> {
         service: glossary,
         logger: harnessLogger,
       }),
+      skillProvider: new SkillToolProvider({
+        service: skills,
+        isAdmin: (staffId) => configCenter.isAdmin(staffId),
+        enabled: () => configCenter.getExtensionsConfig().skillsEnabled,
+      }),
+      projectProvider: new ProjectToolProvider({
+        service: projects,
+        isAdmin: (staffId) => configCenter.isAdmin(staffId),
+        enabled: () => configCenter.getExtensionsConfig().projectsEnabled,
+      }),
       personalAssistantProvider: new PersonalAssistantToolProvider({
         service: personalAssistant,
       }),
@@ -609,6 +860,20 @@ async function main(): Promise<void> {
       },
       'tool registry ready',
     );
+    try {
+      const pluginRuntimeApplied = await plugins.refreshRuntime({
+        type: 'refresh',
+        pluginId: '*',
+      });
+      if (!pluginRuntimeApplied) {
+        logger.warn({}, 'plugin runtime refresh failed after startup');
+      }
+    } catch (error) {
+      logger.warn(
+        { error: errorText(error) },
+        'plugin runtime refresh failed after startup',
+      );
+    }
 
     const toolProviders = toolRegistry.providers;
     const attachmentDir = resolve(toolRegistry.workspace.hostDir, 'attachments');
@@ -812,6 +1077,58 @@ async function main(): Promise<void> {
       logger: harnessLogger,
       memory: hierarchicalMemory,
       glossary,
+      extensions: {
+        build: async ({ message, text }) => {
+          const config = configCenter.getExtensionsConfig();
+          const isAdmin = configCenter.isAdmin(message.senderStaffId);
+          const sections: string[] = [];
+          let projectId: string | undefined;
+          if (config.projectsEnabled) {
+            try {
+              const brief = await projects.buildBrief({
+                senderStaffId: message.senderStaffId,
+                isAdmin,
+                conversationType: message.conversationType,
+                text,
+                maxChars: config.projectBriefMaxChars,
+              });
+              if (brief) {
+                sections.push(brief.text);
+                projectId = brief.projectId;
+              }
+            } catch (error) {
+              logger.warn(
+                {
+                  conversationId: message.conversationId,
+                  error: errorText(error),
+                },
+                'failed to build project brief, continuing without it',
+              );
+            }
+          }
+          if (config.skillsEnabled) {
+            try {
+              const catalog = skills.buildCatalog({
+                query: text,
+                conversationType: message.conversationType,
+                isAdmin,
+                limit: config.skillCatalogLimit,
+                ...(projectId ? { projectId } : {}),
+              });
+              if (catalog.prompt) sections.push(catalog.prompt);
+            } catch (error) {
+              logger.warn(
+                {
+                  conversationId: message.conversationId,
+                  error: errorText(error),
+                },
+                'failed to build skill catalog, continuing without it',
+              );
+            }
+          }
+          return sections.length > 0 ? sections.join('\n\n') : undefined;
+        },
+      },
       usageGuard,
       bystander: {
         buffer: transcriptBuffer,
@@ -1920,6 +2237,7 @@ async function main(): Promise<void> {
         logger: harnessLogger,
         onAcquired: async () => {
           await startGatewayIfLeader();
+          startProjectSync();
           void startBystanderListener().catch((error) =>
             logger.error(
               { error: errorText(error) },
@@ -1933,6 +2251,7 @@ async function main(): Promise<void> {
           gateway?.stop();
           gateway = undefined;
           stopBystanderListener();
+          stopProjectSync();
           runControl.stopAll();
           logger.warn({}, 'cluster leadership lost, stream stopped');
         },
@@ -2178,10 +2497,7 @@ async function main(): Promise<void> {
       glossary,
       mcp: {
         status: () => mcpPort.status(),
-        applyServers: async (servers) => {
-          if (!toolRegistry?.pool) return [];
-          return toolRegistry.pool.applyServers(servers);
-        },
+        applyServers: (servers) => mcpPort.applyServers(servers),
         testServer: (serverId): Promise<McpServerTestResult> =>
           mcpPort.testServer!(serverId),
       },
@@ -2250,6 +2566,8 @@ async function main(): Promise<void> {
       closing = true;
       logger.info({ signal }, 'shutting down');
       if (configPoll) clearInterval(configPoll);
+      stopProjectSync();
+      skillWatchStop?.();
       await leadership?.stop();
       runControl.stopAll();
       dwsAuth?.dispose();

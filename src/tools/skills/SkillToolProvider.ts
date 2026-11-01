@@ -9,6 +9,8 @@ import type {
 export interface SkillToolProviderOptions {
   service: SkillService;
   isAdmin: (staffId: string) => boolean;
+  /** 支持热开关；每次组装工具时求值 */
+  enabled?: boolean | (() => boolean);
 }
 
 function readString(args: Record<string, unknown>, key: string): string {
@@ -35,6 +37,13 @@ export class SkillToolProvider implements IToolProvider {
   constructor(private readonly options: SkillToolProviderOptions) {}
 
   public async getTools(ctx: ExecutionContext): Promise<ToolDefinition[]> {
+    const enabled = this.options.enabled;
+    if (
+      enabled !== undefined &&
+      (typeof enabled === 'function' ? !enabled() : !enabled)
+    ) {
+      return [];
+    }
     const isAdmin = this.options.isAdmin(ctx.senderStaffId);
     return [
       {
