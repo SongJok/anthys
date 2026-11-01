@@ -110,6 +110,9 @@ interface TurnResult {
   toolCalls: ChatToolCall[];
   finishReason: string | null;
   tokens: number;
+  inputTokens: number;
+  outputTokens: number;
+  cachedTokens: number;
   aborted: boolean;
   externallyAborted: boolean;
 }
@@ -306,6 +309,9 @@ export class ReActRunner implements AgentEngine {
     let reasoning = '';
     let narration = '';
     let totalTokens = 0;
+    let inputTokens = 0;
+    let outputTokens = 0;
+    let cachedTokens = 0;
     let steps = 0;
     let halted: string | undefined;
     let refusal: string | undefined;
@@ -436,6 +442,9 @@ export class ReActRunner implements AgentEngine {
         });
         reasoning += turn.reasoning;
         totalTokens += turn.tokens;
+        inputTokens += turn.inputTokens;
+        outputTokens += turn.outputTokens;
+        cachedTokens += turn.cachedTokens;
 
         if (turn.externallyAborted) {
           halted = '请求已取消。';
@@ -625,6 +634,9 @@ export class ReActRunner implements AgentEngine {
           answer += finalTurn.content;
           reasoning += finalTurn.reasoning;
           totalTokens += finalTurn.tokens;
+          inputTokens += finalTurn.inputTokens;
+          outputTokens += finalTurn.outputTokens;
+          cachedTokens += finalTurn.cachedTokens;
         }
       }
 
@@ -645,6 +657,9 @@ export class ReActRunner implements AgentEngine {
 
       const usage = {
         totalTokens,
+        inputTokens,
+        outputTokens,
+        cachedTokens,
         steps,
         durationMs: this.now() - startedAt,
         ...(stopped ? { stopped: true } : {}),
@@ -663,6 +678,9 @@ export class ReActRunner implements AgentEngine {
       if (runController.signal.aborted) {
         const usage = {
           totalTokens,
+          inputTokens,
+          outputTokens,
+          cachedTokens,
           steps,
           durationMs: this.now() - startedAt,
           stopped: true,
@@ -1029,6 +1047,10 @@ export class ReActRunner implements AgentEngine {
     let content = '';
     let reasoning = '';
     let tokens = 0;
+    let inputTokens = 0;
+    let outputTokens = 0;
+    let cachedTokens = 0;
+    let hasSplit = false;
     let finishReason: string | null = null;
     let aborted = false;
     let externallyAborted = false;
@@ -1097,6 +1119,17 @@ export class ReActRunner implements AgentEngine {
         if (chunk.usage?.totalTokens) {
           tokens = chunk.usage.totalTokens;
         }
+        if (chunk.usage?.inputTokens !== undefined) {
+          inputTokens = chunk.usage.inputTokens;
+          hasSplit = true;
+        }
+        if (chunk.usage?.outputTokens !== undefined) {
+          outputTokens = chunk.usage.outputTokens;
+          hasSplit = true;
+        }
+        if (chunk.usage?.cachedTokens !== undefined) {
+          cachedTokens = chunk.usage.cachedTokens;
+        }
       }
     } catch (error) {
       if (!turnController.signal.aborted && !isAbortError(error)) {
@@ -1130,6 +1163,16 @@ export class ReActRunner implements AgentEngine {
     if (!tokens) {
       tokens = this.estimateTokens(params.messages, content);
     }
+    if (!hasSplit) {
+      // 供应商未返回拆分时按输入/输出分别估算，保证成本口径可用且可解释
+      const estimatedOutput = this.estimateTokens([], content + reasoning);
+      inputTokens = Math.max(0, tokens - estimatedOutput);
+      outputTokens = estimatedOutput;
+    } else if (inputTokens === 0) {
+      inputTokens = Math.max(0, tokens - outputTokens);
+    } else if (outputTokens === 0) {
+      outputTokens = Math.max(0, tokens - inputTokens);
+    }
 
     return {
       turnId,
@@ -1138,6 +1181,9 @@ export class ReActRunner implements AgentEngine {
       toolCalls,
       finishReason,
       tokens,
+      inputTokens,
+      outputTokens,
+      cachedTokens,
       aborted,
       externallyAborted,
     };

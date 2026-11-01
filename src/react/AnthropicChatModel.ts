@@ -193,14 +193,27 @@ export class AnthropicChatModel implements ChatModel {
 
     let inputTokens = 0;
     let outputTokens = 0;
+    let cachedTokens = 0;
 
     for await (const event of readSse(response.body)) {
       const type = event.type;
       if (type === 'message_start') {
         const message = event.message as
-          | { usage?: { input_tokens?: number } }
+          | {
+              usage?: {
+                input_tokens?: number;
+                cache_creation_input_tokens?: number;
+                cache_read_input_tokens?: number;
+              };
+            }
           | undefined;
-        inputTokens = message?.usage?.input_tokens ?? inputTokens;
+        const usage = message?.usage;
+        const cached = usage?.cache_read_input_tokens ?? 0;
+        inputTokens =
+          (usage?.input_tokens ?? 0) +
+          (usage?.cache_creation_input_tokens ?? 0) +
+          cached;
+        cachedTokens = cached;
         continue;
       }
       if (type === 'content_block_start') {
@@ -262,7 +275,14 @@ export class AnthropicChatModel implements ChatModel {
         throw new Error(error?.message ?? 'Anthropic 流式响应错误');
       }
       if (type === 'message_stop') {
-        yield { usage: { totalTokens: inputTokens + outputTokens } };
+        yield {
+          usage: {
+            totalTokens: inputTokens + outputTokens,
+            ...(inputTokens > 0 ? { inputTokens } : {}),
+            ...(outputTokens > 0 ? { outputTokens } : {}),
+            ...(cachedTokens > 0 ? { cachedTokens } : {}),
+          },
+        };
       }
     }
   }

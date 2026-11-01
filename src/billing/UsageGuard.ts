@@ -3,6 +3,7 @@ import type {
   UsageLedgerStore,
   UsagePolicy,
 } from '../types/admin-and-console.js';
+import type { ModelPricing } from './ModelPricing.js';
 
 const DAY_MS = 86_400_000;
 const SHANGHAI_OFFSET_MS = 8 * 60 * 60 * 1_000;
@@ -33,6 +34,8 @@ export class QuotaExceededError extends Error {
 export interface UsageGuardOptions {
   ledger: UsageLedgerStore;
   policy: UsagePolicy | (() => UsagePolicy);
+  /** 配置后为每条流水估算人民币成本；未配置时只记账 Token */
+  pricing?: ModelPricing;
   now?: () => number;
 }
 
@@ -45,11 +48,13 @@ export interface QuotaCheckInput {
 export class UsageGuard {
   private readonly ledger: UsageLedgerStore;
   private readonly policySource: UsagePolicy | (() => UsagePolicy);
+  private readonly pricing?: ModelPricing;
   private readonly now: () => number;
 
   constructor(options: UsageGuardOptions) {
     this.ledger = options.ledger;
     this.policySource = options.policy;
+    this.pricing = options.pricing;
     this.now = options.now ?? Date.now;
   }
 
@@ -94,6 +99,16 @@ export class UsageGuard {
 
   public async record(input: UsageLedgerInput): Promise<void> {
     if (input.totalTokens <= 0) return;
-    await this.ledger.append(input);
+    const estimate = this.pricing?.estimate({
+      model: input.model,
+      ...(input.inputTokens !== undefined ? { inputTokens: input.inputTokens } : {}),
+      ...(input.outputTokens !== undefined ? { outputTokens: input.outputTokens } : {}),
+      ...(input.cachedTokens !== undefined ? { cachedTokens: input.cachedTokens } : {}),
+    });
+    await this.ledger.append(
+      estimate
+        ? { ...input, costMicros: estimate.costMicros, priced: true }
+        : input,
+    );
   }
 }

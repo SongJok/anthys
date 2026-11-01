@@ -131,6 +131,29 @@ export interface TraceDailyStats {
   byGroup: GroupTraceStat[];
 }
 
+export interface UsageBreakdownRow {
+  key: string;
+  label: string;
+  tokens: number;
+  turns: number;
+  costMicros: number;
+}
+
+export interface UsageSummary {
+  sinceMs: number;
+  totalTokens: number;
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  totalTurns: number;
+  totalCostMicros: number;
+  pricedTurns: number;
+  byUser: UsageBreakdownRow[];
+  byConversation: UsageBreakdownRow[];
+  byModel: UsageBreakdownRow[];
+  byWorker: UsageBreakdownRow[];
+  byJobKind: UsageBreakdownRow[];
+}
+
 export interface ChatToolCall {
   id: string;
   name: string;

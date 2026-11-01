@@ -990,6 +990,15 @@ export class AgentHarness {
         senderNick: message.senderNick,
         model: result.model ?? 'unknown',
         totalTokens: result.usage.totalTokens,
+        ...(result.usage.inputTokens !== undefined
+          ? { inputTokens: result.usage.inputTokens }
+          : {}),
+        ...(result.usage.outputTokens !== undefined
+          ? { outputTokens: result.usage.outputTokens }
+          : {}),
+        ...(result.usage.cachedTokens !== undefined
+          ? { cachedTokens: result.usage.cachedTokens }
+          : {}),
         steps: result.usage.steps,
         durationMs: result.usage.durationMs,
         proactive,

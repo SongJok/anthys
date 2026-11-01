@@ -532,13 +532,34 @@ async function createTestContext(staticDir?: string): Promise<TestContext> {
       summary: async (days = 1) => ({
         sinceMs: days * 1_000,
         totalTokens: 120,
+        totalInputTokens: 80,
+        totalOutputTokens: 40,
         totalTurns: 2,
+        totalCostMicros: 240,
+        pricedTurns: 2,
         byUser: [
-          { key: 'u-1', label: '张三', tokens: 120, turns: 2 },
+          { key: 'u-1', label: '张三', tokens: 120, turns: 2, costMicros: 240 },
         ],
         byConversation: [
-          { key: 'cid-dev', label: 'cid-dev', tokens: 120, turns: 2 },
+          {
+            key: 'cid-dev',
+            label: 'cid-dev',
+            tokens: 120,
+            turns: 2,
+            costMicros: 240,
+          },
         ],
+        byModel: [
+          {
+            key: 'glm-5.3-flash',
+            label: 'glm-5.3-flash',
+            tokens: 120,
+            turns: 2,
+            costMicros: 240,
+          },
+        ],
+        byWorker: [],
+        byJobKind: [],
       }),
     },
     ...(staticDir ? { staticDir } : {}),

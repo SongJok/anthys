@@ -48,6 +48,7 @@ import type {
   SkillValidationResult,
   StreamStatus,
   TracePage,
+  UsageSummary,
 } from './types';
 
 const TOKEN_KEY = 'dingtalk-agent-admin-token';
@@ -98,6 +99,8 @@ async function postForm<T>(path: string, form: FormData): Promise<T> {
 
 export const api = {
   dashboard: () => request<DashboardPayload>('/dashboard'),
+  usage: (days = 1) =>
+    request<{ summary: UsageSummary }>(`/usage?days=${days}`),
 
   dingtalk: () =>
     request<{ config: DingTalkConfig; stream: StreamStatus | null }>(

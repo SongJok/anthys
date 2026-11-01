@@ -172,6 +172,9 @@ export type AgentStreamEvent =
         totalTokens: number;
         steps: number;
         durationMs: number;
+        inputTokens?: number;
+        outputTokens?: number;
+        cachedTokens?: number;
         stopped?: boolean;
       };
     }
@@ -318,7 +321,12 @@ export interface ChatStreamChunk {
     argumentsDelta?: string;
   };
   finishReason?: string | null;
-  usage?: { totalTokens?: number };
+  usage?: {
+    totalTokens?: number;
+    inputTokens?: number;
+    outputTokens?: number;
+    cachedTokens?: number;
+  };
 }
 
 export interface ChatCompletionRequest {
@@ -343,6 +351,11 @@ export interface RunUsage {
   totalTokens: number;
   steps: number;
   durationMs: number;
+  /** 供应商返回的输入/输出拆分；缺失时为本地估算值 */
+  inputTokens?: number;
+  outputTokens?: number;
+  /** 命中提示缓存的输入 Token，用于单独计价 */
+  cachedTokens?: number;
   stopped?: boolean;
 }
 

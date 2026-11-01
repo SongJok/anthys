@@ -16,7 +16,12 @@ import {
 import { ReloadOutlined } from '@ant-design/icons';
 import { api } from '../api';
 import { formatShanghaiDateTime } from '../time';
-import type { AuditLog, DashboardPayload, McpServerStatus } from '../types';
+import type {
+  AuditLog,
+  DashboardPayload,
+  McpServerStatus,
+  UsageSummary,
+} from '../types';
 
 const ACTION_LABEL: Record<AuditLog['actionType'], string> = {
   UPDATE_LLM: '更新大模型',
@@ -53,6 +58,7 @@ const ACTION_LABEL: Record<AuditLog['actionType'], string> = {
 
 export default function DashboardPage() {
   const [data, setData] = useState<DashboardPayload | null>(null);
+  const [usage, setUsage] = useState<UsageSummary | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -60,7 +66,12 @@ export default function DashboardPage() {
     setLoading(true);
     setError(null);
     try {
-      setData(await api.dashboard());
+      const [dashboard, usagePayload] = await Promise.all([
+        api.dashboard(),
+        api.usage(1),
+      ]);
+      setData(dashboard);
+      setUsage(usagePayload.summary);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -143,6 +154,54 @@ export default function DashboardPage() {
               dataIndex: 'lastError',
               render: (value: string | null) =>
                 value ? <Typography.Text type="danger">{value}</Typography.Text> : '-',
+            },
+          ]}
+        />
+      </Card>
+
+      <Card
+        title="今日 Token 与成本归因"
+        className="console-card"
+        extra={<Typography.Text type="secondary">成本按部署配置的模型单价估算，单位人民币</Typography.Text>}
+      >
+        <Space size={40} wrap style={{ marginBottom: 16 }}>
+          <Statistic title="输入 Token" value={usage?.totalInputTokens ?? 0} />
+          <Statistic title="输出 Token" value={usage?.totalOutputTokens ?? 0} />
+          <Statistic
+            title="估算成本"
+            value={`¥${((usage?.totalCostMicros ?? 0) / 1_000_000).toFixed(4)}`}
+          />
+          <Statistic
+            title="已定价轮次"
+            value={`${usage?.pricedTurns ?? 0} / ${usage?.totalTurns ?? 0}`}
+          />
+        </Space>
+        {(usage?.totalTurns ?? 0) > 0 && (usage?.pricedTurns ?? 0) === 0 && (
+          <Alert
+            type="info"
+            showIcon
+            style={{ marginBottom: 12 }}
+            message="尚未配置 MODEL_PRICING_JSON，当前只统计 Token，成本不做展示口径"
+          />
+        )}
+        <Table
+          size="small"
+          rowKey={(row) => `${row.group}:${row.key}`}
+          pagination={false}
+          loading={loading}
+          dataSource={[
+            ...(usage?.byModel ?? []).map((row) => ({ ...row, group: '模型' })),
+            ...(usage?.byWorker ?? []).map((row) => ({ ...row, group: 'Worker' })),
+          ]}
+          columns={[
+            { title: '类型', dataIndex: 'group', width: 90 },
+            { title: '模型 / Worker', dataIndex: 'label' },
+            { title: '轮次', dataIndex: 'turns' },
+            { title: 'Token', dataIndex: 'tokens' },
+            {
+              title: '估算成本',
+              dataIndex: 'costMicros',
+              render: (value: number) => `¥${(value / 1_000_000).toFixed(4)}`,
             },
           ]}
         />

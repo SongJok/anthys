@@ -331,8 +331,17 @@ pnpm run db:seed      # 可选：预写入默认人设与模型配置，已有�
 | `USAGE_QUOTA_ENABLED` | `false` | 是否启用每日 Token 配额；用量流水始终记录 |
 | `USAGE_DAILY_TOKENS_PER_USER` | `0` | 单员工每自然日 Token 上限，`0` 表示不限 |
 | `USAGE_DAILY_TOKENS_PER_CONVERSATION` | `0` | 单群每自然日 Token 上限，`0` 表示不限 |
+| `MODEL_PRICING_JSON` | 空 | 模型单价（人民币/百万 Token），用于估算 `usage_ledger` 成本；格式见下方 |
 
 配额按 Asia/Shanghai 自然日切分。超出配额时，@ 消息直接收到配额提示且不再调用模型，主动回复则静默跳过。
+
+`MODEL_PRICING_JSON` 支持 `default` 兜底价与按模型覆盖，`input`/`output` 必填，`cachedInput` 可省略（缺省按输入价计）：
+
+```json
+{"default":{"input":2,"output":8,"cachedInput":0.5},"models":{"glm-5.3-flash":{"input":0.5,"output":1}}}
+```
+
+成本按输入、缓存输入、输出三段 Token 计算，落库为人民币 micros（`cost_micros`，1 元 = 1e6）。未配置价格或模型未命中时，流水标记 `priced=false`，汇总会单独显示「已定价轮次」，不会把未定价当成 0 元。价格由部署方维护，项目不内置供应商报价。
 
 模型按角色取自 `LLM_*`、`LLM_ADMIN_*`、`LLM_PROACTIVE_*`，详见「大模型与角色路由」。旧版 `LLM_ROUTE_*` 已移除且不再读取。
 
@@ -1027,7 +1036,7 @@ ReAct 循环内置看门狗（`src/watchdog/RunWatchdog.ts`），只观察不执
 | POST | `/chat/tickets` | 换取一次性 SSE 票据（60 秒内有效、用后即焚） |
 | GET | `/api/v1/chat/stream?ticket=&question=` | 浏览器在线对话流（SSE，事件与钉钉卡片同源） |
 | GET | `/feedback` | 用户反馈列表 |
-| GET | `/usage?days=1` | 用量汇总：总 Token、按员工与按群排名 |
+| GET | `/usage?days=1` | 用量汇总：总 Token、输入/输出拆分、成本与按员工/群/模型/Worker/任务类型排名 |
 | GET / POST | `/scheduled-tasks` | 定时任务列表（含各 `kind`）/ 创建主动播报 |
 | PUT / DELETE | `/scheduled-tasks/:id` | 更新 / 删除定时任务；个人提醒与报告只允许删除，不支持管理端改期或立即执行 |
 | POST | `/scheduled-tasks/:id/run` | 立即执行一次（仅主动播报） |
@@ -1074,7 +1083,7 @@ ReAct 循环内置看门狗（`src/watchdog/RunWatchdog.ts`），只观察不执
 | `react_traces` | ReAct 执行轨迹 |
 | `admin_audit_logs` | 管理操作审计 |
 | `user_feedback` | 用户对回答的反馈（`/feedback` 命令） |
-| `usage_ledger` | 每次模型调用的 Token、模型、耗时与场景 |
+| `usage_ledger` | 每次模型调用的 Token 拆分、模型、耗时、场景与估算成本 |
 | `scheduled_tasks` | 定时主动播报任务与下次触发时间 |
 | `cluster_shared_state` | 多实例共享的去重窗口、旁听冷却与群聊转录状态（仅集群模式写入） |
 | `governance_settings` | 管理端调整的保留期策略（覆盖 env 默认值） |

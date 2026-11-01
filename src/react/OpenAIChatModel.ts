@@ -181,8 +181,28 @@ export class OpenAIChatModel implements ChatModel {
       if (choice?.finish_reason) {
         events.push({ finishReason: choice.finish_reason });
       }
-      if (chunk.usage?.total_tokens) {
-        events.push({ usage: { totalTokens: chunk.usage.total_tokens } });
+      const usage = chunk.usage as
+        | {
+            total_tokens?: number;
+            prompt_tokens?: number;
+            completion_tokens?: number;
+            prompt_tokens_details?: { cached_tokens?: number };
+          }
+        | null
+        | undefined;
+      if (usage?.total_tokens || usage?.prompt_tokens || usage?.completion_tokens) {
+        events.push({
+          usage: {
+            ...(usage.total_tokens ? { totalTokens: usage.total_tokens } : {}),
+            ...(usage.prompt_tokens ? { inputTokens: usage.prompt_tokens } : {}),
+            ...(usage.completion_tokens
+              ? { outputTokens: usage.completion_tokens }
+              : {}),
+            ...(usage.prompt_tokens_details?.cached_tokens
+              ? { cachedTokens: usage.prompt_tokens_details.cached_tokens }
+              : {}),
+          },
+        });
       }
       for (const event of events) {
         yield event;

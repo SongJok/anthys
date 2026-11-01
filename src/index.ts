@@ -55,6 +55,7 @@ import {
 } from './harness/ToolApprovalGate.js';
 import { ModelRoutingEngine } from './harness/ModelRoutingEngine.js';
 import { UsageGuard } from './billing/UsageGuard.js';
+import { parseModelPricing } from './billing/ModelPricing.js';
 import { formatShanghaiDateTime } from './time/shanghaiTime.js';
 import { DrizzleUsageLedgerStore } from './db/usageSchema.js';
 import { DrizzleScheduledTaskStore } from './db/schedulerSchema.js';
@@ -1411,9 +1412,11 @@ async function main(): Promise<void> {
 
     const memoryStore = new DrizzleMemoryStore(dbHandle.db);
     const usageLedger = new DrizzleUsageLedgerStore(dbHandle.db);
+    const modelPricing = parseModelPricing(process.env.MODEL_PRICING_JSON);
     const usageGuard = new UsageGuard({
       ledger: usageLedger,
       policy: () => configCenter.getUsagePolicy(),
+      ...(modelPricing.configured ? { pricing: modelPricing } : {}),
     });
     let clusterSync: ClusterStateSync | undefined;
     const scheduleSharedPersist = (conversationId: string): void => {

@@ -269,9 +269,16 @@ export function createAdminApp(options: AdminApiOptions): Hono {
         summary: {
           sinceMs: 0,
           totalTokens: 0,
+          totalInputTokens: 0,
+          totalOutputTokens: 0,
           totalTurns: 0,
+          totalCostMicros: 0,
+          pricedTurns: 0,
           byUser: [],
           byConversation: [],
+          byModel: [],
+          byWorker: [],
+          byJobKind: [],
         } satisfies UsageSummary,
       });
     }

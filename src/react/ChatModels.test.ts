@@ -468,7 +468,7 @@ describe('AnthropicChatModel', () => {
       },
       { contentDelta: '现在是 12:00' },
       { finishReason: 'tool_calls' },
-      { usage: { totalTokens: 15 } },
+      { usage: { totalTokens: 15, inputTokens: 10, outputTokens: 5 } },
     ]);
 
     const call = fetchImpl.mock.calls[0];
@@ -523,7 +523,7 @@ describe('AnthropicChatModel', () => {
     expect(events).toEqual([
       { contentDelta: '好' },
       { finishReason: 'stop' },
-      { usage: { totalTokens: 3 } },
+      { usage: { totalTokens: 3, inputTokens: 2, outputTokens: 1 } },
     ]);
     const init = fetchImpl.mock.calls[0]?.[1] as RequestInit;
     const payload = JSON.parse(String(init.body)) as Record<string, unknown>;

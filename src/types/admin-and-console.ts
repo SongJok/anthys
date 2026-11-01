@@ -232,6 +232,14 @@ export interface UsageLedgerInput {
   senderNick: string;
   model: string;
   totalTokens: number;
+  /** 输入/输出拆分，用于成本核算；缺失表示供应商未返回 */
+  inputTokens?: number;
+  outputTokens?: number;
+  cachedTokens?: number;
+  /** 人民币 micros（1 元 = 1e6），由 UsageGuard 按部署价格计算 */
+  costMicros?: number;
+  /** 是否成功匹配到价格；false 表示成本为未定价而非 0 元 */
+  priced?: boolean;
   steps: number;
   durationMs: number;
   proactive: boolean;
@@ -252,14 +260,23 @@ export interface UsageBreakdownRow {
   label: string;
   tokens: number;
   turns: number;
+  costMicros: number;
 }
 
 export interface UsageSummary {
   sinceMs: number;
   totalTokens: number;
+  totalInputTokens: number;
+  totalOutputTokens: number;
   totalTurns: number;
+  totalCostMicros: number;
+  /** 成功匹配价格并计入成本的轮次 */
+  pricedTurns: number;
   byUser: UsageBreakdownRow[];
   byConversation: UsageBreakdownRow[];
+  byModel: UsageBreakdownRow[];
+  byWorker: UsageBreakdownRow[];
+  byJobKind: UsageBreakdownRow[];
 }
 
 export interface UsageLedgerStore {

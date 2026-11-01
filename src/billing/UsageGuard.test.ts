@@ -10,6 +10,7 @@ import type {
   UsagePolicy,
   UsageSummary,
 } from '../types/admin-and-console.js';
+import { ModelPricing } from './ModelPricing.js';
 
 class FakeLedger implements UsageLedgerStore {
   public readonly entries: UsageLedgerInput[] = [];
@@ -33,9 +34,16 @@ class FakeLedger implements UsageLedgerStore {
     return {
       sinceMs: 0,
       totalTokens: 0,
+      totalInputTokens: 0,
+      totalOutputTokens: 0,
       totalTurns: 0,
+      totalCostMicros: 0,
+      pricedTurns: 0,
       byUser: [],
       byConversation: [],
+      byModel: [],
+      byWorker: [],
+      byJobKind: [],
     };
   }
 
@@ -134,5 +142,44 @@ describe('UsageGuard', () => {
     expect(ledger.entries).toHaveLength(0);
     await guard.record({ ...base, totalTokens: 42 });
     expect(ledger.entries).toEqual([{ ...base, totalTokens: 42 }]);
+  });
+
+  it('配置单价后写入成本 micros，未知模型保持未定价', async () => {
+    const ledger = new FakeLedger();
+    const guard = new UsageGuard({
+      ledger,
+      policy: policy(),
+      pricing: new ModelPricing({
+        models: { 'deepseek-chat': { input: 1, output: 2 } },
+      }),
+    });
+    const base = {
+      conversationId: 'cid',
+      conversationType: '1' as const,
+      senderStaffId: 'u-1',
+      senderNick: '张三',
+      steps: 1,
+      durationMs: 10,
+      proactive: false,
+    };
+    await guard.record({
+      ...base,
+      model: 'deepseek-chat',
+      totalTokens: 300,
+      inputTokens: 200,
+      outputTokens: 100,
+    });
+    await guard.record({
+      ...base,
+      model: 'unknown-model',
+      totalTokens: 50,
+      inputTokens: 40,
+      outputTokens: 10,
+    });
+    expect(ledger.entries[0]).toMatchObject({
+      costMicros: 400,
+      priced: true,
+    });
+    expect(ledger.entries[1]?.priced).toBeUndefined();
   });
 });
