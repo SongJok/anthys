@@ -1,10 +1,14 @@
 import { createHash, randomUUID } from 'node:crypto';
+import type { EmbeddingClient } from '../memory/EmbeddingClient.js';
 import type {
   GithubIssueInfo,
+  HandbookContent,
+  HandbookSection,
   ProjectBrief,
   ProjectBriefInput,
   ProjectCreateInput,
   ProjectDocument,
+  ProjectHandbookDraftInput,
   ProjectHandbookRecord,
   ProjectHandbookResult,
   ProjectHistoryResult,
@@ -17,6 +21,7 @@ import type {
   ProjectRecord,
   ProjectSearchResult,
   ProjectSnapshot,
+  ProjectStatus,
   ProjectSymbol,
   ProjectSymbolResult,
   ProjectSyncJob,
@@ -81,6 +86,7 @@ export interface ProjectServiceOptions {
   store: ProjectStore;
   repoSource: RepoSource;
   searchService?: ProjectSearchService;
+  embedder?: EmbeddingClient;
   github?: ProjectGithubHistoryPort;
   defaultProjectId?: () => string | Promise<string>;
   logger?: ProjectServiceLogger;
@@ -287,6 +293,7 @@ export class ProjectService {
   private readonly store: ProjectStore;
   private readonly repoSource: RepoSource;
   private readonly searchService: ProjectSearchService;
+  private readonly embedder?: EmbeddingClient;
   private readonly github?: ProjectGithubHistoryPort;
   private readonly defaultProjectId: () => string | Promise<string>;
   private readonly logger?: ProjectServiceLogger;
@@ -299,9 +306,14 @@ export class ProjectService {
   constructor(options: ProjectServiceOptions) {
     this.store = options.store;
     this.repoSource = options.repoSource;
+    this.embedder = options.embedder;
     this.searchService =
       options.searchService ??
-      new ProjectSearchService({ store: options.store, logger: options.logger });
+      new ProjectSearchService({
+        store: options.store,
+        ...(options.embedder ? { embedder: options.embedder } : {}),
+        logger: options.logger,
+      });
     this.github = options.github;
     this.defaultProjectId = options.defaultProjectId ?? (() => '');
     this.logger = options.logger;
@@ -451,6 +463,42 @@ export class ProjectService {
       projectId,
       Math.min(Math.max(Math.trunc(limit), 1), 100),
     );
+  }
+
+  /** 控制台用的聚合状态：索引统计、最近任务、手册版本与过期标记 */
+  public async getProjectStatus(projectId: string): Promise<ProjectStatus> {
+    const project = await this.requireProject(projectId);
+    const snapshot = await this.findActiveSnapshot(project);
+    const [recentJobs, published, draft] = await Promise.all([
+      this.store.listSyncJobs(projectId, 10),
+      this.store.getLatestHandbook(projectId, 'published'),
+      this.store.getLatestHandbook(projectId, 'draft'),
+    ]);
+    const commit = snapshot?.commitSha ?? project.lastCommit;
+    return {
+      project,
+      snapshot,
+      stale: await this.computeStale(project, snapshot),
+      embeddingEnabled: Boolean(this.embedder),
+      index: snapshot
+        ? {
+            files: snapshot.fileCount,
+            bytes: snapshot.totalBytes,
+            symbols: snapshot.symbolCount,
+            chunks: snapshot.chunkCount,
+            embeddedChunks: Number(snapshot.stats.embeddedChunks ?? 0),
+            truncated: Boolean(snapshot.stats.truncated),
+            branch: snapshot.branch,
+          }
+        : null,
+      latestJob: recentJobs[0] ?? null,
+      recentJobs,
+      handbook: {
+        publishedVersion: published?.version ?? project.handbookVersion ?? 0,
+        draftVersion: draft?.version ?? null,
+        stale: Boolean(published && commit && published.commitSha !== commit),
+      },
+    };
   }
 
   /** 立即返回排队任务，实际同步在后台执行；已有任务在跑时复用 */
@@ -876,6 +924,125 @@ export class ProjectService {
     return published;
   }
 
+  public async getHandbookDraft(
+    projectId: string,
+  ): Promise<ProjectHandbookRecord | null> {
+    await this.requireProject(projectId);
+    return this.store.getLatestHandbook(projectId, 'draft');
+  }
+
+  /**
+   * 保存章节修改为新草稿：默认以最新草稿为基线，没有草稿时复制最新发布版。
+   * 每次保存都会产生新版本，已发布版本保持不变，审核后由 publishHandbook 切换。
+   */
+  public async saveHandbookDraft(
+    projectId: string,
+    input: ProjectHandbookDraftInput,
+    updatedBy = 'admin-console',
+  ): Promise<ProjectHandbookRecord> {
+    const project = await this.requireProject(projectId);
+    if (!Array.isArray(input.sections) || input.sections.length === 0) {
+      throw new ProjectValidationError('至少需要提交一个章节');
+    }
+    const seen = new Set<string>();
+    const patches = input.sections.map((patch) => {
+      if (!isHandbookSectionKey(patch.key)) {
+        throw new ProjectValidationError(`未知的手册章节：${patch.key}`);
+      }
+      if (seen.has(patch.key)) {
+        throw new ProjectValidationError(`章节重复：${patch.key}`);
+      }
+      seen.add(patch.key);
+      const markdown = patch.markdown.trim();
+      if (markdown.length === 0) {
+        throw new ProjectValidationError(`章节 ${patch.key} 的内容不能为空`);
+      }
+      if (markdown.length > 20_000) {
+        throw new ProjectValidationError(`章节 ${patch.key} 不能超过 20000 字符`);
+      }
+      const title = patch.title?.trim();
+      if (title !== undefined && (title.length === 0 || title.length > 100)) {
+        throw new ProjectValidationError('章节标题长度必须在 1-100 字符之间');
+      }
+      return { key: patch.key, markdown, ...(title ? { title } : {}) };
+    });
+
+    let base: ProjectHandbookRecord | null = null;
+    if (input.version !== undefined) {
+      base = await this.store.getHandbook(projectId, input.version);
+      if (!base) {
+        throw new ProjectNotFoundError(`未找到手册版本 v${input.version}`);
+      }
+      if (base.status === 'archived') {
+        throw new ProjectValidationError(`手册 v${base.version} 已归档，不能编辑`);
+      }
+    } else {
+      base =
+        (await this.store.getLatestHandbook(projectId, 'draft')) ??
+        (await this.store.getLatestHandbook(projectId, 'published'));
+    }
+
+    const now = this.now();
+    const sections: HandbookSection[] = (base?.content.sections ?? []).map(
+      (section) => ({
+        ...section,
+        sources: [...section.sources],
+      }),
+    );
+    const byKey = new Map(sections.map((section) => [section.key, section]));
+    for (const patch of patches) {
+      const existing = byKey.get(patch.key);
+      if (existing) {
+        existing.markdown = patch.markdown;
+        if (patch.title) existing.title = patch.title;
+        existing.origin = 'curated';
+        existing.updatedAt = now;
+      } else {
+        const section: HandbookSection = {
+          key: patch.key,
+          title: patch.title ?? HANDBOOK_SECTION_TITLES[patch.key],
+          markdown: patch.markdown,
+          origin: 'curated',
+          sources: [],
+          updatedAt: now,
+        };
+        sections.push(section);
+        byKey.set(patch.key, section);
+      }
+    }
+    if (sections.length === 0) {
+      throw new ProjectValidationError('没有可保存的手册内容，请先生成草稿');
+    }
+    const snapshot = await this.findActiveSnapshot(project);
+    const content: HandbookContent = {
+      sections,
+      generatedAt: now,
+      commit:
+        snapshot?.commitSha ?? base?.content.commit ?? project.lastCommit,
+    };
+    const version = await this.store.nextHandbookVersion(project.id);
+    const record = await this.store.createHandbook({
+      projectId: project.id,
+      version,
+      status: 'draft',
+      commitSha: content.commit,
+      content,
+      sources: sections.flatMap((section) => section.sources),
+      generatedBy: 'manual',
+      createdBy: updatedBy,
+    });
+    this.logger?.info?.(
+      {
+        projectId: project.id,
+        version,
+        base: base?.version ?? null,
+        sections: patches.map((patch) => patch.key),
+      },
+      'project handbook draft saved',
+    );
+    return record;
+  }
+
   public async listManualEntries(projectId: string): Promise<ProjectManualEntry[]> {
     await this.requireProject(projectId);
     return this.store.listManualEntries(projectId);
@@ -1238,7 +1405,13 @@ export class ProjectService {
         projectId,
         prepared.commit,
       );
-      if (existing?.status === 'ready') {
+      // 旧快照可能建立于未启用 embedding 时；首次启用后重建一次以补齐向量
+      const needsEmbeddingBackfill =
+        existing?.status === 'ready' &&
+        Boolean(this.embedder) &&
+        existing.chunkCount > 0 &&
+        typeof existing.stats.embeddedChunks !== 'number';
+      if (existing?.status === 'ready' && !needsEmbeddingBackfill) {
         await this.store.setActiveSnapshot(initial, existing);
         const project = (await this.store.getProject(projectId)) ?? initial;
         const stats = this.statsOfSnapshot(existing, this.now() - startedAt);
@@ -1250,7 +1423,15 @@ export class ProjectService {
         });
         return { project, snapshot: existing, stats };
       }
-      if (existing) await this.store.deleteSnapshot(existing.id);
+      if (existing) {
+        if (needsEmbeddingBackfill) {
+          this.logger?.info?.(
+            { projectId, commit: existing.commitSha },
+            'rebuilding snapshot to backfill chunk embeddings',
+          );
+        }
+        await this.store.deleteSnapshot(existing.id);
+      }
       const created = await this.store.createSnapshot({
         projectId,
         commitSha: prepared.commit,
@@ -1319,6 +1500,7 @@ export class ProjectService {
       }
       await this.store.insertDocuments(documents);
       await this.store.insertSymbols(symbols);
+      const embeddingResult = await this.embedChunks(projectId, chunks);
       await this.store.insertChunks(chunks);
       const stats: ProjectSyncStats = {
         files: scan.files.length,
@@ -1327,6 +1509,18 @@ export class ProjectService {
         chunks: chunks.length,
         skipped: scan.skipped,
         durationMs: this.now() - startedAt,
+        ...(this.embedder
+          ? { embeddedChunks: embeddingResult.embedded }
+          : {}),
+        ...(embeddingResult.error
+          ? { embeddingError: embeddingResult.error }
+          : {}),
+      };
+      const snapshotStats: Record<string, unknown> = {
+        ...stats,
+        truncated: scan.truncated,
+        skippedReasons: scan.skippedReasons,
+        branch: prepared.branch,
       };
       await this.store.updateSnapshot(created.id, {
         status: 'ready',
@@ -1334,12 +1528,7 @@ export class ProjectService {
         totalBytes: stats.bytes,
         symbolCount: stats.symbols,
         chunkCount: stats.chunks,
-        stats: {
-          ...stats,
-          truncated: scan.truncated,
-          skippedReasons: scan.skippedReasons,
-          branch: prepared.branch,
-        } as Record<string, unknown>,
+        stats: snapshotStats,
         error: '',
         finishedAt: this.now(),
       });
@@ -1350,12 +1539,7 @@ export class ProjectService {
         totalBytes: stats.bytes,
         symbolCount: stats.symbols,
         chunkCount: stats.chunks,
-        stats: {
-          ...stats,
-          truncated: scan.truncated,
-          skippedReasons: scan.skippedReasons,
-          branch: prepared.branch,
-        },
+        stats: snapshotStats,
         finishedAt: this.now(),
       };
       snapshot = ready;
@@ -1394,6 +1578,49 @@ export class ProjectService {
     }
   }
 
+  /**
+   * 批量写入分块向量；失败只记录并停止后续批次，不让同步失败，
+   * 检索会自动退回 FTS/trigram，下次同步会重新尝试。
+   */
+  private async embedChunks(
+    projectId: string,
+    chunks: ProjectSearchCandidateInput[],
+  ): Promise<{ embedded: number; error?: string }> {
+    if (!this.embedder || chunks.length === 0) return { embedded: 0 };
+    const batchSize = 32;
+    const maxChars = 6_000;
+    let embedded = 0;
+    for (let index = 0; index < chunks.length; index += batchSize) {
+      const batch = chunks.slice(index, index + batchSize);
+      try {
+        const vectors = await this.embedder.embed(
+          batch.map((chunk) => chunk.content.slice(0, maxChars)),
+        );
+        for (let offset = 0; offset < batch.length; offset += 1) {
+          const vector = vectors[offset];
+          const chunk = batch[offset];
+          if (!chunk || !vector || vector.length === 0) continue;
+          chunk.embedding = vector;
+          embedded += 1;
+        }
+      } catch (error) {
+        const message = errorMessage(error);
+        this.logger?.warn?.(
+          {
+            projectId,
+            batchStart: index,
+            batchSize: batch.length,
+            embedded,
+            error: message,
+          },
+          'project chunk embedding failed; falling back to keyword search',
+        );
+        return { embedded, error: message };
+      }
+    }
+    return { embedded };
+  }
+
   private statsOfSnapshot(
     snapshot: ProjectSnapshot,
     durationMs: number,
@@ -1405,6 +1632,12 @@ export class ProjectService {
       chunks: snapshot.chunkCount,
       skipped: Number(snapshot.stats.skipped ?? 0),
       durationMs,
+      ...(typeof snapshot.stats.embeddedChunks === 'number'
+        ? { embeddedChunks: snapshot.stats.embeddedChunks }
+        : {}),
+      ...(typeof snapshot.stats.embeddingError === 'string'
+        ? { embeddingError: snapshot.stats.embeddingError }
+        : {}),
     };
   }
 

@@ -191,10 +191,30 @@ export interface AuditLog {
     | 'UPDATE_MCP_POLICY'
     | 'UPDATE_GROUP_POLICY'
     | 'EMERGENCY_MUTE'
+    | 'UPDATE_SCHEDULES'
     | 'UPDATE_RETENTION'
     | 'PURGE_DATA'
     | 'DELETE_USER_DATA'
-    | 'QUERY_STATS';
+    | 'UPDATE_GLOSSARY'
+    | 'QUERY_STATS'
+    | 'UPDATE_EXTENSIONS'
+    | 'UPDATE_SKILL'
+    | 'RELOAD_SKILLS'
+    | 'INSTALL_PLUGIN'
+    | 'ENABLE_PLUGIN'
+    | 'DISABLE_PLUGIN'
+    | 'UPGRADE_PLUGIN'
+    | 'ROLLBACK_PLUGIN'
+    | 'UNINSTALL_PLUGIN'
+    | 'CREATE_PROJECT'
+    | 'UPDATE_PROJECT'
+    | 'SYNC_PROJECT'
+    | 'DELETE_PROJECT'
+    | 'GENERATE_PROJECT_HANDBOOK'
+    | 'UPDATE_PROJECT_HANDBOOK'
+    | 'PUBLISH_PROJECT_HANDBOOK'
+    | 'UPDATE_PROJECT_MANUAL'
+    | 'TEST_GITHUB';
   beforeSnapshot: Record<string, unknown>;
   afterSnapshot: Record<string, unknown>;
   createdAt: string;
@@ -610,6 +630,8 @@ export interface ProjectSyncJob {
     chunks: number;
     skipped: number;
     durationMs: number;
+    embeddedChunks?: number;
+    embeddingError?: string;
   };
   error: string;
   createdAt: number;
@@ -621,6 +643,31 @@ export interface ProjectAdminEntry {
   project: ProjectRecord;
   snapshot: ProjectSnapshot | null;
   stale: boolean;
+}
+
+export interface ProjectIndexStatus {
+  files: number;
+  bytes: number;
+  symbols: number;
+  chunks: number;
+  embeddedChunks: number;
+  truncated: boolean;
+  branch: string;
+}
+
+export interface ProjectStatus {
+  project: ProjectRecord;
+  snapshot: ProjectSnapshot | null;
+  stale: boolean;
+  embeddingEnabled: boolean;
+  index: ProjectIndexStatus | null;
+  latestJob: ProjectSyncJob | null;
+  recentJobs: ProjectSyncJob[];
+  handbook: {
+    publishedVersion: number;
+    draftVersion: number | null;
+    stale: boolean;
+  };
 }
 
 export interface GithubAdminStatus {
@@ -739,6 +786,12 @@ export interface ProjectManualEntryInput {
   sensitivity?: ProjectSensitivity;
   injectToBrief?: boolean;
   priority?: number;
+}
+
+export interface HandbookSectionPatch {
+  key: HandbookSectionKey;
+  title?: string;
+  markdown: string;
 }
 
 export interface ProjectHandbookResult {

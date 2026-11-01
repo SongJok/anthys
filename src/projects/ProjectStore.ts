@@ -856,6 +856,51 @@ export class DrizzleProjectStore implements ProjectStore {
     const kinds = input.kinds && input.kinds.length > 0 ? input.kinds : null;
     if (this.keywordIndexAvailable !== false) {
       try {
+        const tokens = csvTokens(query);
+        const fullQuery = sql`plainto_tsquery('simple', ${query})`;
+        const tokenQuery =
+          tokens.length > 0
+            ? sql`(${sql.join(
+                tokens.map(
+                  (token) => sql`plainto_tsquery('simple', ${token})`,
+                ),
+                sql` || `,
+              )})`
+            : fullQuery;
+        const tokenWeight = (token: string): number =>
+          Math.min(4, Math.max(1, Math.ceil(token.length / 4)));
+        const tokenConditions = tokens.flatMap((token) => {
+          const pattern = `%${escapeLike(token)}%`;
+          return [
+            sql`c.content ilike ${pattern}`,
+            sql`c.path ilike ${pattern}`,
+            sql`c.symbol ilike ${pattern}`,
+          ];
+        });
+        const tokenScoreParts = tokens.map((token) => {
+          const pattern = `%${escapeLike(token)}%`;
+          const weight = tokenWeight(token);
+          return sql`(
+            (case when c.content ilike ${pattern} then ${weight} else 0 end) +
+            (case when c.path ilike ${pattern} then ${Math.round(weight * 0.8)} else 0 end) +
+            (case when c.symbol ilike ${pattern} then ${Math.round(weight * 0.8)} else 0 end)
+          )`;
+        });
+        const tokenScore =
+          tokenScoreParts.length > 0
+            ? sql`(${sql.join(tokenScoreParts, sql` + `)})`
+            : sql`0`;
+        const matchConditions = [
+          sql`c.tsv @@ ${fullQuery}`,
+          sql`c.tsv @@ ${tokenQuery}`,
+          sql`c.content ilike ${`%${escapeLike(query)}%`}`,
+          sql`c.path ilike ${`%${escapeLike(query)}%`}`,
+          sql`c.symbol ilike ${`%${escapeLike(query)}%`}`,
+          ...tokenConditions,
+          ...(tokens.length === 0
+            ? [sql`similarity(c.content, ${query}) > 0.05`]
+            : []),
+        ];
         const result = await this.db.execute(sql`
           select s.*
           from (
@@ -868,8 +913,12 @@ export class DrizzleProjectStore implements ProjectStore {
               c.kind,
               d.language,
               c.content,
-              ts_rank(c.tsv, plainto_tsquery('simple', ${query}))::float8 as fts,
-              similarity(c.content, ${query})::float8 as trgm
+              greatest(
+                ts_rank(c.tsv, ${fullQuery}),
+                ts_rank(c.tsv, ${tokenQuery})
+              )::float8 as fts,
+              similarity(c.content, ${query})::float8 as trgm,
+              ${tokenScore}::float8 as token_score
             from project_chunks c
             join project_documents d
               on d.snapshot_id = c.snapshot_id and d.path = c.path
@@ -877,15 +926,14 @@ export class DrizzleProjectStore implements ProjectStore {
               and (${pathLike}::text is null or c.path like ${pathLike})
               and (${language}::text is null or d.language = ${language})
               and (${kinds}::text[] is null or c.kind = any(${kinds}::text[]))
-              and (
-                c.tsv @@ plainto_tsquery('simple', ${query})
-                or c.content ilike ${`%${escapeLike(query)}%`}
-                or c.path ilike ${`%${escapeLike(query)}%`}
-                or c.symbol ilike ${`%${escapeLike(query)}%`}
-                or similarity(c.content, ${query}) > 0.05
-              )
+              and (${sql.join(matchConditions, sql` or `)})
           ) s
-          order by greatest(s.fts, s.trgm) desc, s.path asc, s.start_line asc
+          order by
+            s.token_score desc,
+            s.fts desc,
+            s.trgm desc,
+            s.path asc,
+            s.start_line asc
           limit ${Math.max(1, input.limit)}
         `);
         this.keywordIndexAvailable = true;

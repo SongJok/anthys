@@ -50,19 +50,30 @@ P0、P1、P2 已按本文实现并合入 `main`，README 的「技能、插件�
 | 项目登记、同步快照、扫描、分块与符号索引 | 已实现 | `src/projects/`、`project_*` 表、`src/db/sql/project-index.sql` |
 | 项目只读工具与权限过滤 | 已实现 | `project_list` / `project_handbook` / `project_map` / `project_search` / `project_read` / `project_symbol` / `project_history` |
 | 项目手册 12 章生成、草稿 / 发布版本与人工条目 | 已实现 | `src/projects/HandbookBuilder.ts`、`ProjectService`、控制台「项目手册」 |
+| 手册章节编辑：生成草稿 → 控制台改章节 → 发布新版本 | 已实现 | `ProjectService.saveHandbookDraft`、`PUT /projects/:id/handbook`、控制台章节编辑器 |
+| 项目索引聚合状态（索引统计、向量补齐、最近任务、手册版本） | 已实现 | `ProjectService.getProjectStatus`、`GET /projects/:id/status` |
+| 项目分块向量与混合检索 | 已实现 | `ProjectService.embedChunks`、`EMBEDDING_ENABLED`、`project_chunks.embedding` + HNSW |
+| token 级关键词召回与 IDF 近似重排 | 已实现 | `ProjectStore.searchChunks`、`ProjectSearchService.weightTokens` |
+| 仓库级索引排除文件 | 已实现 | `.anthysignore`、`RepoScanner.readIgnoreFile` |
+| 30 题 golden set 评测（确定性检索评测） | 已实现 | `eval/golden/anthys.json`、`src/eval/`、`pnpm eval:golden` |
+| `.env` 安全约束（忽略规则、示例无密钥、git 不跟踪） | 已实现 | `.gitignore`、`src/config/envSafety.test.ts` |
 | GitHub 只读工具（repo / tree / file / search / pr） | 已实现 | `src/github/GithubClient.ts`、`src/tools/github/GithubToolProvider.ts` |
 | GitHub 运行状态与连通性测试 | 已实现 | `src/github/GithubAdminPort.ts`、`src/admin-api/routes/githubRoutes.ts`、控制台「项目手册」页 |
 | 项目种子（`projects/<id>/project.json` + `manual/*.md`） | 已实现 | `src/projects/ProjectSeed.ts`、`projects/anthys/` |
 | tree-sitter / 调用图 / 插件市场与签名 / 沙箱化第三方工具 | 未实现（P3） | 保持非目标 |
 | 模型生成手册叙述 | 未实现（可选） | 当前为确定性生成 + 人工条目；需要叙述时由模型基于手册现场回答 |
 
-实现与设计的两点差异：
+实现与设计的差异：
 
 - GitHub 工具从“第二期”提前到本次交付，默认 `GITHUB_ENABLED=false`，配置 Token 与白名单后启用。
 - GitHub 状态只反映进程启动时读到的配置：`GITHUB_ENABLED`、Token 或 API 主机变更后必须重启；控制台状态页与 `/github/test` 不读取 `.env` 文件中的未生效值，连通性测试强制绕过 TTL 缓存。
 - 项目检索依赖 `pnpm run db:push` 之后执行 `pnpm run db:extend` 补齐 `tsvector`、`pg_trgm` 与 HNSW 索引；部署脚本已包含该步骤。
+- 启用 `EMBEDDING_ENABLED` 后，同步会为所有分块写入 1536 维向量；历史快照缺少 `embeddedChunks` 统计时会在下一次同步自动重建一次。embedding 调用失败只记录 `embeddingError` 并降级为关键词检索，不会让同步失败。
+- `EMBEDDING_DIMENSIONS` 必须与数据库 `vector(1536)` 一致；不一致时进程会记录错误并禁用 embedding，避免写入失败。
+- `.env` 及其变体（`.env.local`、`.env.production` 等）全部被 Git 忽略，只有 `.env.example` 与 `.env.*.example` 模板允许提交；`src/config/envSafety.test.ts` 会检查示例不含真实密钥且没有被 Git 跟踪。
+- 项目检索按 token 拆分查询并做 IDF 近似加权，`eval/golden/**` 与 `tmp/**` 通过 `.anthysignore` 排除出索引；本地 30 题评测当前为引用命中 100%、事实代理覆盖 100%、p95 265ms、安全通过（受仓库规模限制，不代表 1 万文件生产环境）。
 
-验证方式：`pnpm typecheck`、`pnpm test`、`pnpm --dir web-console build`。
+验证方式：`pnpm typecheck`、`pnpm test`、`pnpm --dir web-console build`；连接数据库并同步项目后运行 `pnpm eval:golden` 查看 30 题评测报告。
 
 ---
 
@@ -197,7 +208,7 @@ P0、P1、P2 已按本文实现并合入 `main`，README 的「技能、插件�
 
 1. **代码理解不是“搜索一下”**：需要仓库地图、符号、调用线索和精确读文件配合。第一期用“按引用频次排序的仓库地图 + 符号搜索 + 行号读取”，第二期再引入 tree-sitter WASM。
 2. **中文检索**：PostgreSQL 默认分词器对中文不友好。代码检索以 ASCII 标识符为主，用 `tsvector('simple', ...)`；中文文档用 `pg_trgm` 相似度 + 向量召回，不引入 zhparser 这类部署负担。
-3. **成本**：不要把每个代码块都做 embedding。默认只对文档、手册和符号摘要做向量；代码用关键词和路径匹配。这样能把索引体积和 embedding 费用控制在可接受范围。
+3. **成本**：默认关闭 embedding（`EMBEDDING_ENABLED=false`），代码只走关键词和路径匹配；开启后同步会为所有分块生成向量（每批 32 条、单条截断 6000 字符），因此可以用开关控制索引体积和调用费用。
 4. **信任边界**：技能、插件、仓库、GitHub 内容、工具输出是五种不同信任级别，必须分别处理，不能一律当系统指令。
 5. **同步一致性**：索引必须绑定 commit 快照；同步失败不能破坏上一版可用索引；回答必须说明引用的是哪个 commit。
 6. **运维复杂度**：新增后台任务、磁盘占用、失败重试和清理策略。需要控制台可见、可重试、可回滚。
@@ -862,10 +873,10 @@ sequenceDiagram
   S->>DB: 写入 snapshot + documents
   S->>IX: 提取符号/分块/仓库地图
   IX->>DB: 写入 chunks + symbols
-  opt 启用向量
-    IX->>E: 批量 embedding（文档/手册/符号摘要）
-    E-->>IX: vectors
-    IX->>DB: 写入 embedding
+  opt 启用 embedding
+    IX->>E: 批量 embedding（所有分块，批 32）
+    E-->>IX: 1536 维向量或错误
+    IX->>DB: 写入 embedding（失败则降级关键词）
   end
   S->>DB: snapshot 标记 ready，atomic 切换 active_snapshot_id
   S->>DB: sync_job 标记 done
@@ -885,8 +896,9 @@ sequenceDiagram
 
 - `.git`、`node_modules`、`dist`、`build`、`coverage`、`.next`、`.nuxt`、`target`、`vendor`、`.venv`、`__pycache__`；
 - 二进制文件、无法 UTF-8 解码的文件、单文件 >1MB、总文件数 >20000、总大小 >500MB；
-- 敏感文件：`.env*`、`*.pem`、`*.key`、`*.p12`、`*.pfx`、`id_rsa*`、`id_ed25519*`、`credentials*`、`.npmrc`、`.pypirc`、`*.keystore`、`*.jks`；
-- 用户自定义忽略规则（项目设置里的 glob）。
+- 敏感文件：`.env*`、`*.pem`、`*.key`、`*.p12`、`*.pfx`、`id_rsa*`、`id_ed25519*`、`credentials*`、`.npmrc`、`.pypirc`、`*.keystore`、`*.jks`；模板（`.env.example` / `.sample` / `.template`）例外保留；
+- 用户自定义忽略规则：`ignoreGlobs` 选项，以及仓库根目录 `.anthysignore`（每行一个 glob，`#` 注释，不影响 git 跟踪）；
+- `anthys` 种子仓通过 `.anthysignore` 排除 `eval/golden/**`（评测答案）与 `tmp/**`（本地临时产物），防止评测自我命中与脏文件污染检索。
 
 保留：
 
@@ -954,31 +966,35 @@ anthys @ 3f2a1c9
 
 #### 8.5.4 向量索引
 
-- 默认只对**文档、手册、符号摘要**做 embedding，不对所有代码块做。
-- 原因：代码块数量大、更新频繁、embedding 成本高；代码用关键词、路径和符号检索已经足够。
-- 如确需代码向量，项目级开关 `embeddings: 'docs' | 'all'`，默认 `docs`。
-- 复用现有 `EmbeddingClient` 和 1536 维约定；表结构固定 1536 维，模型维度不匹配时拒绝启用并提示。
-- 使用 HNSW `vector_cosine_ops` 索引；批量写入，失败可重试。
+- 默认关闭；开启 `EMBEDDING_ENABLED` 且配置了 API Key 后，同步会为**所有分块**写入 1536 维向量。
+- 批大小 32、单条内容截断 6000 字符；某批失败时保留已写入的向量，同步继续完成并记录 `embeddingError`，检索自动降级为关键词路径。
+- 旧快照如果没有 `embeddedChunks` 统计（建立于未启用 embedding 时），下一次同步会重建一次以补齐向量，避免手动清理。
+- 复用现有 `EmbeddingClient` 和 1536 维约定；`EMBEDDING_DIMENSIONS` 必须为 1536，否则启动时记录错误并禁用 embedding，避免与数据库列维度冲突。
+- 使用 HNSW `vector_cosine_ops` 索引；索引由 `pnpm run db:extend` 创建。
 
 #### 8.5.5 关键词索引
 
 - 代码和英文：`to_tsvector('simple', path || ' ' || symbol || ' ' || content)` + GIN。
-- 中文文档：`pg_trgm` 相似度（`similarity(content, query)`）+ GIN。
-- 查询时同时走 FTS 和 trigram，合并去重。
+- 中文文档：`pg_trgm`（`similarity(content, query)`）+ GIN；查询另按 token 做 `ILIKE`，避免整句 trigram 对长查询不敏感。
+- 查询会拆成 token，FTS 用 token 的 `plainto_tsquery` 做 OR，候选按“内容 / 路径 / 符号命中 + token 长度权重”排序，再由服务层用候选集 IDF 近似重排；通用词（如 `create`）不会压过 `ToolRegistry` 这类稀有标识符。
 - 不引入 zhparser，避免额外扩展和运维成本。
+- 评测答案（`.anthysignore` 中的 `eval/golden/**`）不进入索引，否则 golden set 会自我命中并污染用户检索。
 
 ### 8.6 检索与排序
 
-`project_search` 的排序建议：
+`project_search` 的实际排序：
 
 ```text
 score = 0.45 * vector_score
       + 0.35 * keyword_score
       + 0.10 * path_match_boost
       + 0.10 * symbol_match_boost
+
+keyword_score = 0.5 * fts_norm + 0.3 * trigram_norm + 0.2 * content_token_coverage
+path/symbol_match_boost 按 token IDF 加权，稀有标识符权重更高
 ```
 
-- 如果未启用向量，则 `vector_score = 0`，其余权重归一化。
+- 如果未启用向量，则 `vector_score = 0`，按 `0.7 * keyword_score + 0.15 * path_boost + 0.15 * symbol_boost` 计算。
 - `pathGlob`、`kind`、`language` 作为硬过滤。
 - 结果去重：同一 `path` + 重叠行范围只保留分数最高的一条。
 - 每条结果附：`path`、`startLine`、`endLine`、`symbol`、`snippet`、`score`、`commit`。
@@ -1284,6 +1300,24 @@ interface HandbookSection {
 - 事实正确率 ≥ 80%；
 - 安全性 100%（不执行仓库内指令、不输出密钥）；
 - `project_search` p95 < 1.5s（1 万文件规模）。
+
+**已实现的评测器：**
+
+- 题库：`eval/golden/anthys.json`，30 题，按 6 / 8 / 6 / 5 / 5 分布，每题带 `query`、`expectedPaths` 与 `factKeywords`。
+- 评分：`src/eval/GoldenSet.ts`。`pnpm eval:golden` 会在真实数据库上同步 `anthys` 项目，逐题调用 `ProjectService.searchProject`，再把命中行范围读回，统计：
+  - **引用命中率**：Top-K 引用中是否出现期望路径，且行号必须落在真实文件范围内；
+  - **引用完整率**：返回的每条引用路径是否存在于当前快照、行号是否有效；
+  - **事实代理覆盖率**：把引用行内容拼起来后命中 `factKeywords` 的比例；这是检索证据的代理指标，**不等同于人工事实判分**；
+  - **p95**：单题 `project_search` 耗时的 95 分位；
+  - **安全**：扫描引用内容中的密钥形态、是否检索到敏感文件，并实际执行 `.env` / `.env.production` / `id_rsa` 读取探针。
+- 局限：不生成回答文本，因此不评价模型表述与“是否服从仓库内提示注入”；p95 在本仓规模下测得，不代表 1 万文件生产规模。需要人工事实判分时，把报告中的未命中题目导出后人工复核。
+
+```bash
+# 需要 DATABASE_URL、可访问的 embedding 配置（可选）以及 projects/anthys 种子
+pnpm eval:golden -- --project=anthys --json=tmp/golden-report.json
+# 跳过同步，直接用当前快照评测
+pnpm eval:golden -- --no-sync
+```
 
 ### 8.13 首个试点项目：`anthys`
 
@@ -2020,17 +2054,19 @@ allowMissingSecrets=false
 | PUT | `/projects/:id` | 更新项目设置 |
 | DELETE | `/projects/:id` | 删除项目及其快照 |
 | POST | `/projects/:id/sync` | 触发同步（异步） |
-| GET | `/projects/:id/status` | 同步任务、索引统计、最近错误 |
+| GET | `/projects/:id/sync-jobs` | 最近同步任务与错误 |
+| GET | `/projects/:id/status` | 聚合状态：索引统计、向量补齐、最近任务、手册版本与过期标记 |
 | GET | `/projects/:id/snapshots` | 快照历史 |
 | GET | `/projects/:id/search?q=&kind=&limit=` | 控制台调试检索 |
-| GET | `/projects/:id/handbook` | 当前手册（草稿/发布） |
-| PUT | `/projects/:id/handbook` | 保存草稿 |
-| POST | `/projects/:id/handbook/publish` | 发布 |
-| POST | `/projects/:id/handbook/generate` | 生成草稿（可选） |
-| GET | `/projects/:id/manual` | 人工条目列表 |
-| POST | `/projects/:id/manual` | 新建人工条目 |
-| PUT | `/projects/:id/manual/:entryId` | 更新 |
-| DELETE | `/projects/:id/manual/:entryId` | 删除 |
+| GET | `/projects/:id/handbook` | 当前发布手册与最新草稿（`{ handbook, draft }`） |
+| PUT | `/projects/:id/handbook` | 基于最新草稿/发布版保存章节修改，生成新草稿 |
+| POST | `/projects/:id/handbook/publish` | 发布指定版本或最新草稿 |
+| POST | `/projects/:id/handbook/generate` | 重新生成确定性手册草稿 |
+| GET | `/projects/:id/handbooks` | 版本历史 |
+| GET | `/projects/:id/manual-entries` | 人工条目列表 |
+| POST | `/projects/:id/manual-entries` | 新建人工条目 |
+| PUT | `/projects/:id/manual-entries/:entryId` | 更新 |
+| DELETE | `/projects/:id/manual-entries/:entryId` | 删除 |
 
 登记请求：
 
@@ -2058,6 +2094,35 @@ allowMissingSecrets=false
     "projectId": "anthys",
     "status": "queued"
   }
+}
+```
+
+保存手册章节（不传 `version` 时以最新草稿为基线；没有草稿时复制最新发布版；每次保存生成新草稿，已发布版本不变）：
+
+```json
+{
+  "version": 3,
+  "sections": [
+    {
+      "key": "operations",
+      "title": "运维与故障",
+      "markdown": "值班安排：每周轮换；故障先看 /metrics 与 trace。"
+    }
+  ]
+}
+```
+
+`GET /projects/:id/status` 的 `index` 字段示例：
+
+```json
+{
+  "files": 320,
+  "bytes": 4821033,
+  "symbols": 4210,
+  "chunks": 6902,
+  "embeddedChunks": 6902,
+  "truncated": false,
+  "branch": "main"
 }
 ```
 
@@ -2414,15 +2479,15 @@ project_brief_injected_total{project}
 - 文档文本：约 1 万 × 4KB = 40MB；
 - 代码块：约 5 万块 × 1.5KB = 75MB；
 - 符号：约 10 万条 × 200B = 20MB；
-- 向量（仅文档/符号摘要）：约 5000 条 × 6KB = 30MB；
+- 向量（启用 embedding 时为全部分块）：约 5 万条 × 6KB = 300MB；
 - HNSW 索引：约 10–30MB；
-- 单项目总计：150–200MB。
+- 开启 embedding 时单项目总计约 450–500MB，关闭时约 150–200MB。
 
 建议：
 - 单项目磁盘上限 1GB；
 - 全局项目上限按部署磁盘配置；
 - 快照保留 3 个，最坏情况 3 倍索引体积；如果空间紧张，改为保留 1 个历史快照。
-- 向量默认只做文档/符号摘要，避免 5 万代码块 × 6KB = 300MB 的额外开销。
+- 关闭 `EMBEDDING_ENABLED` 可省去约 300MB 向量开销；只在确实需要语义召回时开启，并为 embedding 费用设置预算。
 
 ### 17.3 Token 成本
 
@@ -2442,8 +2507,8 @@ project_brief_injected_total{project}
 
 ### 17.4 限流与并发
 
-- 项目同步：全局最多 2 个并发，单项目 1 个。
-- 索引 embedding：批量、并发 2，失败重试 3 次。
+- 项目同步：全局最多 2 个并发，单项目 1 个（进程内锁 + 集群主节点）。
+- 索引 embedding：按 32 条一批顺序调用；单批失败即停止并降级关键词检索，把错误写入 `embeddingError`，不阻塞快照切换。
 - GitHub API：单进程令牌桶，尊重限流头；403/429 退避。
 - 项目工具：受 ReAct 工具超时 300s 约束；搜索自身设置 10s 超时。
 - 技能加载：纯本地，无额外限流。
@@ -2638,34 +2703,25 @@ P0 项目快照 ─> P2 手册生成
 
 ### 20.1 数据库迁移
 
-1. 更新 `drizzle.config.ts`，加入三个新 schema 文件；
+1. 更新 `drizzle.config.ts`，加入技能、插件、项目三个 schema 文件；
 2. 执行 `pnpm run db:push` 创建新表；
 3. 执行 `pnpm run db:extend` 执行 `src/db/sql/project-index.sql`（`pg_trgm`、`tsvector`、HNSW）；
 4. 确认 `sys_configs` 新增 `extensions` 分区可读写；
 5. 在生产先备份数据库，再执行迁移。
 
-`db:extend` 脚本建议：
-
-```json
-{
-  "scripts": {
-    "db:extend": "tsx src/db/runSql.ts src/db/sql/project-index.sql"
-  }
-}
-```
-
-`runSql.ts` 逐条执行幂等 SQL，遇到已存在对象不报错。
+`db:extend` 已实现为 `tsx src/db/extend.ts`，逐条执行幂等 SQL，遇到已存在对象不报错。
 
 ### 20.2 功能开关
 
 | 开关 | 默认 | 说明 |
 | --- | --- | --- |
-| `SKILLS_ENABLED` | `true` | 技能目录和工具 |
-| `PLUGINS_ENABLED` | `false` | 插件安装/启停 |
-| `PROJECTS_ENABLED` | `false` | 项目登记、同步、工具 |
-| `PROJECT_EMBEDDINGS` | `docs` | `off` / `docs` / `all` |
-| `GITHUB_ENABLED` | `false` | GitHub 工具 |
-| `PROJECT_AUTO_SYNC_MINUTES` | `0` | 0 表示关闭自动同步 |
+| `EXTENSIONS_SKILLS_ENABLED` | `true` | 技能目录和 `skill_*` 工具 |
+| `EXTENSIONS_PLUGINS_ENABLED` | `true` | 插件安装/启停 |
+| `EXTENSIONS_PROJECTS_ENABLED` | `true` | 项目登记、同步、工具 |
+| `EXTENSIONS_DEFAULT_PROJECT_ID` | 空 | 问题未点名项目时使用的默认项目 |
+| `EMBEDDING_ENABLED` | `false` | 项目分块向量、语义记忆与术语向量；同时要求 `EMBEDDING_DIMENSIONS=1536` |
+| `GITHUB_ENABLED` | `false` | GitHub 只读工具 |
+| `PROJECT_SYNC_INTERVAL_SECONDS` | `900` | 未设置项目级 `autoSyncMinutes` 时的自动同步间隔 |
 
 发布顺序：
 
@@ -2683,15 +2739,16 @@ P0 项目快照 ─> P2 手册生成
 - 项目同步失败不影响现有快照；可回滚 `activeSnapshotId`。
 - 插件可回滚到上一版本；卸载默认保留目录 7 天。
 - 数据库表只增不删；回滚代码不需要回滚表结构。
-- 如果出现提示注入或越权，立即关闭 `PROJECTS_ENABLED` / `PLUGINS_ENABLED`，并禁用相关技能。
+- 如果出现提示注入或越权，立即关闭 `EXTENSIONS_PROJECTS_ENABLED` / `EXTENSIONS_PLUGINS_ENABLED`，并禁用相关技能。
 
 ### 20.4 兼容性
 
 - Node.js 24+；
 - PostgreSQL 16 + pgvector + pg_trgm；
 - git 2.30+（项目同步）；
-- 现有 `.env` 不配置新变量时，技能默认可用、插件和项目默认关闭，不影响启动；
+- 现有 `.env` 不配置新变量时，技能与插件默认可用、项目工具默认开启但无已登记项目，不影响启动；
 - 新增依赖尽量纯 JS：`yaml`、`ignore`、`semver`；避免原生编译依赖。`tar`/`yauzl` 用于解包，选择维护良好的库。
+- `.env` 及其变体不允许提交到 Git；只提交 `.env.example` 与 `deploy/.env.production.example`，并把真实 `GITHUB_TOKEN` 等放在部署机的 `.env` 中。
 
 ---
 
@@ -2864,45 +2921,37 @@ max_instruction_chars: 4000
 ## 附录 D：环境变量清单
 
 ```text
-# ---------- Skills ----------
-SKILLS_ENABLED=true
-SKILLS_DIR=skills
+# ---------- Skills / Plugins / Projects ----------
+EXTENSIONS_SKILLS_ENABLED=true
+EXTENSIONS_PLUGINS_ENABLED=true
+EXTENSIONS_PROJECTS_ENABLED=true
+EXTENSIONS_DEFAULT_PROJECT_ID=
 SKILL_CATALOG_LIMIT=20
-SKILL_MAX_INSTRUCTION_CHARS=4000
-SKILL_MAX_RESOURCE_CHARS=4000
-
-# ---------- Plugins ----------
-PLUGINS_ENABLED=false
-PLUGINS_DIR=.state/plugins
-PLUGIN_INCOMING_DIR=.state/plugin-incoming
-PLUGIN_MAX_ARCHIVE_MB=20
-PLUGIN_MAX_FILES=500
-PLUGIN_ALLOWED_COMMANDS=npx,uvx,node,python3,docker
+SKILLS_BUILTIN_DIR=skills/builtin
+SKILLS_LOCAL_DIR=skills/local
+PLUGIN_ALLOWED_COMMANDS=
 PLUGIN_ALLOW_MISSING_SECRETS=false
-
-# ---------- Projects ----------
-PROJECTS_ENABLED=false
-PROJECTS_DIR=.state/projects
 PROJECT_ALLOWED_ROOTS=
-PROJECT_MAX_FILES=20000
-PROJECT_MAX_FILE_BYTES=1048576
-PROJECT_MAX_TOTAL_BYTES=524288000
-PROJECT_SYNC_TIMEOUT_SECONDS=600
-PROJECT_SYNC_CONCURRENCY=2
-PROJECT_SNAPSHOT_KEEP=3
-PROJECT_EMBEDDINGS=docs
-PROJECT_BRIEF_MAX_CHARS=2400
-PROJECT_SEARCH_LIMIT=12
-PROJECT_AUTO_SYNC_MINUTES=0
+PROJECT_SEED_DIR=projects
+PROJECT_SYNC_INTERVAL_SECONDS=900
+PROJECT_BRIEF_MAX_CHARS=2000
+
+# ---------- Embeddings（语义记忆、术语库、项目分块共用） ----------
+EMBEDDING_ENABLED=false
+EMBEDDING_BASE_URL=
+EMBEDDING_API_KEY=
+EMBEDDING_MODEL=text-embedding-3-small
+EMBEDDING_DIMENSIONS=1536
 
 # ---------- GitHub ----------
 GITHUB_ENABLED=false
 GITHUB_TOKEN=
 GITHUB_API_BASE=https://api.github.com
-GITHUB_ALLOWED_HOSTS=github.com,api.github.com
+GITHUB_ALLOWED_HOSTS=
 GITHUB_CACHE_TTL_SECONDS=300
-GITHUB_ADHOC_ENABLED=false
 ```
+
+其他扫描与容量限制（最大文件数、单文件字节数、快照保留数、GitHub 单文件读取上限等）是代码内常量或项目级设置，不是环境变量；以 `.env.example` 与源码为准。`GITHUB_TOKEN` 只从环境读取，不落库、不返回控制台；修改后需要重启进程生效。
 
 ## 附录 E：术语表
 

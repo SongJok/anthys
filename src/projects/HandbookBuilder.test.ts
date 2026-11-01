@@ -81,7 +81,7 @@ const symbols: ProjectSymbol[] = [
 
 const fileContents = new Map<string, string>([
   ['package.json', JSON.stringify({ name: 'demo', scripts: { build: 'tsc', start: 'node dist' } })],
-  ['.env.example', 'LLM_API_KEY=sk-secret-value\nDATABASE_URL=postgres://demo:secret@db\n'],
+  ['.env.example', 'LLM_API_KEY=sk-secret-value\nDATABASE_URL=postgres://demo:CHANGE_ME@db\n'],
   ['deploy/dingtalk-agent.service', 'ExecStart=/usr/bin/env node dist/index.js\n'],
 ]);
 

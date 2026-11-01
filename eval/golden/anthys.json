@@ -1,0 +1,269 @@
+{
+  "project": "anthys",
+  "version": 1,
+  "description": "anthys 试点项目 golden set：30 题，覆盖架构入口、符号定位、数据配置、部署运维、历史决策。factKeywords 只做检索证据覆盖的代理指标，不等同于人工事实判分。",
+  "questions": [
+    {
+      "id": "arch-01",
+      "category": "architecture",
+      "question": "钉钉消息从哪个入口进入机器人？",
+      "query": "StreamGateway DWClient 钉钉消息接入",
+      "expectedPaths": ["src/dingtalk/StreamGateway.ts", "src/index.ts"],
+      "factKeywords": ["StreamGateway", "DWClient"]
+    },
+    {
+      "id": "arch-02",
+      "category": "architecture",
+      "question": "Agent 主循环在哪个文件，基于什么范式？",
+      "query": "AgentHarness ReAct 主循环",
+      "expectedPaths": ["src/harness/AgentHarness.ts"],
+      "factKeywords": ["AgentHarness", "ReAct"]
+    },
+    {
+      "id": "arch-03",
+      "category": "architecture",
+      "question": "工具注册表如何组装工具提供方？",
+      "query": "ToolRegistry create providers 工具",
+      "expectedPaths": ["src/harness/ToolRegistry.ts"],
+      "factKeywords": ["class ToolRegistry", "providers"]
+    },
+    {
+      "id": "arch-04",
+      "category": "architecture",
+      "question": "项目只读工具有哪些？",
+      "query": "ProjectToolProvider project_search project_read",
+      "expectedPaths": ["src/tools/projects/ProjectToolProvider.ts"],
+      "factKeywords": ["ProjectToolProvider", "project_search"]
+    },
+    {
+      "id": "arch-05",
+      "category": "architecture",
+      "question": "技能正文如何注入到模型对话中？",
+      "query": "use_skill instructions 技能注入",
+      "expectedPaths": ["src/tools/skills/SkillToolProvider.ts"],
+      "factKeywords": ["use_skill", "instructions"]
+    },
+    {
+      "id": "arch-06",
+      "category": "architecture",
+      "question": "管理 API 是怎么创建和启动的？",
+      "query": "createAdminApp Hono 管理 API",
+      "expectedPaths": ["src/admin-api/server.ts"],
+      "factKeywords": ["createAdminApp", "Hono"]
+    },
+
+    {
+      "id": "sym-01",
+      "category": "symbols",
+      "question": "ToolRegistry 类定义在哪里？",
+      "query": "class ToolRegistry",
+      "expectedPaths": ["src/harness/ToolRegistry.ts"],
+      "factKeywords": ["class ToolRegistry", "static async create"]
+    },
+    {
+      "id": "sym-02",
+      "category": "symbols",
+      "question": "ProjectService.sync 在哪里实现？",
+      "query": "public async sync runSync 项目同步",
+      "expectedPaths": ["src/projects/ProjectService.ts"],
+      "factKeywords": ["public async sync", "runSync"]
+    },
+    {
+      "id": "sym-03",
+      "category": "symbols",
+      "question": "RepoSource.prepare 做了什么？",
+      "query": "RepoSource prepare 仓库准备",
+      "expectedPaths": ["src/projects/RepoSource.ts"],
+      "factKeywords": ["prepare", "PreparedRepo"]
+    },
+    {
+      "id": "sym-04",
+      "category": "symbols",
+      "question": "buildRepoMap 在哪里定义？",
+      "query": "buildRepoMap 仓库地图",
+      "expectedPaths": ["src/projects/CodeIndexer.ts"],
+      "factKeywords": ["buildRepoMap", "RepoMapInput"]
+    },
+    {
+      "id": "sym-05",
+      "category": "symbols",
+      "question": "GitHub 只读客户端在哪里，是否用了 ETag 缓存？",
+      "query": "GithubClient ETag GitHub 客户端",
+      "expectedPaths": ["src/github/GithubClient.ts"],
+      "factKeywords": ["GithubClient", "ETag"]
+    },
+    {
+      "id": "sym-06",
+      "category": "symbols",
+      "question": "DrizzleProjectStore 在哪里定义？",
+      "query": "DrizzleProjectStore ProjectStore",
+      "expectedPaths": ["src/projects/ProjectStore.ts"],
+      "factKeywords": ["DrizzleProjectStore", "ProjectStore"]
+    },
+    {
+      "id": "sym-07",
+      "category": "symbols",
+      "question": "手册生成函数 buildHandbook 在哪里？",
+      "query": "buildHandbook HandbookContent 手册",
+      "expectedPaths": ["src/projects/HandbookBuilder.ts"],
+      "factKeywords": ["buildHandbook", "HandbookContent"]
+    },
+    {
+      "id": "sym-08",
+      "category": "symbols",
+      "question": "主备选主的 PgAdvisoryLeadership 在哪里？",
+      "query": "PgAdvisoryLeadership pg_advisory_lock 选主",
+      "expectedPaths": ["src/cluster/LeadershipLock.ts"],
+      "factKeywords": ["PgAdvisoryLeadership", "pg_try_advisory_lock"]
+    },
+
+    {
+      "id": "cfg-01",
+      "category": "config",
+      "question": "数据库表定义在哪些文件？",
+      "query": "pgTable schema 数据库表定义",
+      "expectedPaths": ["src/db/schema.ts", "src/db/projectSchema.ts"],
+      "factKeywords": ["pgTable", "projects"]
+    },
+    {
+      "id": "cfg-02",
+      "category": "config",
+      "question": "新增一个 embedding 配置项需要改哪些文件？",
+      "query": "getEmbeddingConfig EMBEDDING_ENABLED 配置",
+      "expectedPaths": ["src/config/EnvConfigProvider.ts", ".env.example"],
+      "factKeywords": ["EMBEDDING_ENABLED", "getEmbeddingConfig"]
+    },
+    {
+      "id": "cfg-03",
+      "category": "config",
+      "question": "项目索引涉及哪些表？",
+      "query": "project_snapshots project_chunks 索引表",
+      "expectedPaths": ["src/db/projectSchema.ts", "src/db/sql/project-index.sql"],
+      "factKeywords": ["project_snapshots", "project_chunks"]
+    },
+    {
+      "id": "cfg-04",
+      "category": "config",
+      "question": "环境变量在哪里解析？",
+      "query": "EnvConfigProvider 环境变量解析",
+      "expectedPaths": ["src/config/EnvConfigProvider.ts"],
+      "factKeywords": ["EnvConfigProvider", "process.env"]
+    },
+    {
+      "id": "cfg-05",
+      "category": "config",
+      "question": "仓库扫描如何过滤敏感文件？",
+      "query": "envTemplate skippedReasons 敏感文件 忽略",
+      "expectedPaths": [
+        "src/projects/RepoScanner.ts",
+        "docs/skills-plugins-project-handbook-design.md"
+      ],
+      "factKeywords": ["envTemplate", "skippedReasons"]
+    },
+    {
+      "id": "cfg-06",
+      "category": "config",
+      "question": "数据库表结构同步和索引扩展用哪些命令？",
+      "query": "db:extend db:push 数据库迁移",
+      "expectedPaths": ["src/db/extend.ts", "package.json"],
+      "factKeywords": ["db:extend", "db:push"]
+    },
+
+    {
+      "id": "deploy-01",
+      "category": "deploy",
+      "question": "服务怎么部署和重启？",
+      "query": "deploy.sh systemctl 部署 重启",
+      "expectedPaths": ["deploy/deploy.sh", "README.md"],
+      "factKeywords": ["systemctl", "deploy.sh"]
+    },
+    {
+      "id": "deploy-02",
+      "category": "deploy",
+      "question": "systemd 服务单元怎么配置？",
+      "query": "dingtalk-agent.service ExecStart systemd",
+      "expectedPaths": ["deploy/dingtalk-agent.service"],
+      "factKeywords": ["ExecStart", "systemd"]
+    },
+    {
+      "id": "deploy-03",
+      "category": "deploy",
+      "question": "Nginx 反向代理配置在哪？",
+      "query": "nginx proxy_pass 反向代理 anthys_admin",
+      "expectedPaths": ["deploy/nginx.conf"],
+      "factKeywords": ["proxy_pass", "anthys_admin"]
+    },
+    {
+      "id": "deploy-04",
+      "category": "deploy",
+      "question": "数据库初始化脚本做了什么？",
+      "query": "init-database.sh CREATE DATABASE vector 初始化",
+      "expectedPaths": ["deploy/init-database.sh"],
+      "factKeywords": ["CREATE DATABASE", "vector"]
+    },
+    {
+      "id": "deploy-05",
+      "category": "deploy",
+      "question": "健康检查接口在哪里？",
+      "query": "/health healthz 健康检查",
+      "expectedPaths": ["src/admin-api/server.ts"],
+      "factKeywords": ["/health", "healthz"]
+    },
+
+    {
+      "id": "history-01",
+      "category": "history",
+      "question": "为什么索引要绑定 commit 快照？",
+      "query": "快照 commit 索引 一致性",
+      "expectedPaths": [
+        "docs/skills-plugins-project-handbook-design.md",
+        "src/projects/ProjectService.ts"
+      ],
+      "factKeywords": ["快照", "commit"]
+    },
+    {
+      "id": "history-02",
+      "category": "history",
+      "question": "为什么插件系统选择声明式而不执行任意代码？",
+      "query": "声明式插件 不执行 任意代码",
+      "expectedPaths": [
+        "docs/skills-plugins-project-handbook-design.md",
+        "src/plugins/PluginManifest.ts"
+      ],
+      "factKeywords": ["声明式", "不执行"]
+    },
+    {
+      "id": "history-03",
+      "category": "history",
+      "question": "为什么动态配置和后台任务只允许单实例执行？",
+      "query": "单实例 advisory lock 动态配置",
+      "expectedPaths": [
+        "docs/skills-plugins-project-handbook-design.md",
+        "src/cluster/LeadershipLock.ts"
+      ],
+      "factKeywords": ["advisory", "单实例"]
+    },
+    {
+      "id": "history-04",
+      "category": "history",
+      "question": "中文检索为什么用 tsvector 加 pg_trgm？",
+      "query": "tsvector pg_trgm 中文检索",
+      "expectedPaths": [
+        "src/db/sql/project-index.sql",
+        "docs/skills-plugins-project-handbook-design.md"
+      ],
+      "factKeywords": ["tsvector", "pg_trgm"]
+    },
+    {
+      "id": "history-05",
+      "category": "history",
+      "question": "项目的安全边界是什么？",
+      "query": "敏感文件 不可信 安全边界",
+      "expectedPaths": [
+        "docs/skills-plugins-project-handbook-design.md",
+        "src/projects/RepoScanner.ts"
+      ],
+      "factKeywords": ["敏感文件", "不可信"]
+    }
+  ]
+}

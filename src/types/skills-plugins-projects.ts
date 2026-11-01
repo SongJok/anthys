@@ -504,6 +504,10 @@ export interface ProjectSyncStats {
   chunks: number;
   skipped: number;
   durationMs: number;
+  /** 已写入向量的分块数；未配置 embedding 时为 0 */
+  embeddedChunks?: number;
+  /** 向量化失败原因；失败时同步仍成功，检索自动退回关键词 */
+  embeddingError?: string;
 }
 
 export interface ProjectSyncJob {
@@ -725,10 +729,47 @@ export interface ProjectManualEntryInput {
 
 export type ProjectManualEntryPatch = Partial<ProjectManualEntryInput>;
 
+export interface HandbookSectionPatch {
+  key: HandbookSectionKey;
+  title?: string;
+  markdown: string;
+}
+
+export interface ProjectHandbookDraftInput {
+  /** 以指定版本为基线；省略时优先最新草稿，其次最新发布版 */
+  version?: number;
+  sections: HandbookSectionPatch[];
+}
+
 export interface ProjectAdminEntry {
   project: ProjectRecord;
   snapshot: ProjectSnapshot | null;
   stale: boolean;
+}
+
+export interface ProjectIndexStatus {
+  files: number;
+  bytes: number;
+  symbols: number;
+  chunks: number;
+  embeddedChunks: number;
+  truncated: boolean;
+  branch: string;
+}
+
+export interface ProjectStatus {
+  project: ProjectRecord;
+  snapshot: ProjectSnapshot | null;
+  stale: boolean;
+  embeddingEnabled: boolean;
+  index: ProjectIndexStatus | null;
+  latestJob: ProjectSyncJob | null;
+  recentJobs: ProjectSyncJob[];
+  handbook: {
+    publishedVersion: number;
+    draftVersion: number | null;
+    stale: boolean;
+  };
 }
 
 /** 管理控制台使用的项目端口；成员过滤由适配器以管理员上下文处理 */
@@ -743,10 +784,16 @@ export interface ProjectAdminPort {
   listSyncJobs(id: string, limit?: number): Promise<ProjectSyncJob[]>;
   listSnapshots(id: string, limit?: number): Promise<ProjectSnapshot[]>;
   search(id: string, query: string, limit?: number): Promise<ProjectSearchResult>;
+  status?(id: string): Promise<ProjectStatus>;
   handbook?(id: string): Promise<ProjectHandbookResult>;
+  handbookDraft?(id: string): Promise<ProjectHandbookRecord | null>;
   manualEntries?(id: string): Promise<ProjectManualEntry[]>;
   handbookVersions?(id: string, limit?: number): Promise<ProjectHandbookRecord[]>;
   generateHandbook?(id: string): Promise<ProjectHandbookRecord>;
+  saveHandbookDraft?(
+    id: string,
+    input: ProjectHandbookDraftInput,
+  ): Promise<ProjectHandbookRecord>;
   publishHandbook?(id: string, version?: number): Promise<ProjectHandbookRecord>;
   createManualEntry?(
     id: string,

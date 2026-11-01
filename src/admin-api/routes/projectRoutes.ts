@@ -8,6 +8,7 @@ import {
 } from '../../projects/ProjectService.js';
 import { ProjectSourceError } from '../../projects/RepoSource.js';
 import type {
+  HandbookSectionKey,
   ProjectAdminEntry,
   ProjectAdminPort,
   ProjectCreateInput,
@@ -251,6 +252,36 @@ function readPatch(body: Record<string, unknown>): ProjectUpdateInput {
   };
 }
 
+function readHandbookDraft(
+  body: Record<string, unknown>,
+): { version?: number; sections: Array<{ key: HandbookSectionKey; title?: string; markdown: string }> } {
+  const raw = body['sections'];
+  if (!Array.isArray(raw) || raw.length === 0) {
+    throw new HTTPException(400, { message: 'sections 必须是非空数组' });
+  }
+  const sections = raw.map((item, index) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+      throw new HTTPException(400, {
+        message: `sections[${index}] 必须是对象`,
+      });
+    }
+    const section = item as Record<string, unknown>;
+    const key = readString(section, 'key', { required: true })!;
+    const markdown = readString(section, 'markdown', { required: true })!;
+    const title = readString(section, 'title');
+    return {
+      key: key as HandbookSectionKey,
+      markdown,
+      ...(title !== undefined ? { title } : {}),
+    };
+  });
+  const version = readNumber(body, 'version');
+  return {
+    ...(version !== undefined ? { version } : {}),
+    sections,
+  };
+}
+
 /** 项目登记、同步任务、快照与检索管理 */
 export function createProjectRoutes(deps: ProjectRouteDeps): Hono {
   const app = new Hono();
@@ -327,6 +358,20 @@ export function createProjectRoutes(deps: ProjectRouteDeps): Hono {
     }
   });
 
+  app.get('/projects/:id/status', async (c) => {
+    if (!deps.projects.status) {
+      throw new HTTPException(503, { message: '项目状态接口未启用' });
+    }
+    try {
+      return c.json({
+        ok: true,
+        status: await deps.projects.status(c.req.param('id')),
+      });
+    } catch (error) {
+      mapProjectError(error);
+    }
+  });
+
   app.get('/projects/:id/snapshots', async (c) => {
     const limitRaw = Number(c.req.query('limit') ?? 10);
     try {
@@ -361,13 +406,43 @@ export function createProjectRoutes(deps: ProjectRouteDeps): Hono {
       throw new HTTPException(503, { message: '项目手册接口未启用' });
     }
     try {
-      return c.json({
-        ok: true,
-        handbook: await deps.projects.handbook(c.req.param('id')),
-      });
+      const id = c.req.param('id');
+      const [handbook, draft] = await Promise.all([
+        deps.projects.handbook(id),
+        deps.projects.handbookDraft?.(id).catch(() => null) ?? null,
+      ]);
+      return c.json({ ok: true, handbook, draft });
     } catch (error) {
       mapProjectError(error);
     }
+  });
+
+  app.put('/projects/:id/handbook', async (c) => {
+    if (!deps.projects.saveHandbookDraft) {
+      throw new HTTPException(503, { message: '项目手册草稿接口未启用' });
+    }
+    const id = c.req.param('id');
+    const body = await readJsonBody(c);
+    let handbook;
+    try {
+      handbook = await deps.projects.saveHandbookDraft(id, readHandbookDraft(body));
+    } catch (error) {
+      mapProjectError(error);
+    }
+    if (deps.configCenter) {
+      await recordWebAudit(
+        deps.configCenter,
+        webActor(c),
+        'UPDATE_PROJECT_HANDBOOK',
+        { id },
+        {
+          action: 'save-handbook-draft',
+          sections: handbook.content.sections.map((section) => section.key),
+          handbook: auditHandbook(handbook),
+        },
+      );
+    }
+    return c.json({ ok: true, handbook });
   });
 
   app.get('/projects/:id/manual-entries', async (c) => {

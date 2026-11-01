@@ -14,6 +14,7 @@ import type {
   GithubAdminStatus,
   GithubConnectionTestResult,
   GroupPolicy,
+  HandbookSectionPatch,
   KnownGroup,
   LLMConfig,
   LlmTestResult,
@@ -34,6 +35,7 @@ import type {
   ProjectRecord,
   ProjectSearchResult,
   ProjectSnapshot,
+  ProjectStatus,
   ProjectSyncJob,
   RetentionPolicy,
   RetentionStats,
@@ -470,13 +472,25 @@ export const api = {
     request<{ snapshots: ProjectSnapshot[] }>(
       `/projects/${encodeURIComponent(id)}/snapshots?limit=${limit}`,
     ),
+  projectStatus: (id: string) =>
+    request<{ status: ProjectStatus }>(
+      `/projects/${encodeURIComponent(id)}/status`,
+    ),
   searchProject: (id: string, query: string, limit = 10) =>
     request<{ result: ProjectSearchResult }>(
       `/projects/${encodeURIComponent(id)}/search?q=${encodeURIComponent(query)}&limit=${limit}`,
     ),
   projectHandbook: (id: string) =>
-    request<{ handbook: ProjectHandbookResult }>(
+    request<{ handbook: ProjectHandbookResult; draft: ProjectHandbookRecord | null }>(
       `/projects/${encodeURIComponent(id)}/handbook`,
+    ),
+  saveProjectHandbookDraft: (
+    id: string,
+    input: { version?: number; sections: HandbookSectionPatch[] },
+  ) =>
+    request<{ handbook: ProjectHandbookRecord }>(
+      `/projects/${encodeURIComponent(id)}/handbook`,
+      { method: 'PUT', body: JSON.stringify(input) },
     ),
   projectManualEntries: (id: string) =>
     request<{ entries: ProjectManualEntry[] }>(

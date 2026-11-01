@@ -26,6 +26,7 @@ import type { ColumnsType } from 'antd/es/table';
 import {
   BookOutlined,
   CloudSyncOutlined,
+  EditOutlined,
   GithubOutlined,
   PlusOutlined,
   ReloadOutlined,
@@ -34,6 +35,7 @@ import { api } from '../api';
 import type {
   GithubAdminStatus,
   GithubConnectionTestResult,
+  HandbookSection,
   HandbookSectionKey,
   ProjectAdminEntry,
   ProjectHandbookRecord,
@@ -46,6 +48,7 @@ import type {
   ProjectSnapshot,
   ProjectSnapshotStatus,
   ProjectSourceType,
+  ProjectStatus,
   ProjectSyncJob,
   ProjectSyncStatus,
   ProjectVisibility,
@@ -202,9 +205,19 @@ export default function ProjectsPage() {
   const [activeTab, setActiveTab] = useState('overview');
   const [snapshots, setSnapshots] = useState<ProjectSnapshot[]>([]);
   const [jobs, setJobs] = useState<ProjectSyncJob[]>([]);
+  const [projectStatus, setProjectStatus] = useState<ProjectStatus | null>(null);
   const [handbook, setHandbook] = useState<ProjectHandbookResult | null>(null);
+  const [handbookDraft, setHandbookDraft] =
+    useState<ProjectHandbookRecord | null>(null);
   const [handbookError, setHandbookError] = useState('');
   const [handbookLoading, setHandbookLoading] = useState(false);
+  const [sectionEditor, setSectionEditor] = useState<{
+    open: boolean;
+    key: HandbookSectionKey;
+    title: string;
+    markdown: string;
+  }>({ open: false, key: 'overview', title: '', markdown: '' });
+  const [savingDraft, setSavingDraft] = useState(false);
   const [handbookVersions, setHandbookVersions] = useState<
     ProjectHandbookRecord[]
   >([]);
@@ -293,6 +306,7 @@ export default function ProjectsPage() {
         entryResult,
         snapshotsResult,
         jobsResult,
+        statusResult,
         handbookResult,
         versionsResult,
         entriesResult,
@@ -301,8 +315,11 @@ export default function ProjectsPage() {
         api.projectSnapshots(id, 20),
         api.projectSyncJobs(id, 20),
         api
+          .projectStatus(id)
+          .then((result) => result.status)
+          .catch(() => null),
+        api
           .projectHandbook(id)
-          .then((result) => result.handbook)
           .catch(() => null),
         api
           .projectHandbookVersions(id, 10)
@@ -316,10 +333,12 @@ export default function ProjectsPage() {
       if (entryResult) setDetail(entryResult);
       setSnapshots(snapshotsResult.snapshots);
       setJobs(jobsResult.jobs);
-      setHandbook(handbookResult);
+      setProjectStatus(statusResult);
+      setHandbook(handbookResult?.handbook ?? null);
+      setHandbookDraft(handbookResult?.draft ?? null);
       setHandbookVersions(versionsResult);
       setManualEntries(entriesResult);
-      setHandbookError(handbookResult ? '' : '项目手册尚未生成或接口未启用');
+      setHandbookError(handbookResult?.handbook ? '' : '项目手册尚未生成或接口未启用');
     } catch (error) {
       message.error(error instanceof Error ? error.message : String(error));
     } finally {
@@ -468,8 +487,11 @@ export default function ProjectsPage() {
     if (!detail) return;
     setHandbookLoading(true);
     try {
-      const { handbook: result } = await api.projectHandbook(detail.project.id);
+      const { handbook: result, draft } = await api.projectHandbook(
+        detail.project.id,
+      );
       setHandbook(result);
+      setHandbookDraft(draft);
       setHandbookError('');
     } catch (error) {
       setHandbookError(
@@ -477,6 +499,48 @@ export default function ProjectsPage() {
       );
     } finally {
       setHandbookLoading(false);
+    }
+  };
+
+  const openSectionEditor = (section: HandbookSection) => {
+    const draftSection = handbookDraft?.content.sections.find(
+      (item) => item.key === section.key,
+    );
+    setSectionEditor({
+      open: true,
+      key: section.key,
+      title: draftSection?.title ?? section.title,
+      markdown: draftSection?.markdown ?? section.markdown,
+    });
+  };
+
+  const saveSectionDraft = async () => {
+    if (!detail) return;
+    if (!sectionEditor.markdown.trim()) {
+      message.error('章节内容不能为空');
+      return;
+    }
+    setSavingDraft(true);
+    try {
+      const { handbook: record } = await api.saveProjectHandbookDraft(
+        detail.project.id,
+        {
+          sections: [
+            {
+              key: sectionEditor.key,
+              title: sectionEditor.title,
+              markdown: sectionEditor.markdown,
+            },
+          ],
+        },
+      );
+      message.success(`已保存为草稿 v${record.version}，确认后可发布`);
+      setSectionEditor((prev) => ({ ...prev, open: false }));
+      await refreshDetail(detail.project.id);
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setSavingDraft(false);
     }
   };
 
@@ -692,6 +756,8 @@ export default function ProjectsPage() {
   const latestDraft = handbookVersions.find(
     (item) => item.status === 'draft',
   );
+  const displaySections =
+    handbookDraft?.content.sections ?? handbook?.content.sections ?? [];
 
   return (
     <Space direction="vertical" size={16} style={{ width: '100%' }}>
@@ -1052,6 +1118,49 @@ export default function ProjectsPage() {
         </Form>
       </Modal>
 
+      <Modal
+        title={`编辑章节：${sectionEditor.title || sectionEditor.key}`}
+        open={sectionEditor.open}
+        onCancel={() =>
+          setSectionEditor((prev) => ({ ...prev, open: false }))
+        }
+        onOk={() => void saveSectionDraft()}
+        okText="保存为草稿"
+        confirmLoading={savingDraft}
+        width={880}
+      >
+        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+          <Alert
+            type="info"
+            showIcon
+            message="保存会生成新的手册草稿版本，不会影响线上已发布内容；确认后再点「发布最新草稿」。"
+          />
+          <Input
+            addonBefore="章节标题"
+            value={sectionEditor.title}
+            maxLength={100}
+            onChange={(event) =>
+              setSectionEditor((prev) => ({
+                ...prev,
+                title: event.target.value,
+              }))
+            }
+          />
+          <Input.TextArea
+            rows={18}
+            maxLength={20000}
+            showCount
+            value={sectionEditor.markdown}
+            onChange={(event) =>
+              setSectionEditor((prev) => ({
+                ...prev,
+                markdown: event.target.value,
+              }))
+            }
+          />
+        </Space>
+      </Modal>
+
       <Drawer
         title={detailProject ? `项目详情：${detailProject.name}` : '项目详情'}
         open={Boolean(detail)}
@@ -1143,6 +1252,63 @@ export default function ProjectsPage() {
                           {detailProject.description || '无'}
                         </Descriptions.Item>
                       </Descriptions>
+                      {projectStatus ? (
+                        <Descriptions
+                          size="small"
+                          bordered
+                          column={2}
+                          title="索引与运行状态"
+                        >
+                          <Descriptions.Item label="文件 / 符号 / 分块">
+                            {projectStatus.index
+                              ? `${projectStatus.index.files} / ${projectStatus.index.symbols} / ${projectStatus.index.chunks}`
+                              : '尚未同步'}
+                          </Descriptions.Item>
+                          <Descriptions.Item label="已向量化分块">
+                            {projectStatus.embeddingEnabled
+                              ? `${projectStatus.index?.embeddedChunks ?? 0} / ${projectStatus.index?.chunks ?? 0}`
+                              : '未启用 embedding'}
+                          </Descriptions.Item>
+                          <Descriptions.Item label="最近任务">
+                            {projectStatus.latestJob
+                              ? `${projectStatus.latestJob.status} · ${formatTime(projectStatus.latestJob.createdAt)}`
+                              : '无'}
+                          </Descriptions.Item>
+                          <Descriptions.Item label="手册版本">
+                            已发布 v{projectStatus.handbook.publishedVersion}
+                            {projectStatus.handbook.draftVersion
+                              ? ` · 草稿 v${projectStatus.handbook.draftVersion}`
+                              : ''}
+                          </Descriptions.Item>
+                          <Descriptions.Item label="索引截断">
+                            {projectStatus.index?.truncated ? (
+                              <Tag color="orange">已达到扫描上限</Tag>
+                            ) : (
+                              <Tag color="green">完整</Tag>
+                            )}
+                          </Descriptions.Item>
+                          <Descriptions.Item label="索引分支">
+                            {projectStatus.index?.branch || '—'}
+                          </Descriptions.Item>
+                        </Descriptions>
+                      ) : null}
+                      {projectStatus?.latestJob?.error ? (
+                        <Alert
+                          type="error"
+                          showIcon
+                          message={`最近同步失败：${projectStatus.latestJob.error}`}
+                        />
+                      ) : null}
+                      {projectStatus?.index &&
+                      projectStatus.embeddingEnabled &&
+                      projectStatus.index.embeddedChunks <
+                        projectStatus.index.chunks ? (
+                        <Alert
+                          type="warning"
+                          showIcon
+                          message="部分分块没有向量，向量召回只覆盖已向量化部分；可重新同步补齐。"
+                        />
+                      ) : null}
                       {detail.stale ? (
                         <Alert
                           type="warning"
@@ -1376,13 +1542,18 @@ export default function ProjectsPage() {
                           {latestDraft ? (
                             <Tag color="gold">草稿 v{latestDraft.version} 待发布</Tag>
                           ) : null}
+                          {handbookDraft ? (
+                            <Tag color="gold">
+                              当前显示草稿 v{handbookDraft.version}
+                            </Tag>
+                          ) : null}
                         </Space>
                         {handbookError ? (
                           <Alert type="warning" showIcon message={handbookError} />
                         ) : null}
-                        {handbook ? (
+                        {displaySections.length > 0 ? (
                           <Collapse
-                            items={handbook.content.sections.map((section) => ({
+                            items={displaySections.map((section) => ({
                               key: section.key,
                               label: (
                                 <Space>
@@ -1391,6 +1562,17 @@ export default function ProjectsPage() {
                                     {section.title}
                                   </Typography.Text>
                                   <Tag>{section.origin}</Tag>
+                                  <Button
+                                    type="link"
+                                    size="small"
+                                    icon={<EditOutlined />}
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      openSectionEditor(section);
+                                    }}
+                                  >
+                                    编辑
+                                  </Button>
                                 </Space>
                               ),
                               children: (

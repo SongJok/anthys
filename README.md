@@ -120,6 +120,8 @@ pnpm run db:seed      # 可选：预写入默认人设与模型配置，已有�
 
 将 `.env.example` 复制为 `.env`，按下列分组填写。缺少必需项时进程会立即退出并列出缺失的变量名。
 
+> `.env` 以及 `.env.local`、`.env.production` 等变体已被 `.gitignore` 忽略，禁止提交到 GitHub；只提交不含真实密钥的 `.env.example` 与 `deploy/.env.production.example`。`pnpm test` 会检查示例文件没有真实密钥、Git 也没有跟踪任何 `.env` 密钥文件。
+
 **运行时与数据库**
 
 | 变量 | 默认值 | 说明 |
@@ -205,9 +207,9 @@ pnpm run db:seed      # 可选：预写入默认人设与模型配置，已有�
 | `EMBEDDING_BASE_URL` | 沿用 `LLM_BASE_URL` | OpenAI 兼容的 embeddings 接口地址 |
 | `EMBEDDING_API_KEY` | 沿用 `LLM_API_KEY` | embeddings 接口密钥 |
 | `EMBEDDING_MODEL` | `text-embedding-3-small` | 向量模型名称 |
-| `EMBEDDING_DIMENSIONS` | `1536` | 向量维度，需与 `semantic_memories.embedding` 列一致 |
+| `EMBEDDING_DIMENSIONS` | `1536` | 向量维度；必须与数据库 `vector(1536)` 一致，否则启动时记录错误并禁用 embedding |
 
-启用后，语义记忆写入时生成向量，召回时按余弦距离排序；embedding 服务异常会自动降级为关键词召回，不影响回答。
+启用后，语义记忆写入时生成向量，召回时按余弦距离排序；术语库在关键词未命中时回退向量召回，项目同步会为所有分块写入向量并参与混合检索。`EMBEDDING_DIMENSIONS` 不是 1536 时 embedding 会被禁用，避免写入失败；embedding 服务异常会自动降级为关键词检索，不影响回答。
 
 **企业术语知识库**
 
@@ -597,10 +599,11 @@ sudo cp deploy/nginx.conf /etc/nginx/conf.d/ && sudo nginx -t && sudo systemctl 
 
 - **来源**：`local`（服务器上的目录，只能读 `PROJECT_ALLOWED_ROOTS`，默认仓库根）、`github`（`owner/name` + ref，按 GitHub 只读接口拉取）与 `manual`（只维护手册与人工条目，不扫描代码）。
 - **同步与快照**：每次同步生成不可变快照，记录 commit、文件清单、分块索引与符号表；检索结果与引用统一带 `path:line @ commit`，历史版本可追溯。定期同步由项目的 `autoSyncMinutes` 控制，缺省回退到 `PROJECT_SYNC_INTERVAL_SECONDS`。
-- **扫描边界**：`.env`、私钥、证书、凭据文件不进入索引；`.env.example` / `.sample` / `.template` 会保留，用于在手册里只列出变量名而不泄露取值。超大文件、二进制与依赖目录会被跳过。
-- **混合检索**：关键词（全文与 trigram）、路径、符号与可选 pgvector 向量一起召回；可按 `pathGlob`、语言与类型（`code` / `doc` / `config` / `test`）过滤。`private` 项目只在单聊中向 owner 或管理员开放，`admin` 项目仅管理员可见。
+- **扫描边界**：`.env`、私钥、证书、凭据文件不进入索引；`.env.example` / `.sample` / `.template` 会保留，用于在手册里只列出变量名而不泄露取值。超大文件、二进制与依赖目录会被跳过。仓库根目录的 `.anthysignore` 可按行声明额外排除的 glob（`#` 注释，不影响 git 跟踪）；`anthys` 种子用它排除 `eval/golden/**` 与 `tmp/**`，避免评测答案和临时产物进入语料。
+- **混合检索**：关键词（全文与 trigram）、路径、符号与可选 pgvector 向量一起召回；查询会拆成 token 分别做全文与子串匹配，再按 token 稀有度（IDF 近似）加权路径 / 符号命中，避免通用词淹没真正的定义文件。可按 `pathGlob`、语言与类型（`code` / `doc` / `config` / `test`）过滤。启用 `EMBEDDING_ENABLED` 后，同步会按批为所有分块生成 1536 维向量；旧快照缺少向量统计时会在下一次同步自动重建一次。embedding 失败只记录 `embeddingError` 并降级关键词检索，不会让同步失败。`private` 项目只在单聊中向 owner 或管理员开放，`admin` 项目仅管理员可见。
 - **项目工具**：`project_list`、`project_handbook`、`project_map`、`project_search`、`project_read`、`project_symbol`、`project_history`。`project_history` 在 GitHub 来源下可直接查 issues / PRs，其余来源会说明能力边界。
 - **项目手册**：按固定 12 章生成草稿——项目概览、架构设计、模块地图、数据模型、配置与密钥、构建与部署、运维与故障、编码约定、测试与验收、历史决策、常见问题、风险与边界。草稿可以预览、重新生成和发布；发布后才进入模型上下文，并递增 `handbookVersion`。手册内容只汇总变量名、脚本路径与命令，不展开密钥值或部署脚本正文。
+- **章节编辑与状态**：控制台可基于最新草稿（没有草稿时基于最新发布版）逐章修改标题与 Markdown，保存会生成新草稿而不改动已发布版本；审核后再发布。`GET /projects/:id/status` 汇总索引文件数 / 分块数 / 已向量化分块数、最近同步任务与错误、发布与草稿版本、是否过期；控制台会如实展示这些状态与降级原因。
 - **人工条目**：管理员可在任意章节新增、编辑、删除人工条目，设置可见性、敏感级别、是否注入项目简报与优先级。人工条目优先于自动生成内容，重新生成不会覆盖管理员编辑。
 - **种子目录**：启动时读取 `PROJECT_SEED_DIR`（默认 `projects`）下的 `<projectId>/project.json` 与 `manual/*.md`。项目不存在才创建，配置更新不会覆盖已有记录；种子人工条目只更新由 `seed:projects/manual` 自己写入的版本，管理员改过的条目会被跳过。
 - `EXTENSIONS_PROJECTS_ENABLED=false` 可整体关闭；`EXTENSIONS_DEFAULT_PROJECT_ID` 指定问题未点名项目时的默认项目。
@@ -872,11 +875,13 @@ sudo cp deploy/nginx.conf /etc/nginx/conf.d/ && sudo nginx -t && sudo systemctl 
 | GET / POST | `/projects` | 项目列表 / 登记项目 |
 | GET / PUT / DELETE | `/projects/:id` | 项目详情 / 更新 / 删除 |
 | POST | `/projects/:id/sync` | 触发一次同步（异步任务） |
+| GET | `/projects/:id/status` | 索引统计、向量补齐、最近任务、手册版本与过期标记 |
 | GET | `/projects/:id/sync-jobs`、`/snapshots`、`/search` | 同步任务 / 快照 / 混合检索 |
 | GET / POST | `/projects/:id/manual-entries` | 人工条目列表 / 新增 |
 | PUT / DELETE | `/projects/:id/manual-entries/:entryId` | 更新 / 删除人工条目 |
-| GET | `/projects/:id/handbook`、`/handbooks` | 当前已发布手册 / 全部版本 |
-| POST | `/projects/:id/handbook/generate`、`/publish` | 生成草稿 / 发布指定版本 |
+| GET | `/projects/:id/handbook`、`/handbooks` | 当前发布手册与最新草稿 / 全部版本 |
+| PUT | `/projects/:id/handbook` | 基于最新草稿保存章节修改，生成新草稿 |
+| POST | `/projects/:id/handbook/generate`、`/publish` | 生成草稿 / 发布指定版本或最新草稿 |
 | GET | `/github/status` | GitHub 工具的真实运行状态（不读取 `.env` 文件中的未生效值） |
 | POST | `/github/test` | 对指定或默认仓库做连通性测试（绕过缓存，写审计） |
 | GET | `/audit-logs` | 管理操作审计 |
@@ -963,6 +968,23 @@ sudo cp deploy/nginx.conf /etc/nginx/conf.d/ && sudo nginx -t && sudo systemctl 
 | DWS 查询报错 | 员工个人登录态过期：机器人会在提问时自动发起设备码授权并私聊推送链接；若员工长时间未授权，可让其在下一次提问时重试，或在单聊发送 `/dws-login` 手动重发 |
 | DWS 提示缺权限 | 应用未开通对应权限点：管理员会收到含权限点与开通命令的单聊通知；按通知开通后，员工在单聊重新 `/dws-login` 刷新个人授权 |
 | 工具结果被截断 | 超过了节点 `maxResultChars`，可调大上限或用沙盒对落盘数据做聚合 |
+
+### 测试与质量评测
+
+```bash
+pnpm typecheck
+pnpm test                    # 单元/集成测试，含 .env 安全约束与 golden set 题库校验
+pnpm -C web-console build
+```
+
+30 题 golden set 评测需要可达的 `DATABASE_URL` 与已同步的项目（首次会自动导入 `projects/anthys` 种子）：
+
+```bash
+pnpm eval:golden -- --project=anthys --json=tmp/golden-report.json
+pnpm eval:golden -- --no-sync   # 复用当前快照，不做重新同步
+```
+
+报告包含引用命中率、引用完整率、事实代理覆盖率（检索证据中 `factKeywords` 的命中比例）、`project_search` p95 与安全探针结果。它是确定性检索评测，不生成回答文本，事实覆盖率不等同于人工判分；安全项覆盖密钥泄露、敏感文件与 `.env` 读取探针，不覆盖模型是否服从仓库内提示注入。未达标时命令以非零状态退出，可用于发布前检查。
 
 ---
 

@@ -418,6 +418,36 @@ async function main(): Promise<void> {
       process.cwd(),
       process.env.SKILLS_LOCAL_DIR?.trim() || 'skills/local',
     );
+    const embeddingConfig = configCenter.getEmbeddingConfig();
+    const embeddingDimensionsMismatch =
+      Boolean(embeddingConfig?.enabled && embeddingConfig.apiKey) &&
+      (embeddingConfig?.dimensions ?? 1536) !== 1536;
+    if (embeddingDimensionsMismatch) {
+      logger.error(
+        {
+          dimensions: embeddingConfig?.dimensions,
+          required: 1536,
+        },
+        'EMBEDDING_DIMENSIONS 与数据库 vector(1536) 不一致，已禁用 embedding；请改回 1536 或同步调整表结构',
+      );
+    }
+    const embeddingClient =
+      embeddingConfig?.enabled &&
+      embeddingConfig.apiKey &&
+      !embeddingDimensionsMismatch
+        ? new OpenAIEmbeddingClient({
+            baseUrl: embeddingConfig.baseUrl,
+            apiKey: embeddingConfig.apiKey,
+            model: embeddingConfig.model,
+            dimensions: embeddingConfig.dimensions,
+          })
+        : undefined;
+    if (embeddingClient) {
+      logger.info(
+        { model: embeddingConfig?.model, dimensions: embeddingClient.dimensions },
+        'embedding client enabled for semantic memory and project search',
+      );
+    }
 
     const mergeMcpServers = async (
       manual: EnterpriseMcpServerConfig[] = configCenter.getMcpServers(),
@@ -593,6 +623,7 @@ async function main(): Promise<void> {
         stateDir: resolve(stateRoot, 'projects'),
         logger: harnessLogger,
       }),
+      ...(embeddingClient ? { embedder: embeddingClient } : {}),
       ...(projectGithubPort ? { github: projectGithubPort } : {}),
       defaultProjectId: () =>
         configCenter.getExtensionsConfig().defaultProjectId,
@@ -705,11 +736,19 @@ async function main(): Promise<void> {
           ...(limit !== undefined ? { limit } : {}),
           member: adminProjectMember,
         }),
+      status: (id) => projects.getProjectStatus(id),
       handbook: (id) =>
         projects.getHandbook({ projectRef: id, member: adminProjectMember }),
+      handbookDraft: (id) => projects.getHandbookDraft(id),
       manualEntries: (id) => projects.listManualEntries(id),
       handbookVersions: (id, limit) => projects.listHandbookVersions(id, limit),
       generateHandbook: (id) => projects.generateHandbook(id),
+      saveHandbookDraft: (id, input) =>
+        projects.saveHandbookDraft(
+          id,
+          input,
+          adminProjectMember.senderStaffId,
+        ),
       publishHandbook: (id, version) =>
         projects.publishHandbook(id, version),
       createManualEntry: (id, input) =>
@@ -868,23 +907,6 @@ async function main(): Promise<void> {
       logger: harnessLogger,
     });
     dwsAuth = authManager;
-
-    const embeddingConfig = configCenter.getEmbeddingConfig();
-    const embeddingClient =
-      embeddingConfig?.enabled && embeddingConfig.apiKey
-        ? new OpenAIEmbeddingClient({
-            baseUrl: embeddingConfig.baseUrl,
-            apiKey: embeddingConfig.apiKey,
-            model: embeddingConfig.model,
-            dimensions: embeddingConfig.dimensions,
-          })
-        : undefined;
-    if (embeddingClient) {
-      logger.info(
-        { model: embeddingConfig?.model, dimensions: embeddingClient.dimensions },
-        'semantic memory embedding enabled',
-      );
-    }
 
     const glossary = new GlossaryService({
       store: new DrizzleGlossaryStore(dbHandle.db),

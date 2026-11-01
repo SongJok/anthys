@@ -98,6 +98,11 @@ interface MergedCandidate extends ProjectSearchCandidate {
   score: number;
 }
 
+interface WeightedToken {
+  token: string;
+  weight: number;
+}
+
 export class ProjectSearchService {
   private readonly store: ProjectStore;
   private readonly embedder?: EmbeddingClient;
@@ -159,7 +164,7 @@ export class ProjectSearchService {
       ...(pathLike ? { pathLike } : {}),
       ...(input.language ? { language: input.language } : {}),
       ...(kindFilter ? { kinds: kindFilter } : {}),
-      limit: limit * 6,
+      limit: limit * 8,
     });
     const vectorPromise = this.vectorSearch(input, query, pathLike, kindFilter, limit);
     const [keywordResult, vectorResult] = await Promise.all([
@@ -198,14 +203,17 @@ export class ProjectSearchService {
     const candidates = Array.from(merged.values());
     const maxFts = Math.max(0, ...candidates.map((candidate) => candidate.ftsScore));
     const hasVector = candidates.some((candidate) => candidate.vectorScore > 0);
+    const weightedTokens = this.weightTokens(tokens, candidates);
     for (const candidate of candidates) {
       const ftsNorm = maxFts > 0 ? candidate.ftsScore / maxFts : 0;
       const trigramNorm = Math.min(1, candidate.trigramScore);
+      const contentCoverage = this.tokenBoost(candidate.content, weightedTokens);
       const substring = candidate.content.toLowerCase().includes(query.toLowerCase());
-      let keywordScore = 0.6 * ftsNorm + 0.4 * trigramNorm;
+      let keywordScore =
+        0.5 * ftsNorm + 0.3 * trigramNorm + 0.2 * contentCoverage;
       if (substring) keywordScore = Math.max(keywordScore, 0.8);
-      const pathBoost = this.tokenBoost(candidate.path, tokens);
-      const symbolBoost = this.tokenBoost(candidate.symbol, tokens);
+      const pathBoost = this.tokenBoost(candidate.path, weightedTokens);
+      const symbolBoost = this.tokenBoost(candidate.symbol, weightedTokens);
       if (pathBoost > 0) candidate.matchedBy.add('path');
       const score = hasVector
         ? 0.45 * Math.max(0, candidate.vectorScore) +
@@ -328,11 +336,34 @@ export class ProjectSearchService {
     return undefined;
   }
 
-  private tokenBoost(value: string, tokens: string[]): number {
+  private weightTokens(
+    tokens: string[],
+    candidates: MergedCandidate[],
+  ): WeightedToken[] {
+    const total = Math.max(1, candidates.length);
+    return tokens.map((token) => {
+      const documentFrequency = candidates.reduce((count, candidate) => {
+        const haystack =
+          `${candidate.path}\n${candidate.symbol}\n${candidate.content}`.toLowerCase();
+        return count + (haystack.includes(token) ? 1 : 0);
+      }, 0);
+      return {
+        token,
+        weight: Math.log((total + 1) / (documentFrequency + 1)) + 0.5,
+      };
+    });
+  }
+
+  private tokenBoost(value: string, tokens: WeightedToken[]): number {
     if (!value) return 0;
     const lower = value.toLowerCase();
-    const hits = tokens.filter((token) => lower.includes(token)).length;
-    return tokens.length > 0 ? Math.min(1, hits / tokens.length) : 0;
+    const total = tokens.reduce((sum, item) => sum + item.weight, 0);
+    if (total <= 0) return 0;
+    const hits = tokens.reduce(
+      (sum, item) => sum + (lower.includes(item.token) ? item.weight : 0),
+      0,
+    );
+    return Math.min(1, hits / total);
   }
 
   private toHit(candidate: MergedCandidate, query: string): ProjectSearchHit {

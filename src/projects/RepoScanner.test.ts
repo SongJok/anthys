@@ -86,6 +86,25 @@ describe('RepoScanner', () => {
     expect(result.truncated).toBe(false);
   });
 
+  it('读取仓库根目录 .anthysignore 排除文件', async () => {
+    const root = await makeRoot();
+    await write(root, 'src/app.ts', 'export const app = true;\n');
+    await write(root, 'eval/golden/answers.json', '{}\n');
+    await write(root, 'tmp/scratch.ts', 'export const scratch = true;\n');
+    await write(
+      root,
+      '.anthysignore',
+      '# 评测答案不参与索引\n\neval/golden/**\ntmp/**\n',
+    );
+
+    const result = await scanRepository(root);
+    expect(result.files.map((file) => file.path).sort()).toEqual([
+      '.anthysignore',
+      'src/app.ts',
+    ]);
+    expect(result.skippedReasons.ignored).toBe(2);
+  });
+
   it('超过文件数量上限时标记 truncated', async () => {
     const root = await makeRoot();
     for (let index = 0; index < 5; index += 1) {
@@ -118,6 +137,9 @@ describe('scanner helpers', () => {
     expect(isSensitiveFile('.env.production')).toBe(true);
     expect(isSensitiveFile('.env.example')).toBe(false);
     expect(isSensitiveFile('.env.template')).toBe(false);
+    expect(isSensitiveFile('.env.production.example')).toBe(false);
+    expect(isSensitiveFile('.env.local.sample')).toBe(false);
+    expect(isSensitiveFile('.env.local')).toBe(true);
     expect(isSensitiveFile('server.pem')).toBe(true);
     expect(isSensitiveFile('id_rsa')).toBe(true);
     expect(isSensitiveFile('credentials.json')).toBe(true);

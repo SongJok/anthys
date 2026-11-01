@@ -2,6 +2,7 @@ import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import type { EmbeddingClient } from '../memory/EmbeddingClient.js';
 import type { ExecutionContext } from '../types/core.js';
 import type {
   HandbookSectionKey,
@@ -324,9 +325,41 @@ class MemoryProjectStore implements ProjectStore {
   }
 
   public async searchVectors(
-    _input: ProjectVectorQuery,
+    input: ProjectVectorQuery,
   ): Promise<{ candidates: ProjectSearchCandidate[] }> {
-    return { candidates: [] };
+    const documents = new Map(
+      this.documents
+        .filter((document) => document.snapshotId === input.snapshotId)
+        .map((document) => [document.path, document]),
+    );
+    const scored = this.chunkRows
+      .filter(
+        (chunk) =>
+          chunk.snapshotId === input.snapshotId &&
+          Boolean(chunk.embedding && chunk.embedding.length > 0),
+      )
+      .map((chunk) => ({
+        chunk,
+        score: cosineSimilarity(chunk.embedding ?? [], input.vector),
+      }))
+      .filter((item) => item.score > 0.5)
+      .sort((left, right) => right.score - left.score)
+      .slice(0, input.limit);
+    return {
+      candidates: scored.map(({ chunk, score }) => ({
+        id: chunk.id,
+        path: chunk.path,
+        startLine: chunk.startLine,
+        endLine: chunk.endLine,
+        symbol: chunk.symbol,
+        kind: chunk.kind,
+        language: documents.get(chunk.path)?.language ?? 'other',
+        content: chunk.content,
+        ftsScore: 0,
+        trigramScore: 0,
+        vectorScore: score,
+      })),
+    };
   }
 
   public async createSyncJob(
@@ -492,7 +525,7 @@ class MemoryProjectStore implements ProjectStore {
   }
 }
 
-async function createFixture(): Promise<{
+async function createFixture(embedder?: EmbeddingClient): Promise<{
   root: string;
   repoRoot: string;
   store: MemoryProjectStore;
@@ -529,8 +562,26 @@ async function createFixture(): Promise<{
       allowedRoots: [root],
       stateDir: path.join(root, '.state'),
     }),
+    ...(embedder ? { embedder } : {}),
   });
   return { root, repoRoot, store, service };
+}
+
+function cosineSimilarity(left: number[], right: number[]): number {
+  if (left.length === 0 || right.length === 0) return 0;
+  let dot = 0;
+  let leftNorm = 0;
+  let rightNorm = 0;
+  const size = Math.min(left.length, right.length);
+  for (let index = 0; index < size; index += 1) {
+    const a = left[index] ?? 0;
+    const b = right[index] ?? 0;
+    dot += a * b;
+    leftNorm += a * a;
+    rightNorm += b * b;
+  }
+  if (leftNorm === 0 || rightNorm === 0) return 0;
+  return dot / Math.sqrt(leftNorm * rightNorm);
 }
 
 const singleChatEmployee = {
@@ -620,6 +671,142 @@ describe('ProjectService 同步与读取', () => {
     expect(brief?.commit).toBe(result.snapshot.commitSha);
   });
 
+  it('同步时写入分块向量并支持纯向量检索', async () => {
+    const embedder: EmbeddingClient = {
+      dimensions: 2,
+      async embed(texts) {
+        return texts.map((text) => (/entry|handle/iu.test(text) ? [1, 0] : [0, 1]));
+      },
+    };
+    const { repoRoot, service } = await createFixture(embedder);
+    await writeFile(
+      path.join(repoRoot, 'src', 'entry.ts'),
+      [
+        'export function handleEntry(): string {',
+        "  return 'entry';",
+        '}',
+      ].join('\n'),
+    );
+    await service.createProject({
+      id: 'anthys',
+      name: '钉钉智能体',
+      source: { type: 'local', path: repoRoot },
+    });
+    const result = await service.sync('anthys');
+    expect(result.stats.embeddedChunks).toBe(result.stats.chunks);
+    expect(result.stats.embeddingError).toBeUndefined();
+
+    const search = await service.searchProject({
+      projectRef: 'anthys',
+      query: 'entryhandler',
+      member: singleChatEmployee,
+    });
+    expect(search.hits.length).toBeGreaterThan(0);
+    expect(search.hits[0]).toMatchObject({
+      path: 'src/entry.ts',
+      match: 'vector',
+    });
+
+    const status = await service.getProjectStatus('anthys');
+    expect(status.embeddingEnabled).toBe(true);
+    expect(status.index?.chunks).toBeGreaterThan(0);
+    expect(status.index?.embeddedChunks).toBe(status.index?.chunks);
+    expect(status.latestJob?.status).toBe('succeeded');
+    expect(status.handbook).toEqual({
+      publishedVersion: 0,
+      draftVersion: null,
+      stale: false,
+    });
+  });
+
+  it('向量生成失败时降级为关键字检索并记录错误', async () => {
+    const embedder: EmbeddingClient = {
+      dimensions: 2,
+      async embed() {
+        throw new Error('embedding service unavailable');
+      },
+    };
+    const { repoRoot, service } = await createFixture(embedder);
+    await service.createProject({
+      id: 'anthys',
+      name: '钉钉智能体',
+      source: { type: 'local', path: repoRoot },
+    });
+    const result = await service.sync('anthys');
+    expect(result.stats.embeddedChunks).toBe(0);
+    expect(result.stats.embeddingError).toContain('embedding service unavailable');
+
+    const search = await service.searchProject({
+      projectRef: 'anthys',
+      query: 'greet',
+      member: singleChatEmployee,
+    });
+    expect(search.hits.length).toBeGreaterThan(0);
+    expect(search.hits[0]?.path).toBe('src/app.ts');
+    expect(search.warning).toContain('向量检索失败');
+
+    const status = await service.getProjectStatus('anthys');
+    expect(status.index?.embeddedChunks).toBe(0);
+    expect(status.latestJob?.status).toBe('succeeded');
+  });
+
+  it('保存章节修改生成新草稿并保留已发布版本', async () => {
+    const { repoRoot, store, service } = await createFixture();
+    await service.createProject({
+      id: 'anthys',
+      name: '钉钉智能体',
+      source: { type: 'local', path: repoRoot },
+    });
+    await service.sync('anthys');
+
+    const draft = await service.generateHandbook('anthys');
+    expect(draft.version).toBe(1);
+    await service.publishHandbook('anthys', draft.version);
+
+    const saved = await service.saveHandbookDraft(
+      'anthys',
+      {
+        sections: [
+          { key: 'overview', title: '项目概述', markdown: '人工补充的概述' },
+        ],
+      },
+      'admin-1',
+    );
+    expect(saved.version).toBe(2);
+    expect(saved.status).toBe('draft');
+    expect(saved.generatedBy).toBe('manual');
+    expect(saved.createdBy).toBe('admin-1');
+    expect(
+      saved.content.sections.find((section) => section.key === 'overview'),
+    ).toMatchObject({
+      title: '项目概述',
+      markdown: '人工补充的概述',
+      origin: 'curated',
+    });
+    expect((await store.getHandbook('anthys', 1))?.status).toBe('published');
+    expect((await service.getHandbookDraft('anthys'))?.version).toBe(2);
+
+    const beforePublish = await service.getProjectStatus('anthys');
+    expect(beforePublish.handbook).toMatchObject({
+      publishedVersion: 1,
+      draftVersion: 2,
+    });
+
+    const published = await service.publishHandbook('anthys');
+    expect(published.version).toBe(2);
+    const afterPublish = await service.getProjectStatus('anthys');
+    expect(afterPublish.handbook).toMatchObject({
+      publishedVersion: 2,
+      draftVersion: null,
+    });
+
+    await expect(
+      service.saveHandbookDraft('anthys', {
+        sections: [{ key: 'overview', markdown: '   ' }],
+      }),
+    ).rejects.toThrow(/不能为空/u);
+  });
+
   it('敏感文件不会被索引，不存在文件读取会报错', async () => {
     const { repoRoot, service } = await createFixture();
     await service.createProject({
@@ -659,7 +846,7 @@ describe('ProjectService 同步与读取', () => {
     const { repoRoot, service } = await createFixture();
     await writeFile(
       path.join(repoRoot, '.env.example'),
-      'LLM_API_KEY=sk-secret-value\nDATABASE_URL=postgres://demo:secret@db\n',
+      'LLM_API_KEY=sk-secret-value\nDATABASE_URL=postgres://demo:CHANGE_ME@db\n',
     );
     await mkdir(path.join(repoRoot, 'deploy'), { recursive: true });
     await writeFile(

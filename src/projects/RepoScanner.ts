@@ -185,7 +185,10 @@ export function matchesGlob(relativePath: string, glob: string): boolean {
 
 export function isSensitiveFile(fileName: string): boolean {
   const name = fileName.toLowerCase();
-  const envTemplate = /^\.env\.(?:example|sample|template)$/u.test(name);
+  // 允许模板：.env.example、.env.production.example 等只含占位符，可参与索引
+  const envTemplate = /^\.env(?:\.[a-z0-9_-]+)*\.(?:example|sample|template)$/u.test(
+    name,
+  );
   return (
     (!envTemplate && /^\.env(?:$|\.)/u.test(name)) ||
     /\.(?:pem|key|p12|pfx|keystore|jks)$/u.test(name) ||
@@ -269,6 +272,20 @@ function addSkip(
   reasons[reason] = (reasons[reason] ?? 0) + 1;
 }
 
+async function readIgnoreFile(root: string): Promise<string[]> {
+  let raw: string;
+  try {
+    raw = await readFile(path.join(root, '.anthysignore'), 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+    throw error;
+  }
+  return raw
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && !line.startsWith('#'));
+}
+
 export async function scanRepository(
   root: string,
   options: RepoScanOptions = {},
@@ -276,7 +293,10 @@ export async function scanRepository(
   const maxFiles = options.maxFiles ?? DEFAULT_MAX_FILES;
   const maxTotalBytes = options.maxTotalBytes ?? DEFAULT_MAX_TOTAL_BYTES;
   const maxFileBytes = options.maxFileBytes ?? DEFAULT_MAX_FILE_BYTES;
-  const ignoreGlobs = options.ignoreGlobs ?? [];
+  const ignoreGlobs = [
+    ...(options.ignoreGlobs ?? []),
+    ...(await readIgnoreFile(root)),
+  ];
   const files: ScannedFile[] = [];
   const skippedReasons: Record<string, number> = {};
   let skipped = 0;

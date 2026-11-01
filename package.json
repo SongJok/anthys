@@ -22,6 +22,7 @@
     "db:extend": "tsx src/db/extend.ts",
     "db:generate": "drizzle-kit generate",
     "db:seed": "tsx src/db/seed.ts",
+    "eval:golden": "tsx src/eval/runGoldenSet.ts",
     "test": "vitest run"
   },
   "dependencies": {
