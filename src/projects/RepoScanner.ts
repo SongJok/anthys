@@ -185,8 +185,9 @@ export function matchesGlob(relativePath: string, glob: string): boolean {
 
 export function isSensitiveFile(fileName: string): boolean {
   const name = fileName.toLowerCase();
+  const envTemplate = /^\.env\.(?:example|sample|template)$/u.test(name);
   return (
-    /^\.env(?:$|\.)/u.test(name) ||
+    (!envTemplate && /^\.env(?:$|\.)/u.test(name)) ||
     /\.(?:pem|key|p12|pfx|keystore|jks)$/u.test(name) ||
     /^id_(?:rsa|ed25519)(?:$|\.)/u.test(name) ||
     /^credentials(?:$|\.)/u.test(name) ||

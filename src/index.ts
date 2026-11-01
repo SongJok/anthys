@@ -66,10 +66,16 @@ import { LocalSkillManager } from './skills/LocalSkillManager.js';
 import { SkillToolProvider } from './tools/skills/SkillToolProvider.js';
 import { PluginService } from './plugins/PluginService.js';
 import { DrizzlePluginStore } from './plugins/PluginStore.js';
-import { ProjectService } from './projects/ProjectService.js';
+import {
+  ProjectService,
+  type ProjectGithubHistoryPort,
+} from './projects/ProjectService.js';
 import { DrizzleProjectStore } from './projects/ProjectStore.js';
 import { RepoSource } from './projects/RepoSource.js';
+import { seedProjectsFromRoot } from './projects/ProjectSeed.js';
 import { ProjectToolProvider } from './tools/projects/ProjectToolProvider.js';
+import { GithubClient } from './github/GithubClient.js';
+import { GithubToolProvider } from './tools/github/GithubToolProvider.js';
 import type { SkillScanRoot } from './skills/SkillRegistry.js';
 import { GroupTranscriptBuffer } from './bystander/GroupTranscriptBuffer.js';
 import { CooldownLimiter } from './bystander/CooldownLimiter.js';
@@ -531,6 +537,45 @@ async function main(): Promise<void> {
       .map((item) => item.trim())
       .filter(Boolean)
       .map((item) => resolve(process.cwd(), item));
+    const githubEnabled = envEnabled(process.env.GITHUB_ENABLED, false);
+    let githubClient: GithubClient | undefined;
+    if (githubEnabled) {
+      try {
+        githubClient = new GithubClient({
+          token: process.env.GITHUB_TOKEN?.trim() ?? '',
+          ...(process.env.GITHUB_API_BASE?.trim()
+            ? { apiBase: process.env.GITHUB_API_BASE.trim() }
+            : {}),
+          allowedHosts: (process.env.GITHUB_ALLOWED_HOSTS ?? '')
+            .split(',')
+            .map((item) => item.trim())
+            .filter(Boolean),
+          cacheTtlMs: envSeconds(process.env.GITHUB_CACHE_TTL_SECONDS, 300) * 1000,
+          logger: harnessLogger,
+        });
+      } catch (error) {
+        logger.warn(
+          {
+            error: error instanceof Error ? error.message : String(error),
+          },
+          'github client init failed; github tools disabled',
+        );
+      }
+    }
+    const projectGithubPort: ProjectGithubHistoryPort | undefined = githubClient
+      ? {
+          search: async (repoRef, query, options) => {
+            const result = await githubClient.search(repoRef, query, {
+              kind: options.kind,
+              ...(options.limit ? { limit: options.limit } : {}),
+            });
+            if ('kind' in result) {
+              return { items: result.items, total: result.total };
+            }
+            return { items: [], total: 0 };
+          },
+        }
+      : undefined;
     projectService = new ProjectService({
       store: new DrizzleProjectStore(dbHandle.db, harnessLogger),
       repoSource: new RepoSource({
@@ -541,23 +586,49 @@ async function main(): Promise<void> {
         stateDir: resolve(stateRoot, 'projects'),
         logger: harnessLogger,
       }),
+      ...(projectGithubPort ? { github: projectGithubPort } : {}),
       defaultProjectId: () =>
         configCenter.getExtensionsConfig().defaultProjectId,
       logger: harnessLogger,
       briefMaxChars: extensionsConfig.projectBriefMaxChars,
     });
     const projects = projectService;
+    const projectSeedRoot = resolve(
+      process.cwd(),
+      process.env.PROJECT_SEED_DIR?.trim() || 'projects',
+    );
+    if (extensionsConfig.projectsEnabled) {
+      try {
+        await seedProjectsFromRoot({
+          service: projects,
+          root: projectSeedRoot,
+          logger: harnessLogger,
+        });
+      } catch (error) {
+        logger.warn(
+          {
+            error: error instanceof Error ? error.message : String(error),
+            root: projectSeedRoot,
+          },
+          'project seed import failed',
+        );
+      }
+    }
     logger.info(
       {
         skillsEnabled: extensionsConfig.skillsEnabled,
         pluginsEnabled: extensionsConfig.pluginsEnabled,
         pluginsRoot: resolve(stateRoot, 'plugins'),
         projectsEnabled: extensionsConfig.projectsEnabled,
+        projectSeedRoot,
         projectAllowedRoots:
           projectAllowedRoots.length > 0
             ? projectAllowedRoots
             : [process.cwd()],
         defaultProjectId: extensionsConfig.defaultProjectId,
+        githubEnabled,
+        githubReady: Boolean(githubClient),
+        githubTokenConfigured: githubClient?.hasToken ?? false,
       },
       'extension services configured',
     );
@@ -612,6 +683,22 @@ async function main(): Promise<void> {
         }),
       handbook: (id) =>
         projects.getHandbook({ projectRef: id, member: adminProjectMember }),
+      manualEntries: (id) => projects.listManualEntries(id),
+      handbookVersions: (id, limit) => projects.listHandbookVersions(id, limit),
+      generateHandbook: (id) => projects.generateHandbook(id),
+      publishHandbook: (id, version) =>
+        projects.publishHandbook(id, version),
+      createManualEntry: (id, input) =>
+        projects.createManualEntry(id, input, adminProjectMember.senderStaffId),
+      updateManualEntry: (id, entryId, patch) =>
+        projects.updateManualEntry(
+          id,
+          entryId,
+          patch,
+          adminProjectMember.senderStaffId,
+        ),
+      deleteManualEntry: (id, entryId) =>
+        projects.deleteManualEntry(id, entryId),
     };
 
     const projectSyncIntervalSeconds = Math.max(
@@ -886,6 +973,24 @@ async function main(): Promise<void> {
         isAdmin: (staffId) => configCenter.isAdmin(staffId),
         enabled: () => configCenter.getExtensionsConfig().projectsEnabled,
       }),
+      ...(githubClient
+        ? {
+            githubProvider: new GithubToolProvider({
+              client: githubClient,
+              defaultRepo: async () => {
+                const defaultId =
+                  configCenter.getExtensionsConfig().defaultProjectId;
+                if (!defaultId) return '';
+                const record = await projects.getProject(defaultId);
+                return record?.source.type === 'github'
+                  ? record.source.repo
+                  : '';
+              },
+              enabled: () =>
+                configCenter.getExtensionsConfig().projectsEnabled,
+            }),
+          }
+        : {}),
       personalAssistantProvider: new PersonalAssistantToolProvider({
         service: personalAssistant,
       }),

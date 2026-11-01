@@ -667,10 +667,55 @@ export interface HandbookSection {
   updatedAt?: number;
 }
 
+export type HandbookStatus = 'draft' | 'published' | 'archived';
+export type HandbookGeneratedBy = 'manual' | 'facts' | 'llm';
+
+export interface ProjectHandbookRecord {
+  id: string;
+  projectId: string;
+  version: number;
+  status: HandbookStatus;
+  commitSha: string;
+  content: {
+    sections: HandbookSection[];
+    generatedAt: number;
+    commit: string;
+  };
+  sources: Array<Record<string, unknown>>;
+  generatedBy: HandbookGeneratedBy;
+  createdBy: string;
+  createdAt: number;
+  publishedAt?: number;
+}
+
+export interface ProjectManualEntry {
+  id: string;
+  projectId: string;
+  section: HandbookSectionKey;
+  title: string;
+  markdown: string;
+  visibility: ProjectVisibility;
+  sensitivity: ProjectSensitivity;
+  injectToBrief: boolean;
+  priority: number;
+  updatedBy: string;
+  updatedAt: number;
+}
+
+export interface ProjectManualEntryInput {
+  section: HandbookSectionKey;
+  title: string;
+  markdown: string;
+  visibility?: ProjectVisibility;
+  sensitivity?: ProjectSensitivity;
+  injectToBrief?: boolean;
+  priority?: number;
+}
+
 export interface ProjectHandbookResult {
   projectId: string;
   version: number;
-  status: 'draft' | 'published' | 'archived';
+  status: HandbookStatus;
   commit: string;
   stale: boolean;
   content: {
@@ -678,17 +723,5 @@ export interface ProjectHandbookResult {
     generatedAt: number;
     commit: string;
   };
-  manualEntries: Array<{
-    id: string;
-    projectId: string;
-    section: HandbookSectionKey;
-    title: string;
-    markdown: string;
-    visibility: ProjectVisibility;
-    sensitivity: ProjectSensitivity;
-    injectToBrief: boolean;
-    priority: number;
-    updatedBy: string;
-    updatedAt: number;
-  }>;
+  manualEntries: ProjectManualEntry[];
 }

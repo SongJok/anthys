@@ -25,7 +25,10 @@ import type {
   PluginValidationIssue,
   PluginVersionRecord,
   ProjectAdminEntry,
+  ProjectHandbookRecord,
   ProjectHandbookResult,
+  ProjectManualEntry,
+  ProjectManualEntryInput,
   ProjectRecord,
   ProjectSearchResult,
   ProjectSnapshot,
@@ -474,8 +477,44 @@ export const api = {
       `/projects/${encodeURIComponent(id)}/handbook`,
     ),
   projectManualEntries: (id: string) =>
-    request<{ entries: ProjectHandbookResult['manualEntries'] }>(
+    request<{ entries: ProjectManualEntry[] }>(
       `/projects/${encodeURIComponent(id)}/manual-entries`,
+    ),
+  projectHandbookVersions: (id: string, limit = 10) =>
+    request<{ versions: ProjectHandbookRecord[] }>(
+      `/projects/${encodeURIComponent(id)}/handbooks?limit=${limit}`,
+    ),
+  generateProjectHandbook: (id: string) =>
+    request<{ handbook: ProjectHandbookRecord }>(
+      `/projects/${encodeURIComponent(id)}/handbook/generate`,
+      { method: 'POST' },
+    ),
+  publishProjectHandbook: (id: string, version?: number) =>
+    request<{ handbook: ProjectHandbookRecord }>(
+      `/projects/${encodeURIComponent(id)}/handbook/publish`,
+      {
+        method: 'POST',
+        body: JSON.stringify(version ? { version } : {}),
+      },
+    ),
+  createProjectManualEntry: (id: string, input: ProjectManualEntryInput) =>
+    request<{ entry: ProjectManualEntry }>(
+      `/projects/${encodeURIComponent(id)}/manual-entries`,
+      { method: 'POST', body: JSON.stringify(input) },
+    ),
+  updateProjectManualEntry: (
+    id: string,
+    entryId: string,
+    input: Partial<ProjectManualEntryInput>,
+  ) =>
+    request<{ entry: ProjectManualEntry }>(
+      `/projects/${encodeURIComponent(id)}/manual-entries/${encodeURIComponent(entryId)}`,
+      { method: 'PUT', body: JSON.stringify(input) },
+    ),
+  deleteProjectManualEntry: (id: string, entryId: string) =>
+    request<{ ok: boolean }>(
+      `/projects/${encodeURIComponent(id)}/manual-entries/${encodeURIComponent(entryId)}`,
+      { method: 'DELETE' },
     ),
 };
 

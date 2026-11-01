@@ -11,10 +11,13 @@ import type {
   ProjectAdminEntry,
   ProjectAdminPort,
   ProjectCreateInput,
+  ProjectManualEntryInput,
+  ProjectManualEntryPatch,
   ProjectRecord,
   ProjectSource,
   ProjectUpdateInput,
 } from '../../types/skills-plugins-projects.js';
+import type { ProjectHandbookRecord } from '../../types/skills-plugins-projects.js';
 import {
   isProjectSensitivity,
   isProjectVisibility,
@@ -60,6 +63,67 @@ function auditProject(project: ProjectRecord): Record<string, unknown> {
     enabled: project.enabled,
     isDefault: project.isDefault,
     autoSyncMinutes: project.autoSyncMinutes,
+  };
+}
+
+function readManualEntry(
+  body: Record<string, unknown>,
+  partial: boolean,
+): ProjectManualEntryInput | ProjectManualEntryPatch {
+  const input: ProjectManualEntryInput = {
+    section: (readString(body, 'section', { required: !partial }) ??
+      'overview') as ProjectManualEntryInput['section'],
+    title: readString(body, 'title', { required: !partial }) ?? '',
+    markdown: readString(body, 'markdown', { required: !partial }) ?? '',
+  };
+  if (partial) {
+    const patch: ProjectManualEntryPatch = {};
+    const section = readString(body, 'section');
+    if (section !== undefined) {
+      patch.section = section as ProjectManualEntryPatch['section'];
+    }
+    const title = readString(body, 'title');
+    if (title !== undefined) patch.title = title;
+    const markdown = readString(body, 'markdown');
+    if (markdown !== undefined) patch.markdown = markdown;
+    const visibility = readString(body, 'visibility');
+    if (visibility !== undefined) {
+      patch.visibility = visibility as ProjectManualEntryPatch['visibility'];
+    }
+    const sensitivity = readString(body, 'sensitivity');
+    if (sensitivity !== undefined) {
+      patch.sensitivity =
+        sensitivity as ProjectManualEntryPatch['sensitivity'];
+    }
+    const injectToBrief = readBoolean(body, 'injectToBrief');
+    if (injectToBrief !== undefined) patch.injectToBrief = injectToBrief;
+    const priority = readNumber(body, 'priority');
+    if (priority !== undefined) patch.priority = priority;
+    return patch;
+  }
+  const visibility = readString(body, 'visibility');
+  if (visibility !== undefined) {
+    input.visibility = visibility as ProjectManualEntryInput['visibility'];
+  }
+  const sensitivity = readString(body, 'sensitivity');
+  if (sensitivity !== undefined) {
+    input.sensitivity = sensitivity as ProjectManualEntryInput['sensitivity'];
+  }
+  const injectToBrief = readBoolean(body, 'injectToBrief');
+  if (injectToBrief !== undefined) input.injectToBrief = injectToBrief;
+  const priority = readNumber(body, 'priority');
+  if (priority !== undefined) input.priority = priority;
+  return input;
+}
+
+function auditHandbook(record: ProjectHandbookRecord): Record<string, unknown> {
+  return {
+    projectId: record.projectId,
+    version: record.version,
+    status: record.status,
+    commit: record.commitSha,
+    generatedBy: record.generatedBy,
+    sections: record.content.sections.map((section) => section.key),
   };
 }
 
@@ -318,6 +382,161 @@ export function createProjectRoutes(deps: ProjectRouteDeps): Hono {
     } catch (error) {
       mapProjectError(error);
     }
+  });
+
+  app.post('/projects/:id/manual-entries', async (c) => {
+    if (!deps.projects.createManualEntry) {
+      throw new HTTPException(503, { message: '人工条目接口未启用' });
+    }
+    const id = c.req.param('id');
+    const body = await readJsonBody(c);
+    let entry;
+    try {
+      entry = await deps.projects.createManualEntry(
+        id,
+        readManualEntry(body, false) as ProjectManualEntryInput,
+      );
+    } catch (error) {
+      mapProjectError(error);
+    }
+    if (deps.configCenter) {
+      await recordWebAudit(
+        deps.configCenter,
+        webActor(c),
+        'UPDATE_PROJECT_MANUAL',
+        { id },
+        {
+          action: 'create-manual',
+          id,
+          entryId: entry.id,
+          section: entry.section,
+          title: entry.title,
+        },
+      );
+    }
+    return c.json({ ok: true, entry });
+  });
+
+  app.put('/projects/:id/manual-entries/:entryId', async (c) => {
+    if (!deps.projects.updateManualEntry) {
+      throw new HTTPException(503, { message: '人工条目接口未启用' });
+    }
+    const id = c.req.param('id');
+    const entryId = c.req.param('entryId');
+    const body = await readJsonBody(c);
+    let entry;
+    try {
+      entry = await deps.projects.updateManualEntry(
+        id,
+        entryId,
+        readManualEntry(body, true) as ProjectManualEntryPatch,
+      );
+    } catch (error) {
+      mapProjectError(error);
+    }
+    if (deps.configCenter) {
+      await recordWebAudit(
+        deps.configCenter,
+        webActor(c),
+        'UPDATE_PROJECT_MANUAL',
+        { id, entryId },
+        {
+          action: 'update-manual',
+          id,
+          entryId,
+          section: entry.section,
+          title: entry.title,
+        },
+      );
+    }
+    return c.json({ ok: true, entry });
+  });
+
+  app.delete('/projects/:id/manual-entries/:entryId', async (c) => {
+    if (!deps.projects.deleteManualEntry) {
+      throw new HTTPException(503, { message: '人工条目接口未启用' });
+    }
+    const id = c.req.param('id');
+    const entryId = c.req.param('entryId');
+    try {
+      await deps.projects.deleteManualEntry(id, entryId);
+    } catch (error) {
+      mapProjectError(error);
+    }
+    if (deps.configCenter) {
+      await recordWebAudit(
+        deps.configCenter,
+        webActor(c),
+        'UPDATE_PROJECT_MANUAL',
+        { id, entryId },
+        { action: 'delete-manual', id, entryId },
+      );
+    }
+    return c.json({ ok: true });
+  });
+
+  app.get('/projects/:id/handbooks', async (c) => {
+    if (!deps.projects.handbookVersions) {
+      return c.json({ ok: true, versions: [] });
+    }
+    const limitRaw = Number(c.req.query('limit') ?? 10);
+    try {
+      const versions = await deps.projects.handbookVersions(
+        c.req.param('id'),
+        Number.isFinite(limitRaw) ? limitRaw : 10,
+      );
+      return c.json({ ok: true, versions });
+    } catch (error) {
+      mapProjectError(error);
+    }
+  });
+
+  app.post('/projects/:id/handbook/generate', async (c) => {
+    if (!deps.projects.generateHandbook) {
+      throw new HTTPException(503, { message: '项目手册接口未启用' });
+    }
+    const id = c.req.param('id');
+    let handbook;
+    try {
+      handbook = await deps.projects.generateHandbook(id);
+    } catch (error) {
+      mapProjectError(error);
+    }
+    if (deps.configCenter) {
+      await recordWebAudit(
+        deps.configCenter,
+        webActor(c),
+        'GENERATE_PROJECT_HANDBOOK',
+        { id },
+        { action: 'generate-handbook', handbook: auditHandbook(handbook) },
+      );
+    }
+    return c.json({ ok: true, handbook });
+  });
+
+  app.post('/projects/:id/handbook/publish', async (c) => {
+    if (!deps.projects.publishHandbook) {
+      throw new HTTPException(503, { message: '项目手册接口未启用' });
+    }
+    const id = c.req.param('id');
+    const body = await readJsonBody(c);
+    const version = readNumber(body, 'version');
+    let handbook;
+    try {
+      handbook = await deps.projects.publishHandbook(id, version);
+    } catch (error) {
+      mapProjectError(error);
+    }
+    if (deps.configCenter) {
+      await recordWebAudit(
+        deps.configCenter,
+        webActor(c),
+        'PUBLISH_PROJECT_HANDBOOK',
+        { id },
+        { action: 'publish-handbook', handbook: auditHandbook(handbook) },
+      );
+    }
+    return c.json({ ok: true, handbook });
   });
 
   app.get('/projects/:id', async (c) => {

@@ -610,6 +610,9 @@ export interface ProjectHistoryResult {
   commit: string;
   kind: 'commits' | 'blame' | 'issues' | 'prs';
   commits: ProjectCommitEntry[];
+  /** kind 为 issues/prs 时的 GitHub 条目 */
+  issues?: GithubIssueInfo[];
+  total?: number;
   note?: string;
 }
 
@@ -742,6 +745,19 @@ export interface ProjectAdminPort {
   search(id: string, query: string, limit?: number): Promise<ProjectSearchResult>;
   handbook?(id: string): Promise<ProjectHandbookResult>;
   manualEntries?(id: string): Promise<ProjectManualEntry[]>;
+  handbookVersions?(id: string, limit?: number): Promise<ProjectHandbookRecord[]>;
+  generateHandbook?(id: string): Promise<ProjectHandbookRecord>;
+  publishHandbook?(id: string, version?: number): Promise<ProjectHandbookRecord>;
+  createManualEntry?(
+    id: string,
+    input: ProjectManualEntryInput,
+  ): Promise<ProjectManualEntry>;
+  updateManualEntry?(
+    id: string,
+    entryId: string,
+    patch: ProjectManualEntryPatch,
+  ): Promise<ProjectManualEntry>;
+  deleteManualEntry?(id: string, entryId: string): Promise<void>;
 }
 
 /* ------------------------------------------------------------------ */
@@ -781,6 +797,62 @@ export interface GithubFileResult {
   encoding: string;
   content: string;
   truncated: boolean;
+  startLine: number;
+  endLine: number;
+  totalLines: number;
+  nextStartLine?: number;
+}
+
+export interface GithubTreeResult {
+  entries: GithubTreeEntry[];
+  truncated: boolean;
+  ref: string;
+}
+
+export interface GithubCodeSearchItem {
+  path: string;
+  name: string;
+  htmlUrl: string;
+  textMatches: string[];
+}
+
+export interface GithubCodeSearchResult {
+  items: GithubCodeSearchItem[];
+  total: number;
+  truncated: boolean;
+}
+
+export interface GithubIssueSearchResult {
+  kind: 'issues' | 'prs';
+  items: GithubIssueInfo[];
+  total: number;
+}
+
+export interface GithubPullRequestFile {
+  filename: string;
+  status: string;
+  additions: number;
+  deletions: number;
+  changes: number;
+  patch?: string;
+}
+
+export interface GithubPullRequestResult {
+  info: GithubPullRequestInfo;
+  files: GithubPullRequestFile[];
+  additions: number;
+  deletions: number;
+  changedFiles: number;
+}
+
+export interface GithubHistoryItem {
+  number: number;
+  title: string;
+  state: string;
+  author: string;
+  url: string;
+  updatedAt: string;
+  kind: 'issue' | 'pr';
 }
 
 export interface GithubPullRequestInfo {

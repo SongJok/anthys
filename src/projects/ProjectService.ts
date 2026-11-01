@@ -1,11 +1,16 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type {
+  GithubIssueInfo,
   ProjectBrief,
   ProjectBriefInput,
   ProjectCreateInput,
   ProjectDocument,
+  ProjectHandbookRecord,
   ProjectHandbookResult,
   ProjectHistoryResult,
+  ProjectManualEntry,
+  ProjectManualEntryInput,
+  ProjectManualEntryPatch,
   ProjectMapResult,
   ProjectMemberContextInput,
   ProjectReadResult,
@@ -32,6 +37,7 @@ import {
   extractSymbols,
   renderRepoMap,
 } from './CodeIndexer.js';
+import { buildHandbook } from './HandbookBuilder.js';
 import {
   canReadProjectContent,
   hasCodeHint,
@@ -47,6 +53,7 @@ import {
   type ProjectSearchServiceLogger,
 } from './ProjectSearchService.js';
 import type {
+  ProjectDocumentMeta,
   ProjectSearchCandidateInput,
   ProjectStore,
 } from './ProjectStore.js';
@@ -62,10 +69,19 @@ export interface ProjectServiceLogger extends ProjectSearchServiceLogger {
   info?(obj: Record<string, unknown>, message: string): void;
 }
 
+export interface ProjectGithubHistoryPort {
+  search(
+    repoRef: string,
+    query: string,
+    options: { kind: 'issues' | 'prs'; limit?: number },
+  ): Promise<{ items: GithubIssueInfo[]; total: number }>;
+}
+
 export interface ProjectServiceOptions {
   store: ProjectStore;
   repoSource: RepoSource;
   searchService?: ProjectSearchService;
+  github?: ProjectGithubHistoryPort;
   defaultProjectId?: () => string | Promise<string>;
   logger?: ProjectServiceLogger;
   now?: () => number;
@@ -140,6 +156,8 @@ export interface ProjectHistoryInput {
   projectRef?: string;
   path?: string;
   kind?: 'commits' | 'blame' | 'issues' | 'prs';
+  /** issues/prs 关键词；留空看最近更新 */
+  query?: string;
   limit?: number;
   member: ProjectMemberContextInput;
 }
@@ -269,6 +287,7 @@ export class ProjectService {
   private readonly store: ProjectStore;
   private readonly repoSource: RepoSource;
   private readonly searchService: ProjectSearchService;
+  private readonly github?: ProjectGithubHistoryPort;
   private readonly defaultProjectId: () => string | Promise<string>;
   private readonly logger?: ProjectServiceLogger;
   private readonly now: () => number;
@@ -283,6 +302,7 @@ export class ProjectService {
     this.searchService =
       options.searchService ??
       new ProjectSearchService({ store: options.store, logger: options.logger });
+    this.github = options.github;
     this.defaultProjectId = options.defaultProjectId ?? (() => '');
     this.logger = options.logger;
     this.now = options.now ?? Date.now;
@@ -630,16 +650,16 @@ export class ProjectService {
     const kind = input.kind ?? 'commits';
     const snapshot = await this.findActiveSnapshot(project);
     const commit = snapshot?.commitSha ?? project.lastCommit;
-    if (kind !== 'commits') {
+    if (kind === 'issues' || kind === 'prs') {
+      return this.searchGithubIssues(project, commit, kind, input);
+    }
+    if (kind === 'blame') {
       return {
         projectId: project.id,
         commit,
         kind,
         commits: [],
-        note:
-          kind === 'blame'
-            ? 'blame 需要完整 Git 历史，当前阶段未启用'
-            : 'issues/prs 需要 GitHub 客户端，将在 GitHub 集成阶段提供',
+        note: 'blame 需要完整 Git 历史，当前阶段未启用',
       };
     }
     if (project.source.type === 'manual') {
@@ -665,6 +685,59 @@ export class ProjectService {
         kind,
         commits: [],
         note: `读取 Git 历史失败：${errorMessage(error)}`,
+      };
+    }
+  }
+
+  private async searchGithubIssues(
+    project: ProjectRecord,
+    commit: string,
+    kind: 'issues' | 'prs',
+    input: ProjectHistoryInput,
+  ): Promise<ProjectHistoryResult> {
+    if (project.source.type !== 'github') {
+      return {
+        projectId: project.id,
+        commit,
+        kind,
+        commits: [],
+        note: '只有 GitHub 来源的项目支持 issues/prs 查询',
+      };
+    }
+    if (!this.github) {
+      return {
+        projectId: project.id,
+        commit,
+        kind,
+        commits: [],
+        note: 'GitHub 客户端未启用（需要 GITHUB_ENABLED=true）',
+      };
+    }
+    try {
+      const result = await this.github.search(
+        project.source.repo,
+        input.query ?? '',
+        {
+          kind,
+          limit: Math.min(Math.max(input.limit ?? 10, 1), 30),
+        },
+      );
+      return {
+        projectId: project.id,
+        commit,
+        kind,
+        commits: [],
+        issues: result.items,
+        total: result.total,
+        ...(result.items.length === 0 ? { note: '没有匹配的条目' } : {}),
+      };
+    } catch (error) {
+      return {
+        projectId: project.id,
+        commit,
+        kind,
+        commits: [],
+        note: `查询 GitHub 失败：${errorMessage(error)}`,
       };
     }
   }
@@ -701,6 +774,350 @@ export class ProjectService {
       content,
       manualEntries,
     };
+  }
+
+  public async listHandbookVersions(
+    projectId: string,
+    limit = 10,
+  ): Promise<ProjectHandbookRecord[]> {
+    await this.requireProject(projectId);
+    return this.store.listHandbooks(projectId, limit);
+  }
+
+  public async generateHandbook(
+    projectId: string,
+    createdBy = 'admin-console',
+  ): Promise<ProjectHandbookRecord> {
+    const project = await this.requireProject(projectId);
+    const snapshot = await this.findActiveSnapshot(project);
+    const [documents, symbols, manualEntries] = snapshot
+      ? await Promise.all([
+          this.store.listDocumentMetas(snapshot.id),
+          this.store.getSymbols(snapshot.id),
+          this.store.listManualEntries(project.id),
+        ])
+      : [[], [], await this.store.listManualEntries(project.id)];
+    const repoMapText = snapshot
+      ? renderRepoMap(
+          buildRepoMap({
+            projectId: project.id,
+            commit: snapshot.commitSha,
+            files: documents,
+            symbols,
+            maxTokens: 1_500,
+          }),
+        )
+      : '';
+    const fileContents = snapshot
+      ? await this.loadHandbookFiles(snapshot.id, documents)
+      : new Map<string, string>();
+    const content = buildHandbook({
+      project,
+      snapshot,
+      documents,
+      symbols,
+      repoMapText,
+      fileContents,
+      manualEntryCount: manualEntries.length,
+      now: this.now(),
+    });
+    const version = await this.store.nextHandbookVersion(project.id);
+    const sources = content.sections.flatMap((section) => section.sources);
+    const record = await this.store.createHandbook({
+      projectId: project.id,
+      version,
+      status: 'draft',
+      commitSha: content.commit,
+      content,
+      sources,
+      generatedBy: 'facts',
+      createdBy,
+    });
+    this.logger?.info?.(
+      {
+        projectId: project.id,
+        version,
+        sections: content.sections.length,
+        commit: content.commit,
+      },
+      'project handbook draft generated',
+    );
+    return record;
+  }
+
+  public async publishHandbook(
+    projectId: string,
+    version?: number,
+    _publishedBy = 'admin-console',
+  ): Promise<ProjectHandbookRecord> {
+    const project = await this.requireProject(projectId);
+    const target =
+      version !== undefined
+        ? await this.store.getHandbook(project.id, version)
+        : await this.store.getLatestHandbook(project.id, 'draft');
+    if (!target) {
+      throw new ProjectValidationError(
+        version !== undefined
+          ? `未找到手册版本 v${version}`
+          : '没有可发布的草稿，请先生成手册',
+      );
+    }
+    const published = await this.store.publishHandbook(project.id, target.version);
+    if (!published) {
+      throw new ProjectValidationError(`发布手册 v${target.version} 失败`);
+    }
+    await this.store.updateProject(project.id, {
+      handbookVersion: published.version,
+    });
+    this.logger?.info?.(
+      { projectId: project.id, version: published.version },
+      'project handbook published',
+    );
+    return published;
+  }
+
+  public async listManualEntries(projectId: string): Promise<ProjectManualEntry[]> {
+    await this.requireProject(projectId);
+    return this.store.listManualEntries(projectId);
+  }
+
+  /**
+   * 导入种子人工条目：同 section+title 仅在仍由 seedTag 维护时覆盖，
+   * 控制台改过的条目（updatedBy 变为管理员）保持不动。
+   */
+  public async importManualEntries(
+    projectId: string,
+    entries: ProjectManualEntryInput[],
+    seedTag: string,
+  ): Promise<{ created: number; updated: number; skipped: number }> {
+    await this.requireProject(projectId);
+    const existing = await this.store.listManualEntries(projectId);
+    const byKey = new Map(
+      existing.map((entry) => [`${entry.section}\u0000${entry.title}`, entry]),
+    );
+    const result = { created: 0, updated: 0, skipped: 0 };
+    for (const input of entries) {
+      const normalized = this.normalizeManualEntry(
+        input,
+      ) as ProjectManualEntryInput;
+      const key = `${normalized.section}\u0000${normalized.title}`;
+      const current = byKey.get(key);
+      if (!current) {
+        const created = await this.store.createManualEntry(
+          projectId,
+          normalized,
+          seedTag,
+        );
+        byKey.set(key, created);
+        result.created += 1;
+        continue;
+      }
+      if (current.updatedBy !== seedTag) {
+        result.skipped += 1;
+        continue;
+      }
+      await this.store.updateManualEntry(
+        projectId,
+        current.id,
+        normalized,
+        seedTag,
+      );
+      result.updated += 1;
+    }
+    return result;
+  }
+
+  public async createManualEntry(
+    projectId: string,
+    input: ProjectManualEntryInput,
+    updatedBy = 'admin-console',
+  ): Promise<ProjectManualEntry> {
+    await this.requireProject(projectId);
+    const normalized = this.normalizeManualEntry(
+      input,
+    ) as ProjectManualEntryInput;
+    const entry = await this.store.createManualEntry(
+      projectId,
+      normalized,
+      updatedBy,
+    );
+    this.logger?.info?.(
+      { projectId, entryId: entry.id, section: entry.section },
+      'project manual entry created',
+    );
+    return entry;
+  }
+
+  public async updateManualEntry(
+    projectId: string,
+    entryId: string,
+    patch: ProjectManualEntryPatch,
+    updatedBy = 'admin-console',
+  ): Promise<ProjectManualEntry> {
+    await this.requireProject(projectId);
+    const existing = await this.store.getManualEntry(projectId, entryId);
+    if (!existing) {
+      throw new ProjectNotFoundError(`未找到人工条目：${entryId}`);
+    }
+    const normalized = this.normalizeManualEntry(patch, true);
+    if (Object.keys(normalized).length === 0) {
+      throw new ProjectValidationError('没有需要更新的字段');
+    }
+    const entry = await this.store.updateManualEntry(
+      projectId,
+      entryId,
+      normalized,
+      updatedBy,
+    );
+    if (!entry) {
+      throw new ProjectNotFoundError(`未找到人工条目：${entryId}`);
+    }
+    this.logger?.info?.(
+      { projectId, entryId, section: entry.section },
+      'project manual entry updated',
+    );
+    return entry;
+  }
+
+  public async deleteManualEntry(
+    projectId: string,
+    entryId: string,
+  ): Promise<void> {
+    await this.requireProject(projectId);
+    const removed = await this.store.deleteManualEntry(projectId, entryId);
+    if (!removed) {
+      throw new ProjectNotFoundError(`未找到人工条目：${entryId}`);
+    }
+    this.logger?.info?.({ projectId, entryId }, 'project manual entry deleted');
+  }
+
+  private async requireProject(projectId: string): Promise<ProjectRecord> {
+    const project = await this.store.getProject(projectId);
+    if (!project) throw new ProjectNotFoundError(`未找到项目：${projectId}`);
+    return project;
+  }
+
+  private normalizeManualEntry(
+    input: ProjectManualEntryInput | ProjectManualEntryPatch,
+    partial = false,
+  ): ProjectManualEntryInput | ProjectManualEntryPatch {
+    const result: ProjectManualEntryInput = {
+      section: 'overview',
+      title: '',
+      markdown: '',
+    };
+    if (input.section !== undefined) {
+      if (!isHandbookSectionKey(input.section)) {
+        throw new ProjectValidationError(`未知的手册章节：${input.section}`);
+      }
+      result.section = input.section;
+    } else if (!partial) {
+      throw new ProjectValidationError('缺少 section');
+    }
+    if (input.title !== undefined) {
+      const title = input.title.trim();
+      if (title.length === 0 || title.length > 200) {
+        throw new ProjectValidationError('title 长度必须在 1-200 字符之间');
+      }
+      result.title = title;
+    } else if (!partial) {
+      throw new ProjectValidationError('缺少 title');
+    }
+    if (input.markdown !== undefined) {
+      const markdown = input.markdown.trim();
+      if (markdown.length === 0) {
+        throw new ProjectValidationError('markdown 不能为空');
+      }
+      if (markdown.length > 20_000) {
+        throw new ProjectValidationError('markdown 不能超过 20000 字符');
+      }
+      result.markdown = markdown;
+    } else if (!partial) {
+      throw new ProjectValidationError('缺少 markdown');
+    }
+    if (input.visibility !== undefined) {
+      if (!isProjectVisibility(input.visibility)) {
+        throw new ProjectValidationError(
+          'visibility 必须是 team / private / admin',
+        );
+      }
+      result.visibility = input.visibility;
+    }
+    if (input.sensitivity !== undefined) {
+      if (!isProjectSensitivity(input.sensitivity)) {
+        throw new ProjectValidationError('sensitivity 必须是 team / private');
+      }
+      result.sensitivity = input.sensitivity;
+    }
+    if (input.injectToBrief !== undefined) {
+      result.injectToBrief = input.injectToBrief;
+    }
+    if (input.priority !== undefined) {
+      if (
+        !Number.isFinite(input.priority) ||
+        input.priority < -100 ||
+        input.priority > 100
+      ) {
+        throw new ProjectValidationError('priority 必须在 -100 到 100 之间');
+      }
+      result.priority = Math.trunc(input.priority);
+    }
+    if (partial) {
+      const patch: ProjectManualEntryPatch = {};
+      if (input.section !== undefined) patch.section = result.section;
+      if (input.title !== undefined) patch.title = result.title;
+      if (input.markdown !== undefined) patch.markdown = result.markdown;
+      if (input.visibility !== undefined) patch.visibility = result.visibility;
+      if (input.sensitivity !== undefined) patch.sensitivity = result.sensitivity;
+      if (input.injectToBrief !== undefined) {
+        patch.injectToBrief = result.injectToBrief;
+      }
+      if (input.priority !== undefined) patch.priority = result.priority;
+      return patch;
+    }
+    return result;
+  }
+
+  private async loadHandbookFiles(
+    snapshotId: string,
+    documents: ProjectDocumentMeta[],
+  ): Promise<Map<string, string>> {
+    const priority = (path: string): number => {
+      if (/^README(\.[^/]*)?$/iu.test(path)) return 0;
+      if (path === 'package.json') return 1;
+      if (/(^|\/)(AGENTS|CLAUDE|CONTRIBUTING)\.md$/iu.test(path)) return 2;
+      if (/(^|\/)\.env(\.example|\.sample|\.template)?$/iu.test(path)) return 3;
+      if (/(^|\/)(config|conf)\//u.test(path)) return 4;
+      if (/(^|\/)(schema|schemas|migrations?|db)\//u.test(path)) return 5;
+      if (/(^|\/)(deploy|deployment|ops|infra)\//u.test(path)) return 6;
+      if (/(^|\/)(adr|decisions?|design|operations?|runbook|faq)\b/iu.test(path)) {
+        return 7;
+      }
+      if (/\.(md|mdx|rst)$/iu.test(path)) return 8;
+      return 9;
+    };
+    const selected = documents
+      .filter(
+        (document) =>
+          document.sizeBytes <= 64 * 1024 && priority(document.path) < 9,
+      )
+      .sort(
+        (left, right) =>
+          priority(left.path) - priority(right.path) ||
+          left.path.localeCompare(right.path),
+      )
+      .slice(0, 48);
+    const entries = await Promise.all(
+      selected.map(async (document) => {
+        const row = await this.store.getDocument(snapshotId, document.path);
+        return [document.path, row?.text ?? ''] as const;
+      }),
+    );
+    const files = new Map<string, string>();
+    for (const [path, text] of entries) {
+      if (text) files.set(path, text.slice(0, 24_000));
+    }
+    return files;
   }
 
   public async buildBrief(input: ProjectBriefInput): Promise<ProjectBrief | null> {

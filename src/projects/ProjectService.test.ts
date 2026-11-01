@@ -9,6 +9,8 @@ import type {
   ProjectDocumentKind,
   ProjectHandbookRecord,
   ProjectManualEntry,
+  ProjectManualEntryInput,
+  ProjectManualEntryPatch,
   ProjectRecord,
   ProjectSnapshot,
   ProjectSyncJob,
@@ -18,6 +20,7 @@ import type {
 } from '../types/skills-plugins-projects.js';
 import type {
   ProjectDocumentMeta,
+  ProjectHandbookCreateInput,
   ProjectReferenceCandidate,
   ProjectSearchCandidate,
   ProjectSearchCandidateInput,
@@ -360,14 +363,132 @@ class MemoryProjectStore implements ProjectStore {
   }
 
   public async getLatestHandbook(
-    _projectId: string,
-    _status?: 'draft' | 'published' | 'archived',
+    projectId: string,
+    status?: 'draft' | 'published' | 'archived',
   ): Promise<ProjectHandbookRecord | null> {
-    return this.handbookRows[0] ?? null;
+    return (
+      this.handbookRows.find(
+        (row) =>
+          row.projectId === projectId && (status === undefined || row.status === status),
+      ) ?? null
+    );
   }
 
-  public async listManualEntries(_projectId: string): Promise<ProjectManualEntry[]> {
-    return this.manualRows;
+  public async getHandbook(
+    projectId: string,
+    version: number,
+  ): Promise<ProjectHandbookRecord | null> {
+    return (
+      this.handbookRows.find(
+        (row) => row.projectId === projectId && row.version === version,
+      ) ?? null
+    );
+  }
+
+  public async listHandbooks(
+    projectId: string,
+    limit = 10,
+  ): Promise<ProjectHandbookRecord[]> {
+    return this.handbookRows
+      .filter((row) => row.projectId === projectId)
+      .sort((left, right) => right.version - left.version)
+      .slice(0, limit);
+  }
+
+  public async nextHandbookVersion(projectId: string): Promise<number> {
+    const versions = this.handbookRows
+      .filter((row) => row.projectId === projectId)
+      .map((row) => row.version);
+    return (versions.length > 0 ? Math.max(...versions) : 0) + 1;
+  }
+
+  public async createHandbook(
+    input: ProjectHandbookCreateInput,
+  ): Promise<ProjectHandbookRecord> {
+    const record: ProjectHandbookRecord = {
+      id: this.nextId('handbook'),
+      ...input,
+      createdAt: Date.now(),
+      ...(input.status === 'published' ? { publishedAt: Date.now() } : {}),
+    };
+    this.handbookRows.push(record);
+    return record;
+  }
+
+  public async publishHandbook(
+    projectId: string,
+    version: number,
+  ): Promise<ProjectHandbookRecord | null> {
+    this.handbookRows = this.handbookRows.map((row) =>
+      row.projectId === projectId && row.status === 'published'
+        ? { ...row, status: 'archived' as const }
+        : row,
+    );
+    const target = this.handbookRows.find(
+      (row) => row.projectId === projectId && row.version === version,
+    );
+    if (!target) return null;
+    target.status = 'published';
+    target.publishedAt = Date.now();
+    return target;
+  }
+
+  public async listManualEntries(projectId: string): Promise<ProjectManualEntry[]> {
+    return this.manualRows.filter((row) => row.projectId === projectId);
+  }
+
+  public async getManualEntry(
+    projectId: string,
+    id: string,
+  ): Promise<ProjectManualEntry | null> {
+    return (
+      this.manualRows.find((row) => row.projectId === projectId && row.id === id) ??
+      null
+    );
+  }
+
+  public async createManualEntry(
+    projectId: string,
+    input: ProjectManualEntryInput,
+    updatedBy: string,
+  ): Promise<ProjectManualEntry> {
+    const entry: ProjectManualEntry = {
+      id: this.nextId('manual'),
+      projectId,
+      section: input.section,
+      title: input.title,
+      markdown: input.markdown,
+      visibility: input.visibility ?? 'team',
+      sensitivity: input.sensitivity ?? 'team',
+      injectToBrief: input.injectToBrief ?? false,
+      priority: input.priority ?? 0,
+      updatedBy,
+      updatedAt: Date.now(),
+    };
+    this.manualRows.push(entry);
+    return entry;
+  }
+
+  public async updateManualEntry(
+    projectId: string,
+    id: string,
+    patch: ProjectManualEntryPatch,
+    updatedBy: string,
+  ): Promise<ProjectManualEntry | null> {
+    const entry = this.manualRows.find(
+      (row) => row.projectId === projectId && row.id === id,
+    );
+    if (!entry) return null;
+    Object.assign(entry, patch, { updatedBy, updatedAt: Date.now() });
+    return entry;
+  }
+
+  public async deleteManualEntry(projectId: string, id: string): Promise<boolean> {
+    const before = this.manualRows.length;
+    this.manualRows = this.manualRows.filter(
+      (row) => !(row.projectId === projectId && row.id === id),
+    );
+    return this.manualRows.length < before;
   }
 }
 
@@ -532,6 +653,175 @@ describe('ProjectService 同步与读取', () => {
         member: groupEmployee,
       }),
     ).rejects.toThrow(/private/u);
+  });
+
+  it('生成手册草稿、发布版本并保护人工改过的条目', async () => {
+    const { repoRoot, service } = await createFixture();
+    await writeFile(
+      path.join(repoRoot, '.env.example'),
+      'LLM_API_KEY=sk-secret-value\nDATABASE_URL=postgres://demo:secret@db\n',
+    );
+    await mkdir(path.join(repoRoot, 'deploy'), { recursive: true });
+    await writeFile(
+      path.join(repoRoot, 'deploy', 'dingtalk-agent.service'),
+      'ExecStart=/usr/bin/env node dist/index.js\n',
+    );
+    await service.createProject({
+      id: 'anthys',
+      name: '钉钉智能体',
+      source: { type: 'local', path: repoRoot },
+    });
+    await service.sync('anthys');
+
+    const seeded = await service.importManualEntries(
+      'anthys',
+      [
+        {
+          section: 'overview',
+          title: '值班安排',
+          markdown: '值班说明',
+          injectToBrief: true,
+        },
+      ],
+      'seed:test',
+    );
+    expect(seeded).toEqual({ created: 1, updated: 0, skipped: 0 });
+    const manual = await service.createManualEntry(
+      'anthys',
+      { section: 'operations', title: '发布步骤', markdown: '先备份再发布' },
+      'admin-1',
+    );
+    expect(manual.updatedBy).toBe('admin-1');
+
+    const draft = await service.generateHandbook('anthys');
+    expect(draft).toMatchObject({
+      version: 1,
+      status: 'draft',
+      generatedBy: 'facts',
+    });
+    const config = draft.content.sections.find(
+      (section) => section.key === 'config',
+    );
+    expect(config?.markdown).toContain('LLM_API_KEY');
+    expect(config?.markdown).not.toContain('sk-secret-value');
+    expect(config?.markdown).not.toContain('postgres://demo:secret');
+
+    const published = await service.publishHandbook('anthys', draft.version);
+    expect(published.status).toBe('published');
+    const fetched = await service.getHandbook({
+      projectRef: 'anthys',
+      member: singleChatEmployee,
+    });
+    expect(fetched.version).toBe(1);
+    expect(fetched.manualEntries.map((entry) => entry.title)).toEqual(
+      expect.arrayContaining(['值班安排', '发布步骤']),
+    );
+
+    const seededEntry = (await service.listManualEntries('anthys')).find(
+      (entry) => entry.title === '值班安排',
+    );
+    expect(seededEntry).toBeDefined();
+    await service.updateManualEntry(
+      'anthys',
+      seededEntry?.id ?? '',
+      { markdown: '人工改过' },
+      'admin-1',
+    );
+    const again = await service.importManualEntries(
+      'anthys',
+      [
+        { section: 'overview', title: '值班安排', markdown: '种子更新' },
+        { section: 'overview', title: '新增条目', markdown: '新内容' },
+      ],
+      'seed:test',
+    );
+    expect(again).toEqual({ created: 1, updated: 0, skipped: 1 });
+    const rows = await service.listManualEntries('anthys');
+    expect(rows.find((entry) => entry.title === '值班安排')?.markdown).toBe(
+      '人工改过',
+    );
+
+    await service.deleteManualEntry('anthys', manual.id);
+    expect(
+      (await service.listManualEntries('anthys')).some(
+        (entry) => entry.id === manual.id,
+      ),
+    ).toBe(false);
+  });
+
+  it('GitHub 项目的 issues/prs 通过注入的客户端查询', async () => {
+    const { root, repoRoot, store } = await createFixture();
+    const requests: Array<Record<string, unknown>> = [];
+    const service = new ProjectService({
+      store,
+      repoSource: new RepoSource({
+        allowedRoots: [root],
+        stateDir: path.join(root, '.state-github'),
+      }),
+      github: {
+        search: async (repoRef, query, options) => {
+          requests.push({ repoRef, query, ...options });
+          return {
+            items: [
+              {
+                number: 7,
+                title: '修复卡片刷新',
+                state: 'open',
+                author: 'joony',
+                labels: ['bug'],
+                htmlUrl: 'https://github.com/SongJok/anthys/issues/7',
+                body: '',
+                createdAt: '',
+                updatedAt: '2026-10-01T00:00:00Z',
+              },
+            ],
+            total: 3,
+          };
+        },
+      },
+    });
+    await service.createProject({
+      id: 'github-demo',
+      name: 'GitHub Demo',
+      source: { type: 'github', repo: 'SongJok/anthys' },
+    });
+    await service.createProject({
+      id: 'local-demo',
+      name: 'Local Demo',
+      source: { type: 'local', path: repoRoot },
+    });
+
+    const issues = await service.historyProject({
+      projectRef: 'github-demo',
+      kind: 'issues',
+      query: '卡片',
+      limit: 5,
+      member: singleChatEmployee,
+    });
+    expect(issues.issues?.[0]).toMatchObject({ number: 7, title: '修复卡片刷新' });
+    expect(issues.total).toBe(3);
+    expect(requests[0]).toEqual({
+      repoRef: 'SongJok/anthys',
+      query: '卡片',
+      kind: 'issues',
+      limit: 5,
+    });
+
+    const prs = await service.historyProject({
+      projectRef: 'github-demo',
+      kind: 'prs',
+      member: singleChatEmployee,
+    });
+    expect(prs.issues?.length).toBe(1);
+    expect(requests[1]).toMatchObject({ kind: 'prs', limit: 10 });
+
+    const local = await service.historyProject({
+      projectRef: 'local-demo',
+      kind: 'issues',
+      member: singleChatEmployee,
+    });
+    expect(local.issues).toBeUndefined();
+    expect(local.note).toContain('GitHub 来源');
   });
 
   it('工具 Provider 返回带行号的读取结果和检索引用', async () => {

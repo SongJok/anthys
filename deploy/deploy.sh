@@ -40,6 +40,8 @@ $SUDO -u "$APP_USER" pnpm -C "$APP_PATH" build
 if [ "$SKIP_DB_PUSH" != "1" ]; then
   log "同步数据库表结构"
   $SUDO -u "$APP_USER" pnpm -C "$APP_PATH" run db:push
+  log "补齐项目索引（tsvector / pg_trgm / HNSW）"
+  $SUDO -u "$APP_USER" pnpm -C "$APP_PATH" run db:extend
 fi
 
 log "重启服务"

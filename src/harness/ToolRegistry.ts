@@ -75,6 +75,8 @@ export interface ToolRegistryOptions {
   skillProvider?: IToolProvider;
   /** 项目手册与代码检索工具 */
   projectProvider?: IToolProvider;
+  /** GitHub 仓库读取工具 */
+  githubProvider?: IToolProvider;
   /** 个人提醒与定时报告工具（内部只对单聊挂载） */
   personalAssistantProvider?: IToolProvider;
   /** 公网搜索工具；由外部注入，并在 getTools 内实时判断开关 */
@@ -335,6 +337,9 @@ export class ToolRegistry {
     }
     if (options.projectProvider) {
       providers.push(options.projectProvider);
+    }
+    if (options.githubProvider) {
+      providers.push(options.githubProvider);
     }
     if (options.personalAssistantProvider) {
       providers.push(options.personalAssistantProvider);

@@ -1,0 +1,11 @@
+{
+  "id": "anthys",
+  "name": "钉钉智能体",
+  "aliases": ["钉钉智能体", "anthys", "dingtalk-agent"],
+  "description": "钉钉 Stream 接入的企业知识与运维助手",
+  "source": { "type": "local", "path": ".", "branch": "main" },
+  "default": true,
+  "visibility": "team",
+  "sensitivity": "team",
+  "autoSyncMinutes": 30
+}

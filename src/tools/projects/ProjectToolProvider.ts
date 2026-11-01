@@ -492,7 +492,7 @@ export class ProjectToolProvider implements IToolProvider {
       {
         name: 'project_history',
         description:
-          '查看项目的 Git 提交历史（可按路径过滤）；blame/issues/prs 依赖额外能力。',
+          '查看项目的 Git 提交历史（可按路径过滤），或查询 GitHub 项目的 Issue/PR；blame 暂不支持。',
         risk: 'read',
         source: 'projects',
         parametersJsonSchema: {
@@ -504,6 +504,10 @@ export class ProjectToolProvider implements IToolProvider {
               type: 'string',
               enum: ['commits', 'blame', 'issues', 'prs'],
               default: 'commits',
+            },
+            query: {
+              type: 'string',
+              description: 'issues/prs 的关键词；留空查看最近更新',
             },
             limit: {
               type: 'integer',
@@ -528,6 +532,7 @@ export class ProjectToolProvider implements IToolProvider {
                     | 'prs',
                 }
               : {}),
+            ...(readString(args, 'query') ? { query: readString(args, 'query') } : {}),
             limit: readNumber(args, 'limit', 10, 1, 30),
             member,
           });
@@ -537,9 +542,26 @@ export class ProjectToolProvider implements IToolProvider {
           for (const commit of result.commits) {
             lines.push(`- ${commit.sha} ${commit.date} ${commit.author}：${commit.subject}`);
           }
+          for (const issue of result.issues ?? []) {
+            const labels =
+              issue.labels.length > 0 ? ` [${issue.labels.join(',')}]` : '';
+            lines.push(
+              `- #${issue.number} [${issue.state}] ${issue.title}（${issue.author}）${labels}`,
+              `  ${issue.htmlUrl} 更新于 ${issue.updatedAt}`,
+            );
+          }
+          if (result.issues && result.total !== undefined && result.total > result.issues.length) {
+            lines.push(
+              `（共 ${result.total} 条，已展示前 ${result.issues.length} 条）`,
+            );
+          }
           if (result.note) lines.push(`说明：${result.note}`);
-          if (result.commits.length === 0 && !result.note) {
-            lines.push('没有提交记录。');
+          if (
+            result.commits.length === 0 &&
+            (result.issues?.length ?? 0) === 0 &&
+            !result.note
+          ) {
+            lines.push('没有记录。');
           }
           return lines.join('\n');
         },

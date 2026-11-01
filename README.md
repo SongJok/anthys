@@ -6,6 +6,7 @@
 - **过程可见的回答**：AI 卡片实时展示状态角标与流式正文，工具调用与推理过程仍完整落库可审计。
 - **克制的主动回复**：群内全量旁听，经三级漏斗判断后才对高优故障、技术求助作出回应。
 - **越用越懂团队**：工作记忆 + 情景摘要 + 语义画像三层记忆，跨会话保留上下文；企业术语库把内部黑话沉淀成可检索、可校验的固定模板。
+- **可扩展的知识层**：技能按目录渐进披露，声明式插件只声明技能与 MCP、不执行代码，项目手册把仓库事实沉淀成可发布的 12 章说明，并可接 GitHub 只读工具做跨仓对比。
 - **双通道动态管控**：管理员既可以在钉钉单聊里用自然语言下达指令，也可以在 Web 控制台逐项配置，保存即生效。
 - **企业级边界**：管理员白名单、DWS 命令白名单与写操作确认、沙箱隔离、凭据掩码与全量操作审计。
 
@@ -33,6 +34,7 @@
 | 故障排查 | 在群里讨论报错时，机器人主动拉取生产日志、检索代码与接口文档，给出可执行的结论 |
 | 数据速查 | 单聊询问「上周订单超时的集中原因」，机器人调用数据服务并用沙盒做聚合统计 |
 | 流程查询 | @ 机器人问「本周日程」「我的待办」「这份文档怎么规定的」，机器人调用 DWS 查询；确认后也可建日程、建待办、发审批 |
+| 代码理解 | 问「这个项目从哪开始读」「这个符号在哪定义」，机器人基于项目快照给出文件、行号与提交；也可同步 GitHub 仓库、查看 Issue 与 PR |
 | 知识沉淀 | 团队术语、同事职责、历史结论被逐步记住，后续回答不再从零解释 |
 | 运营管控 | 管理员随时切换模型、调预算、增删 MCP、调整群策略，或一键紧急静音 |
 | 需求把关 | 超过 15 分钟 / 12 万 Token 或明文写着重活的需求，机器人直接说明不认可并停止执行，避免长时间空转 |
@@ -48,7 +50,7 @@ flowchart LR
   C -->|单聊或 @| D[ReAct 智能体]
   C -->|群内未 @| E[旁听判定]
   E -->|命中主题且通过冷却与置信度| D
-  D --> F[工具层<br/>企业 MCP · DWS · 公网搜索 · 沙盒 · 内置工具]
+  D --> F[工具层<br/>企业 MCP · DWS · 项目 · GitHub · 公网搜索 · 沙盒 · 内置工具]
   D --> G[三层记忆]
   D --> H[AI 卡片流式输出]
   I[Web 控制台 / 管理员单聊] --> J[动态配置中心]
@@ -106,7 +108,8 @@ pnpm install
 pnpm -C web-console install
 
 psql "postgres://localhost:5432/dingtalk_agent" -c "CREATE EXTENSION IF NOT EXISTS vector;"
-pnpm run db:push      # 创建会话、记忆、动态配置、审计与轨迹等数据表
+pnpm run db:push      # 创建会话、记忆、动态配置、审计、技能、插件与项目等数据表
+pnpm run db:extend    # 补齐项目检索的 tsvector / pg_trgm / HNSW 索引，可重复执行
 pnpm run db:seed      # 可选：预写入默认人设与模型配置，已有记录不覆盖
 ```
 
@@ -213,6 +216,36 @@ pnpm run db:seed      # 可选：预写入默认人设与模型配置，已有�
 | `GLOSSARY_RETRIEVAL_LIMIT` | `4` | 每次提问检索的术语卡条数上限，最大 10 |
 
 术语内容全部在控制台「术语知识库」页面维护；启用 `EMBEDDING_ENABLED` 后，术语检索会在关键词未命中时回退 pgvector 相似度召回，历史术语的向量会在启动后台补齐。
+
+**技能、插件与项目**
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `EXTENSIONS_SKILLS_ENABLED` | `true` | 是否挂载技能目录与 `skill_*` 工具 |
+| `EXTENSIONS_PLUGINS_ENABLED` | `true` | 是否启用声明式插件的安装与运行时合并 |
+| `EXTENSIONS_PROJECTS_ENABLED` | `true` | 是否挂载项目工具、项目同步与项目手册 |
+| `EXTENSIONS_DEFAULT_PROJECT_ID` | 空 | 问题未点名项目时使用的默认项目；空则由模型选择或主动询问 |
+| `SKILL_CATALOG_LIMIT` | `20` | 注入系统提示的技能目录条数，范围 1–50 |
+| `PROJECT_BRIEF_MAX_CHARS` | `2000` | 注入系统提示的项目简报长度上限，范围 200–8000 |
+| `SKILLS_BUILTIN_DIR` | `skills/builtin` | 随仓库发布的内置技能目录 |
+| `SKILLS_LOCAL_DIR` | `skills/local` | 团队自建技能目录，支持在线编辑与热重载 |
+| `PLUGIN_ALLOWED_COMMANDS` | 空（使用 `npx,uvx,node,python3,docker`） | 插件 stdio MCP 允许的裸命令，逗号分隔 |
+| `PLUGIN_ALLOW_MISSING_SECRETS` | `false` | 缺少必需密钥时是否允许先安装；允许时插件保持禁用 |
+| `PROJECT_ALLOWED_ROOTS` | 空（仅仓库根目录） | `local` 来源项目允许读取的根目录，逗号分隔 |
+| `PROJECT_SEED_DIR` | `projects` | 启动时导入 `<id>/project.json` 与 `manual/*.md` 的种子目录 |
+| `PROJECT_SYNC_INTERVAL_SECONDS` | `900` | 未配置 `autoSyncMinutes` 时的项目自动同步间隔 |
+
+**GitHub 只读工具**
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `GITHUB_ENABLED` | `false` | 是否向模型暴露 `github_*` 只读工具 |
+| `GITHUB_TOKEN` | 空 | GitHub Token，只从环境变量读取；代码检索必需，公开仓库读取可选 |
+| `GITHUB_API_BASE` | `https://api.github.com` | 必须是 HTTPS，且主机在默认白名单或 `GITHUB_ALLOWED_HOSTS` 内 |
+| `GITHUB_ALLOWED_HOSTS` | 空 | 额外允许的 GitHub Enterprise API 主机名，逗号分隔 |
+| `GITHUB_CACHE_TTL_SECONDS` | `300` | ETag / 304 缓存秒数，`0` 关闭，最大 300 |
+
+技能、插件与项目的完整命令、清单字段和失败模式见 [开发文档](docs/skills-plugins-project-handbook-design.md)。
 
 **多模态入站与产物投递**
 
@@ -367,16 +400,17 @@ sudo useradd -m -s /bin/bash anthys 2>/dev/null || true
 sudo -u anthys git clone git@github.com:SongJok/anthys.git /opt/anthys/app
 sudo cp deploy/.env.production.example /opt/anthys/app/.env
 sudo chown anthys:anthys /opt/anthys/app/.env && sudo chmod 600 /opt/anthys/app/.env
+sudo -u anthys pnpm -C /opt/anthys/app install && sudo -u anthys pnpm -C /opt/anthys/app/web-console install
 # 填好 .env 后建表
 sudo -u anthys pnpm -C /opt/anthys/app run db:push
-sudo -u anthys pnpm -C /opt/anthys/app install && sudo -u anthys pnpm -C /opt/anthys/app/web-console install
+sudo -u anthys pnpm -C /opt/anthys/app run db:extend
 sudo -u anthys pnpm -C /opt/anthys/app build
 sudo cp deploy/dingtalk-agent.service /etc/systemd/system/
 sudo systemctl daemon-reload && sudo systemctl enable --now dingtalk-agent
 sudo cp deploy/nginx.conf /etc/nginx/conf.d/ && sudo nginx -t && sudo systemctl reload nginx
 ```
 
-后续升级只需 `sudo bash deploy/deploy.sh`。
+后续升级只需 `sudo bash deploy/deploy.sh`：脚本会拉代码、装依赖、构建、执行 `db:push` 与 `db:extend`、重启并做健康检查。只想跳过表结构同步时设置 `SKIP_DB_PUSH=1`。
 
 > 钉钉 Stream 模式是出站长连接，服务器无需为机器人开放公网入站端口；只有管理控制台需要对外暴露，请用安全组与 Nginx 双重限制来源 IP。
 > 依赖安装**不要加 `--prod`**：启动脚本使用的 `tsx` 在 devDependencies 中。`isolated-vm` 需要现场编译，故依赖脚本会安装 `build-essential` 与 `python3`。
@@ -531,6 +565,64 @@ sudo cp deploy/nginx.conf /etc/nginx/conf.d/ && sudo nginx -t && sudo systemctl 
 - 术语写入带 30 秒进程内缓存，管理端新增、更新、删除后立即失效，无需重启。
 - 审计日志只记录术语的元数据快照，不复制敏感术语正文。
 
+### 技能、插件与项目手册
+
+#### 技能 Skills
+
+技能是一段受控的操作步骤，用来教机器人"这类任务应该怎么做"，而不是把新的可执行代码带进进程。
+
+- **渐进披露**：系统提示只注入技能目录（名称、描述、适用场景，受 `SKILL_CATALOG_LIMIT` 限制）；模型命中任务后调用 `use_skill` 加载正文，需要细节时再用 `skill_read` 分页读取技能目录内的参考文件。单次正文最多 4000 字符，参考文件单次最多 500 行 / 4000 字符，单文件上限 1MB。
+- **来源**：`SKILLS_BUILTIN_DIR`（默认 `skills/builtin`）随仓库发布，`SKILLS_LOCAL_DIR`（默认 `skills/local`）用于团队自建。内置技能包括 `code-reading`、`repo-review`、`incident-triage`、`project-onboarding`、`github-project-scan`、`handbook-maintainer`。
+- **格式**：每个技能是一个目录，`SKILL.md` 以 YAML frontmatter 开头，字段包括 `name`、`description`、`version`、`when_to_use`、`tags`、`allowed_tools`、`risk`、`visibility` 与 `max_instruction_chars`；正文按「适用场景 / 步骤 / 约束」组织，可附带 `references/` 等资源文件。
+- **管理**：控制台「技能 Skills」可查看目录预览、校验草稿、启用 / 停用、在线编辑 `SKILL.md` 与资源文件，并查看近 7 天调用次数。保存后立即热更新，无需重启。
+- **边界**：技能正文只来自管理员维护的本地目录；聊天内容、工具返回、仓库文件都不会被当作指令注入。`EXTENSIONS_SKILLS_ENABLED=false` 可整体关闭。
+
+#### 声明式插件
+
+插件是**纯声明包**，用于把技能与 MCP 节点成套分发，不执行任意安装脚本或运行时代码。
+
+- **包结构**：插件根目录包含 `plugin.json`，技能目录（默认 `skills/`）与可选的说明文件；通过控制台上传 zip，或填写服务器上已解包的目录。
+- **清单字段**：`schemaVersion`、`id`、`name`、`version`（SemVer）、`description`、`engines.agent`、`trust`、`skills`、`mcpServers`、`secrets`、`permissions`（仅展示与审计）。
+- **安装校验**：检查 id / 版本格式、agent 版本区间、技能名冲突、MCP 传输方式、stdio 裸命令是否在 `PLUGIN_ALLOWED_COMMANDS`（默认 `npx,uvx,node,python3,docker`）内、`${ENV_VAR}` 占位符是否有对应环境变量；任何 error 都不会落盘。
+- **版本与回滚**：可安装、升级、启用、停用、回滚、卸载，保留最近两个版本；升级或回滚后技能与 MCP 节点热替换。
+- **命名空间**：插件技能以 `plugin:<插件id>:<技能名>` 暴露；插件 MCP 节点以 `plugin-<插件id>-<节点id>` 注册，工具名相应为 `mcp__plugin-<插件id>-<节点id>__<tool>`，不会与手工节点冲突。
+- **密钥**：清单只声明变量名，值从 `.env` 读取；勾选「允许缺失密钥」时插件先安装但保持禁用，补齐后启用即可。
+- **边界**：`EXTENSIONS_PLUGINS_ENABLED=false` 可整体关闭；插件不能携带可执行安装钩子，也不能覆盖内置技能或手工 MCP 节点。
+
+#### 项目手册与代码理解
+
+项目登记后，机器人可以像熟悉仓库的同事一样回答"入口在哪、这个符号怎么定义、上线要注意什么"，并且每个结论都能落到具体文件与提交。
+
+- **来源**：`local`（服务器上的目录，只能读 `PROJECT_ALLOWED_ROOTS`，默认仓库根）、`github`（`owner/name` + ref，按 GitHub 只读接口拉取）与 `manual`（只维护手册与人工条目，不扫描代码）。
+- **同步与快照**：每次同步生成不可变快照，记录 commit、文件清单、分块索引与符号表；检索结果与引用统一带 `path:line @ commit`，历史版本可追溯。定期同步由项目的 `autoSyncMinutes` 控制，缺省回退到 `PROJECT_SYNC_INTERVAL_SECONDS`。
+- **扫描边界**：`.env`、私钥、证书、凭据文件不进入索引；`.env.example` / `.sample` / `.template` 会保留，用于在手册里只列出变量名而不泄露取值。超大文件、二进制与依赖目录会被跳过。
+- **混合检索**：关键词（全文与 trigram）、路径、符号与可选 pgvector 向量一起召回；可按 `pathGlob`、语言与类型（`code` / `doc` / `config` / `test`）过滤。`private` 项目只在单聊中向 owner 或管理员开放，`admin` 项目仅管理员可见。
+- **项目工具**：`project_list`、`project_handbook`、`project_map`、`project_search`、`project_read`、`project_symbol`、`project_history`。`project_history` 在 GitHub 来源下可直接查 issues / PRs，其余来源会说明能力边界。
+- **项目手册**：按固定 12 章生成草稿——项目概览、架构设计、模块地图、数据模型、配置与密钥、构建与部署、运维与故障、编码约定、测试与验收、历史决策、常见问题、风险与边界。草稿可以预览、重新生成和发布；发布后才进入模型上下文，并递增 `handbookVersion`。手册内容只汇总变量名、脚本路径与命令，不展开密钥值或部署脚本正文。
+- **人工条目**：管理员可在任意章节新增、编辑、删除人工条目，设置可见性、敏感级别、是否注入项目简报与优先级。人工条目优先于自动生成内容，重新生成不会覆盖管理员编辑。
+- **种子目录**：启动时读取 `PROJECT_SEED_DIR`（默认 `projects`）下的 `<projectId>/project.json` 与 `manual/*.md`。项目不存在才创建，配置更新不会覆盖已有记录；种子人工条目只更新由 `seed:projects/manual` 自己写入的版本，管理员改过的条目会被跳过。
+- `EXTENSIONS_PROJECTS_ENABLED=false` 可整体关闭；`EXTENSIONS_DEFAULT_PROJECT_ID` 指定问题未点名项目时的默认项目。
+
+#### GitHub 只读工具
+
+启用 `GITHUB_ENABLED=true` 后，模型可以使用五个只读工具：
+
+| 工具 | 说明 |
+| --- | --- |
+| `github_repo` | 仓库元信息：默认分支、语言、可见性、Star、更新时间与 topics |
+| `github_tree` | 指定 ref / 目录的树状结构，按深度与条数收敛 |
+| `github_file` | 读取文件，支持行区间与续读；单文件上限 1MB |
+| `github_search` | 代码检索需要 Token；issues / PRs 检索无需 Token |
+| `github_pr` | PR 详情与变更文件，补丁按长度截断 |
+
+安全与稳定性：
+
+- Token 只从 `GITHUB_TOKEN` 读取，不落库、不回传控制台；代码检索必须配置 Token，未配置时会明确提示。
+- `GITHUB_API_BASE` 必须是 HTTPS，且主机为 `api.github.com`、`*.github.com` 或 `GITHUB_ALLOWED_HOSTS` 中的白名单；客户端不跟随重定向。
+- 相同请求按 ETag / 304 缓存，TTL 由 `GITHUB_CACHE_TTL_SECONDS` 控制；限流错误会带出重置时间，而不是静默失败。
+- 仓库内容属于外部不可信数据：只作为参考材料展示，不当作指令执行，也不会自动写入项目手册的权威结论。
+- 未启用时不会挂载 `github_*` 工具；GitHub 来源项目的 issues / PRs 查询会返回"需要开启 `GITHUB_ENABLED`"的说明，本地项目能力不受影响。
+
 ### 工具能力
 
 机器人的工具按需挂载，回答时会自行选择与组合：
@@ -538,6 +630,9 @@ sudo cp deploy/nginx.conf /etc/nginx/conf.d/ && sudo nginx -t && sudo systemctl 
 | 工具源 | 能力 |
 | --- | --- |
 | 内置工具 | `current_time` 时区时间、`calculator` 安全表达式计算、`system_status` 进程与资源状态 |
+| 技能 | `skill_search` 按任务检索技能、`use_skill` 加载操作步骤、`skill_read` 分页读取技能内参考文件 |
+| 项目 | `project_list` / `project_map` / `project_search` / `project_read` / `project_symbol` / `project_history` 读取已登记项目快照，`project_handbook` 读取已发布手册 |
+| GitHub（只读） | `github_repo` / `github_tree` / `github_file` / `github_search` / `github_pr`，按白名单 HTTPS 访问并缓存 |
 | 企业 MCP | 通过 MCP 协议接入代码、数据、日志、接口文档等外部服务，可增删改查与热重载 |
 | 钉钉 DWS | 查询文档、知识库、日历、待办、通讯录与审批；写操作（建日程、建待办、改通讯录、发审批）经 `/confirm` 二次确认 |
 | 公网搜索 | `web_search` 调用智谱 Web Search API 检索公开网页，返回标题、链接、发布时间与摘要，并作为引用展示；相同查询短期缓存、单会话与进程级调用配额，单聊与群聊均可用，可在控制台关闭 |
@@ -674,7 +769,7 @@ sudo cp deploy/nginx.conf /etc/nginx/conf.d/ && sudo nginx -t && sudo systemctl 
 
 ## 管理控制台
 
-控制台与机器人同进程提供，默认地址 `http://<host>:8787/`，共九个页面：
+控制台与机器人同进程提供，默认地址 `http://<host>:8787/`，共十二个页面：
 
 | 页面 | 可以做什么 |
 | --- | --- |
@@ -686,6 +781,9 @@ sudo cp deploy/nginx.conf /etc/nginx/conf.d/ && sudo nginx -t && sudo systemctl 
 | **群聊旁听策略** | 查看全局默认策略、按群覆盖旁听与主动回复参数、一键紧急静音 |
 | **ReAct 审计轨迹** | 按群过滤并分页查看每次回答的思维链、工具入参、耗时、沙盒输出与最终答案 |
 | **术语知识库** | 按固定模板增删改查内部黑话，按名称 / 别名 / 时效性 / 敏感级别检索，查看注入命中统计、质量校验结果与系统提示预览 |
+| **技能 Skills** | 浏览技能目录与触发条件预览、校验草稿、启用 / 停用、在线编辑 `SKILL.md` 与资源文件，查看近 7 天调用次数 |
+| **声明式插件** | 校验并安装插件包，升级 / 回滚 / 启停 / 卸载，查看版本记录、缺失密钥与合并后的技能和 MCP 节点 |
+| **项目手册** | 登记与同步项目、浏览快照与混合检索结果、生成 / 发布项目手册，维护各章节人工条目 |
 | **数据治理** | 调整各表保留期、查看超期行数与附件占用、先 dry-run 再清理，以及按会话 / 员工级联删除 |
 
 使用说明：
@@ -755,6 +853,26 @@ sudo cp deploy/nginx.conf /etc/nginx/conf.d/ && sudo nginx -t && sudo systemctl 
 | GET | `/glossary/:id` | 读取单条术语 |
 | POST | `/glossary` | 创建术语 |
 | PUT / DELETE | `/glossary/:id` | 更新 / 删除术语 |
+| GET / POST | `/skills` | 技能列表 / 新建本地技能 |
+| POST | `/skills/validate`、`/skills/reload`、`/skills/preview` | 校验草稿 / 重新扫描 / 预览目录 |
+| GET | `/skills/usage` | 技能整体调用统计 |
+| GET / PUT / DELETE | `/skills/:id` | 查看 / 更新 / 删除技能 |
+| POST | `/skills/:id/enable`、`/skills/:id/disable` | 启用 / 停用技能 |
+| GET / PUT / DELETE | `/skills/:id/resource` | 读取 / 写入 / 删除技能资源文件 |
+| GET | `/skills/:id/usage` | 单技能调用统计 |
+| GET | `/plugins` | 插件列表与运行时状态 |
+| POST | `/plugins/validate`、`/plugins/install` | 校验插件包 / 安装（上传 zip 或服务器目录） |
+| POST | `/plugins/:id/upgrade`、`/enable`、`/disable`、`/rollback` | 升级 / 启用 / 停用 / 回滚 |
+| GET | `/plugins/:id`、`/plugins/:id/versions` | 插件详情 / 版本记录 |
+| DELETE | `/plugins/:id` | 卸载插件 |
+| GET / POST | `/projects` | 项目列表 / 登记项目 |
+| GET / PUT / DELETE | `/projects/:id` | 项目详情 / 更新 / 删除 |
+| POST | `/projects/:id/sync` | 触发一次同步（异步任务） |
+| GET | `/projects/:id/sync-jobs`、`/snapshots`、`/search` | 同步任务 / 快照 / 混合检索 |
+| GET / POST | `/projects/:id/manual-entries` | 人工条目列表 / 新增 |
+| PUT / DELETE | `/projects/:id/manual-entries/:entryId` | 更新 / 删除人工条目 |
+| GET | `/projects/:id/handbook`、`/handbooks` | 当前已发布手册 / 全部版本 |
+| POST | `/projects/:id/handbook/generate`、`/publish` | 生成草稿 / 发布指定版本 |
 | GET | `/audit-logs` | 管理操作审计 |
 | POST | `/chat/tickets` | 换取一次性 SSE 票据（60 秒内有效、用后即焚） |
 | GET | `/api/v1/chat/stream?ticket=&question=` | 浏览器在线对话流（SSE，事件与钉钉卡片同源） |
@@ -778,6 +896,8 @@ sudo cp deploy/nginx.conf /etc/nginx/conf.d/ && sudo nginx -t && sudo systemctl 
 | 管理入口 | 管理 API 用 Bearer Token；ChatOps 用管理员 StaffId 白名单；未设置 Token 时会在启动日志中明确告警 |
 | 凭据保护 | AppSecret、模型 API Key、MCP 请求头在接口与审计中只出现掩码，前端不可回读明文 |
 | 命令执行 | DWS 子命令白名单 + 参数校验；写操作必须经 `/confirm` 二次确认，取消日程等标记为高危 |
+| 技能与插件 | 技能只来自本地受控目录；插件是纯声明包，安装前校验清单、命令白名单与密钥占位，不执行安装脚本；插件技能与 MCP 节点使用独立命名空间，不能覆盖手工配置 |
+| 项目与 GitHub | 项目只读快照，敏感文件不入索引，`private` 项目限制单聊可见；GitHub 仅 HTTPS + 白名单主机且不跟随重定向，Token 只读环境变量，外部仓库内容按不可信数据处理 |
 | 代码执行 | 沙盒无网络、只读文件系统、内存与时长受限 |
 | 群内行为 | 旁听不响应、主动回复受冷却与置信度双重限制，支持一键静音 |
 | 审计 | 每次配置变更记录操作人、动作类型、变更前后快照与时间 |
@@ -792,6 +912,11 @@ sudo cp deploy/nginx.conf /etc/nginx/conf.d/ && sudo nginx -t && sudo systemctl 
 | `conversation_summaries` | 情景摘要 |
 | `semantic_memories` | 术语与职责画像（含向量） |
 | `glossary_terms` | 企业术语知识库：固定模板字段、注入权重、命中次数与向量 |
+| `skills` / `skill_usage` | 技能元数据（正文仍在技能目录）与调用统计 |
+| `plugins` / `plugin_versions` | 插件当前状态、清单与可回滚版本 |
+| `projects` / `project_snapshots` / `project_sync_jobs` | 项目登记、不可变快照与同步任务 |
+| `project_documents` / `project_chunks` / `project_symbols` | 项目文件、分块与符号索引（分块可选向量） |
+| `project_handbooks` / `project_manual_entries` | 项目手册版本与人工条目 |
 | `bystander_policies` | 群级旁听策略 |
 | `sys_configs` | 动态配置（钉钉、模型、预算、MCP、默认群策略） |
 | `react_traces` | ReAct 执行轨迹 |
@@ -841,6 +966,10 @@ sudo cp deploy/nginx.conf /etc/nginx/conf.d/ && sudo nginx -t && sudo systemctl 
 - 群聊旁听缓冲位于进程内存，重启后由新消息重新积累；摘要与语义记忆不受影响。
 - 主动回复由模型判定驱动，不解析固定口令；对主题词与置信度的调整比改提示词更有效。
 - DWS 的写操作（建日程、建待办、改通讯录、发审批）需要应用开通对应权限点；缺失时机器人会通知管理员，但不会自动替管理员开通或发版。
+- 项目符号与引用基于轻量解析与全文索引，不是编译器级 AST；复杂泛型、动态导入与跨语言调用链的推导有限，结论仍应回到 `path:line @ commit` 核对。
+- 项目手册由确定性规则生成，可选补充人工条目，不调用模型撰写叙述；需要总结或对比时由模型基于手册与代码现场回答。
+- 插件第一期只做声明式分发，不执行任意安装脚本，也不提供插件市场；需要新的可执行能力时通过 MCP 节点或技能接入。
+- GitHub 工具只读并受 GitHub API 速率与网络可达性限制；私有仓库需配置 Token，企业内网实例需把 API 主机加入 `GITHUB_ALLOWED_HOSTS`。
 - 管理控制台是现代浏览器单页应用，不提供旧版浏览器兼容。
 - 真实钉钉、真实模型与企业 MCP 的联通性取决于部署环境的网络与凭据，需要在实际环境中验证。
 

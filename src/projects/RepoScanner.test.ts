@@ -116,6 +116,8 @@ describe('scanner helpers', () => {
   it('识别敏感文件名', () => {
     expect(isSensitiveFile('.env')).toBe(true);
     expect(isSensitiveFile('.env.production')).toBe(true);
+    expect(isSensitiveFile('.env.example')).toBe(false);
+    expect(isSensitiveFile('.env.template')).toBe(false);
     expect(isSensitiveFile('server.pem')).toBe(true);
     expect(isSensitiveFile('id_rsa')).toBe(true);
     expect(isSensitiveFile('credentials.json')).toBe(true);

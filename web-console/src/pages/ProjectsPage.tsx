@@ -31,8 +31,12 @@ import {
 } from '@ant-design/icons';
 import { api } from '../api';
 import type {
+  HandbookSectionKey,
   ProjectAdminEntry,
+  ProjectHandbookRecord,
   ProjectHandbookResult,
+  ProjectManualEntry,
+  ProjectManualEntryInput,
   ProjectRecord,
   ProjectSearchResult,
   ProjectSensitivity,
@@ -81,6 +85,30 @@ const JOB_COLOR: Record<ProjectSyncStatus, string> = {
   succeeded: 'green',
   failed: 'red',
 };
+
+const HANDBOOK_STATUS_COLOR: Record<ProjectHandbookRecord['status'], string> = {
+  draft: 'gold',
+  published: 'green',
+  archived: 'default',
+};
+
+const HANDBOOK_SECTION_OPTIONS: Array<{
+  value: HandbookSectionKey;
+  label: string;
+}> = [
+  { value: 'overview', label: '概览' },
+  { value: 'architecture', label: '架构' },
+  { value: 'modules', label: '模块' },
+  { value: 'data_model', label: '数据模型' },
+  { value: 'config', label: '配置' },
+  { value: 'deploy', label: '部署' },
+  { value: 'operations', label: '运维' },
+  { value: 'conventions', label: '约定' },
+  { value: 'testing', label: '测试' },
+  { value: 'decisions', label: '决策' },
+  { value: 'faq', label: '常见问题' },
+  { value: 'risks', label: '风险' },
+];
 
 function formatTime(ms: number | null | undefined): string {
   if (!ms) return '—';
@@ -174,6 +202,19 @@ export default function ProjectsPage() {
   const [handbook, setHandbook] = useState<ProjectHandbookResult | null>(null);
   const [handbookError, setHandbookError] = useState('');
   const [handbookLoading, setHandbookLoading] = useState(false);
+  const [handbookVersions, setHandbookVersions] = useState<
+    ProjectHandbookRecord[]
+  >([]);
+  const [handbookAction, setHandbookAction] = useState<
+    'generate' | 'publish' | ''
+  >('');
+  const [manualEntries, setManualEntries] = useState<ProjectManualEntry[]>([]);
+  const [manualForm] = Form.useForm<ProjectManualEntryInput>();
+  const [manualModal, setManualModal] = useState<{
+    open: boolean;
+    editing?: ProjectManualEntry;
+  }>({ open: false });
+  const [manualSaving, setManualSaving] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResult, setSearchResult] = useState<ProjectSearchResult | null>(
     null,
@@ -202,20 +243,36 @@ export default function ProjectsPage() {
   const refreshDetail = async (id: string) => {
     setDetailLoading(true);
     try {
-      const [entryResult, snapshotsResult, jobsResult, handbookResult] =
-        await Promise.all([
-          api.projects().then(({ projects }) => projects.find((item) => item.project.id === id) ?? null),
-          api.projectSnapshots(id, 20),
-          api.projectSyncJobs(id, 20),
-          api
-            .projectHandbook(id)
-            .then((result) => result.handbook)
-            .catch(() => null),
-        ]);
+      const [
+        entryResult,
+        snapshotsResult,
+        jobsResult,
+        handbookResult,
+        versionsResult,
+        entriesResult,
+      ] = await Promise.all([
+        api.projects().then(({ projects }) => projects.find((item) => item.project.id === id) ?? null),
+        api.projectSnapshots(id, 20),
+        api.projectSyncJobs(id, 20),
+        api
+          .projectHandbook(id)
+          .then((result) => result.handbook)
+          .catch(() => null),
+        api
+          .projectHandbookVersions(id, 10)
+          .then((result) => result.versions)
+          .catch(() => [] as ProjectHandbookRecord[]),
+        api
+          .projectManualEntries(id)
+          .then((result) => result.entries)
+          .catch(() => [] as ProjectManualEntry[]),
+      ]);
       if (entryResult) setDetail(entryResult);
       setSnapshots(snapshotsResult.snapshots);
       setJobs(jobsResult.jobs);
       setHandbook(handbookResult);
+      setHandbookVersions(versionsResult);
+      setManualEntries(entriesResult);
       setHandbookError(handbookResult ? '' : '项目手册尚未生成或接口未启用');
     } catch (error) {
       message.error(error instanceof Error ? error.message : String(error));
@@ -377,6 +434,100 @@ export default function ProjectsPage() {
     }
   };
 
+  const generateHandbook = async () => {
+    if (!detail) return;
+    setHandbookAction('generate');
+    try {
+      const { handbook: record } = await api.generateProjectHandbook(
+        detail.project.id,
+      );
+      message.success(`已生成草稿 v${record.version}，确认内容后发布`);
+      await refreshDetail(detail.project.id);
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setHandbookAction('');
+    }
+  };
+
+  const publishHandbook = async (version?: number) => {
+    if (!detail) return;
+    setHandbookAction('publish');
+    try {
+      const { handbook: record } = await api.publishProjectHandbook(
+        detail.project.id,
+        version,
+      );
+      message.success(`已发布项目手册 v${record.version}`);
+      await refreshDetail(detail.project.id);
+      await load();
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setHandbookAction('');
+    }
+  };
+
+  const openManualEntry = (entry?: ProjectManualEntry) => {
+    setManualModal({ open: true, ...(entry ? { editing: entry } : {}) });
+    manualForm.setFieldsValue(
+      entry
+        ? {
+            section: entry.section,
+            title: entry.title,
+            markdown: entry.markdown,
+            visibility: entry.visibility,
+            sensitivity: entry.sensitivity,
+            injectToBrief: entry.injectToBrief,
+            priority: entry.priority,
+          }
+        : {
+            section: 'overview',
+            title: '',
+            markdown: '',
+            visibility: 'team',
+            sensitivity: 'team',
+            injectToBrief: false,
+            priority: 0,
+          },
+    );
+  };
+
+  const submitManualEntry = async (values: ProjectManualEntryInput) => {
+    if (!detail) return;
+    setManualSaving(true);
+    try {
+      if (manualModal.editing) {
+        await api.updateProjectManualEntry(
+          detail.project.id,
+          manualModal.editing.id,
+          values,
+        );
+        message.success('人工条目已更新');
+      } else {
+        await api.createProjectManualEntry(detail.project.id, values);
+        message.success('人工条目已创建');
+      }
+      setManualModal({ open: false });
+      await refreshDetail(detail.project.id);
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setManualSaving(false);
+    }
+  };
+
+  const removeManualEntry = async (entry: ProjectManualEntry) => {
+    if (!detail) return;
+    try {
+      await api.deleteProjectManualEntry(detail.project.id, entry.id);
+      message.success(`已删除条目「${entry.title}」`);
+      await refreshDetail(detail.project.id);
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : String(error));
+    }
+  };
+
   const columns: ColumnsType<ProjectAdminEntry> = [
     {
       title: '项目',
@@ -492,6 +643,9 @@ export default function ProjectsPage() {
   ];
 
   const detailProject = detail?.project;
+  const latestDraft = handbookVersions.find(
+    (item) => item.status === 'draft',
+  );
 
   return (
     <Space direction="vertical" size={16} style={{ width: '100%' }}>
@@ -664,6 +818,77 @@ export default function ProjectsPage() {
             </Form.Item>
             <Form.Item label="启用" name="enabled" valuePropName="checked">
               <Switch />
+            </Form.Item>
+          </Space>
+        </Form>
+      </Modal>
+
+      <Modal
+        title={manualModal.editing ? '编辑人工条目' : '新增人工条目'}
+        open={manualModal.open}
+        onCancel={() => setManualModal({ open: false })}
+        onOk={() => void manualForm.submit()}
+        okText="保存"
+        confirmLoading={manualSaving}
+        width={760}
+      >
+        <Form form={manualForm} layout="vertical" onFinish={submitManualEntry}>
+          <Space style={{ width: '100%' }} size={12}>
+            <Form.Item
+              label="分区"
+              name="section"
+              rules={[{ required: true, message: '请选择分区' }]}
+              style={{ width: 220 }}
+            >
+              <Select options={HANDBOOK_SECTION_OPTIONS} />
+            </Form.Item>
+            <Form.Item
+              label="标题"
+              name="title"
+              rules={[{ required: true, message: '请填写标题' }]}
+              style={{ width: 480 }}
+            >
+              <Input maxLength={200} placeholder="例如：发布流程与回滚步骤" />
+            </Form.Item>
+          </Space>
+          <Form.Item
+            label="内容（Markdown）"
+            name="markdown"
+            rules={[{ required: true, message: '请填写内容' }]}
+          >
+            <Input.TextArea
+              rows={10}
+              maxLength={20000}
+              showCount
+              placeholder="只写团队确认过的事实；不要粘贴密钥或令牌"
+            />
+          </Form.Item>
+          <Space style={{ width: '100%' }} size={16}>
+            <Form.Item label="可见范围" name="visibility">
+              <Select
+                style={{ width: 160 }}
+                options={Object.entries(VISIBILITY_LABEL).map(
+                  ([value, label]) => ({ value, label }),
+                )}
+              />
+            </Form.Item>
+            <Form.Item label="敏感级别" name="sensitivity">
+              <Select
+                style={{ width: 140 }}
+                options={Object.entries(SENSITIVITY_LABEL).map(
+                  ([value, label]) => ({ value, label }),
+                )}
+              />
+            </Form.Item>
+            <Form.Item
+              label="注入项目摘要"
+              name="injectToBrief"
+              valuePropName="checked"
+            >
+              <Switch />
+            </Form.Item>
+            <Form.Item label="权重（-100 ~ 100）" name="priority">
+              <InputNumber min={-100} max={100} />
             </Form.Item>
           </Space>
         </Form>
@@ -956,10 +1181,30 @@ export default function ProjectsPage() {
                   children: (
                     <Spin spinning={handbookLoading}>
                       <Space direction="vertical" size={12} style={{ width: '100%' }}>
-                        <Space>
+                        <Space wrap>
                           <Button icon={<ReloadOutlined />} onClick={() => void loadHandbook()}>
                             刷新手册
                           </Button>
+                          <Button
+                            type="primary"
+                            loading={handbookAction === 'generate'}
+                            onClick={() => void generateHandbook()}
+                          >
+                            生成草稿
+                          </Button>
+                          <Popconfirm
+                            title="发布最新草稿？"
+                            description="发布后对话侧 project_handbook 会立即读取新版本。"
+                            disabled={!latestDraft}
+                            onConfirm={() => void publishHandbook()}
+                          >
+                            <Button
+                              loading={handbookAction === 'publish'}
+                              disabled={!latestDraft}
+                            >
+                              发布最新草稿
+                            </Button>
+                          </Popconfirm>
                           {handbook ? (
                             <>
                               <Tag>v{handbook.version}</Tag>
@@ -969,6 +1214,9 @@ export default function ProjectsPage() {
                                 <Tag color="orange">快照已更新</Tag>
                               ) : null}
                             </>
+                          ) : null}
+                          {latestDraft ? (
+                            <Tag color="gold">草稿 v{latestDraft.version} 待发布</Tag>
                           ) : null}
                         </Space>
                         {handbookError ? (
@@ -1001,60 +1249,169 @@ export default function ProjectsPage() {
                             }))}
                           />
                         ) : (
-                          <Empty description="尚未生成项目手册" />
+                          <Empty description="尚未生成项目手册，可基于当前快照生成确定性草稿" />
                         )}
+                        <Typography.Title level={5} style={{ margin: 0 }}>
+                          版本记录
+                        </Typography.Title>
+                        <Table<ProjectHandbookRecord>
+                          rowKey="id"
+                          size="small"
+                          pagination={false}
+                          dataSource={handbookVersions}
+                          locale={{ emptyText: '暂无手册版本' }}
+                          columns={[
+                            {
+                              title: '版本',
+                              dataIndex: 'version',
+                              width: 80,
+                              render: (value: number) => `v${value}`,
+                            },
+                            {
+                              title: '状态',
+                              dataIndex: 'status',
+                              width: 100,
+                              render: (value: ProjectHandbookRecord['status']) => (
+                                <Tag color={HANDBOOK_STATUS_COLOR[value]}>
+                                  {value}
+                                </Tag>
+                              ),
+                            },
+                            {
+                              title: '提交',
+                              dataIndex: 'commitSha',
+                              width: 110,
+                              render: (value: string) => (
+                                <Typography.Text code>
+                                  {shortSha(value)}
+                                </Typography.Text>
+                              ),
+                            },
+                            {
+                              title: '生成方式',
+                              dataIndex: 'generatedBy',
+                              width: 90,
+                            },
+                            {
+                              title: '创建时间',
+                              dataIndex: 'createdAt',
+                              width: 170,
+                              render: (value: number) => formatTime(value),
+                            },
+                            {
+                              title: '操作',
+                              key: 'actions',
+                              width: 100,
+                              render: (_value, record) =>
+                                record.status === 'draft' ? (
+                                  <Popconfirm
+                                    title={`发布 v${record.version}？`}
+                                    onConfirm={() =>
+                                      void publishHandbook(record.version)
+                                    }
+                                  >
+                                    <Button size="small" type="link">
+                                      发布
+                                    </Button>
+                                  </Popconfirm>
+                                ) : (
+                                  '—'
+                                ),
+                            },
+                          ]}
+                        />
                       </Space>
                     </Spin>
                   ),
                 },
                 {
                   key: 'manual',
-                  label: `人工条目${handbook ? `（${handbook.manualEntries.length}）` : ''}`,
-                  children: handbook ? (
-                    <Table
-                      rowKey="id"
-                      size="small"
-                      pagination={false}
-                      dataSource={handbook.manualEntries}
-                      columns={[
-                        { title: '标题', dataIndex: 'title', width: 220 },
-                        { title: '分区', dataIndex: 'section', width: 120 },
-                        {
-                          title: '注入摘要',
-                          dataIndex: 'injectToBrief',
-                          width: 100,
-                          render: (value: boolean) =>
-                            value ? <Tag color="green">是</Tag> : <Tag>否</Tag>,
-                        },
-                        { title: '权重', dataIndex: 'priority', width: 80 },
-                        {
-                          title: '更新人',
-                          dataIndex: 'updatedBy',
-                          width: 140,
-                        },
-                        {
-                          title: '更新时间',
-                          dataIndex: 'updatedAt',
-                          width: 170,
-                          render: (value: number) => formatTime(value),
-                        },
-                      ]}
-                      expandable={{
-                        expandedRowRender: (row) => (
-                          <pre
-                            style={{
-                              margin: 0,
-                              whiteSpace: 'pre-wrap',
-                              fontSize: 12,
-                            }}
-                          >
-                            {row.markdown}
-                          </pre>
-                        ),
-                      }}
-                    />
-                  ) : (
-                    <Empty description="暂无人工条目" />
+                  label: `人工条目（${manualEntries.length}）`,
+                  children: (
+                    <Space direction="vertical" size={12} style={{ width: '100%' }}>
+                      <Button
+                        type="primary"
+                        icon={<PlusOutlined />}
+                        onClick={() => openManualEntry()}
+                      >
+                        新增条目
+                      </Button>
+                      <Table<ProjectManualEntry>
+                        rowKey="id"
+                        size="small"
+                        pagination={false}
+                        dataSource={manualEntries}
+                        locale={{ emptyText: '暂无人工条目' }}
+                        columns={[
+                          { title: '标题', dataIndex: 'title', width: 220 },
+                          {
+                            title: '分区',
+                            dataIndex: 'section',
+                            width: 120,
+                            render: (value: HandbookSectionKey) =>
+                              HANDBOOK_SECTION_OPTIONS.find(
+                                (option) => option.value === value,
+                              )?.label ?? value,
+                          },
+                          {
+                            title: '注入摘要',
+                            dataIndex: 'injectToBrief',
+                            width: 100,
+                            render: (value: boolean) =>
+                              value ? <Tag color="green">是</Tag> : <Tag>否</Tag>,
+                          },
+                          { title: '权重', dataIndex: 'priority', width: 80 },
+                          {
+                            title: '更新人',
+                            dataIndex: 'updatedBy',
+                            width: 140,
+                          },
+                          {
+                            title: '更新时间',
+                            dataIndex: 'updatedAt',
+                            width: 170,
+                            render: (value: number) => formatTime(value),
+                          },
+                          {
+                            title: '操作',
+                            key: 'actions',
+                            width: 130,
+                            render: (_value, record) => (
+                              <Space>
+                                <Button
+                                  size="small"
+                                  type="link"
+                                  onClick={() => openManualEntry(record)}
+                                >
+                                  编辑
+                                </Button>
+                                <Popconfirm
+                                  title={`删除条目「${record.title}」？`}
+                                  onConfirm={() => void removeManualEntry(record)}
+                                >
+                                  <Button size="small" type="link" danger>
+                                    删除
+                                  </Button>
+                                </Popconfirm>
+                              </Space>
+                            ),
+                          },
+                        ]}
+                        expandable={{
+                          expandedRowRender: (row) => (
+                            <pre
+                              style={{
+                                margin: 0,
+                                whiteSpace: 'pre-wrap',
+                                fontSize: 12,
+                              }}
+                            >
+                              {row.markdown}
+                            </pre>
+                          ),
+                        }}
+                      />
+                    </Space>
                   ),
                 },
               ]}

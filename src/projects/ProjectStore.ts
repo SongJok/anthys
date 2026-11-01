@@ -12,10 +12,13 @@ import {
 } from '../db/projectSchema.js';
 import type {
   HandbookSectionKey,
+  HandbookSource,
   ProjectDocument,
   ProjectDocumentKind,
   ProjectHandbookRecord,
   ProjectManualEntry,
+  ProjectManualEntryInput,
+  ProjectManualEntryPatch,
   ProjectRecord,
   ProjectSnapshot,
   ProjectSnapshotStatus,
@@ -139,6 +142,55 @@ function toSyncJob(row: typeof projectSyncJobs.$inferSelect): ProjectSyncJob {
   };
 }
 
+function toHandbookRecord(
+  row: typeof projectHandbooks.$inferSelect,
+): ProjectHandbookRecord {
+  return {
+    id: row.id,
+    projectId: row.projectId,
+    version: row.version,
+    status: row.status as ProjectHandbookRecord['status'],
+    commitSha: row.commitSha,
+    content: row.content,
+    sources: row.sources ?? [],
+    generatedBy: row.generatedBy as ProjectHandbookRecord['generatedBy'],
+    createdBy: row.createdBy,
+    createdAt: new Date(row.createdAt).getTime(),
+    ...(row.publishedAt
+      ? { publishedAt: new Date(row.publishedAt).getTime() }
+      : {}),
+  };
+}
+
+function toManualEntry(
+  row: typeof projectManualEntries.$inferSelect,
+): ProjectManualEntry {
+  return {
+    id: row.id,
+    projectId: row.projectId,
+    section: row.section as HandbookSectionKey,
+    title: row.title,
+    markdown: row.markdown,
+    visibility: row.visibility as ProjectVisibility,
+    sensitivity: row.sensitivity as ProjectSensitivity,
+    injectToBrief: row.injectToBrief,
+    priority: row.priority,
+    updatedBy: row.updatedBy,
+    updatedAt: new Date(row.updatedAt).getTime(),
+  };
+}
+
+export interface ProjectHandbookCreateInput {
+  projectId: string;
+  version: number;
+  status: ProjectHandbookRecord['status'];
+  commitSha: string;
+  content: ProjectHandbookRecord['content'];
+  sources: HandbookSource[];
+  generatedBy: ProjectHandbookRecord['generatedBy'];
+  createdBy: string;
+}
+
 export interface ProjectStore {
   listProjects(): Promise<ProjectRecord[]>;
   getProject(id: string): Promise<ProjectRecord | null>;
@@ -223,7 +275,39 @@ export interface ProjectStore {
     projectId: string,
     status?: 'draft' | 'published' | 'archived',
   ): Promise<ProjectHandbookRecord | null>;
+  getHandbook(
+    projectId: string,
+    version: number,
+  ): Promise<ProjectHandbookRecord | null>;
+  listHandbooks(
+    projectId: string,
+    limit?: number,
+  ): Promise<ProjectHandbookRecord[]>;
+  nextHandbookVersion(projectId: string): Promise<number>;
+  createHandbook(
+    input: ProjectHandbookCreateInput,
+  ): Promise<ProjectHandbookRecord>;
+  publishHandbook(
+    projectId: string,
+    version: number,
+  ): Promise<ProjectHandbookRecord | null>;
   listManualEntries(projectId: string): Promise<ProjectManualEntry[]>;
+  getManualEntry(
+    projectId: string,
+    id: string,
+  ): Promise<ProjectManualEntry | null>;
+  createManualEntry(
+    projectId: string,
+    input: ProjectManualEntryInput,
+    updatedBy: string,
+  ): Promise<ProjectManualEntry>;
+  updateManualEntry(
+    projectId: string,
+    id: string,
+    patch: ProjectManualEntryPatch,
+    updatedBy: string,
+  ): Promise<ProjectManualEntry | null>;
+  deleteManualEntry(projectId: string, id: string): Promise<boolean>;
 }
 
 export interface ProjectSearchCandidateInput {
@@ -1006,22 +1090,107 @@ export class DrizzleProjectStore implements ProjectStore {
       )
       .orderBy(desc(projectHandbooks.version))
       .limit(1);
-    if (!row) return null;
-    return {
-      id: row.id,
-      projectId: row.projectId,
-      version: row.version,
-      status: row.status as ProjectHandbookRecord['status'],
-      commitSha: row.commitSha,
-      content: row.content,
-      sources: row.sources ?? [],
-      generatedBy: row.generatedBy as ProjectHandbookRecord['generatedBy'],
-      createdBy: row.createdBy,
-      createdAt: new Date(row.createdAt).getTime(),
-      ...(row.publishedAt
-        ? { publishedAt: new Date(row.publishedAt).getTime() }
-        : {}),
-    };
+    return row ? toHandbookRecord(row) : null;
+  }
+
+  public async getHandbook(
+    projectId: string,
+    version: number,
+  ): Promise<ProjectHandbookRecord | null> {
+    const [row] = await this.db
+      .select()
+      .from(projectHandbooks)
+      .where(
+        and(
+          eq(projectHandbooks.projectId, projectId),
+          eq(projectHandbooks.version, version),
+        ),
+      )
+      .limit(1);
+    return row ? toHandbookRecord(row) : null;
+  }
+
+  public async listHandbooks(
+    projectId: string,
+    limit = 10,
+  ): Promise<ProjectHandbookRecord[]> {
+    const rows = await this.db
+      .select()
+      .from(projectHandbooks)
+      .where(eq(projectHandbooks.projectId, projectId))
+      .orderBy(desc(projectHandbooks.version))
+      .limit(Math.min(Math.max(limit, 1), 50));
+    return rows.map(toHandbookRecord);
+  }
+
+  public async nextHandbookVersion(projectId: string): Promise<number> {
+    const [row] = await this.db
+      .select({
+        version: sql<number>`coalesce(max(${projectHandbooks.version}), 0)`,
+      })
+      .from(projectHandbooks)
+      .where(eq(projectHandbooks.projectId, projectId));
+    return Number(row?.version ?? 0) + 1;
+  }
+
+  public async createHandbook(
+    input: ProjectHandbookCreateInput,
+  ): Promise<ProjectHandbookRecord> {
+    const [row] = await this.db
+      .insert(projectHandbooks)
+      .values({
+        projectId: input.projectId,
+        version: input.version,
+        status: input.status,
+        commitSha: input.commitSha,
+        content: input.content,
+        sources: input.sources,
+        generatedBy: input.generatedBy,
+        createdBy: input.createdBy,
+        ...(input.status === 'published' ? { publishedAt: new Date() } : {}),
+      })
+      .returning();
+    return toHandbookRecord(row);
+  }
+
+  public async publishHandbook(
+    projectId: string,
+    version: number,
+  ): Promise<ProjectHandbookRecord | null> {
+    return this.db.transaction(async (tx) => {
+      const [target] = await tx
+        .select()
+        .from(projectHandbooks)
+        .where(
+          and(
+            eq(projectHandbooks.projectId, projectId),
+            eq(projectHandbooks.version, version),
+          ),
+        )
+        .limit(1);
+      if (!target) return null;
+      await tx
+        .update(projectHandbooks)
+        .set({ status: 'archived' })
+        .where(
+          and(
+            eq(projectHandbooks.projectId, projectId),
+            eq(projectHandbooks.status, 'published'),
+            ne(projectHandbooks.version, version),
+          ),
+        );
+      const [row] = await tx
+        .update(projectHandbooks)
+        .set({ status: 'published', publishedAt: new Date() })
+        .where(
+          and(
+            eq(projectHandbooks.projectId, projectId),
+            eq(projectHandbooks.version, version),
+          ),
+        )
+        .returning();
+      return row ? toHandbookRecord(row) : null;
+    });
   }
 
   public async listManualEntries(
@@ -1036,19 +1205,103 @@ export class DrizzleProjectStore implements ProjectStore {
         projectManualEntries.section,
         projectManualEntries.title,
       );
-    return rows.map((row) => ({
-      id: row.id,
-      projectId: row.projectId,
-      section: row.section as HandbookSectionKey,
-      title: row.title,
-      markdown: row.markdown,
-      visibility: row.visibility as ProjectVisibility,
-      sensitivity: row.sensitivity as ProjectSensitivity,
-      injectToBrief: row.injectToBrief,
-      priority: row.priority,
-      updatedBy: row.updatedBy,
-      updatedAt: new Date(row.updatedAt).getTime(),
-    }));
+    return rows.map(toManualEntry);
+  }
+
+  public async getManualEntry(
+    projectId: string,
+    id: string,
+  ): Promise<ProjectManualEntry | null> {
+    const [row] = await this.db
+      .select()
+      .from(projectManualEntries)
+      .where(
+        and(
+          eq(projectManualEntries.projectId, projectId),
+          eq(projectManualEntries.id, id),
+        ),
+      )
+      .limit(1);
+    return row ? toManualEntry(row) : null;
+  }
+
+  public async createManualEntry(
+    projectId: string,
+    input: ProjectManualEntryInput,
+    updatedBy: string,
+  ): Promise<ProjectManualEntry> {
+    const [row] = await this.db
+      .insert(projectManualEntries)
+      .values({
+        projectId,
+        section: input.section,
+        title: input.title,
+        markdown: input.markdown,
+        ...(input.visibility !== undefined
+          ? { visibility: input.visibility }
+          : {}),
+        ...(input.sensitivity !== undefined
+          ? { sensitivity: input.sensitivity }
+          : {}),
+        ...(input.injectToBrief !== undefined
+          ? { injectToBrief: input.injectToBrief }
+          : {}),
+        ...(input.priority !== undefined ? { priority: input.priority } : {}),
+        updatedBy,
+      })
+      .returning();
+    return toManualEntry(row);
+  }
+
+  public async updateManualEntry(
+    projectId: string,
+    id: string,
+    patch: ProjectManualEntryPatch,
+    updatedBy: string,
+  ): Promise<ProjectManualEntry | null> {
+    const [row] = await this.db
+      .update(projectManualEntries)
+      .set({
+        ...(patch.section !== undefined ? { section: patch.section } : {}),
+        ...(patch.title !== undefined ? { title: patch.title } : {}),
+        ...(patch.markdown !== undefined ? { markdown: patch.markdown } : {}),
+        ...(patch.visibility !== undefined
+          ? { visibility: patch.visibility }
+          : {}),
+        ...(patch.sensitivity !== undefined
+          ? { sensitivity: patch.sensitivity }
+          : {}),
+        ...(patch.injectToBrief !== undefined
+          ? { injectToBrief: patch.injectToBrief }
+          : {}),
+        ...(patch.priority !== undefined ? { priority: patch.priority } : {}),
+        updatedBy,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(projectManualEntries.projectId, projectId),
+          eq(projectManualEntries.id, id),
+        ),
+      )
+      .returning();
+    return row ? toManualEntry(row) : null;
+  }
+
+  public async deleteManualEntry(
+    projectId: string,
+    id: string,
+  ): Promise<boolean> {
+    const rows = await this.db
+      .delete(projectManualEntries)
+      .where(
+        and(
+          eq(projectManualEntries.projectId, projectId),
+          eq(projectManualEntries.id, id),
+        ),
+      )
+      .returning({ id: projectManualEntries.id });
+    return rows.length > 0;
   }
 }
 

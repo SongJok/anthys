@@ -39,6 +39,29 @@
 
 P0 + P1 是可用 MVP，约 3–4 周；P2 完成后才真正具备“项目手册 + 良好代码理解”的完整体验。P3 视效果再定。
 
+### 0.3 当前实现状态（2026-11-01）
+
+P0、P1、P2 已按本文实现并合入 `main`，README 的「技能、插件与项目手册」一节给出使用说明。
+
+| 能力 | 状态 | 落点 |
+| --- | --- | --- |
+| 技能发现、校验、渐进披露与热更新 | 已实现 | `src/skills/`、`src/tools/skills/`、6 个内置技能、控制台「技能 Skills」 |
+| 声明式插件安装、升级、回滚、启停、MCP 合并 | 已实现 | `src/plugins/`、`src/admin-api/routes/pluginRoutes.ts`、控制台「声明式插件」 |
+| 项目登记、同步快照、扫描、分块与符号索引 | 已实现 | `src/projects/`、`project_*` 表、`src/db/sql/project-index.sql` |
+| 项目只读工具与权限过滤 | 已实现 | `project_list` / `project_handbook` / `project_map` / `project_search` / `project_read` / `project_symbol` / `project_history` |
+| 项目手册 12 章生成、草稿 / 发布版本与人工条目 | 已实现 | `src/projects/HandbookBuilder.ts`、`ProjectService`、控制台「项目手册」 |
+| GitHub 只读工具（repo / tree / file / search / pr） | 已实现 | `src/github/GithubClient.ts`、`src/tools/github/GithubToolProvider.ts` |
+| 项目种子（`projects/<id>/project.json` + `manual/*.md`） | 已实现 | `src/projects/ProjectSeed.ts`、`projects/anthys/` |
+| tree-sitter / 调用图 / 插件市场与签名 / 沙箱化第三方工具 | 未实现（P3） | 保持非目标 |
+| 模型生成手册叙述 | 未实现（可选） | 当前为确定性生成 + 人工条目；需要叙述时由模型基于手册现场回答 |
+
+实现与设计的两点差异：
+
+- GitHub 工具从“第二期”提前到本次交付，默认 `GITHUB_ENABLED=false`，配置 Token 与白名单后启用。
+- 项目检索依赖 `pnpm run db:push` 之后执行 `pnpm run db:extend` 补齐 `tsvector`、`pg_trgm` 与 HNSW 索引；部署脚本已包含该步骤。
+
+验证方式：`pnpm typecheck`、`pnpm test`、`pnpm --dir web-console build`。
+
 ---
 
 ## 1. 背景与目标
