@@ -383,7 +383,7 @@ pnpm run db:seed      # 可选：预写入默认人设与模型配置，已有�
 | `DATA_CLEANUP_INTERVAL_SECONDS` | `86400` | 定时清理间隔；集群模式下仅 leader 执行 |
 | `DATA_CLEANUP_DRY_RUN` | `false` | 定时清理只统计不删除，适合上线前观察 |
 
-保留期可在控制台「数据治理」页调整，调整后写入 `governance_settings`，重启后仍生效。手动清理默认 dry-run，确认后再执行删除；按会话或员工级联删除会同步清理消息、摘要、轨迹、用量、反馈、旁听策略、定时任务与对应附件目录，并要求显式 `confirm`，操作会写入管理审计。日志脱敏覆盖普通文本参数与结构化对象字段；如需排障保留原文，可临时设置 `DATA_REDACTION_ENABLED=false`。
+保留期可在控制台「数据治理」页调整，调整后写入 `governance_settings`，重启后仍生效。手动清理默认 dry-run，确认后再执行删除；按会话或员工级联删除会同步清理消息、摘要、轨迹、用量、任务结果、反馈、旁听策略、定时任务与对应附件目录，并要求显式 `confirm`，操作会写入管理审计。日志脱敏覆盖普通文本参数与结构化对象字段；如需排障保留原文，可临时设置 `DATA_REDACTION_ENABLED=false`。
 
 **管理控制台与企业 MCP**
 
@@ -544,12 +544,14 @@ sudo cp deploy/nginx.conf /etc/nginx/conf.d/ && sudo nginx -t && sudo systemctl 
 - 失败任务按 `maxAttempts` 自动退避重试；连续失败进入 `failed` 并通知发起人。
 - 命中运行看门狗的硬预算时任务进入 `paused` 并通知发起人；`paused` 任务不会被自动领取，需要 `/job-resume <ID>` 显式恢复。
 - 集群模式下只有持有主锁的实例运行 JobRunner 与定时调度器，避免重复执行。
+- 任务成功后结果写入 `task_results`（每个会话保留最近 300 条），模型可用 `task_result_search` 检索本会话历史任务结果；检索严格按会话隔离，定时播报不重复沉淀。设置 `TASK_MEMORY_ENABLED=false` 可关闭写入与工具挂载。
 
 | 变量 | 默认值 | 说明 |
 | --- | --- | --- |
 | `JOB_RUNNER_INTERVAL_SECONDS` | `5` | 后台任务轮询间隔（秒） |
 | `JOB_LEASE_SECONDS` | `1800` | 任务执行租约，需大于单任务最长执行时间；租约过期可被重新领取 |
 | `JOB_MAX_CONCURRENCY` | `2` | 单实例同时执行的后台任务数 |
+| `TASK_MEMORY_ENABLED` | `true` | 是否沉淀任务结果并挂载 `task_result_search` |
 
 **Worker 化执行**：`/worker <research|ops|report> <需求>` 把任务交给带独立画像的执行单元。三类 Worker 共用持久化队列、租约与用量归因，但各自拥有工具白名单、独立预算和结构化回执：
 
@@ -1085,6 +1087,7 @@ ReAct 循环内置看门狗（`src/watchdog/RunWatchdog.ts`），只观察不执
 | `admin_audit_logs` | 管理操作审计 |
 | `user_feedback` | 用户对回答的反馈（`/feedback` 命令） |
 | `usage_ledger` | 每次模型调用的 Token 拆分、模型、耗时、场景与估算成本 |
+| `task_results` | 已完成后台任务的精简结果快照，供同会话历史追问检索 |
 | `scheduled_tasks` | 定时主动播报任务与下次触发时间 |
 | `cluster_shared_state` | 多实例共享的去重窗口、旁听冷却与群聊转录状态（仅集群模式写入） |
 | `governance_settings` | 管理端调整的保留期策略（覆盖 env 默认值） |

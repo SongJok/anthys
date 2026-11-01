@@ -79,6 +79,8 @@ export interface ToolRegistryOptions {
   githubProvider?: IToolProvider;
   /** 个人提醒与定时报告工具（内部只对单聊挂载） */
   personalAssistantProvider?: IToolProvider;
+  /** 已完成后台任务结果检索工具 */
+  taskMemoryProvider?: IToolProvider;
   /** 公网搜索工具；由外部注入，并在 getTools 内实时判断开关 */
   webSearchProvider?: IToolProvider;
   /** 公网链接读取工具；由外部注入，并在 getTools 内实时判断开关 */
@@ -350,6 +352,9 @@ export class ToolRegistry {
     }
     if (options.personalAssistantProvider) {
       providers.push(options.personalAssistantProvider);
+    }
+    if (options.taskMemoryProvider) {
+      providers.push(options.taskMemoryProvider);
     }
     if (options.workspaceReadProvider) {
       providers.push(options.workspaceReadProvider(workspace));

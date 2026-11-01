@@ -60,6 +60,7 @@ import { formatShanghaiDateTime } from './time/shanghaiTime.js';
 import { DrizzleUsageLedgerStore } from './db/usageSchema.js';
 import { DrizzleScheduledTaskStore } from './db/schedulerSchema.js';
 import { DrizzleAgentJobStore } from './db/jobSchema.js';
+import { DrizzleTaskResultStore } from './db/taskMemorySchema.js';
 import { DrizzleAgentTaskStore } from './db/taskSchema.js';
 import { TaskService, taskIdFromJob } from './tasks/TaskService.js';
 import { DrizzlePendingActionPersistence } from './db/approvalSchema.js';
@@ -151,6 +152,8 @@ import { DrizzleDwsIdentityStore } from './db/dwsIdentitySchema.js';
 import { PersonalReportBuilder } from './personal/PersonalReportBuilder.js';
 import { PersonalAssistantService } from './personal/PersonalAssistantService.js';
 import { PersonalAssistantToolProvider } from './tools/personal/PersonalAssistantToolProvider.js';
+import { TaskResultMemory } from './memory/TaskResultMemory.js';
+import { TaskMemoryToolProvider } from './tools/taskMemory/TaskMemoryToolProvider.js';
 import { TraceCollector, createMcpAdminPort } from './admin-api/runtime.js';
 import { startAdminServer } from './admin-api/server.js';
 import { MetricsRegistry } from './admin-api/metrics.js';
@@ -1048,6 +1051,17 @@ async function main(): Promise<void> {
       'web fetch configuration resolved',
     );
 
+    const taskMemoryEnabled = envEnabled(
+      process.env.TASK_MEMORY_ENABLED,
+      true,
+    );
+    const taskMemory = taskMemoryEnabled
+      ? new TaskResultMemory({
+          store: new DrizzleTaskResultStore(dbHandle.db),
+          logger: harnessLogger,
+        })
+      : null;
+
     toolRegistry = await ToolRegistry.create({
       mcpServers: await mergeMcpServers(),
       enableDws: configCenter.getSystemConfig().dingtalk.dwsCliEnabled,
@@ -1122,6 +1136,13 @@ async function main(): Promise<void> {
       personalAssistantProvider: new PersonalAssistantToolProvider({
         service: personalAssistant,
       }),
+      ...(taskMemory
+        ? {
+            taskMemoryProvider: new TaskMemoryToolProvider({
+              memory: taskMemory,
+            }),
+          }
+        : {}),
       workspaceReadProvider: (workspace) =>
         new WorkspaceReadToolProvider({ workspace }),
       ...(artifactDeliveryEnabled
@@ -1667,6 +1688,16 @@ async function main(): Promise<void> {
           status: 'succeeded',
           ...(worker ? { worker } : {}),
         });
+        if (taskMemory) {
+          try {
+            await taskMemory.rememberJob(job);
+          } catch (error) {
+            logger.warn(
+              { jobId: job.id, error: errorText(error) },
+              'failed to save task result memory',
+            );
+          }
+        }
         await notifyJobOwner(job, formatJobResultNotice(job));
         await syncTaskForJob(job, 'completed', job.result?.answer ?? null);
       },

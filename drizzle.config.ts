@@ -16,6 +16,7 @@ export default defineConfig({
     './src/db/pluginSchema.ts',
     './src/db/projectSchema.ts',
     './src/db/jobSchema.ts',
+    './src/db/taskMemorySchema.ts',
     './src/db/taskSchema.ts',
     './src/db/approvalSchema.ts',
     './src/db/investigationSchema.ts',

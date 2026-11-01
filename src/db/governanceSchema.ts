@@ -164,6 +164,7 @@ export class PgRetentionStore implements RetentionStore {
     const cascades: Array<[string, string, unknown[]]> = [
       ['traces', 'DELETE FROM react_traces WHERE conversation_id = $1', [conversationId]],
       ['usage', 'DELETE FROM usage_ledger WHERE conversation_id = $1', [conversationId]],
+      ['taskResults', 'DELETE FROM task_results WHERE conversation_id = $1', [conversationId]],
       ['feedback', 'DELETE FROM user_feedback WHERE conversation_id = $1', [conversationId]],
       ['groupPolicies', 'DELETE FROM bystander_policies WHERE conversation_id = $1', [conversationId]],
       ['scheduledTasks', 'DELETE FROM scheduled_tasks WHERE conversation_id = $1', [conversationId]],
@@ -234,6 +235,7 @@ export class PgRetentionStore implements RetentionStore {
     const cascades: Array<[string, string]> = [
       ['traces', 'DELETE FROM react_traces WHERE sender_staff_id = $1'],
       ['usage', 'DELETE FROM usage_ledger WHERE sender_staff_id = $1'],
+      ['taskResults', 'DELETE FROM task_results WHERE sender_staff_id = $1'],
       ['feedback', 'DELETE FROM user_feedback WHERE sender_staff_id = $1'],
       ['scheduledTasks', 'DELETE FROM scheduled_tasks WHERE created_by = $1'],
       [
