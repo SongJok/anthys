@@ -10,6 +10,17 @@ export interface JobRunnerLogger {
   warn(obj: Record<string, unknown>, msg: string): void;
 }
 
+/** 执行层主动暂停任务（看门狗升级），JobRunner 会保留任务并通知发起人 */
+export class JobPauseError extends Error {
+  constructor(
+    message: string,
+    public readonly code?: string,
+  ) {
+    super(message);
+    this.name = 'JobPauseError';
+  }
+}
+
 export interface JobExecutionContext {
   emit(event: AgentStreamEvent): void;
   signal: AbortSignal;
@@ -35,6 +46,7 @@ export interface JobRunnerOptions {
     result: AgentJobResult,
   ) => Promise<void> | void;
   onFailed?: (job: AgentJob, error: string) => Promise<void> | void;
+  onPaused?: (job: AgentJob, reason: string) => Promise<void> | void;
 }
 
 function eventPayload(event: AgentStreamEvent): {
@@ -65,6 +77,15 @@ function eventPayload(event: AgentStreamEvent): {
         : null;
     case 'error':
       return { type: 'error', payload: { message: event.message } };
+    case 'watchdog':
+      return {
+        type: 'watchdog',
+        payload: {
+          action: event.action,
+          code: event.code,
+          reason: event.reason,
+        },
+      };
     case 'completed':
       return { type: 'usage', payload: { ...event.usage } };
     default:
@@ -87,6 +108,7 @@ export class JobRunner {
   private readonly now: () => number;
   private readonly onCompleted?: JobRunnerOptions['onCompleted'];
   private readonly onFailed?: JobRunnerOptions['onFailed'];
+  private readonly onPaused?: JobRunnerOptions['onPaused'];
   private readonly active = new Map<string, Promise<void>>();
   private readonly controllers = new Map<string, AbortController>();
   private timer: NodeJS.Timeout | null = null;
@@ -104,6 +126,7 @@ export class JobRunner {
     this.now = options.now ?? Date.now;
     this.onCompleted = options.onCompleted;
     this.onFailed = options.onFailed;
+    this.onPaused = options.onPaused;
   }
 
   public start(): void {
@@ -261,6 +284,25 @@ export class JobRunner {
     } catch (error) {
       const message =
         error instanceof Error ? error.message : String(error);
+      if (error instanceof JobPauseError) {
+        const paused = await this.store.pause(job.id, this.owner, message);
+        if (paused) {
+          await this.store.appendEvent({
+            jobId: job.id,
+            type: 'paused',
+            payload: {
+              reason: message,
+              ...(error.code ? { code: error.code } : {}),
+            },
+          });
+          this.logger?.info(
+            { jobId: job.id, reason: message },
+            'job paused',
+          );
+          await this.onPaused?.(paused, message);
+        }
+        return;
+      }
       if (controller.signal.aborted) {
         const current = await this.store.get(job.id);
         if (current?.status === 'cancelled') {

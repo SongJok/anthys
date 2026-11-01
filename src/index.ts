@@ -63,10 +63,12 @@ import { DrizzleAgentTaskStore } from './db/taskSchema.js';
 import { TaskService, taskIdFromJob } from './tasks/TaskService.js';
 import { DrizzlePendingActionPersistence } from './db/approvalSchema.js';
 import { DrizzleSilentInvestigationStore } from './db/investigationSchema.js';
-import { JobRunner } from './jobs/JobRunner.js';
+import { JobPauseError, JobRunner } from './jobs/JobRunner.js';
 import { createWorkerRegistry } from './workers/WorkerRegistry.js';
 import { ScopedToolProvider } from './workers/ScopedToolProvider.js';
 import { isWorkerName, type WorkerName } from './types/workers.js';
+import { createWatchdogPolicy } from './watchdog/RunWatchdog.js';
+import type { WatchdogDecision } from './types/watchdog.js';
 import {
   formatJob,
   formatJobList,
@@ -1292,6 +1294,25 @@ async function main(): Promise<void> {
     // 企业 MCP 普遍较慢，单次工具等待默认 300 秒（MCP 自身 480 秒上限之内）
     const toolTimeoutMs =
       envSeconds(process.env.TOOL_TIMEOUT_SECONDS, 300) * 1_000;
+    const watchdogPolicy = createWatchdogPolicy(process.env);
+    const watchdogRunOptions = {
+      watchdog: { policy: watchdogPolicy },
+      onWatchdog: (decision: WatchdogDecision): void => {
+        metrics.inc('agent_watchdog_total', {
+          action: decision.action,
+          code: decision.code,
+        });
+        logger.warn(
+          {
+            action: decision.action,
+            code: decision.code,
+            reason: decision.reason,
+          },
+          'run watchdog intervened',
+        );
+      },
+    };
+    logger.info({ policy: watchdogPolicy }, 'run watchdog configured');
     const engine = new ReActRunner({
       model: chatModel,
       toolProviders,
@@ -1304,6 +1325,7 @@ async function main(): Promise<void> {
       approval: resolveToolApproval,
       toolTimeoutMs,
       ...(planner ? { planner } : {}),
+      ...watchdogRunOptions,
     });
 
     // 静默调查只允许只读工具，执行层过滤保证模型即使被诱导也看不到写操作
@@ -1316,6 +1338,7 @@ async function main(): Promise<void> {
       approval: resolveToolApproval,
       toolTimeoutMs,
       toolFilter: (tool) => tool.risk === 'read',
+      ...watchdogRunOptions,
     });
 
     // 后台 Worker：独立画像、工具白名单与预算；研究/报表走只读，执行单元写操作仍需确认
@@ -1340,6 +1363,7 @@ async function main(): Promise<void> {
           enableNativeReasoning: false,
           approval: resolveToolApproval,
           toolTimeoutMs,
+          ...watchdogRunOptions,
         }),
       };
     }
@@ -1374,6 +1398,7 @@ async function main(): Promise<void> {
         approval: resolveToolApproval,
         toolTimeoutMs,
         ...(planner ? { planner } : {}),
+        ...watchdogRunOptions,
       });
       routedEngines.set(role, runner);
       return runner;
@@ -1615,19 +1640,20 @@ async function main(): Promise<void> {
           signal: context.signal,
           ...(worker ? { worker } : {}),
         });
+        if (result.watchdog?.action === 'pause') {
+          throw new JobPauseError(result.watchdog.reason, result.watchdog.code);
+        }
+        const metadata = {
+          ...(worker ? { worker } : {}),
+          ...(result.workerOutput ? { workerOutput: result.workerOutput } : {}),
+          ...(result.watchdog ? { watchdog: result.watchdog } : {}),
+        };
         return {
           answer: result.answer,
           reasoning: result.reasoning,
           ...(result.model ? { model: result.model } : {}),
           usage: result.usage,
-          ...(result.workerOutput
-            ? {
-                metadata: {
-                  ...(worker ? { worker } : {}),
-                  workerOutput: result.workerOutput,
-                },
-              }
-            : {}),
+          ...(Object.keys(metadata).length > 0 ? { metadata } : {}),
         };
       },
       onCompleted: async (job) => {
@@ -1654,6 +1680,23 @@ async function main(): Promise<void> {
           `后台任务 ${job.id.slice(0, 8)} 执行失败：${error.slice(0, 500)}`,
         );
         await syncTaskForJob(job, 'failed', error);
+      },
+      onPaused: async (job, reason) => {
+        const worker =
+          typeof job.metadata.worker === 'string' ? job.metadata.worker : undefined;
+        metrics.inc('agent_jobs_total', {
+          kind: job.kind,
+          status: 'paused',
+          ...(worker ? { worker } : {}),
+        });
+        const shortId = job.id.slice(0, 8);
+        await notifyJobOwner(
+          job,
+          [
+            `后台任务 ${shortId} 已暂停：${reason.slice(0, 500)}`,
+            `恢复：\`/job-resume ${shortId} 补充要求\`（可附一句约束，例如“只基于已有信息作答”）；终止：\`/job-cancel ${shortId}\`。`,
+          ].join('\n'),
+        );
       },
     });
 
@@ -2231,6 +2274,44 @@ async function main(): Promise<void> {
           );
         }
         return `已取消后台任务 ${job.id.slice(0, 8)}。`;
+      },
+      resumeJob: async (message, id, note) => {
+        const resolved = await resolveJobForMessage(message, id);
+        if ('error' in resolved) return resolved.error;
+        const { job } = resolved;
+        if (
+          job.senderStaffId !== message.senderStaffId &&
+          !configCenter.isAdmin(message.senderStaffId)
+        ) {
+          return '只有任务发起人或管理员可以恢复该任务。';
+        }
+        if (job.status !== 'paused') {
+          return `任务 ${job.id.slice(0, 8)} 当前为「${formatJobStatus(job.status)}」，只有已暂停的任务可以恢复。`;
+        }
+        const trimmedNote = note?.trim().slice(0, 500) || undefined;
+        const prompt = trimmedNote
+          ? `${job.prompt}\n\n恢复时补充要求：${trimmedNote}`
+          : undefined;
+        const resumed = await jobStore.resume(
+          job.id,
+          prompt ? { prompt } : {},
+        );
+        if (!resumed) return '任务状态已变化，请发送 /jobs 重新查看。';
+        metrics.inc('agent_jobs_total', {
+          kind: resumed.kind,
+          status: 'queued',
+        });
+        logger.info(
+          { jobId: job.id, withNote: Boolean(trimmedNote) },
+          'agent job resumed',
+        );
+        return [
+          `已恢复后台任务 ${resumed.id.slice(0, 8)}，将重新排队执行。`,
+          trimmedNote ? `已追加补充要求：${trimmedNote.slice(0, 200)}` : '',
+          '查看进度：`/jobs`；再次取消：`/job-cancel <id>`。',
+        ]
+          .filter(Boolean)
+          .join('\n');
       },
       reply: replyTo,
     });

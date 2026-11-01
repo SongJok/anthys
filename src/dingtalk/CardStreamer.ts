@@ -466,6 +466,23 @@ export class CardStreamer {
         this.flushDirty(false, false);
         return;
       }
+      case 'watchdog': {
+        const label =
+          event.action === 'inject'
+            ? '已注入收敛约束'
+            : event.action === 'degrade'
+              ? '已停用工具并要求收敛'
+              : event.action === 'pause'
+                ? '已暂停执行'
+                : '已停止执行';
+        this.status = `执行保护：${label}`;
+        this.toolLines.push(`- 执行保护（${event.code}）：${event.reason}`);
+        this.dirtyThinking = this.layout !== 'v2';
+        this.dirtyTools = this.layout === 'v2';
+        this.dirtyStatus = true;
+        this.throttler.push(1);
+        return;
+      }
       case 'completed': {
         this.status = event.usage.stopped
           ? `已停止 · ${(event.usage.durationMs / 1000).toFixed(1)}s · ${event.usage.totalTokens} tokens`

@@ -521,6 +521,7 @@ sudo cp deploy/nginx.conf /etc/nginx/conf.d/ && sudo nginx -t && sudo systemctl 
 | `/jobs` | 查看本会话最近的后台任务 |
 | `/job-status <ID>` | 查看后台任务状态、耗时与结果摘要（ID 支持前缀） |
 | `/job-cancel <ID>` | 取消排队或执行中的后台任务（仅发起人或管理员） |
+| `/job-resume <ID> [补充要求]` | 恢复被看门狗暂停的任务，可追加一句约束后重新排队（仅发起人或管理员） |
 
 同一会话（单聊或群聊）严格按到达顺序串行处理：群里多人先后 @ 机器人时，先 @ 的问题先回答完整，后来的问题进入队列等待，不会为了回答下一条而中断未完成的任务。只有 `/stop`（或进程退出）会中止当前回答，并同时清空该会话排队中的问题；排队中的卡片会显示前面还有几条问题。后台任务不占用该会话队列，由独立 JobRunner 按配额领取执行。
 
@@ -532,6 +533,7 @@ sudo cp deploy/nginx.conf /etc/nginx/conf.d/ && sudo nginx -t && sudo systemctl 
 - JobRunner 用 `FOR UPDATE SKIP LOCKED` 原子领取任务，默认每 5 秒轮询、单实例并发 2 个；执行过程写入 `agent_job_events`，可通过 `/job-status` 查看。
 - 任务复用对话会话、记忆与工具链，但不会打断当前对话；结果同时写入会话历史，并通过机器人单聊通知发起人。
 - 失败任务按 `maxAttempts` 自动退避重试；连续失败进入 `failed` 并通知发起人。
+- 命中运行看门狗的硬预算时任务进入 `paused` 并通知发起人；`paused` 任务不会被自动领取，需要 `/job-resume <ID>` 显式恢复。
 - 集群模式下只有持有主锁的实例运行 JobRunner 与定时调度器，避免重复执行。
 
 | 变量 | 默认值 | 说明 |
@@ -568,6 +570,24 @@ sudo cp deploy/nginx.conf /etc/nginx/conf.d/ && sudo nginx -t && sudo systemctl 
 - `/task link` 可把 `url`、`doc`、`issue`、`card`、`message`、`job`、`conversation`、`other` 绑定到线程，同一线程内相同 `kind + ref` 幂等；`/task show` 展示全部链接与订阅者。
 - `/task close` 只关闭线程，不会隐式取消仍在执行的后台任务；任务详情与通知会显示线程 ID，便于回到 `/task show`。
 - 新增 `agent_tasks`、`agent_task_links`、`agent_task_subscriptions` 三张表；升级部署后需执行 `pnpm db:push`。
+
+### 运行看门狗
+
+ReAct 循环内置看门狗（`src/watchdog/RunWatchdog.ts`），只观察不执行工具，专门处理“工具一直在跑、但信息不再增加”的空转，以及预算即将耗尽的风险：
+
+- **检测**：连续多步工具输出没有新内容、相同工具与参数被反复调用、连续多步工具全部失败、Token / 墙钟预算达到告警比例。
+- **分级干预**：先向模型注入收敛约束（要求停止探索或更换查询条件）；多次提醒仍无改善则**降级**——停用工具，要求基于已有信息直接作答；预算达到硬阈值则**升级**——后台任务进入 `paused` 等待人工确认，交互运行直接停止，避免继续消耗。
+- **可恢复**：后台任务暂停后不会自动重跑，发起人可 `/job-resume <ID> 补充要求` 追加约束并重新排队；`/job-cancel <ID>` 直接终止。恢复会从头执行任务，而不是从暂停的那一步继续。
+- **可审计**：干预会发出 `watchdog` 流式事件、写入 `agent_job_events`（类型 `watchdog` / `paused`），并记录指标 `agent_watchdog_total{action,code}`；`/job-status` 会展示暂停原因或降级说明。
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `WATCHDOG_ENABLED` | `true` | 是否启用运行看门狗 |
+| `WATCHDOG_NO_PROGRESS_STEPS` | `3` | 连续多少步没有新信息后开始干预 |
+| `WATCHDOG_MAX_INJECTIONS` | `2` | 降级前最多注入几轮约束 |
+| `WATCHDOG_TOOL_ERROR_STEPS` | `3` | 连续多少步工具全部失败后干预 |
+| `WATCHDOG_WARN_RATIO` | `0.8` | 预算使用比例达到该值时注入收敛约束 |
+| `WATCHDOG_HARD_RATIO` | `0.95` | 预算使用比例达到该值时暂停后台任务 / 停止交互运行 |
 
 ### 个人提醒与工作报告
 

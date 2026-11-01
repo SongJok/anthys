@@ -76,4 +76,43 @@ describe('JobService worker formatting', () => {
     expect(formatJob(plain)).not.toContain('Worker');
     expect(formatJobResultNotice(plain)).not.toContain('Worker');
   });
+
+  it('暂停任务展示暂停原因与恢复指令', () => {
+    const paused = job({
+      kind: 'task',
+      status: 'paused',
+      metadata: {},
+      result: null,
+      error: 'Token 预算接近上限（已使用 95%），主动暂停执行',
+      finishedAt: null,
+    });
+    const detail = formatJob(paused);
+    expect(detail).toContain('已暂停');
+    expect(detail).toContain('暂停原因：');
+    expect(detail).toContain('/job-resume abcdef12');
+    expect(formatJobList([paused])).toContain('/job-resume');
+  });
+
+  it('看门狗降级会写入任务详情与完成通知', () => {
+    const degraded = job({
+      kind: 'task',
+      metadata: {},
+      result: {
+        answer: '基于已有信息给出结论',
+        reasoning: '',
+        usage: { totalTokens: 100, steps: 6, durationMs: 1_000 },
+        metadata: {
+          watchdog: {
+            action: 'degrade',
+            code: 'no-progress',
+            reason: '连续 3 步工具调用没有带来新信息',
+            notice: '已停用工具',
+            escalate: false,
+          },
+        },
+      },
+    });
+    expect(formatJob(degraded)).toContain('执行保护：');
+    expect(formatJobResultNotice(degraded)).toContain('执行保护：');
+  });
 });

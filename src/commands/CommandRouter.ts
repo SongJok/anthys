@@ -52,6 +52,12 @@ export interface CommandRuntime {
   jobStatus(message: InboundMessage, id: string): Promise<string>;
   /** 取消指定后台任务（支持 ID 前缀） */
   cancelJob(message: InboundMessage, id: string): Promise<string>;
+  /** 恢复已暂停的后台任务，可追加补充要求（支持 ID 前缀） */
+  resumeJob(
+    message: InboundMessage,
+    id: string,
+    note?: string,
+  ): Promise<string>;
   reply(message: InboundMessage, text: string): Promise<void>;
 }
 
@@ -88,6 +94,7 @@ const HELP_TEXT = [
   '- `/jobs` 查看本会话最近的后台任务',
   '- `/job-status <id>` 查看任务详情',
   '- `/job-cancel <id>` 取消排队或执行中的任务',
+  '- `/job-resume <id> [补充要求]` 恢复已暂停的任务',
 ].join('\n');
 
 export function parseCommand(text: string): ParsedCommand | null {
@@ -286,6 +293,22 @@ export class CommandRouter {
           return true;
         }
         await runtime.reply(message, await runtime.cancelJob(message, id));
+        return true;
+      }
+      case 'job-resume': {
+        const [idToken, ...rest] = command.args;
+        const id = idToken?.trim();
+        if (!id) {
+          await runtime.reply(
+            message,
+            '用法：`/job-resume <任务 ID> [补充要求]`',
+          );
+          return true;
+        }
+        await runtime.reply(
+          message,
+          await runtime.resumeJob(message, id, rest.join(' ').trim() || undefined),
+        );
         return true;
       }
       case 'feedback': {

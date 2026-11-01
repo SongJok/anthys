@@ -96,6 +96,17 @@ export interface AgentJobStore {
     error: string,
     retryable?: boolean,
   ): Promise<AgentJob | null>;
+  /** 看门狗或人工暂停：保留任务与预算状态，等待 resume 后重新排队 */
+  pause(
+    jobId: string,
+    owner: string,
+    reason: string,
+  ): Promise<AgentJob | null>;
+  /** 恢复已暂停的任务；可追加补充要求后重新执行 */
+  resume(
+    jobId: string,
+    patch?: { prompt?: string },
+  ): Promise<AgentJob | null>;
   cancel(jobId: string): Promise<AgentJob | null>;
   get(jobId: string): Promise<AgentJob | null>;
   list(input?: ListJobsInput): Promise<AgentJob[]>;

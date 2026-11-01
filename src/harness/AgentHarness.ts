@@ -709,24 +709,33 @@ export class AgentHarness {
       }
     }
     const finalAnswer = workerOutput?.summary ?? result.answer;
+    const paused = result.watchdog?.action === 'pause';
 
-    await repository.appendMessage({
-      conversationId: conversation.id,
-      role: 'assistant',
-      content: finalAnswer,
-      reasoning: result.reasoning || null,
-      tokenCount: result.usage.totalTokens,
-      metadata: {
-        messageId: message.messageId,
-        jobId: job.id,
-        jobKind: job.kind,
-        ...(workerName ? { worker: workerName } : {}),
-        ...(workerOutput ? { workerStatus: workerOutput.status } : {}),
-        steps: result.usage.steps,
-        durationMs: result.usage.durationMs,
-        ...(result.model ? { model: result.model } : {}),
-      },
-    });
+    if (!paused) {
+      await repository.appendMessage({
+        conversationId: conversation.id,
+        role: 'assistant',
+        content: finalAnswer,
+        reasoning: result.reasoning || null,
+        tokenCount: result.usage.totalTokens,
+        metadata: {
+          messageId: message.messageId,
+          jobId: job.id,
+          jobKind: job.kind,
+          ...(workerName ? { worker: workerName } : {}),
+          ...(workerOutput ? { workerStatus: workerOutput.status } : {}),
+          steps: result.usage.steps,
+          durationMs: result.usage.durationMs,
+          ...(result.model ? { model: result.model } : {}),
+          ...(result.watchdog
+            ? {
+                watchdog: result.watchdog.action,
+                watchdogCode: result.watchdog.code,
+              }
+            : {}),
+        },
+      });
+    }
 
     this.options.logger?.info(
       {
@@ -735,6 +744,12 @@ export class AgentHarness {
         jobKind: job.kind,
         ...(workerName ? { worker: workerName } : {}),
         ...(workerOutput ? { workerStatus: workerOutput.status } : {}),
+        ...(result.watchdog
+          ? {
+              watchdog: result.watchdog.action,
+              watchdogCode: result.watchdog.code,
+            }
+          : {}),
         steps: result.usage.steps,
         tokens: result.usage.totalTokens,
         durationMs: result.usage.durationMs,
@@ -742,12 +757,14 @@ export class AgentHarness {
       'agent job completed',
     );
 
-    this.scheduleMemoryMaintenance(
-      conversation.id,
-      message,
-      text,
-      finalAnswer,
-    );
+    if (!paused) {
+      this.scheduleMemoryMaintenance(
+        conversation.id,
+        message,
+        text,
+        finalAnswer,
+      );
+    }
     return {
       ...result,
       answer: finalAnswer,

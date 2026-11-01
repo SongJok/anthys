@@ -186,7 +186,8 @@ export class DrizzleAgentJobStore implements AgentJobStore {
         .where(
           or(
             and(
-              inArray(agentJobs.status, ['queued', 'paused']),
+              // paused 任务只能由 /job-resume 显式恢复，避免看门狗暂停后自动重跑
+              eq(agentJobs.status, 'queued'),
               lte(agentJobs.availableAt, now),
               or(
                 isNull(agentJobs.leaseExpiresAt),
@@ -334,6 +335,66 @@ export class DrizzleAgentJobStore implements AgentJobStore {
       )
       .returning();
     return rows[0] ? toJob(rows[0]) : null;
+  }
+
+  public async pause(
+    jobId: string,
+    owner: string,
+    reason: string,
+  ): Promise<AgentJob | null> {
+    const now = new Date();
+    const rows = await this.db
+      .update(agentJobs)
+      .set({
+        status: 'paused',
+        error: reason,
+        leaseOwner: null,
+        leaseExpiresAt: null,
+        finishedAt: now,
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(agentJobs.id, jobId),
+          eq(agentJobs.leaseOwner, owner),
+          eq(agentJobs.status, 'running'),
+        ),
+      )
+      .returning();
+    return rows[0] ? toJob(rows[0]) : null;
+  }
+
+  public async resume(
+    jobId: string,
+    patch: { prompt?: string } = {},
+  ): Promise<AgentJob | null> {
+    const row = await this.db.transaction(async (tx) => {
+      const currentRows = await tx
+        .select()
+        .from(agentJobs)
+        .where(eq(agentJobs.id, jobId))
+        .for('update');
+      const current = currentRows[0];
+      if (!current || current.status !== 'paused') return null;
+      const now = new Date();
+      const updated = await tx
+        .update(agentJobs)
+        .set({
+          status: 'queued',
+          prompt: patch.prompt ?? current.prompt,
+          error: null,
+          leaseOwner: null,
+          leaseExpiresAt: null,
+          startedAt: null,
+          finishedAt: null,
+          availableAt: now,
+          updatedAt: now,
+        })
+        .where(eq(agentJobs.id, jobId))
+        .returning();
+      return updated[0] ?? null;
+    });
+    return row ? toJob(row) : null;
   }
 
   public async get(jobId: string): Promise<AgentJob | null> {

@@ -1,3 +1,9 @@
+import type {
+  WatchdogAction,
+  WatchdogCode,
+  WatchdogOutcome,
+} from './watchdog.js';
+
 /**
  * 1. 统一入站消息契约
  */
@@ -168,6 +174,13 @@ export type AgentStreamEvent =
         durationMs: number;
         stopped?: boolean;
       };
+    }
+  | {
+      type: 'watchdog';
+      action: WatchdogAction;
+      code: WatchdogCode;
+      reason: string;
+      step?: number;
     }
   | { type: 'error'; message: string; retryable?: boolean };
 
@@ -342,6 +355,8 @@ export interface RunResult {
   /** 实际执行本次推理的模型名（模型路由后可能不同于全局配置） */
   model?: string;
   usage: RunUsage;
+  /** 看门狗最后采取的干预；暂停/取消时表示需要人工介入 */
+  watchdog?: WatchdogOutcome;
 }
 
 export interface StoredMessage {

@@ -876,4 +876,115 @@ describe('ReActRunner', () => {
       { type: 'error', message: '上游模型不可用', retryable: true },
     ]);
   });
+
+  it('空转时看门狗注入约束，多次提醒后降级停用工具', async () => {
+    let executions = 0;
+    const provider: IToolProvider = {
+      providerName: 'static',
+      getTools: async () => [
+        {
+          name: 'lookup',
+          description: 'always returns the same data',
+          parametersJsonSchema: { type: 'object', properties: {} },
+          execute: async () => {
+            executions += 1;
+            return '固定结果';
+          },
+        },
+      ],
+    };
+    const model = new ScriptedModel([
+      toolTurn([{ index: 0, id: 'c1', name: 'lookup', args: {} }]),
+      toolTurn([{ index: 0, id: 'c2', name: 'lookup', args: {} }]),
+      toolTurn([{ index: 0, id: 'c3', name: 'lookup', args: {} }]),
+      toolTurn([{ index: 0, id: 'c4', name: 'lookup', args: {} }]),
+      [
+        { contentDelta: '基于已有信息，结论是固定的。' },
+        { finishReason: 'stop', usage: { totalTokens: 5 } },
+      ],
+    ]);
+    const runner = new ReActRunner({
+      model,
+      toolProviders: [provider],
+      policy: { ...policy, maxConsecutiveSameTool: 10 },
+      watchdog: { policy: { noProgressSteps: 2, maxInjections: 1 } },
+    });
+    const events: AgentStreamEvent[] = [];
+
+    const result = await runner.run({
+      messages: userMessages,
+      context: makeContext(),
+      emit: (event) => events.push(event),
+    });
+
+    const watchdogEvents = events.filter(
+      (event): event is Extract<AgentStreamEvent, { type: 'watchdog' }> =>
+        event.type === 'watchdog',
+    );
+    expect(watchdogEvents.map((event) => event.action)).toEqual([
+      'inject',
+      'degrade',
+    ]);
+    expect(result.watchdog?.action).toBe('degrade');
+    expect(executions).toBe(4);
+    const finalRequest = model.requests.at(-1);
+    expect(finalRequest?.tools).toEqual([]);
+    expect(finalRequest?.toolChoice).toBe('none');
+    expect(
+      finalRequest?.messages.some(
+        (message) =>
+          message.role === 'system' && message.content.includes('工具已停用'),
+      ),
+    ).toBe(true);
+    expect(result.answer).toContain('基于已有信息');
+  });
+
+  it('后台任务命中硬预算时暂停，不再发起下一轮', async () => {
+    let executions = 0;
+    const provider: IToolProvider = {
+      providerName: 'static',
+      getTools: async () => [
+        {
+          name: 'lookup',
+          description: 'demo',
+          parametersJsonSchema: { type: 'object', properties: {} },
+          execute: async () => {
+            executions += 1;
+            return 'ok';
+          },
+        },
+      ],
+    };
+    const model = new ScriptedModel([
+      toolTurn([{ index: 0, id: 'c1', name: 'lookup', args: {} }], 100),
+    ]);
+    const runner = new ReActRunner({
+      model,
+      toolProviders: [provider],
+      policy,
+      watchdog: {
+        policy: { warnRatio: 0.8, hardRatio: 0.9 },
+        budget: { maxTotalTokens: 100 },
+      },
+    });
+    const events: AgentStreamEvent[] = [];
+
+    const result = await runner.run({
+      messages: userMessages,
+      context: { ...makeContext(), jobId: 'job-1' },
+      emit: (event) => events.push(event),
+    });
+
+    expect(executions).toBe(1);
+    expect(model.requests).toHaveLength(1);
+    expect(result.watchdog?.action).toBe('pause');
+    expect(result.watchdog?.code).toBe('budget');
+    expect(result.answer).toContain('任务已暂停');
+    expect(
+      events.some(
+        (event) => event.type === 'watchdog' && event.action === 'pause',
+      ),
+    ).toBe(true);
+    expect(events.at(-1)?.type).toBe('completed');
+  });
 });

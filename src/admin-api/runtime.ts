@@ -200,6 +200,15 @@ export class TraceCollector {
       case 'answer_delta':
         this.answerBuffer += event.content;
         return;
+      case 'watchdog':
+        this.flushReasoning();
+        this.steps.push({
+          index: this.steps.length,
+          type: 'narration',
+          content: `执行保护（${event.code}）：${event.reason}`,
+          isError: event.action === 'pause' || event.action === 'cancel',
+        });
+        return;
       case 'completed':
         this.totalTokens = event.usage.totalTokens;
         this.stepCount = event.usage.steps;

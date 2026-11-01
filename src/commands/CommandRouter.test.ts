@@ -87,6 +87,8 @@ function runtime(overrides: Partial<CommandRuntime> = {}): {
     listJobs: async () => '本会话暂无后台任务。',
     jobStatus: async (_msg, id) => `任务 ${id} 详情。`,
     cancelJob: async (_msg, id) => `已取消后台任务 ${id}。`,
+    resumeJob: async (_msg, id, note) =>
+      note ? `已恢复后台任务 ${id}：${note}` : `已恢复后台任务 ${id}。`,
     reply: async (_message, text) => {
       replies.push(text);
     },
@@ -216,6 +218,25 @@ describe('CommandRouter', () => {
 
     await router.tryHandle(message({ text: '/job-cancel 1234abcd' }));
     expect(replies[4]).toContain('已取消');
+  });
+
+  it('/job-resume 转发任务 ID 与补充要求', async () => {
+    const resumed: unknown[] = [];
+    const { router, replies } = runtime({
+      resumeJob: async (msg, id, note) => {
+        resumed.push([msg.messageId, id, note]);
+        return note ? `已恢复 ${id}：${note}` : `已恢复 ${id}。`;
+      },
+    });
+    await router.tryHandle(message({ text: '/job-resume' }));
+    expect(replies[0]).toContain('用法');
+    await router.tryHandle(
+      message({ text: '/job-resume 1234abcd 只基于已有信息作答' }),
+    );
+    expect(resumed).toEqual([
+      ['msg-1', '1234abcd', '只基于已有信息作答'],
+    ]);
+    expect(replies[1]).toContain('已恢复 1234abcd');
   });
 
   it('/worker 校验 Worker 名称并转发需求', async () => {

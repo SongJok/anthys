@@ -27,6 +27,17 @@ import {
   type Planner,
 } from './Planner.js';
 import { extractCitations } from './citations.js';
+import {
+  RunWatchdog,
+  contentHash,
+  toWatchdogOutcome,
+  toolSignature,
+} from '../watchdog/RunWatchdog.js';
+import type {
+  RunWatchdogPolicy,
+  WatchdogDecision,
+  WatchdogOutcome,
+} from '../types/watchdog.js';
 
 const FINAL_TURN_GRACE_MS = 30_000;
 const TOOL_OUTPUT_LIMIT = 4_000;
@@ -78,6 +89,18 @@ export interface ReActRunnerOptions {
   ) => boolean;
   /** 丢弃 / 截断技能指令时的告警回调，用于审计与排查 */
   instructionWarning?: (message: string) => void;
+  /** 运行看门狗：空转/重复/预算风险干预；后台任务按 job 模式暂停 */
+  watchdog?: {
+    enabled?: boolean;
+    policy?: Partial<RunWatchdogPolicy>;
+    /** 覆盖看门狗的预算口径；缺省沿用本次运行策略 */
+    budget?: {
+      maxWallTimeMs?: number;
+      maxTotalTokens?: number;
+    };
+  };
+  /** 每次看门狗介入时回调，用于指标与审计 */
+  onWatchdog?: (decision: WatchdogDecision) => void;
 }
 
 interface TurnResult {
@@ -251,6 +274,22 @@ export class ReActRunner implements AgentEngine {
     const guard = new DynamicLoopGuard(policy, { now: this.now });
     const maxIterations = Math.max(1, policy.maxIterations ?? 40);
     const maxParallelTools = Math.max(1, policy.maxParallelTools ?? 4);
+    const watchdogOption = this.options.watchdog;
+    const watchdog =
+      watchdogOption && watchdogOption.enabled !== false
+        ? new RunWatchdog({
+            mode: input.context.jobId ? 'job' : 'interactive',
+            budget: {
+              maxWallTimeMs:
+                watchdogOption.budget?.maxWallTimeMs ?? policy.maxWallTimeMs,
+              maxTotalTokens:
+                watchdogOption.budget?.maxTotalTokens ?? policy.maxTotalTokens,
+            },
+            ...(watchdogOption.policy
+              ? { policy: watchdogOption.policy }
+              : {}),
+          })
+        : null;
 
     const runController = new AbortController();
     const forwardAbort = () => runController.abort();
@@ -272,6 +311,8 @@ export class ReActRunner implements AgentEngine {
     let refusal: string | undefined;
     let skipFinalTurn = false;
     let stopped = false;
+    let toolsDisabled = false;
+    let watchdogOutcome: WatchdogOutcome | undefined;
     const citations: StreamCitation[] = [];
     const citationKeys = new Set<string>();
     /** 已成功的工具原始输出，用于识别“同一结果被反复判为无效”而空转 */
@@ -298,6 +339,37 @@ export class ReActRunner implements AgentEngine {
           fresh.push(citation);
         }
         if (fresh.length > 0) emit({ type: 'citation', citations: fresh });
+      };
+      const applyWatchdog = (decision: WatchdogDecision | null): boolean => {
+        if (!decision) return false;
+        watchdogOutcome = toWatchdogOutcome(decision);
+        emit({
+          type: 'watchdog',
+          action: decision.action,
+          code: decision.code,
+          reason: decision.reason,
+          step: steps,
+        });
+        this.options.onWatchdog?.(decision);
+        if (decision.action === 'inject') {
+          pushSystemOnce(messages, `[执行监督] ${decision.guidance}`);
+          return false;
+        }
+        if (decision.action === 'degrade') {
+          toolsDisabled = true;
+          pushSystemOnce(messages, `[执行监督] ${decision.guidance}`);
+          return false;
+        }
+        return true;
+      };
+      const stopForWatchdog = (): void => {
+        const notice = watchdogOutcome?.notice ?? '';
+        if (notice) {
+          answer += notice;
+          emit({ type: 'answer_delta', content: notice, final: true });
+        }
+        skipFinalTurn = true;
+        stopped = true;
       };
 
       let planItems: PlanItem[] | null = null;
@@ -340,12 +412,23 @@ export class ReActRunner implements AgentEngine {
           skipFinalTurn = true;
           break;
         }
+        // 在发起下一轮模型调用前检查预算，保留已完成的最终回答；
+        // 降级后允许一次无工具收尾，避免在最后一步丢掉结论。
+        if (
+          !toolsDisabled &&
+          applyWatchdog(
+            watchdog?.observeBudget(this.now() - startedAt, totalTokens) ?? null,
+          )
+        ) {
+          stopForWatchdog();
+          break;
+        }
 
         steps += 1;
         const turn = await this.streamTurn({
           messages,
-          tools: toolSchemas,
-          toolChoice: 'auto',
+          tools: toolsDisabled ? [] : toolSchemas,
+          toolChoice: toolsDisabled ? 'none' : 'auto',
           signal: runController.signal,
           deadlineAt,
           emit,
@@ -481,6 +564,31 @@ export class ReActRunner implements AgentEngine {
           }
           break;
         }
+        const watchdogDecision =
+          watchdog?.observeToolStep({
+            elapsedMs: this.now() - startedAt,
+            tokens: totalTokens,
+            tools: executions.map((execution, index) => {
+              const call = turn.toolCalls[index];
+              return {
+                name: execution.name,
+                signature: toolSignature(
+                  call?.function.name ?? execution.name,
+                  call?.function.arguments ?? '{}',
+                ),
+                contentHash: contentHash(execution.content),
+                isError: execution.isError,
+                citationKeys: (execution.citations ?? []).map(
+                  (citation) =>
+                    citation.url ?? `${citation.source ?? ''}|${citation.title}`,
+                ),
+              };
+            }),
+          }) ?? null;
+        if (applyWatchdog(watchdogDecision)) {
+          stopForWatchdog();
+          break;
+        }
         for (const warning of warnings) {
           pushSystemOnce(messages, warning);
         }
@@ -549,6 +657,7 @@ export class ReActRunner implements AgentEngine {
         citations,
         model: this.options.model.modelName,
         usage,
+        ...(watchdogOutcome ? { watchdog: watchdogOutcome } : {}),
       };
     } catch (error) {
       if (runController.signal.aborted) {
@@ -570,6 +679,7 @@ export class ReActRunner implements AgentEngine {
           citations,
           model: this.options.model.modelName,
           usage,
+          ...(watchdogOutcome ? { watchdog: watchdogOutcome } : {}),
         };
       }
       const message = error instanceof Error ? error.message : String(error);

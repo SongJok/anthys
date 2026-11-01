@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { JobRunner } from './JobRunner.js';
+import { JobPauseError, JobRunner } from './JobRunner.js';
 import type {
   AgentJob,
   AgentJobEvent,
@@ -115,6 +115,39 @@ class MemoryJobStore implements AgentJobStore {
       job.status = 'cancelled';
       return { ...job };
     }
+    return { ...job };
+  }
+
+  async pause(
+    jobId: string,
+    owner: string,
+    reason: string,
+  ): Promise<AgentJob | null> {
+    const job = this.jobs.get(jobId);
+    if (!job || job.leaseOwner !== owner || job.status !== 'running') {
+      return null;
+    }
+    job.status = 'paused';
+    job.error = reason;
+    job.leaseOwner = null;
+    job.leaseExpiresAt = null;
+    job.finishedAt = Date.now();
+    return { ...job };
+  }
+
+  async resume(
+    jobId: string,
+    patch: { prompt?: string } = {},
+  ): Promise<AgentJob | null> {
+    const job = this.jobs.get(jobId);
+    if (!job || job.status !== 'paused') return null;
+    job.status = 'queued';
+    if (patch.prompt) job.prompt = patch.prompt;
+    job.error = null;
+    job.leaseOwner = null;
+    job.leaseExpiresAt = null;
+    job.startedAt = null;
+    job.finishedAt = null;
     return { ...job };
   }
 
@@ -277,6 +310,55 @@ describe('JobRunner', () => {
     const stored = await store.get(job.id);
     expect(stored?.status).toBe('cancelled');
     expect(stored?.result).toBeNull();
+    await runner.stop();
+  });
+
+  it('看门狗暂停后保留任务，resume 后重新执行', async () => {
+    const store = new MemoryJobStore();
+    const job = await store.enqueue(sampleInput);
+    const pausedJobs: AgentJob[] = [];
+    let paused: (() => void) | undefined;
+    const pausedDone = new Promise<void>((resolve) => {
+      paused = resolve;
+    });
+    let executions = 0;
+    const runner = new JobRunner({
+      store,
+      intervalMs: 60_000,
+      now: () => 1_000,
+      execute: async () => {
+        executions += 1;
+        if (executions === 1) {
+          throw new JobPauseError('预算使用率达到 95%', 'budget');
+        }
+        return sampleResult;
+      },
+      onPaused: async (pausedJob, reason) => {
+        pausedJobs.push(pausedJob);
+        expect(reason).toBe('预算使用率达到 95%');
+        paused?.();
+      },
+    });
+
+    await runner.start();
+    await pausedDone;
+
+    const stored = await store.get(job.id);
+    expect(stored?.status).toBe('paused');
+    expect(stored?.error).toBe('预算使用率达到 95%');
+    expect(pausedJobs[0]?.id).toBe(job.id);
+    expect(
+      (await store.listEvents(job.id)).map((event) => event.type),
+    ).toEqual(['started', 'paused']);
+
+    const resumed = await store.resume(job.id, { prompt: '只输出结论' });
+    expect(resumed?.status).toBe('queued');
+    expect(resumed?.prompt).toBe('只输出结论');
+    await runner.tick();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(executions).toBe(2);
+    expect((await store.get(job.id))?.status).toBe('succeeded');
+
     await runner.stop();
   });
 });
