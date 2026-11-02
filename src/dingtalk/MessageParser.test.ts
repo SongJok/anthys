@@ -166,10 +166,44 @@ describe('parseStreamMessage', () => {
     expect(parseStreamMessage('not-an-object')).toBeNull();
   });
 
-  it('只有 @ 没有正文的消息返回 null', () => {
+  it('只有 @ 没有正文的消息标记为 mentionOnly', () => {
+    const message = parseStreamMessage(
+      payload({ isInAtList: true, text: { content: '@小钉   ' } }),
+    );
+    expect(message).toMatchObject({
+      text: '',
+      isAtBot: true,
+      mentionOnly: true,
+    });
+  });
+
+  it('富文本只有 @ 没有正文时同样标记为 mentionOnly', () => {
+    const message = parseStreamMessage(
+      payload({
+        msgtype: 'richText',
+        isInAtList: true,
+        content: { richText: [{ text: '@小钉 ' }] },
+      }),
+    );
+    expect(message).toMatchObject({ text: '', mentionOnly: true });
+  });
+
+  it('纯空白正文不会因为没有 @ 前缀而被放行', () => {
     expect(
-      parseStreamMessage(payload({ text: { content: '@小钉   ' } })),
+      parseStreamMessage(payload({ text: { content: '   ' } })),
     ).toBeNull();
+    expect(
+      parseStreamMessage(
+        payload({
+          msgtype: 'richText',
+          content: { richText: [{ text: '  ' }] },
+        }),
+      ),
+    ).toBeNull();
+  });
+
+  it('普通消息不携带 mentionOnly 标记', () => {
+    expect(parseStreamMessage(payload())).not.toHaveProperty('mentionOnly');
   });
 
   it('createAt 缺失时使用注入的时钟', () => {

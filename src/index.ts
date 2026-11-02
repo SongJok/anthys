@@ -39,6 +39,10 @@ import { ArtifactToolProvider } from './tools/artifacts/ArtifactToolProvider.js'
 import { WorkspaceReadToolProvider } from './tools/workspace/WorkspaceReadToolProvider.js';
 import type { CardActionEvent } from './dingtalk/CardActions.js';
 import {
+  findMentionOnlyContext,
+  MENTION_ONLY_FALLBACK_REPLY,
+} from './dingtalk/MentionOnlyMessage.js';
+import {
   AgentHarness,
   conversationKeyFor,
   conversationTitleFor,
@@ -2633,6 +2637,39 @@ async function main(): Promise<void> {
     }
 
     async function handleIncoming(message: InboundMessage): Promise<void> {
+      if (message.mentionOnly) {
+        const context = findMentionOnlyContext(message, transcriptBuffer);
+        if (!context) {
+          logger.info(
+            {
+              messageId: message.messageId,
+              conversationId: message.conversationId,
+              senderStaffId: message.senderStaffId,
+            },
+            'mention-only message without recent context, replying fallback',
+          );
+          await replyTo(message, MENTION_ONLY_FALLBACK_REPLY);
+          return;
+        }
+        logger.info(
+          {
+            messageId: message.messageId,
+            conversationId: message.conversationId,
+            mergedFromMessageId: context.messageId,
+          },
+          'mention-only message merged with recent context',
+        );
+        message = {
+          ...message,
+          text: context.text,
+          mentionOnly: false,
+          rawPayload: {
+            ...message.rawPayload,
+            mentionOnly: true,
+            mergedFromMessageId: context.messageId,
+          },
+        };
+      }
       if (await commandRouter.tryHandle(message)) return;
       // 先入队再解析附件：同一会话按到达顺序执行，慢附件不能把后一条问题插到前面
       const run = runControl.begin(message);

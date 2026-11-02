@@ -127,7 +127,9 @@ export class GroupTranscriptBuffer {
     options: FormattedTranscriptOptions = {},
   ): string {
     const entries = this.recent(conversationId, options.limit).filter(
-      (entry) => entry.messageId !== options.excludeMessageId,
+      (entry) =>
+        entry.messageId !== options.excludeMessageId &&
+        entry.text.trim() !== '',
     );
     return entries
       .map(

@@ -38,6 +38,10 @@ export function stripLeadingMentions(text: string): string {
   return text.replace(/^(?:\s*@[^\s@]+\s*)+/, '').trim();
 }
 
+function hasLeadingMention(text: string): boolean {
+  return /^(?:\s*@[^\s@]+\s*)+/.test(text);
+}
+
 function detectAtBot(
   payload: RawRobotPayload,
   conversationType: '1' | '2',
@@ -115,6 +119,7 @@ export function parseStreamMessage(
   if (!messageId || !conversationId || !senderStaffId) return null;
 
   let text = '';
+  let mentionOnly = false;
   const attachments: InboundAttachment[] = [];
   if (payload.msgtype === 'text') {
     const textBlock = payload.text;
@@ -124,7 +129,10 @@ export function parseStreamMessage(
     );
     if (!content) return null;
     text = stripLeadingMentions(content);
-    if (!text) return null;
+    if (!text) {
+      if (!hasLeadingMention(content)) return null;
+      mentionOnly = true;
+    }
   } else if (payload.msgtype === 'richText') {
     const content = payload.content;
     if (content === null || typeof content !== 'object') return null;
@@ -142,8 +150,12 @@ export function parseStreamMessage(
         if (part) textParts.push(part);
       }
     }
-    text = stripLeadingMentions(textParts.join(''));
-    if (!text && attachments.length === 0) return null;
+    const rawText = textParts.join('');
+    text = stripLeadingMentions(rawText);
+    if (!text && attachments.length === 0) {
+      if (!hasLeadingMention(rawText)) return null;
+      mentionOnly = true;
+    }
   } else if (
     typeof payload.msgtype === 'string' &&
     (ATTACHMENT_TYPES as readonly string[]).includes(payload.msgtype)
@@ -174,6 +186,7 @@ export function parseStreamMessage(
     senderNick: asNonEmptyString(payload.senderNick) ?? senderStaffId,
     isAtBot: detectAtBot(payload, conversationType),
     text,
+    ...(mentionOnly ? { mentionOnly: true } : {}),
     ...(attachments.length > 0 ? { attachments } : {}),
     ...(asNonEmptyString(payload.conversationTitle)
       ? { conversationTitle: asNonEmptyString(payload.conversationTitle)! }

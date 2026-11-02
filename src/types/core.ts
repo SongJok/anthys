@@ -24,6 +24,8 @@ export interface InboundMessage {
   senderNick: string;
   isAtBot: boolean;
   text: string;
+  /** 正文只有 @ 前缀、没有任何内容；交由调用方合并上文或兜底回应 */
+  mentionOnly?: boolean;
   /**
    * 卡片投递使用的 staffId；缺省回退 senderStaffId。
    * DWS 群消息只有 openDingTalkId，不能投递卡片，置空后走群维度投递。

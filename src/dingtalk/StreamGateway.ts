@@ -201,7 +201,10 @@ export class StreamGateway {
 
     const message = parseStreamMessage(payload, this.now);
     if (!message) {
-      this.options.logger?.info({ messageId }, 'non-text stream message ignored');
+      this.options.logger?.info(
+        { messageId },
+        'stream message ignored, unsupported type or empty payload',
+      );
       return;
     }
     if (message.conversationType === '2') {
@@ -210,6 +213,16 @@ export class StreamGateway {
         await this.dispatchBystander(message);
         return;
       }
+    }
+    if (message.mentionOnly) {
+      this.options.logger?.info(
+        {
+          messageId,
+          conversationId: message.conversationId,
+          senderStaffId: message.senderStaffId,
+        },
+        'mention-only message accepted, recent context will be resolved downstream',
+      );
     }
 
     try {

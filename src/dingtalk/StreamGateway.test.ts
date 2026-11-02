@@ -169,6 +169,28 @@ describe('StreamGateway', () => {
     });
   });
 
+  it('群聊只有 @ 没有正文的消息仍交给主处理链路', async () => {
+    const client = new FakeClient();
+    const handler = vi.fn(async (_message: InboundMessage) => undefined);
+    const gateway = new StreamGateway({ client, handler });
+
+    await gateway.dispatch(
+      payload({
+        conversationType: '2',
+        isInAtList: true,
+        text: { content: '@小钉 ' },
+      }),
+      'msg-group-mention-only',
+    );
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(handler.mock.calls[0]?.[0]).toMatchObject({
+      conversationType: '2',
+      isAtBot: true,
+      text: '',
+      mentionOnly: true,
+    });
+  });
+
   it('相同 messageId 只处理一次（钉钉重推去重）', async () => {
     const client = new FakeClient();
     const handler = vi.fn(async () => undefined);
