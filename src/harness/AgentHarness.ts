@@ -907,13 +907,14 @@ export class AgentHarness {
           message.conversationId,
         );
       } catch (error) {
+        userGroupSharing = 'off';
         this.options.logger?.warn(
           {
             conversationId: message.conversationId,
             personKey: input.personKey,
             error: error instanceof Error ? error.message : String(error),
           },
-          'memory consent resolution failed, keeping default shareable mode',
+          'memory consent resolution failed, disabling group memory sharing',
         );
       }
     }

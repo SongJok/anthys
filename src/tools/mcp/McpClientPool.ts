@@ -493,10 +493,23 @@ export class McpClientPool {
     args: Record<string, unknown>,
     options: McpToolCallOptions,
   ): Promise<McpToolCallResult> {
-    const attempt = async (): Promise<McpToolCallResult> => {
+    try {
       await this.ensureConnected(state.config.id);
-      const client = state.client;
-      if (!client) throw new Error(`MCP Server "${state.config.id}" 未连接`);
+    } catch (error) {
+      if (this.closed) throw error;
+      state.lastError = errorMessage(error);
+      state.connected = false;
+      this.logger?.warn?.(
+        { serverId: state.config.id, tool: tool.originalName, error: state.lastError },
+        'mcp tool preflight connection failed',
+      );
+      await this.disconnect(state);
+      throw error;
+    }
+
+    const client = state.client;
+    if (!client) throw new Error(`MCP Server "${state.config.id}" 未连接`);
+    try {
       const result = await client.callTool(
         { name: tool.originalName, arguments: args },
         undefined,
@@ -520,20 +533,16 @@ export class McpClientPool {
         isError: record.isError === true,
         raw: result,
       };
-    };
-
-    try {
-      return await attempt();
     } catch (error) {
       if (this.closed) throw error;
       state.lastError = errorMessage(error);
       state.connected = false;
       this.logger?.warn?.(
         { serverId: state.config.id, tool: tool.originalName, error: state.lastError },
-        'mcp tool call failed, reconnecting',
+        'mcp tool call failed; not replaying an in-flight request',
       );
       await this.disconnect(state);
-      return attempt();
+      throw error;
     }
   }
 

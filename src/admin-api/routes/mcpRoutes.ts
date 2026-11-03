@@ -8,6 +8,11 @@ import type {
   McpToolAccessPolicy,
 } from '../../types/admin-and-console.js';
 import {
+  MCP_SECRET_MASK,
+  maskMcpServers as maskServers,
+  restoreMaskedMcpEnv as restoreMaskedEnv,
+} from '../../config/mcpSecrets.js';
+import {
   readBoolean,
   readJsonBody,
   readNumber,
@@ -144,44 +149,7 @@ function serverSnapshot(servers: readonly EnterpriseMcpServerConfig[]) {
   }));
 }
 
-/** 管理端读取时用占位符替代真实密钥；回传该占位符表示保持原值 */
-export const MCP_SECRET_MASK = '********';
-
-function maskServers(
-  servers: readonly EnterpriseMcpServerConfig[],
-): EnterpriseMcpServerConfig[] {
-  return servers.map((server) =>
-    server.envOrHeaders
-      ? {
-          ...server,
-          envOrHeaders: Object.fromEntries(
-            Object.keys(server.envOrHeaders).map((key) => [key, MCP_SECRET_MASK]),
-          ),
-        }
-      : { ...server },
-  );
-}
-
-function restoreMaskedEnv(
-  server: EnterpriseMcpServerConfig,
-  existing: EnterpriseMcpServerConfig,
-): EnterpriseMcpServerConfig {
-  if (!server.envOrHeaders) return server;
-  const merged: Record<string, string> = {};
-  for (const [key, value] of Object.entries(server.envOrHeaders)) {
-    if (value === MCP_SECRET_MASK) {
-      const previous = existing.envOrHeaders?.[key];
-      if (previous !== undefined) merged[key] = previous;
-      continue;
-    }
-    merged[key] = value;
-  }
-  const next = { ...server };
-  delete next.envOrHeaders;
-  return Object.keys(merged).length > 0
-    ? { ...next, envOrHeaders: merged }
-    : next;
-}
+export { MCP_SECRET_MASK };
 
 /** 企业 MCP 管理路由：增删改查、连通性测试与工具级访问策略 */
 export function createMcpRoutes(deps: McpRouteDeps): Hono {

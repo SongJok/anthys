@@ -413,7 +413,7 @@ describe('AgentHarness', () => {
     });
   });
 
-  it('授权解析失败时群聊继续执行，按默认共享档位召回', async () => {
+  it('授权解析失败时群聊继续执行，但关闭个人记忆共享', async () => {
     const calls: { messages: unknown[] }[] = [];
     const memoryInputs: Array<
       Parameters<HierarchicalMemoryManager['assemble']>[0]
@@ -467,7 +467,7 @@ describe('AgentHarness', () => {
     await harness.flushMemoryTasks();
     expect(result?.answer).toBe('现在是十点。');
     expect(calls).toHaveLength(1);
-    expect(memoryInputs.at(-1)?.userGroupSharing).toBeUndefined();
+    expect(memoryInputs.at(-1)?.userGroupSharing).toBe('off');
   });
 
   it('后台任务复用会话链路执行并带任务归因', async () => {

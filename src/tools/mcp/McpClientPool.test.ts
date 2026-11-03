@@ -34,6 +34,7 @@ interface FakePartner {
   clientTransport: Transport;
   server: Server;
   callTool: () => number;
+  unstableCalls: () => number;
   listTools: () => number;
 }
 
@@ -45,6 +46,7 @@ async function fakePartner(serverId: string): Promise<FakePartner> {
   );
   let listCount = 0;
   let callCount = 0;
+  let unstableCount = 0;
   const tools =
     serverId === 'prod_log'
       ? [
@@ -60,6 +62,11 @@ async function fakePartner(serverId: string): Promise<FakePartner> {
           {
             name: 'dump_orders',
             description: '导出订单样本',
+            inputSchema: { type: 'object' as const, properties: {} },
+          },
+          {
+            name: 'unstable_write',
+            description: '执行后丢失响应的非幂等写操作',
             inputSchema: { type: 'object' as const, properties: {} },
           },
         ]
@@ -107,6 +114,10 @@ async function fakePartner(serverId: string): Promise<FakePartner> {
         content: [{ type: 'text' as const, text: JSON.stringify(LONG_ORDERS) }],
       };
     }
+    if (name === 'unstable_write') {
+      unstableCount += 1;
+      throw new Error('response lost after write');
+    }
     if (name === 'blame_file') {
       return {
         content: [
@@ -133,6 +144,7 @@ async function fakePartner(serverId: string): Promise<FakePartner> {
     clientTransport,
     server,
     callTool: () => callCount,
+    unstableCalls: () => unstableCount,
     listTools: () => listCount,
   };
 }
@@ -225,12 +237,13 @@ describe('McpClientPool', () => {
       'mcp__git_code__blame_file',
       'mcp__prod_log__dump_orders',
       'mcp__prod_log__query_errors',
+      'mcp__prod_log__unstable_write',
     ]);
     expect(factoryCalls).toEqual(['prod_log', 'git_code']);
 
     const listCallsBefore = partners.map((partner) => partner.listTools());
     const cached = await pool.listTools();
-    expect(cached).toHaveLength(3);
+    expect(cached).toHaveLength(4);
     expect(partners.map((partner) => partner.listTools())).toEqual(
       listCallsBefore,
     );
@@ -260,6 +273,22 @@ describe('McpClientPool', () => {
       file: 'OrderService.java',
     });
     expect(blame.text).toContain('alice');
+  });
+
+  it('写调用在服务端执行后丢失响应时不自动重放', async () => {
+    const { factory, partners } = inMemoryFactory();
+    const pool = new McpClientPool({
+      servers: [config('prod_log')],
+      transportFactory: factory,
+    });
+    cleanup.push(() => pool.close());
+    await pool.init();
+    await pool.listTools();
+
+    await expect(
+      pool.callTool('mcp__prod_log__unstable_write', {}),
+    ).rejects.toThrow('response lost');
+    expect(partners[0]?.unstableCalls()).toBe(1);
   });
 
   it('工具级错误以 isError 返回而不是断开连接', async () => {

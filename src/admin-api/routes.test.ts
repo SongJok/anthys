@@ -326,6 +326,7 @@ const LOG_SERVER: EnterpriseMcpServerConfig = {
   domain: 'log',
   transport: 'streamable-http',
   endpointOrCommand: 'https://logs.example.com/mcp',
+  envOrHeaders: { authorization: 'Bearer logs-secret' },
   timeoutMs: 5_000,
   maxResultChars: 8_000,
   enabled: true,
@@ -942,6 +943,12 @@ describe('群策略、轨迹与审计大盘', () => {
     expect(dashBody.today.totalTokens).toBe(5_000);
     expect(dashBody.mcpServers).toHaveLength(1);
     expect(dashBody.system.llm.apiKey).not.toContain('sk-env-secret-key');
+    expect(
+      dashBody.system.mcpServers.find(
+        (server: { id: string }) => server.id === 'logs',
+      ).envOrHeaders.authorization,
+    ).toBe(MCP_SECRET_MASK);
+    expect(JSON.stringify(dashBody.system)).not.toContain('logs-secret');
   });
 });
 

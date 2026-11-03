@@ -25,6 +25,7 @@ import type {
   ModelRole,
 } from '../types/core.js';
 import type { EnterpriseMcpServerConfig } from '../types/mcp-and-sandbox.js';
+import { maskMcpServers } from './mcpSecrets.js';
 import {
   DEFAULT_EXTENSIONS_CONFIG,
   type ExtensionsConfig,
@@ -220,7 +221,7 @@ export class DynamicConfigCenter
         apiKey: maskSecret(this.state.llm.apiKey),
       },
       loopPolicy: clone(this.state.loopPolicy),
-      mcpServers: clone(this.state.mcpServers),
+      mcpServers: maskMcpServers(this.state.mcpServers),
       defaultBystanderPolicy: clone(this.state.defaultBystanderPolicy),
       mcpAccessPolicies: clone(this.state.mcpAccessPolicies),
       extensions: clone(this.state.extensions),

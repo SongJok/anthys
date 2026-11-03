@@ -45,19 +45,61 @@ export class PersonalAssistantToolProvider implements IToolProvider {
 
   public async getTools(ctx: ExecutionContext): Promise<ToolDefinition[]> {
     if (ctx.conversationType !== '1') return [];
-    return [this.reminderTool(), this.reportTool()];
+    return [
+      this.reminderReadTool(),
+      this.reminderManageTool(),
+      this.reportReadTool(),
+      this.reportManageTool(),
+    ];
   }
 
-  private reminderTool(): ToolDefinition {
+  private reminderReadTool(): ToolDefinition {
     return {
       name: 'personal_reminder',
       description:
-        '管理当前用户的钉钉个人提醒（仅单聊）。action=create 时用 when 描述时间（如“25分钟后”“明天9点”“2026-11-01 09:00”），text 写提醒内容；action=list 查看；action=cancel 按 id 取消。提醒到点由机器人单聊发送。',
+        '查看当前用户的钉钉个人提醒（仅单聊）。action=list 列出提醒；创建和取消请使用 personal_reminder_manage。',
       risk: 'read',
       parametersJsonSchema: {
         type: 'object',
         properties: {
-          action: { type: 'string', enum: ['create', 'list', 'cancel'] },
+          action: { type: 'string', enum: ['list'] },
+        },
+        required: ['action'],
+        additionalProperties: false,
+      },
+      execute: async (args, execCtx) => {
+        if (execCtx.conversationType !== '1') {
+          throw new Error('个人提醒仅在单聊中可用');
+        }
+        const action = requireString(args, 'action', '操作');
+        if (action !== 'list') {
+          throw new Error(`不支持的 action：${action}`);
+        }
+        const tasks = await this.service.listOwn(execCtx.senderStaffId);
+        return JSON.stringify({
+          ok: true,
+          reminders: tasks
+            .filter((task) => task.kind === 'reminder')
+            .map((task) => ({
+              id: task.id,
+              title: task.title,
+              at: task.nextRunAt,
+            })),
+        });
+      },
+    };
+  }
+
+  private reminderManageTool(): ToolDefinition {
+    return {
+      name: 'personal_reminder_manage',
+      description:
+        '创建或取消当前用户的钉钉个人提醒（仅单聊）。action=create 时用 when 描述时间（如“25分钟后”“明天9点”“2026-11-01 09:00”），text 写提醒内容；action=cancel 按 id 取消。提醒到点由机器人单聊发送。',
+      risk: 'write',
+      parametersJsonSchema: {
+        type: 'object',
+        properties: {
+          action: { type: 'string', enum: ['create', 'cancel'] },
           when: {
             type: 'string',
             description: '提醒时间描述，create 时必填，如“25分钟后”“明天9点”',
@@ -91,19 +133,6 @@ export class PersonalAssistantToolProvider implements IToolProvider {
             message: `已设置提醒：${task.title}`,
           });
         }
-        if (action === 'list') {
-          const tasks = await this.service.listOwn(execCtx.senderStaffId);
-          return JSON.stringify({
-            ok: true,
-            reminders: tasks
-              .filter((task) => task.kind === 'reminder')
-              .map((task) => ({
-                id: task.id,
-                title: task.title,
-                at: task.nextRunAt,
-              })),
-          });
-        }
         if (action === 'cancel') {
           const id = requireString(args, 'id', '提醒 ID');
           const task = await this.service.cancelOwn(execCtx.senderStaffId, id);
@@ -117,19 +146,67 @@ export class PersonalAssistantToolProvider implements IToolProvider {
     };
   }
 
-  private reportTool(): ToolDefinition {
+  private reportReadTool(): ToolDefinition {
     return {
       name: 'personal_report',
       description:
-        '管理当前用户的日/周/月工作简报（仅单聊）。action=create 需要 frequency 与 time，可选 weekday（1-7，周日用 7）或 dayOfMonth（1-28）；action=preview 立即用钉钉日程/待办/审批生成一份；action=list 查看；action=cancel 取消。报告为确定性汇总，不调用大模型。',
+        '查看当前用户的日/周/月工作简报（仅单聊）。action=preview 立即用钉钉日程/待办/审批生成一份；action=list 查看已配置报告；创建和取消请使用 personal_report_manage。报告为确定性汇总，不调用大模型。',
       risk: 'read',
       parametersJsonSchema: {
         type: 'object',
         properties: {
-          action: {
+          action: { type: 'string', enum: ['list', 'preview'] },
+          period: {
             type: 'string',
-            enum: ['create', 'list', 'cancel', 'preview'],
+            enum: ['daily', 'weekly', 'monthly'],
+            description: 'preview 的报告周期，默认 daily',
           },
+        },
+        required: ['action'],
+        additionalProperties: false,
+      },
+      execute: async (args, execCtx) => {
+        if (execCtx.conversationType !== '1') {
+          throw new Error('个人报告仅在单聊中可用');
+        }
+        const action = requireString(args, 'action', '操作');
+        if (action === 'list') {
+          const tasks = await this.service.listOwn(execCtx.senderStaffId);
+          return JSON.stringify({
+            ok: true,
+            reports: tasks
+              .filter((task) => task.kind !== 'reminder')
+              .map((task) => ({
+                id: task.id,
+                title: task.title,
+                cron: task.cron,
+                nextRunAt: task.nextRunAt,
+              })),
+          });
+        }
+        if (action === 'preview') {
+          const period = optionalString(args, 'period') ?? 'daily';
+          if (!['daily', 'weekly', 'monthly'].includes(period)) {
+            throw new Error(`不支持的 period：${period}`);
+          }
+          const kind = `${period}_report` as PersonalReportKind;
+          return await this.service.previewReport(execCtx.senderStaffId, kind);
+        }
+        throw new Error(`不支持的 action：${action}`);
+      },
+    };
+  }
+
+  private reportManageTool(): ToolDefinition {
+    return {
+      name: 'personal_report_manage',
+      description:
+        '创建或取消当前用户的日/周/月工作简报（仅单聊）。action=create 需要 frequency 与 time，可选 weekday（1-7，周日用 7）或 dayOfMonth（1-28）；action=cancel 取消。报告为确定性汇总，不调用大模型。',
+      risk: 'write',
+      parametersJsonSchema: {
+        type: 'object',
+        properties: {
+          action: { type: 'string', enum: ['create', 'cancel'] },
           frequency: {
             type: 'string',
             enum: ['daily', 'weekly', 'monthly'],
@@ -152,11 +229,6 @@ export class PersonalAssistantToolProvider implements IToolProvider {
             description: '每月几号推送，monthly 时使用，默认 1',
           },
           id: { type: 'string', description: '报告任务 ID，cancel 时必填' },
-          period: {
-            type: 'string',
-            enum: ['daily', 'weekly', 'monthly'],
-            description: 'preview 的报告周期，默认 daily',
-          },
         },
         required: ['action'],
         additionalProperties: false,
@@ -201,20 +273,6 @@ export class PersonalAssistantToolProvider implements IToolProvider {
             message: `已创建${task.title}`,
           });
         }
-        if (action === 'list') {
-          const tasks = await this.service.listOwn(execCtx.senderStaffId);
-          return JSON.stringify({
-            ok: true,
-            reports: tasks
-              .filter((task) => task.kind !== 'reminder')
-              .map((task) => ({
-                id: task.id,
-                title: task.title,
-                cron: task.cron,
-                nextRunAt: task.nextRunAt,
-              })),
-          });
-        }
         if (action === 'cancel') {
           const id = requireString(args, 'id', '报告任务 ID');
           const task = await this.service.cancelOwn(execCtx.senderStaffId, id);
@@ -222,18 +280,6 @@ export class PersonalAssistantToolProvider implements IToolProvider {
             return JSON.stringify({ ok: false, message: `没有找到报告任务：${id}` });
           }
           return JSON.stringify({ ok: true, message: `已取消：${task.title}` });
-        }
-        if (action === 'preview') {
-          const period = optionalString(args, 'period') ?? 'daily';
-          if (!['daily', 'weekly', 'monthly'].includes(period)) {
-            throw new Error(`不支持的 period：${period}`);
-          }
-          const kind = `${period}_report` as PersonalReportKind;
-          const text = await this.service.previewReport(
-            execCtx.senderStaffId,
-            kind,
-          );
-          return text;
         }
         throw new Error(`不支持的 action：${action}`);
       },

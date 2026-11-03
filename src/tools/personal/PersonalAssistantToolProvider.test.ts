@@ -90,26 +90,50 @@ async function findTool(
 }
 
 describe('PersonalAssistantToolProvider', () => {
-  it('群聊不挂载，单聊挂载两个工具', async () => {
+  it('群聊不挂载，单聊按读写拆分挂载四个工具', async () => {
     const calls = newCalls();
     const provider = new PersonalAssistantToolProvider({
       service: fakeService(calls),
     });
     expect(await provider.getTools(ctx({ conversationType: '2' }))).toEqual([]);
+    const tools = await provider.getTools(ctx());
+    expect(tools.map((tool) => tool.name)).toEqual([
+      'personal_reminder',
+      'personal_reminder_manage',
+      'personal_report',
+      'personal_report_manage',
+    ]);
     expect(
-      (await provider.getTools(ctx())).map((tool) => tool.name),
-    ).toEqual(['personal_reminder', 'personal_report']);
+      tools.map((tool) => [tool.name, tool.risk]),
+    ).toEqual([
+      ['personal_reminder', 'read'],
+      ['personal_reminder_manage', 'write'],
+      ['personal_report', 'read'],
+      ['personal_report_manage', 'write'],
+    ]);
   });
 
-  it('创建/查看/取消提醒', async () => {
+  it('通过独立写工具创建和取消，读工具只能查询', async () => {
     const calls = newCalls();
     const provider = new PersonalAssistantToolProvider({
       service: fakeService(calls),
     });
-    const tool = await findTool(provider, 'personal_reminder', ctx());
+    const readTool = await findTool(provider, 'personal_reminder', ctx());
+    const writeTool = await findTool(
+      provider,
+      'personal_reminder_manage',
+      ctx(),
+    );
+
+    await expect(
+      readTool.execute(
+        { action: 'create', when: '25分钟后', text: '开会' },
+        ctx(),
+      ),
+    ).rejects.toThrow('不支持的 action');
 
     const created = JSON.parse(
-      await tool.execute(
+      await writeTool.execute(
         { action: 'create', when: '25分钟后', text: '开会' },
         ctx(),
       ),
@@ -122,25 +146,26 @@ describe('PersonalAssistantToolProvider', () => {
     });
 
     const list = JSON.parse(
-      await tool.execute({ action: 'list' }, ctx()),
+      await readTool.execute({ action: 'list' }, ctx()),
     ) as { reminders: Array<{ id: string }> };
     expect(list.reminders.map((item) => item.id)).toEqual(['reminder-1']);
 
     const missing = JSON.parse(
-      await tool.execute({ action: 'cancel', id: 'nope' }, ctx()),
+      await writeTool.execute({ action: 'cancel', id: 'nope' }, ctx()),
     ) as { ok: boolean };
     expect(missing.ok).toBe(false);
   });
 
-  it('创建周报并预览', async () => {
+  it('通过独立写工具创建周期报告，读工具提供预览', async () => {
     const calls = newCalls();
     const provider = new PersonalAssistantToolProvider({
       service: fakeService(calls),
     });
-    const tool = await findTool(provider, 'personal_report', ctx());
+    const readTool = await findTool(provider, 'personal_report', ctx());
+    const writeTool = await findTool(provider, 'personal_report_manage', ctx());
 
     const created = JSON.parse(
-      await tool.execute(
+      await writeTool.execute(
         { action: 'create', frequency: 'weekly', time: '09:00', weekday: 1 },
         ctx(),
       ),
@@ -153,7 +178,10 @@ describe('PersonalAssistantToolProvider', () => {
       minute: 0,
     });
 
-    const preview = await tool.execute({ action: 'preview', period: 'weekly' }, ctx());
+    const preview = await readTool.execute(
+      { action: 'preview', period: 'weekly' },
+      ctx(),
+    );
     expect(preview).toBe('PREVIEW weekly_report');
   });
 });
