@@ -10,8 +10,9 @@ import { DwsWriteTaskService } from './DwsWriteTaskService.js';
 class MemoryTaskStore implements DwsWriteTaskStore {
   public readonly tasks = new Map<string, DwsWriteTask>();
 
-  async save(task: DwsWriteTask): Promise<void> {
+  async save(task: DwsWriteTask): Promise<DwsWriteTask> {
     this.tasks.set(task.conversationId, { ...task });
+    return { ...task };
   }
 
   async getByConversation(conversationId: string): Promise<DwsWriteTask | null> {
@@ -92,24 +93,24 @@ function service(
   store: MemoryTaskStore,
   identity: Pick<DwsIdentityService, 'status'>,
   options: {
-    resume?: (message: InboundMessage) => Promise<void>;
+    resume?: (task: DwsWriteTask) => Promise<void>;
     notify?: (message: InboundMessage, text: string) => Promise<void>;
     now?: () => number;
   } = {},
 ): {
   service: DwsWriteTaskService;
-  resumed: InboundMessage[];
+  resumed: DwsWriteTask[];
   notices: string[];
 } {
-  const resumed: InboundMessage[] = [];
+  const resumed: DwsWriteTask[] = [];
   const notices: string[] = [];
   const instance = new DwsWriteTaskService({
     store,
     identity,
     resume:
       options.resume ??
-      (async (msg) => {
-        resumed.push(msg);
+      (async (task) => {
+        resumed.push(task);
       }),
     notify:
       options.notify ??
@@ -143,7 +144,10 @@ describe('DwsWriteTaskService', () => {
     const claimed = await tasks.resumeForStaff('staff-1');
 
     expect(claimed).toEqual(['conv-1']);
-    expect(resumed).toEqual([original]);
+    expect(resumed).toHaveLength(1);
+    expect(resumed[0]?.message).toEqual(original);
+    expect(resumed[0]?.toolName).toBe('dws_calendar_manage');
+    expect(resumed[0]?.args).toEqual({ action: 'create' });
     expect(notices[0]).toContain('正在自动继续');
     expect(await store.getByConversation('conv-1')).toBeNull();
     tasks.dispose();
@@ -296,7 +300,96 @@ describe('DwsWriteTaskService', () => {
     await vi.advanceTimersByTimeAsync(5_000);
 
     expect(resumed).toHaveLength(1);
-    expect(resumed[0]?.conversationId).toBe('conv-1');
+    expect(resumed[0]?.message.conversationId).toBe('conv-1');
+    tasks.dispose();
+  });
+
+  it('自动执行失败时保留失败记录并提示可以重新发起', async () => {
+    const store = new MemoryTaskStore();
+    const { identity } = fakeIdentity(['authenticated']);
+    const { service: tasks, notices } = service(store, identity, {
+      resume: async () => {
+        throw new Error('DWS 命令执行失败');
+      },
+    });
+    await tasks.create({
+      message: message(),
+      toolName: 'dws_todo_manage',
+      args: { action: 'create' },
+      risk: 'write',
+    });
+
+    await tasks.resumeForStaff('staff-1');
+
+    expect(store.tasks.get('conv-1')?.state).toBe('failed');
+    expect(store.tasks.get('conv-1')?.lastError).toContain('DWS 命令执行失败');
+    expect(notices.at(-1)).toContain('自动继续执行写操作失败');
+    tasks.dispose();
+  });
+
+  it('登录事件落在没有内存任务的实例上时从持久层同步', async () => {
+    const store = new MemoryTaskStore();
+    const { identity } = fakeIdentity(['authenticated']);
+    await store.save({
+      id: 'task-db',
+      conversationId: 'conv-1',
+      staffId: 'staff-1',
+      message: message(),
+      toolName: 'dws_todo_manage',
+      args: { action: 'create' },
+      risk: 'write',
+      state: 'waiting_auth',
+      attempts: 0,
+      lastError: null,
+      createdAt: 1_000,
+      updatedAt: 1_000,
+      expiresAt: Date.now() + 10 * 60_000,
+    });
+    const { service: tasks, resumed } = service(store, identity);
+
+    const claimed = await tasks.resumeForStaff('staff-1');
+
+    expect(claimed).toEqual(['conv-1']);
+    expect(resumed).toHaveLength(1);
+    expect(resumed[0]?.id).toBe('task-db');
+    tasks.dispose();
+  });
+
+  it('同一会话覆盖任务时以数据库返回的原 id 继续执行', async () => {
+    class UpsertStore extends MemoryTaskStore {
+      private seq = 0;
+      override async save(task: DwsWriteTask): Promise<DwsWriteTask> {
+        const existing = this.tasks.get(task.conversationId);
+        const persisted: DwsWriteTask = existing
+          ? { ...task, id: existing.id }
+          : { ...task, id: `db-${++this.seq}` };
+        this.tasks.set(task.conversationId, persisted);
+        return { ...persisted };
+      }
+    }
+    const store = new UpsertStore();
+    const { identity } = fakeIdentity(['authenticated']);
+    const { service: tasks, resumed } = service(store, identity);
+    const first = await tasks.create({
+      message: message(),
+      toolName: 'dws_todo_manage',
+      args: { action: 'create' },
+      risk: 'write',
+    });
+    const second = await tasks.create({
+      message: message({ messageId: 'msg-2' }),
+      toolName: 'dws_calendar_manage',
+      args: { action: 'create' },
+      risk: 'write',
+    });
+
+    expect(first.id).toBe('db-1');
+    expect(second.id).toBe('db-1');
+    await tasks.resumeForStaff('staff-1');
+    expect(resumed).toHaveLength(1);
+    expect(resumed[0]?.id).toBe('db-1');
+    expect(resumed[0]?.message.messageId).toBe('msg-2');
+    expect(await store.getByConversation('conv-1')).toBeNull();
     tasks.dispose();
   });
 });

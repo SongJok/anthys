@@ -154,6 +154,35 @@ describe('createToolApprovalGate', () => {
     });
   });
 
+  it('写操作登记时保存发起人的完整上下文', async () => {
+    const { approve, store } = gate();
+    await approve(
+      {
+        toolName: 'mcp__crm__create_ticket',
+        args: { title: '线上故障' },
+        conversationId: 'cid-1',
+        senderStaffId: 'staff-1',
+      },
+      {
+        conversationId: 'cid-1',
+        messageId: 'msg-9',
+        senderStaffId: 'staff-1',
+        senderNick: '张三',
+        conversationType: '1',
+        personKey: 'staff:staff-1',
+        deadlineAt: Date.now() + 60_000,
+        now: Date.now,
+      },
+    );
+    expect(store.peek('cid-1')?.requestedBy).toEqual({
+      staffId: 'staff-1',
+      nick: '张三',
+      messageId: 'msg-9',
+      conversationType: '1',
+      personKey: 'staff:staff-1',
+    });
+  });
+
   it('关闭闸门后写操作直接放行', async () => {
     const { approve, store } = gate({ enabled: false });
     await expect(

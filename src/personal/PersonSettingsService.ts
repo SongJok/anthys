@@ -9,6 +9,8 @@ import type {
   PersonPreferencesInput,
   PersonPreferencesStore,
   PersonSettingsAdminPort,
+  PersonSettingsReassignPort,
+  PersonSettingsReassignResult,
   PreferenceLanguage,
   ReplyLength,
 } from '../types/personal-settings.js';
@@ -82,6 +84,65 @@ function clip(value: string, limit: number): string {
   return trimmed.length > limit ? `${trimmed.slice(0, limit)}…` : trimmed;
 }
 
+const SHARING_RANK: Record<GroupMemorySharing, number> = {
+  off: 0,
+  shareable: 1,
+  all: 2,
+};
+
+/** 偏好以最近一次修改为准，避免合并时被旧设置覆盖 */
+function mergePreferences(
+  target: PersonPreferences,
+  source: PersonPreferences,
+  personKey: string,
+  now: number,
+): PersonPreferences {
+  const winner = target.updatedAt >= source.updatedAt ? target : source;
+  return { ...winner, personKey, updatedAt: now };
+}
+
+/**
+ * 授权合并只收紧不放松：共享档位取更严格的一档；
+ * 白名单取交集，交集为空时取并集（空列表表示全部群，直接取交集会误放宽）。
+ */
+function mergeConsents(
+  target: PersonMemoryConsent,
+  source: PersonMemoryConsent,
+  personKey: string,
+  now: number,
+): PersonMemoryConsent {
+  const groupSharing =
+    SHARING_RANK[target.groupSharing] <= SHARING_RANK[source.groupSharing]
+      ? target.groupSharing
+      : source.groupSharing;
+  let allowedConversationIds: string[];
+  if (target.allowedConversationIds.length === 0) {
+    allowedConversationIds = [...source.allowedConversationIds];
+  } else if (source.allowedConversationIds.length === 0) {
+    allowedConversationIds = [...target.allowedConversationIds];
+  } else {
+    const intersection = target.allowedConversationIds.filter((id) =>
+      source.allowedConversationIds.includes(id),
+    );
+    allowedConversationIds =
+      intersection.length > 0
+        ? intersection
+        : [
+            ...new Set([
+              ...target.allowedConversationIds,
+              ...source.allowedConversationIds,
+            ]),
+          ];
+  }
+  return {
+    personKey,
+    groupSharing,
+    allowedConversationIds,
+    updatedBy: target.updatedBy || source.updatedBy,
+    updatedAt: now,
+  };
+}
+
 function renderLength(length: ReplyLength): string {
   switch (length) {
     case 'concise':
@@ -110,7 +171,10 @@ function renderLanguage(language: PreferenceLanguage): string {
  * - 授权决定个人语义记忆能否在群聊中被召回。
  */
 export class PersonSettingsService
-  implements PersonSettingsAdminPort, PersonMemoryConsentResolver
+  implements
+    PersonSettingsAdminPort,
+    PersonMemoryConsentResolver,
+    PersonSettingsReassignPort
 {
   private readonly preferences: PersonPreferencesStore;
   private readonly consents: PersonMemoryConsentStore;
@@ -128,6 +192,49 @@ export class PersonSettingsService
 
   public privacyUsage(): string {
     return PRIVACY_USAGE;
+  }
+
+  /**
+   * 把旧身份的个人偏好与记忆授权迁到新 personKey。
+   * 幂等：迁移后删除旧记录，重复调用不会再次改动目标设置。
+   */
+  public async reassignPersonKey(
+    fromPersonKey: string,
+    toPersonKey: string,
+  ): Promise<PersonSettingsReassignResult> {
+    const from = fromPersonKey.trim();
+    const to = toPersonKey.trim();
+    if (!from || !to || from === to) {
+      return { migratedPreferences: 0, migratedConsents: 0 };
+    }
+    let migratedPreferences = 0;
+    let migratedConsents = 0;
+
+    const sourcePreferences = await this.preferences.get(from);
+    if (sourcePreferences) {
+      const targetPreferences = await this.preferences.get(to);
+      await this.preferences.upsert(
+        targetPreferences
+          ? mergePreferences(targetPreferences, sourcePreferences, to, this.now())
+          : { ...sourcePreferences, personKey: to },
+      );
+      await this.preferences.remove(from);
+      migratedPreferences = 1;
+    }
+
+    const sourceConsent = await this.consents.get(from);
+    if (sourceConsent) {
+      const targetConsent = await this.consents.get(to);
+      await this.consents.upsert(
+        targetConsent
+          ? mergeConsents(targetConsent, sourceConsent, to, this.now())
+          : { ...sourceConsent, personKey: to },
+      );
+      await this.consents.remove(from);
+      migratedConsents = 1;
+    }
+
+    return { migratedPreferences, migratedConsents };
   }
 
   public async getPreferences(personKey: string): Promise<PersonPreferences> {

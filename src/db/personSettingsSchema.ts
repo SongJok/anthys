@@ -125,6 +125,12 @@ export class DrizzlePersonPreferencesStore implements PersonPreferencesStore {
     if (!row) throw new Error('failed to upsert person preferences');
     return toPreferences(row);
   }
+
+  public async remove(personKey: string): Promise<void> {
+    await this.db
+      .delete(personPreferences)
+      .where(eq(personPreferences.personKey, personKey));
+  }
 }
 
 export class DrizzlePersonMemoryConsentStore
@@ -171,5 +177,11 @@ export class DrizzlePersonMemoryConsentStore
     const row = rows[0];
     if (!row) throw new Error('failed to upsert person memory consent');
     return toConsent(row);
+  }
+
+  public async remove(personKey: string): Promise<void> {
+    await this.db
+      .delete(personMemoryConsents)
+      .where(eq(personMemoryConsents.personKey, personKey));
   }
 }

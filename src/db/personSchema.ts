@@ -20,6 +20,8 @@ import type {
   PersonaScope,
 } from '../types/persona-and-identity.js';
 
+type DbExecutor = Pick<Database, 'insert' | 'update' | 'select'>;
+
 /**
  * 员工身份主表：personKey 是记忆与人设的稳定归属键。
  * 一个员工可能有 staffId、openDingTalkId、外部加密 ID 等多个别名。
@@ -258,7 +260,14 @@ export class DrizzlePersonIdentityStore implements PersonIdentityStore {
     personKey: string;
     displayName?: string;
   }): Promise<void> {
-    await this.db
+    await this.ensurePersonOn(this.db, input);
+  }
+
+  private async ensurePersonOn(
+    db: DbExecutor,
+    input: { personKey: string; displayName?: string },
+  ): Promise<void> {
+    await db
       .insert(personIdentities)
       .values({
         personKey: input.personKey,
@@ -267,7 +276,7 @@ export class DrizzlePersonIdentityStore implements PersonIdentityStore {
       .onConflictDoNothing();
     const displayName = input.displayName?.trim();
     if (!displayName) return;
-    await this.db
+    await db
       .update(personIdentities)
       .set({ displayName, updatedAt: new Date() })
       .where(
@@ -387,48 +396,50 @@ export class DrizzlePersonIdentityStore implements PersonIdentityStore {
     personKey: string;
     displayName?: string;
   }): Promise<{ previousPersonKey: string | null }> {
-    await this.ensurePerson({
-      personKey: input.personKey,
-      ...(input.displayName ? { displayName: input.displayName } : {}),
-    });
-    const existingRows = await this.db
-      .select()
-      .from(personIdentityAliases)
-      .where(eq(personIdentityAliases.alias, input.alias))
-      .limit(1);
-    const existing = existingRows[0];
-    const previousPersonKey =
-      existing && existing.personKey !== input.personKey
-        ? existing.personKey
-        : null;
+    return await this.db.transaction(async (tx) => {
+      await this.ensurePersonOn(tx, {
+        personKey: input.personKey,
+        ...(input.displayName ? { displayName: input.displayName } : {}),
+      });
+      const existingRows = await tx
+        .select()
+        .from(personIdentityAliases)
+        .where(eq(personIdentityAliases.alias, input.alias))
+        .limit(1);
+      const existing = existingRows[0];
+      const previousPersonKey =
+        existing && existing.personKey !== input.personKey
+          ? existing.personKey
+          : null;
 
-    if (existing) {
-      await this.db
-        .update(personIdentityAliases)
-        .set({
+      if (existing) {
+        await tx
+          .update(personIdentityAliases)
+          .set({
+            personKey: input.personKey,
+            source: 'manual',
+            ...(input.displayName?.trim()
+              ? { displayName: input.displayName.trim() }
+              : {}),
+            updatedAt: new Date(),
+          })
+          .where(eq(personIdentityAliases.alias, input.alias));
+      } else {
+        await tx.insert(personIdentityAliases).values({
+          alias: input.alias,
           personKey: input.personKey,
           source: 'manual',
-          ...(input.displayName?.trim()
-            ? { displayName: input.displayName.trim() }
-            : {}),
-          updatedAt: new Date(),
-        })
-        .where(eq(personIdentityAliases.alias, input.alias));
-    } else {
-      await this.db.insert(personIdentityAliases).values({
-        alias: input.alias,
-        personKey: input.personKey,
-        source: 'manual',
-        displayName: input.displayName?.trim() ?? '',
-      });
-    }
+          displayName: input.displayName?.trim() ?? '',
+        });
+      }
 
-    if (previousPersonKey) {
-      await this.db
-        .update(personIdentities)
-        .set({ mergedInto: input.personKey, updatedAt: new Date() })
-        .where(eq(personIdentities.personKey, previousPersonKey));
-    }
-    return { previousPersonKey };
+      if (previousPersonKey) {
+        await tx
+          .update(personIdentities)
+          .set({ mergedInto: input.personKey, updatedAt: new Date() })
+          .where(eq(personIdentities.personKey, previousPersonKey));
+      }
+      return { previousPersonKey };
+    });
   }
 }

@@ -36,8 +36,8 @@ export interface DwsWriteTaskInput {
 }
 
 export interface DwsWriteTaskStore {
-  /** 同一会话只保留一个待授权写任务，新请求覆盖旧请求 */
-  save(task: DwsWriteTask): Promise<void>;
+  /** 同一会话只保留一个待授权写任务，新请求覆盖旧请求；返回数据库中的最终记录 */
+  save(task: DwsWriteTask): Promise<DwsWriteTask>;
   getByConversation(conversationId: string): Promise<DwsWriteTask | null>;
   listWaiting(nowMs: number): Promise<DwsWriteTask[]>;
   /** 原子地把 waiting_auth 置为 resuming；返回 null 表示已被其他实例抢到 */

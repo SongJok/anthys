@@ -15,8 +15,8 @@ export interface DwsWriteTaskLogger {
 export interface DwsWriteTaskServiceOptions {
   store: DwsWriteTaskStore;
   identity: Pick<DwsIdentityService, 'status'>;
-  /** 授权完成后按原始消息继续执行；通常接回 handleIncoming */
-  resume: (message: InboundMessage) => Promise<void>;
+  /** 授权完成后按保存的工具与参数精确执行；失败时抛出以保留失败记录 */
+  resume: (task: DwsWriteTask) => Promise<void>;
   notify: (message: InboundMessage, text: string) => Promise<void>;
   logger?: DwsWriteTaskLogger;
   now?: () => number;
@@ -120,21 +120,22 @@ export class DwsWriteTaskService {
       updatedAt: now,
       expiresAt: now + this.ttlMs,
     };
-    await this.store.save(task);
-    this.tasks.set(task.conversationId, {
-      task,
+    // 同一会话已有任务时，upsert 保留数据库里的原 id；后续 claim 必须用返回值
+    const persisted = await this.store.save(task);
+    this.tasks.set(persisted.conversationId, {
+      task: persisted,
       nextCheckAt: now + this.delayFor(0),
     });
     this.logger?.info?.(
       {
-        taskId: task.id,
-        conversationId: task.conversationId,
-        staffId: task.staffId,
-        toolName: task.toolName,
+        taskId: persisted.id,
+        conversationId: persisted.conversationId,
+        staffId: persisted.staffId,
+        toolName: persisted.toolName,
       },
       'dws write task waiting for authorization',
     );
-    return task;
+    return persisted;
   }
 
   /**
@@ -142,6 +143,7 @@ export class DwsWriteTaskService {
    * 返回已抢到的会话 ID，调用方据此跳过同一会话的通用 pending 恢复。
    */
   public async resumeForStaff(staffId: string): Promise<string[]> {
+    await this.syncWaiting(staffId);
     const claimed: string[] = [];
     for (const [conversationId, entry] of [...this.tasks]) {
       if (
@@ -228,6 +230,26 @@ export class DwsWriteTaskService {
     return this.pollDelaysMs[index] ?? DEFAULT_POLL_DELAYS_MS[0]!;
   }
 
+  /** 登录事件可能落在没有本地内存记录的实例上，以持久层为准补齐 */
+  private async syncWaiting(staffId?: string): Promise<void> {
+    try {
+      const waiting = await this.store.listWaiting(this.now());
+      for (const task of waiting) {
+        if (staffId && task.staffId !== staffId) continue;
+        const existing = this.tasks.get(task.conversationId);
+        this.tasks.set(task.conversationId, {
+          task,
+          nextCheckAt: existing?.nextCheckAt ?? this.now() + this.delayFor(0),
+        });
+      }
+    } catch (error) {
+      this.logger?.warn?.(
+        { error: errorText(error) },
+        'failed to sync dws write tasks from store',
+      );
+    }
+  }
+
   private async tick(): Promise<void> {
     if (this.checking) return;
     this.checking = true;
@@ -279,6 +301,7 @@ export class DwsWriteTaskService {
       this.tasks.delete(entry.task.conversationId);
       return false;
     }
+    this.tasks.delete(claimed.conversationId);
     this.logger?.info?.(
       {
         taskId: claimed.id,
@@ -304,7 +327,7 @@ export class DwsWriteTaskService {
       );
     }
     try {
-      await this.resume(claimed.message);
+      await this.resume(claimed);
       await this.store.remove(claimed.conversationId);
       return true;
     } catch (error) {

@@ -83,12 +83,27 @@ export interface PersonPreferencesStore {
   get(personKey: string): Promise<PersonPreferences | null>;
   list(): Promise<PersonPreferences[]>;
   upsert(preferences: PersonPreferences): Promise<PersonPreferences>;
+  remove(personKey: string): Promise<void>;
 }
 
 export interface PersonMemoryConsentStore {
   get(personKey: string): Promise<PersonMemoryConsent | null>;
   list(): Promise<PersonMemoryConsent[]>;
   upsert(consent: PersonMemoryConsent): Promise<PersonMemoryConsent>;
+  remove(personKey: string): Promise<void>;
+}
+
+export interface PersonSettingsReassignResult {
+  migratedPreferences: number;
+  migratedConsents: number;
+}
+
+/** 身份合并时把个人偏好与记忆授权迁到新的 personKey */
+export interface PersonSettingsReassignPort {
+  reassignPersonKey(
+    fromPersonKey: string,
+    toPersonKey: string,
+  ): Promise<PersonSettingsReassignResult>;
 }
 
 /** AgentHarness 在群聊召回个人记忆前解析授权档位 */

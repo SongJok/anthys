@@ -57,8 +57,8 @@ function toTask(row: Row): DwsWriteTask {
 export class DrizzleDwsWriteTaskStore implements DwsWriteTaskStore {
   constructor(private readonly db: Database) {}
 
-  public async save(task: DwsWriteTask): Promise<void> {
-    await this.db
+  public async save(task: DwsWriteTask): Promise<DwsWriteTask> {
+    const rows = await this.db
       .insert(dwsWriteTasks)
       .values({
         id: task.id,
@@ -89,7 +89,11 @@ export class DrizzleDwsWriteTaskStore implements DwsWriteTaskStore {
           updatedAt: new Date(task.updatedAt),
           expiresAt: new Date(task.expiresAt),
         },
-      });
+      })
+      .returning();
+    const row = rows[0];
+    if (!row) throw new Error('failed to save dws write task');
+    return toTask(row);
   }
 
   public async getByConversation(

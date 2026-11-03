@@ -130,6 +130,8 @@ export interface PersonIdentityAdminPort {
     previousPersonKey: string | null;
     migratedMemories: number;
     migratedPersonas: number;
+    migratedPreferences: number;
+    migratedConsents: number;
   }>;
 }
 

@@ -10,6 +10,7 @@ import type {
 } from '../types/persona-and-identity.js';
 import { isStaffUserId } from '../dingtalk/userIds.js';
 import type { SemanticMemoryAdminPort } from '../types/bystander-and-memory.js';
+import type { PersonSettingsReassignPort } from '../types/personal-settings.js';
 
 export interface PersonIdentityLogger {
   info(obj: Record<string, unknown>, msg: string): void;
@@ -134,6 +135,7 @@ export class PersonIdentityService
   private readonly store: PersonIdentityStore;
   private readonly memories?: Pick<SemanticMemoryAdminPort, 'reassignSubjectKey'>;
   private readonly personas?: Pick<PersonaProfileStore, 'reassignSubjectKey'>;
+  private readonly settings?: PersonSettingsReassignPort;
   private readonly logger?: PersonIdentityLogger;
   private readonly now: () => number;
   private readonly cacheTtlMs: number;
@@ -148,6 +150,7 @@ export class PersonIdentityService
     store: PersonIdentityStore;
     memories?: Pick<SemanticMemoryAdminPort, 'reassignSubjectKey'>;
     personas?: Pick<PersonaProfileStore, 'reassignSubjectKey'>;
+    settings?: PersonSettingsReassignPort;
     logger?: PersonIdentityLogger;
     now?: () => number;
     cacheTtlMs?: number;
@@ -159,6 +162,7 @@ export class PersonIdentityService
     this.store = options.store;
     this.memories = options.memories;
     this.personas = options.personas;
+    this.settings = options.settings;
     this.logger = options.logger;
     this.now = options.now ?? Date.now;
     this.cacheTtlMs = Math.max(0, options.cacheTtlMs ?? DEFAULT_CACHE_TTL_MS);
@@ -241,6 +245,8 @@ export class PersonIdentityService
     previousPersonKey: string | null;
     migratedMemories: number;
     migratedPersonas: number;
+    migratedPreferences: number;
+    migratedConsents: number;
   }> {
     const normalized = input.source
       ? { alias: input.alias.trim(), source: input.source }
@@ -256,8 +262,9 @@ export class PersonIdentityService
 
     // bindAlias 会把旧身份的 mergedInto 改指向目标，因此必须先取合并链与子孙身份
     const existing = await this.store.findPersonByAlias(normalized.alias);
+    const merging = input.mergeMemories !== false;
     const sourcePersonKey =
-      existing && existing.personKey !== targetPersonKey && input.mergeMemories !== false
+      existing && existing.personKey !== targetPersonKey && merging
         ? existing.personKey
         : null;
     const mergeChain = sourcePersonKey
@@ -266,6 +273,41 @@ export class PersonIdentityService
     const descendants = sourcePersonKey
       ? await this.collectDescendants(sourcePersonKey, new Set(mergeChain))
       : [];
+    const keys = new Set<string>(
+      sourcePersonKey
+        ? mergeChain.length > 0
+          ? mergeChain
+          : [sourcePersonKey]
+        : [],
+    );
+    for (const descendant of descendants) keys.add(descendant);
+    keys.delete(targetPersonKey);
+
+    let migratedMemories = 0;
+    let migratedPersonas = 0;
+    let migratedPreferences = 0;
+    let migratedConsents = 0;
+    const migrate = async (oldKey: string): Promise<void> => {
+      migratedMemories +=
+        (await this.memories?.reassignSubjectKey(oldKey, targetPersonKey)) ?? 0;
+      migratedPersonas +=
+        (await this.personas?.reassignSubjectKey(
+          'user',
+          oldKey,
+          targetPersonKey,
+        )) ?? 0;
+      const settings = await this.settings?.reassignPersonKey(
+        oldKey,
+        targetPersonKey,
+      );
+      migratedPreferences += settings?.migratedPreferences ?? 0;
+      migratedConsents += settings?.migratedConsents ?? 0;
+    };
+    // 先迁移历史数据再改别名：绑定失败时别名仍指向旧身份，
+    // 重试会重新收集同一批 key；各项迁移幂等，不会重复累加。
+    for (const oldKey of keys) {
+      await migrate(oldKey);
+    }
 
     const outcome = await this.store.bindAlias({
       alias: normalized.alias,
@@ -276,25 +318,27 @@ export class PersonIdentityService
     });
     this.cache.clear();
 
-    let migratedMemories = 0;
-    let migratedPersonas = 0;
-    if (outcome.previousPersonKey && input.mergeMemories !== false) {
-      const keys = new Set(
-        mergeChain.length > 0
-          ? mergeChain
-          : [outcome.previousPersonKey],
+    // 并发绑定可能在预检查与写入之间改了指代，补迁一次兜底
+    if (
+      outcome.previousPersonKey &&
+      merging &&
+      outcome.previousPersonKey !== targetPersonKey &&
+      !keys.has(outcome.previousPersonKey)
+    ) {
+      const extraChain = await this.collectMergeChain(
+        outcome.previousPersonKey,
       );
-      for (const descendant of descendants) keys.add(descendant);
-      for (const oldKey of keys) {
-        if (oldKey === targetPersonKey) continue;
-        migratedMemories +=
-          (await this.memories?.reassignSubjectKey(oldKey, targetPersonKey)) ?? 0;
-        migratedPersonas +=
-          (await this.personas?.reassignSubjectKey(
-            'user',
-            oldKey,
-            targetPersonKey,
-          )) ?? 0;
+      const extraDescendants = await this.collectDescendants(
+        outcome.previousPersonKey,
+        new Set(extraChain),
+      );
+      const extras = new Set(extraChain);
+      for (const descendant of extraDescendants) extras.add(descendant);
+      extras.delete(targetPersonKey);
+      for (const oldKey of extras) {
+        if (keys.has(oldKey)) continue;
+        keys.add(oldKey);
+        await migrate(oldKey);
       }
     }
     this.onBind?.({ personKey: targetPersonKey, previousPersonKey: outcome.previousPersonKey });
@@ -307,6 +351,8 @@ export class PersonIdentityService
         previousPersonKey: outcome.previousPersonKey,
         migratedMemories,
         migratedPersonas,
+        migratedPreferences,
+        migratedConsents,
       },
       'person identity bound',
     );
@@ -315,6 +361,8 @@ export class PersonIdentityService
       previousPersonKey: outcome.previousPersonKey,
       migratedMemories,
       migratedPersonas,
+      migratedPreferences,
+      migratedConsents,
     };
   }
 

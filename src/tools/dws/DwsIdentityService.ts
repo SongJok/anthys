@@ -257,7 +257,7 @@ export class DwsIdentityService extends EventEmitter {
   private readonly queues = new Map<string, Promise<unknown>>();
   private readonly pending = new Map<
     string,
-    Map<string, { resume: boolean; createdAt: number }>
+    Map<string, { resume: boolean; messageId?: string; createdAt: number }>
   >();
 
   constructor(options: DwsIdentityServiceOptions) {
@@ -579,6 +579,15 @@ export class DwsIdentityService extends EventEmitter {
       }
       void this.verifyAndBind(staffId)
         .then((status) => {
+          if (status.state !== 'authenticated') {
+            const reason = status.message ?? '授权未生效，请重试';
+            this.logger?.warn?.(
+              { staffId, state: status.state, reason },
+              'dws identity login not effective',
+            );
+            this.emit('login-failed', { staffId, reason });
+            return;
+          }
           this.logger?.info?.(
             { staffId, user: status.record?.userName, profile: status.record?.profile },
             'dws identity login succeeded',
@@ -757,21 +766,25 @@ export class DwsIdentityService extends EventEmitter {
   public markPending(
     staffId: string,
     conversationId: string,
-    options: { resume?: boolean } = {},
+    options: { resume?: boolean; messageId?: string } = {},
   ): void {
     if (!staffId || !conversationId) return;
     const entries = this.pending.get(staffId) ?? new Map();
     const existing = entries.get(conversationId);
+    const messageId = options.messageId ?? existing?.messageId;
     entries.set(conversationId, {
       resume: existing?.resume || (options.resume ?? true),
+      ...(messageId ? { messageId } : {}),
       createdAt: this.now(),
     });
     this.pending.set(staffId, entries);
   }
 
-  public takePending(
-    staffId: string,
-  ): Array<{ conversationId: string; resume: boolean }> {
+  public takePending(staffId: string): Array<{
+    conversationId: string;
+    resume: boolean;
+    messageId?: string;
+  }> {
     const entries = this.pending.get(staffId);
     if (!entries) return [];
     this.pending.delete(staffId);
@@ -781,6 +794,7 @@ export class DwsIdentityService extends EventEmitter {
       .map(([conversationId, meta]) => ({
         conversationId,
         resume: meta.resume,
+        ...(meta.messageId ? { messageId: meta.messageId } : {}),
       }));
   }
 

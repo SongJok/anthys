@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type {
+  ExecutionContext,
   ToolApprovalDecision,
   ToolApprovalRequest,
 } from '../types/core.js';
@@ -16,6 +17,8 @@ export interface PendingToolAction {
     staffId: string;
     nick?: string;
     messageId?: string;
+    conversationType?: '1' | '2';
+    personKey?: string;
   };
   createdAt: number;
   expiresAt: number;
@@ -228,9 +231,10 @@ export function createToolApprovalGate(
   options: ToolApprovalGateOptions,
 ): (
   request: ToolApprovalRequest,
+  context?: ExecutionContext,
 ) => Promise<ToolApprovalDecision> {
   const enabled = options.enabled ?? true;
-  return async (request) => {
+  return async (request, context) => {
     if (!enabled) return { approved: true };
     const risk = classifyToolRisk({
       name: request.toolName,
@@ -243,7 +247,15 @@ export function createToolApprovalGate(
       toolName: request.toolName,
       args: request.args,
       risk,
-      requestedBy: { staffId: request.senderStaffId },
+      requestedBy: {
+        staffId: request.senderStaffId,
+        ...(context?.senderNick ? { nick: context.senderNick } : {}),
+        ...(context?.messageId ? { messageId: context.messageId } : {}),
+        ...(context?.conversationType
+          ? { conversationType: context.conversationType }
+          : {}),
+        ...(context?.personKey ? { personKey: context.personKey } : {}),
+      },
     });
     options.logger?.info?.(
       {

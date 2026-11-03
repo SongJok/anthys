@@ -27,6 +27,10 @@ class MemoryPreferenceStore implements PersonPreferencesStore {
     this.rows.set(preferences.personKey, preferences);
     return preferences;
   }
+
+  public async remove(personKey: string): Promise<void> {
+    this.rows.delete(personKey);
+  }
 }
 
 class MemoryConsentStore implements PersonMemoryConsentStore {
@@ -43,6 +47,10 @@ class MemoryConsentStore implements PersonMemoryConsentStore {
   public async upsert(consent: PersonMemoryConsent): Promise<PersonMemoryConsent> {
     this.rows.set(consent.personKey, consent);
     return consent;
+  }
+
+  public async remove(personKey: string): Promise<void> {
+    this.rows.delete(personKey);
   }
 }
 
@@ -233,5 +241,95 @@ describe('PersonSettingsService', () => {
     const consent = await service.getConsent('staff:1');
     expect(consent.allowedConversationIds).toEqual([]);
     expect(consent.groupSharing).toBe('all');
+  });
+
+  it('身份合并时迁移个人偏好与授权，旧记录删除且重复调用幂等', async () => {
+    const { service, preferences, consents } = makeService();
+    preferences.rows.set('external:open-1', {
+      personKey: 'external:open-1',
+      replyLength: 'concise',
+      language: 'en',
+      addressAs: '小明',
+      extraInstructions: '',
+      enabled: true,
+      updatedBy: 'external:open-1',
+      updatedAt: NOW,
+    });
+    consents.rows.set('external:open-1', {
+      personKey: 'external:open-1',
+      groupSharing: 'shareable',
+      allowedConversationIds: ['cid-a'],
+      updatedBy: 'external:open-1',
+      updatedAt: NOW,
+    });
+
+    const outcome = await service.reassignPersonKey(
+      'external:open-1',
+      'staff:1',
+    );
+
+    expect(outcome).toEqual({ migratedPreferences: 1, migratedConsents: 1 });
+    expect(preferences.rows.has('external:open-1')).toBe(false);
+    expect(consents.rows.has('external:open-1')).toBe(false);
+    expect(await service.getPreferences('staff:1')).toMatchObject({
+      replyLength: 'concise',
+      addressAs: '小明',
+    });
+    expect(await service.getConsent('staff:1')).toMatchObject({
+      groupSharing: 'shareable',
+      allowedConversationIds: ['cid-a'],
+    });
+
+    expect(
+      await service.reassignPersonKey('external:open-1', 'staff:1'),
+    ).toEqual({ migratedPreferences: 0, migratedConsents: 0 });
+  });
+
+  it('合并授权时取更严格档位与白名单交集，不放松权限', async () => {
+    const { service, consents } = makeService();
+    consents.rows.set('staff:1', {
+      personKey: 'staff:1',
+      groupSharing: 'shareable',
+      allowedConversationIds: ['cid-a', 'cid-b'],
+      updatedBy: 'staff:1',
+      updatedAt: NOW,
+    });
+    consents.rows.set('external:open-1', {
+      personKey: 'external:open-1',
+      groupSharing: 'off',
+      allowedConversationIds: ['cid-b', 'cid-c'],
+      updatedBy: 'external:open-1',
+      updatedAt: NOW,
+    });
+
+    await service.reassignPersonKey('external:open-1', 'staff:1');
+
+    const consent = await service.getConsent('staff:1');
+    expect(consent.groupSharing).toBe('off');
+    expect(consent.allowedConversationIds).toEqual(['cid-b']);
+    expect(consents.rows.has('external:open-1')).toBe(false);
+  });
+
+  it('两个白名单不相交时取并集，避免空列表被解释成全部群', async () => {
+    const { service, consents } = makeService();
+    consents.rows.set('staff:1', {
+      personKey: 'staff:1',
+      groupSharing: 'all',
+      allowedConversationIds: ['cid-a'],
+      updatedBy: 'staff:1',
+      updatedAt: NOW,
+    });
+    consents.rows.set('external:open-1', {
+      personKey: 'external:open-1',
+      groupSharing: 'all',
+      allowedConversationIds: ['cid-b'],
+      updatedBy: 'external:open-1',
+      updatedAt: NOW,
+    });
+
+    await service.reassignPersonKey('external:open-1', 'staff:1');
+
+    const consent = await service.getConsent('staff:1');
+    expect(consent.allowedConversationIds.sort()).toEqual(['cid-a', 'cid-b']);
   });
 });

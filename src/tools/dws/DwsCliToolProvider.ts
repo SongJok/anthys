@@ -567,6 +567,7 @@ export class DwsCliToolProvider implements IToolProvider {
       };
       identity.markPending(ctx.senderStaffId, ctx.conversationId, {
         resume: true,
+        messageId: ctx.messageId,
       });
     } catch (error) {
       failure = error instanceof Error ? error.message : String(error);
@@ -590,7 +591,7 @@ export class DwsCliToolProvider implements IToolProvider {
           ticket.verifyUrl,
           `授权码：${ticket.userCode}`,
           write
-            ? '授权完成后我会自动继续，并直接执行刚才的写操作，不需要你再确认。'
+            ? '授权完成后我会自动继续刚才的写操作；取消日程、覆盖文档等高危操作仍会再次请你 /confirm。'
             : '授权完成后我会自动继续刚才的问题。',
         ].join('\n')
       : `${intro}我尝试自动发起授权但失败了${failure ? `（${failure}）` : ''}，请稍后再试。`;

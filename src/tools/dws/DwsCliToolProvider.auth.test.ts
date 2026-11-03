@@ -411,7 +411,7 @@ describe('DwsCliToolProvider 每员工独立身份闸门', () => {
     expect(output.writeConsentRecorded).toBe(true);
     expect(output.instruction).toContain('直接执行刚才的写操作');
     expect(notes).toHaveLength(1);
-    expect(notes[0]).toContain('直接执行刚才的写操作');
+    expect(notes[0]).toContain('自动继续刚才的写操作');
 
     const gate = await new DwsCliToolProvider({ identity }).authorizationGate(
       ctx,

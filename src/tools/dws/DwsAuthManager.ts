@@ -215,7 +215,7 @@ export class DwsAuthManager extends EventEmitter {
   private session: LoginSession | null = null;
   private readonly pending = new Map<
     string,
-    { resume: boolean; createdAt: number }
+    { resume: boolean; messageId?: string; createdAt: number }
   >();
 
   constructor(options: DwsAuthManagerOptions = {}) {
@@ -451,18 +451,24 @@ export class DwsAuthManager extends EventEmitter {
   /** 记录“授权完成后需要续跑”的会话；默认续跑上一条问题。 */
   public markPending(
     conversationId: string,
-    options: { resume?: boolean } = {},
+    options: { resume?: boolean; messageId?: string } = {},
   ): void {
     if (!conversationId) return;
     const existing = this.pending.get(conversationId);
+    const messageId = options.messageId ?? existing?.messageId;
     this.pending.set(conversationId, {
       // 一旦登记过“续跑原始问题”，后续手动 /dws-login 不应降级为仅通知
       resume: existing?.resume || (options.resume ?? true),
+      ...(messageId ? { messageId } : {}),
       createdAt: this.now(),
     });
   }
 
-  public takePending(): Array<{ conversationId: string; resume: boolean }> {
+  public takePending(): Array<{
+    conversationId: string;
+    resume: boolean;
+    messageId?: string;
+  }> {
     const at = this.now();
     const entries = [...this.pending.entries()];
     this.pending.clear();
@@ -471,6 +477,7 @@ export class DwsAuthManager extends EventEmitter {
       .map(([conversationId, meta]) => ({
         conversationId,
         resume: meta.resume,
+        ...(meta.messageId ? { messageId: meta.messageId } : {}),
       }));
   }
 

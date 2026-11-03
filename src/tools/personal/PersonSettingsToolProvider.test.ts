@@ -29,6 +29,10 @@ class MemoryPreferencesStore implements PersonPreferencesStore {
     this.rows.set(saved.personKey, saved);
     return saved;
   }
+
+  public async remove(personKey: string): Promise<void> {
+    this.rows.delete(personKey);
+  }
 }
 
 class MemoryConsentStore implements PersonMemoryConsentStore {
@@ -46,6 +50,10 @@ class MemoryConsentStore implements PersonMemoryConsentStore {
     const saved = { ...consent };
     this.rows.set(saved.personKey, saved);
     return saved;
+  }
+
+  public async remove(personKey: string): Promise<void> {
+    this.rows.delete(personKey);
   }
 }
 

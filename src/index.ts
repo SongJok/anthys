@@ -56,8 +56,10 @@ import {
 import {
   classifyToolRisk,
   createToolApprovalGate,
+  formatApprovalPrompt,
   PendingActionStore,
 } from './harness/ToolApprovalGate.js';
+import { buildConfirmedActionContext } from './harness/approvalContext.js';
 import { ModelRoutingEngine } from './harness/ModelRoutingEngine.js';
 import {
   parseToolExecutionPolicy,
@@ -186,6 +188,7 @@ import {
 import { DrizzleDwsIdentityStore } from './db/dwsIdentitySchema.js';
 import { DrizzleDwsWriteTaskStore } from './db/dwsWriteTaskSchema.js';
 import { DwsWriteTaskService } from './tools/dws/DwsWriteTaskService.js';
+import type { DwsWriteTask } from './types/dws-write-task.js';
 import { PersonalReportBuilder } from './personal/PersonalReportBuilder.js';
 import { PersonalAssistantService } from './personal/PersonalAssistantService.js';
 import { PersonalAssistantToolProvider } from './tools/personal/PersonalAssistantToolProvider.js';
@@ -254,7 +257,7 @@ function errorText(error: unknown): string {
  * 取消日程、覆盖文档这类不可逆操作仍要求 /confirm。
  */
 function requiresExplicitDwsConfirmation(
-  request: ToolApprovalRequest,
+  request: Pick<ToolApprovalRequest, 'toolName' | 'args' | 'risk'>,
 ): boolean {
   if (request.risk === 'destructive') return true;
   if (request.toolName === 'dws_calendar_cancel') return true;
@@ -933,6 +936,20 @@ async function main(): Promise<void> {
       logger: harnessLogger,
     });
     await pendingActions.hydrate();
+    /** 原始消息不在内存时，用执行上下文拼一条只含本人标识的快照 */
+    const approvalMessageFor = (
+      context: ExecutionContext,
+    ): InboundMessage => ({
+      messageId: context.messageId,
+      conversationId: context.conversationId,
+      conversationType: context.conversationType,
+      senderStaffId: context.senderStaffId,
+      senderNick: context.senderNick,
+      isAtBot: true,
+      text: '',
+      rawPayload: { source: 'approval_snapshot' },
+      timestamp: Date.now(),
+    });
     const approvalGate = createToolApprovalGate({
       store: pendingActions,
       enabled: envEnabled(process.env.TOOL_CONFIRMATION_ENABLED, true),
@@ -954,8 +971,10 @@ async function main(): Promise<void> {
         const gate = await toolRegistry?.dwsAuthorizationGate(context, true);
         if (gate) {
           if (gate.loginStarted) {
-            const message = runControl.messageById(context.messageId);
-            if (message && dwsWriteTasksService) {
+            const message =
+              runControl.messageById(context.messageId) ??
+              approvalMessageFor(context);
+            if (dwsWriteTasksService) {
               try {
                 await dwsWriteTasksService.create({
                   message,
@@ -981,7 +1000,7 @@ async function main(): Promise<void> {
           return { approved: true };
         }
       }
-      return approvalGate(request);
+      return approvalGate(request, context);
     };
 
     const adminProvider = new AdminChatOpsToolProvider({
@@ -1644,10 +1663,15 @@ async function main(): Promise<void> {
       store: personaProfileStore,
       fallback: () => personaRef,
     });
+    const personSettings = new PersonSettingsService({
+      preferences: new DrizzlePersonPreferencesStore(dbHandle.db),
+      consents: new DrizzlePersonMemoryConsentStore(dbHandle.db),
+    });
     const personIdentity = new PersonIdentityService({
       store: personIdentityStore,
       memories: memoryStore,
       personas: personaProfileStore,
+      settings: personSettings,
       logger: harnessLogger,
       onBind: () => personaResolver.invalidate(),
     });
@@ -1672,10 +1696,6 @@ async function main(): Promise<void> {
           },
         ]);
       },
-    });
-    const personSettings = new PersonSettingsService({
-      preferences: new DrizzlePersonPreferencesStore(dbHandle.db),
-      consents: new DrizzlePersonMemoryConsentStore(dbHandle.db),
     });
     const personalMemory = new PersonalMemoryService({
       memories: memoryStore,
@@ -2120,7 +2140,7 @@ async function main(): Promise<void> {
     dwsWriteTasksService = new DwsWriteTaskService({
       store: new DrizzleDwsWriteTaskStore(dbHandle.db),
       identity: identityService,
-      resume: (message) => handleIncoming(message),
+      resume: (task) => executeDwsWriteTask(task),
       notify: notifyDwsWriteTask,
       logger: harnessLogger,
     });
@@ -2198,6 +2218,95 @@ async function main(): Promise<void> {
         );
         return defaultPersonKeyFor(message);
       }
+    };
+
+    /**
+     * 登录事件只回复发起授权的那条消息；消息快照缺失时才退回会话最后一条。
+     * 个人授权传入 staffId，避免在群里回复到别人的消息上。
+     */
+    const pendingNoticeMessage = (
+      entry: { conversationId: string; messageId?: string },
+      staffId?: string,
+    ): InboundMessage | null => {
+      const byId = entry.messageId
+        ? runControl.messageById(entry.messageId)
+        : null;
+      if (byId) {
+        return staffId && byId.senderStaffId !== staffId ? null : byId;
+      }
+      const last = runControl.lastMessage(entry.conversationId);
+      if (!last) return null;
+      return staffId && last.senderStaffId !== staffId ? null : last;
+    };
+
+    /**
+     * 授权完成后按保存的工具与参数精确执行，不重新跑模型规划。
+     * 执行失败直接抛出，由 DwsWriteTaskService 保留失败记录并通知用户。
+     */
+    const executeDwsWriteTask = async (task: DwsWriteTask): Promise<void> => {
+      const registry = toolRegistry;
+      if (!registry) throw new Error('工具注册表尚未就绪');
+      if (!executionPolicy.allows(task.toolName)) {
+        throw new Error(`工具 ${task.toolName} 已被执行策略禁用`);
+      }
+      const requester = task.message;
+      const personKey = await resolveCommandPersonKey(requester);
+      const ctx: ExecutionContext = {
+        conversationId: requester.conversationId,
+        messageId: requester.messageId,
+        senderStaffId: requester.senderStaffId,
+        senderNick: requester.senderNick,
+        conversationType: requester.conversationType,
+        personKey,
+        deadlineAt: Date.now() + 120_000,
+        now: Date.now,
+        notify: async (text) => {
+          await notifyDwsWriteTask(requester, text);
+        },
+      };
+      const gate = await registry.dwsAuthorizationGate(ctx, true);
+      if (gate) throw new Error(gate.userText);
+      if (requiresExplicitDwsConfirmation(task)) {
+        const action = pendingActions.put({
+          conversationId: task.conversationId,
+          toolName: task.toolName,
+          args: task.args,
+          risk: task.risk,
+          requestedBy: {
+            staffId: requester.senderStaffId,
+            ...(requester.senderNick ? { nick: requester.senderNick } : {}),
+            ...(requester.messageId ? { messageId: requester.messageId } : {}),
+            ...(requester.conversationType
+              ? { conversationType: requester.conversationType }
+              : {}),
+            ...(personKey ? { personKey } : {}),
+          },
+        });
+        await notifyDwsWriteTask(
+          requester,
+          `${formatApprovalPrompt(action, pendingActions.ttlSeconds)}\n\n这是授权前你发起的写操作，确认后才会执行。`,
+        );
+        return;
+      }
+      const tool = (await registry.assembleTools(ctx)).find(
+        (item) => item.name === task.toolName,
+      );
+      if (!tool) throw new Error(`工具 ${task.toolName} 当前不可用`);
+      const output = await runWithTimeout(
+        tool.executeStructured
+          ? tool.executeStructured(task.args, ctx).then((result) =>
+              typeof result === 'string' ? result : result.text,
+            )
+          : tool.execute(task.args, ctx),
+        120_000,
+        task.toolName,
+      );
+      const clipped =
+        output.length > 2_000 ? `${output.slice(0, 2_000)}…` : output;
+      await notifyDwsWriteTask(
+        requester,
+        `已按本人授权自动执行 \`${task.toolName}\`：\n${clipped}`,
+      );
     };
 
     const commandRouter = new CommandRouter({
@@ -2319,6 +2428,7 @@ async function main(): Promise<void> {
         }
         identityService.markPending(message.senderStaffId, message.conversationId, {
           resume: false,
+          messageId: message.messageId,
         });
         return [
           '已发起本人 DWS 设备授权，请在钉钉中打开以下链接完成授权（15 分钟内有效）：',
@@ -2436,7 +2546,10 @@ async function main(): Promise<void> {
             return `发起系统级 DWS 授权失败：${reason}`;
           }
         }
-        authManager.markPending(message.conversationId, { resume: false });
+        authManager.markPending(message.conversationId, {
+          resume: false,
+          messageId: message.messageId,
+        });
         return [
           '已发起系统级 DWS 设备授权（仅用于旁听等基础设施），请在钉钉中打开以下链接完成授权（15 分钟内有效）：',
           ticket.verifyUrl,
@@ -2476,16 +2589,28 @@ async function main(): Promise<void> {
         }
         const registry = toolRegistry;
         if (!registry) return '工具注册表尚未就绪，操作已取消。';
+        const base = buildConfirmedActionContext({ action, fallback: message });
+        const personKey =
+          action.requestedBy.personKey ??
+          (await resolveCommandPersonKey(base.requesterMessage));
         const ctx: ExecutionContext = {
-          conversationId: message.conversationId,
-          messageId: message.messageId,
-          senderStaffId: message.senderStaffId,
-          senderNick: message.senderNick,
-          conversationType: message.conversationType,
-          personKey: await resolveCommandPersonKey(message),
-          deadlineAt: Date.now() + 120_000,
-          now: Date.now,
+          ...base.context,
+          personKey,
+          notify: async (text) => {
+            await replyTo(message, text);
+          },
         };
+        if (!isRequester) {
+          logger.info(
+            {
+              conversationId: action.conversationId,
+              toolName: action.toolName,
+              requester: action.requestedBy.staffId,
+              confirmer: message.senderStaffId,
+            },
+            'admin confirmed tool action on behalf of requester',
+          );
+        }
         const tool = (await registry.assembleTools(ctx)).find(
           (item) => item.name === action.toolName,
         );
@@ -2930,7 +3055,7 @@ async function main(): Promise<void> {
         'dws authorization restored',
       );
       for (const entry of pending) {
-        const last = runControl.lastMessage(entry.conversationId);
+        const last = pendingNoticeMessage(entry);
         if (!last) continue;
         if (!entry.resume) {
           void replyTo(
@@ -2965,7 +3090,7 @@ async function main(): Promise<void> {
         'dws authorization not restored',
       );
       for (const entry of pending) {
-        const last = runControl.lastMessage(entry.conversationId);
+        const last = pendingNoticeMessage(entry);
         if (!last) continue;
         void replyTo(
           last,
@@ -2993,8 +3118,8 @@ async function main(): Promise<void> {
         );
         for (const entry of pending) {
           if (claimed.has(entry.conversationId)) continue;
-          const last = runControl.lastMessage(entry.conversationId);
-          if (!last || last.senderStaffId !== staffId) continue;
+          const last = pendingNoticeMessage(entry, staffId);
+          if (!last) continue;
           if (!entry.resume) {
             await replyTo(
               last,
@@ -3026,8 +3151,8 @@ async function main(): Promise<void> {
         );
         for (const entry of pending) {
           if (failed.has(entry.conversationId)) continue;
-          const last = runControl.lastMessage(entry.conversationId);
-          if (!last || last.senderStaffId !== staffId) continue;
+          const last = pendingNoticeMessage(entry, staffId);
+          if (!last) continue;
           await replyTo(
             last,
             `本人 DWS 授权未完成：${reason}。发送 /dws-consent 查看授权范围后，再发送 /dws-login 重试。`,

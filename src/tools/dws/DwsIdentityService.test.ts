@@ -326,6 +326,30 @@ describe('DwsIdentityService', () => {
     expect((await store.get('staff-1'))?.profile).toBe('ding-corp:staff-1');
   });
 
+  it('CLI 进程成功但授权状态未生效时按失败处理', async () => {
+    const { service: instance } = service({
+      runCommand: () => ({ exitCode: 0, stdout: '{}', stderr: '' }),
+    });
+    await instance.recordConsent('staff-1');
+    let successFired = false;
+    instance.once('login-success', () => {
+      successFired = true;
+    });
+    const failure = new Promise<{ reason: string }>((resolve) => {
+      instance.once('login-failed', resolve as never);
+    });
+    await instance.startLogin('staff-1');
+    const session = (instance as unknown as {
+      sessions: Map<string, { child: EventEmitter }>;
+    }).sessions.get('staff-1');
+    session?.child.emit('exit', 0, null);
+
+    await expect(failure).resolves.toMatchObject({
+      reason: expect.any(String),
+    });
+    expect(successFired).toBe(false);
+  });
+
   it('授权账号与发起人不一致时拒绝绑定', async () => {    const profiles = JSON.stringify({
       profiles: [
         {

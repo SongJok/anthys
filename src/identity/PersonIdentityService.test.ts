@@ -9,12 +9,14 @@ import type {
   PersonaProfileStore,
 } from '../types/persona-and-identity.js';
 import type { SemanticMemoryAdminPort } from '../types/bystander-and-memory.js';
+import type { PersonSettingsReassignPort } from '../types/personal-settings.js';
 
 const NOW = new Date('2026-11-01T10:00:00Z').getTime();
 
 class FakeIdentityStore implements PersonIdentityStore {
   public readonly people = new Map<string, PersonIdentityRecord>();
   public readonly aliases = new Map<string, PersonIdentityAliasRecord>();
+  public failNextBind = false;
 
   public async findPersonByAlias(alias: string): Promise<{
     personKey: string;
@@ -122,6 +124,10 @@ class FakeIdentityStore implements PersonIdentityStore {
     personKey: string;
     displayName?: string;
   }): Promise<{ previousPersonKey: string | null }> {
+    if (this.failNextBind) {
+      this.failNextBind = false;
+      throw new Error('数据库写入失败');
+    }
     await this.ensurePerson({
       personKey: input.personKey,
       ...(input.displayName ? { displayName: input.displayName } : {}),
@@ -192,12 +198,14 @@ function createService(options: {
   store: FakeIdentityStore;
   memories?: Pick<SemanticMemoryAdminPort, 'reassignSubjectKey'>;
   personas?: Pick<PersonaProfileStore, 'reassignSubjectKey'>;
+  settings?: PersonSettingsReassignPort;
   onBind?: (input: { personKey: string; previousPersonKey: string | null }) => void;
 }) {
   return new PersonIdentityService({
     store: options.store,
     ...(options.memories ? { memories: options.memories } : {}),
     ...(options.personas ? { personas: options.personas } : {}),
+    ...(options.settings ? { settings: options.settings } : {}),
     ...(options.onBind ? { onBind: options.onBind } : {}),
     now: () => NOW,
     cacheTtlMs: 60_000,
@@ -335,6 +343,8 @@ describe('PersonIdentityService', () => {
       previousPersonKey: 'external:open-2',
       migratedMemories: 2,
       migratedPersonas: 1,
+      migratedPreferences: 0,
+      migratedConsents: 0,
     });
     expect(memoryMoves).toEqual([['external:open-2', 'staff:staff-2']]);
     expect(personaMoves).toEqual([
@@ -355,15 +365,106 @@ describe('PersonIdentityService', () => {
     expect(afterBind.bound).toBe(true);
   });
 
-  it('mergeMemories=false 时只改别名归属，不迁移历史数据', async () => {
+  it('绑定身份时迁移个人偏好与记忆授权设置', async () => {
+    const store = new FakeIdentityStore();
+    const settingsMoves: Array<[string, string]> = [];
+    const service = createService({
+      store,
+      settings: {
+        async reassignPersonKey(from, to) {
+          settingsMoves.push([from, to]);
+          return { migratedPreferences: 1, migratedConsents: 2 };
+        },
+      },
+    });
+
+    await service.resolve(
+      message({
+        senderStaffId: 'open-8',
+        rawPayload: { senderOpenDingTalkId: 'open-8' },
+      }),
+    );
+    const outcome = await service.bind({
+      alias: 'open:open-8',
+      staffId: 'staff-8',
+    });
+
+    expect(settingsMoves).toEqual([['external:open-8', 'staff:staff-8']]);
+    expect(outcome.migratedPreferences).toBe(1);
+    expect(outcome.migratedConsents).toBe(2);
+  });
+
+  it('绑定写入失败后别名保持原归属，重试会重新迁移', async () => {
     const store = new FakeIdentityStore();
     const memoryMoves: string[] = [];
+    const settingsMoves: string[] = [];
     const service = createService({
       store,
       memories: {
         async reassignSubjectKey(from) {
           memoryMoves.push(from);
           return 1;
+        },
+      },
+      settings: {
+        async reassignPersonKey(from, to) {
+          settingsMoves.push(`${from}->${to}`);
+          return { migratedPreferences: 1, migratedConsents: 1 };
+        },
+      },
+    });
+
+    await service.resolve(
+      message({
+        senderStaffId: 'open-7',
+        rawPayload: { senderOpenDingTalkId: 'open-7' },
+      }),
+    );
+    memoryMoves.length = 0;
+    settingsMoves.length = 0;
+    store.failNextBind = true;
+
+    await expect(
+      service.bind({ alias: 'open:open-7', staffId: 'staff-7' }),
+    ).rejects.toThrow('数据库写入失败');
+    expect(store.aliases.get('open:open-7')?.personKey).toBe('external:open-7');
+
+    const outcome = await service.bind({
+      alias: 'open:open-7',
+      staffId: 'staff-7',
+    });
+
+    expect(outcome).toMatchObject({
+      personKey: 'staff:staff-7',
+      previousPersonKey: 'external:open-7',
+      migratedMemories: 1,
+      migratedPreferences: 1,
+      migratedConsents: 1,
+    });
+    expect(memoryMoves).toEqual(['external:open-7', 'external:open-7']);
+    expect(settingsMoves).toEqual([
+      'external:open-7->staff:staff-7',
+      'external:open-7->staff:staff-7',
+    ]);
+    expect(store.aliases.get('open:open-7')?.personKey).toBe('staff:staff-7');
+  });
+
+  it('mergeMemories=false 时只改别名归属，不迁移历史数据', async () => {
+    const store = new FakeIdentityStore();
+    const memoryMoves: string[] = [];
+    const settingsMoves: string[] = [];
+    const service = createService({
+      store,
+      memories: {
+        async reassignSubjectKey(from) {
+          memoryMoves.push(from);
+          return 1;
+        },
+      },
+      settings: {
+        async reassignPersonKey(from, to) {
+          settingsMoves.push(`${from}->${to}`);
+          return { migratedPreferences: 1, migratedConsents: 1 };
         },
       },
     });
@@ -383,7 +484,10 @@ describe('PersonIdentityService', () => {
 
     expect(outcome.migratedMemories).toBe(0);
     expect(outcome.migratedPersonas).toBe(0);
+    expect(outcome.migratedPreferences).toBe(0);
+    expect(outcome.migratedConsents).toBe(0);
     expect(memoryMoves).toEqual([]);
+    expect(settingsMoves).toEqual([]);
     expect(store.aliases.get('open:open-6')?.personKey).toBe('staff:staff-6');
   });
 

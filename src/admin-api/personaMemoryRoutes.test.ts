@@ -130,6 +130,8 @@ class FakeIdentities implements PersonIdentityAdminPort {
       previousPersonKey: 'external:open-abc',
       migratedMemories: 2,
       migratedPersonas: 1,
+      migratedPreferences: 1,
+      migratedConsents: 1,
     };
   }
 }
