@@ -672,7 +672,7 @@ export class DwsCliToolProvider implements IToolProvider {
     return {
       name: 'dws_doc_search_and_read',
       description:
-        '检索并读取企业内钉钉文档与知识库（含线上故障复盘文档）。action=search 按关键词搜索，read/get 按 documentId 读取正文，list 列出最近文档。',
+        '检索并读取钉钉文档与知识库，仅限于提问人本人有权限查看的内容。action=search 按关键词搜索，read/get 按 documentId 读取正文（长文可用 page 翻页），list 列出本人最近文档。找不到时可能只是无权访问，不要断言企业内不存在。',
       parametersJsonSchema: {
         type: 'object',
         properties: {

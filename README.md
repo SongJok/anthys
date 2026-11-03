@@ -883,7 +883,7 @@ ReAct 循环内置看门狗（`src/watchdog/RunWatchdog.ts`），只观察不执
 
 | 工具 | 风险 | 说明 |
 | --- | --- | --- |
-| `dws_doc_search_and_read` | read | 文档与知识库检索、读取 |
+| `dws_doc_search_and_read` | read | 文档与知识库检索、读取（仅提问人可见范围） |
 | `dws_org_and_schedule` | read | 通讯录、日程、待办、审批的只读查询，只接受只读子命令 |
 | `dws_calendar_manage` | write | 创建 / 修改日程 |
 | `dws_calendar_cancel` | destructive | 取消（删除）日程 |
@@ -900,7 +900,7 @@ ReAct 循环内置看门狗（`src/watchdog/RunWatchdog.ts`），只观察不执
 
 写工具统一声明 `write` / `destructive`，会先进入「写操作确认」闸门：机器人展示参数与风险，用户回复 `/confirm` 后才真正执行；执行时携带 `--yes`，避免 CLI 在无终端环境中等待交互确认。文档覆盖（`overwrite`）还会要求显式 `confirmOverwrite=true`；提交日志必须至少提供一个接收人，否则日志对任何人都不可见。AI 表格单次记录查询上限 100 条、分组统计上限 1000 条，超出时建议缩小过滤范围或改用沙盒分析。
 
-使用前需要在运行机器上安装 `dws` CLI。所有业务查询和写操作都使用**提问人本人**的 DWS 身份，不再借用管理员账号；调用时不拼接 shell，单次调用有 15 秒超时与输出长度上限。
+使用前需要在运行机器上安装 `dws` CLI。所有业务查询和写操作都使用**提问人本人**的 DWS 身份，不再借用管理员账号；调用时不拼接 shell，单次调用有 15 秒超时与输出长度上限。文档与知识库结果因此只覆盖该员工本人有权限查看的内容，不会返回全组织文档；找不到时也可能只是无权访问。
 
 #### 每员工独立 DWS 身份（同意 + 设备码授权 + 加密令牌）
 
