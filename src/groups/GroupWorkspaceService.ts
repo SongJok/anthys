@@ -9,6 +9,10 @@ import type {
   GroupWorkspaceSnapshot,
   GroupWorkspaceStore,
 } from '../types/group-workspace.js';
+import type {
+  SemanticMemoryAdminPort,
+  SemanticMemoryRecord,
+} from '../types/bystander-and-memory.js';
 import { formatShanghaiDateTime } from '../time/shanghaiTime.js';
 
 const TITLE_LIMIT = 80;
@@ -17,7 +21,8 @@ const GOAL_TITLE_LIMIT = 120;
 const TASK_TITLE_LIMIT = 120;
 const DETAIL_LIMIT = 4_000;
 const RESPONSIBILITY_LIMIT = 200;
-const BRIEF_LIMIT = 1_600;
+const BRIEF_LIMIT = 2_000;
+const BRIEF_MEMORY_LIMIT = 5;
 
 const GOAL_STATUS_LABELS: Record<GroupGoalStatus, string> = {
   active: '进行中',
@@ -38,11 +43,17 @@ const USAGE = [
   '- `/group` 查看本群定位、目标与任务',
   '- `/group purpose <内容>` 设置本群长期目标/定位',
   '- `/group responsibility add <内容>` / `remove <内容>` 维护群职责',
-  '- `/group goal add <标题> [--due 2026-11-30]` 新建群目标',
+  '- `/group goal add <标题> [--due 2026-11-30] [--owner 姓名]` 新建群目标',
   '- `/group goal list` / `/group goal done|pause|resume|archive <ID>`',
-  '- `/group task add <标题> [--due 2026-11-30]` 新建群任务',
+  '- `/group goal progress <ID> <0-100|+10|-10>` 更新目标进度',
+  '- `/group goal owner|due <ID> <姓名|日期>` 调整负责人或截止时间',
+  '- `/group task add <标题> [--goal <目标ID>] [--owner 姓名] [--due 2026-11-30]` 新建群任务',
   '- `/group task list` / `/group task start|done|cancel <ID>`',
+  '- `/group task assign|due|link|unlink <ID> ...` 调整负责人、截止时间或关联目标',
   '- `/group note <内容>` 手动沉淀一条群记忆',
+  '- `/group memory list|search|forget ...` 查看、检索或删除群记忆（删除需管理员）',
+  '- `/group digest` 生成本群目标与任务进度摘要',
+  '- `/group report daily 09:00` 定期播报群目标进度（管理员）',
 ].join('\n');
 
 export interface GroupWorkspaceMemoryNote {
@@ -58,6 +69,8 @@ export interface GroupWorkspaceServiceOptions {
   isAdmin: (staffId: string) => boolean;
   /** 手动群记忆沉淀；未配置时 /group note 只返回不可用提示 */
   saveNote?: (note: GroupWorkspaceMemoryNote) => Promise<void>;
+  /** 群记忆查看与删除；未配置时 /group memory 只返回不可用提示 */
+  memories?: SemanticMemoryAdminPort;
   now?: () => number;
 }
 
@@ -108,6 +121,30 @@ function shortId(id: string): string {
   return id.slice(0, 8);
 }
 
+function clampProgress(value: number): number {
+  if (!Number.isFinite(value)) {
+    throw new Error('群目标进度必须是 0–100 的数字');
+  }
+  return Math.max(0, Math.min(100, Math.round(value)));
+}
+
+function parseProgressInput(current: number, raw: string): number | string {
+  const text = raw.trim().replace(/%$/u, '');
+  const relative = /^([+-])\s*(\d{1,3})$/u.exec(text);
+  if (relative) {
+    const delta = Number(relative[2]) * (relative[1] === '-' ? -1 : 1);
+    return clampProgress(current + delta);
+  }
+  if (!/^\d{1,3}$/u.test(text)) {
+    return '用法：`/group goal progress <ID> <0-100|+10|-10>`。';
+  }
+  const value = Number(text);
+  if (value < 0 || value > 100) {
+    return '群目标进度需在 0–100 之间。';
+  }
+  return value;
+}
+
 function dueLabel(dueAt: number | null): string {
   return dueAt ? `截止 ${formatShanghaiDateTime(dueAt)}` : '';
 }
@@ -124,12 +161,14 @@ export class GroupWorkspaceService implements GroupWorkspaceAdminPort {
   private readonly store: GroupWorkspaceStore;
   private readonly isAdmin: (staffId: string) => boolean;
   private readonly saveNote?: GroupWorkspaceServiceOptions['saveNote'];
+  private readonly memories?: SemanticMemoryAdminPort;
   private readonly now: () => number;
 
   constructor(options: GroupWorkspaceServiceOptions) {
     this.store = options.store;
     this.isAdmin = options.isAdmin;
     this.saveNote = options.saveNote;
+    this.memories = options.memories;
     this.now = options.now ?? Date.now;
   }
 
@@ -191,6 +230,7 @@ export class GroupWorkspaceService implements GroupWorkspaceAdminPort {
     input: {
       title: string;
       detail?: string;
+      progress?: number;
       ownerName?: string;
       dueAt?: number | null;
     },
@@ -203,6 +243,7 @@ export class GroupWorkspaceService implements GroupWorkspaceAdminPort {
       title,
       detail: clip(input.detail ?? '', DETAIL_LIMIT),
       status: 'active',
+      progress: clampProgress(input.progress ?? 0),
       ownerPersonKey: null,
       ownerName: input.ownerName?.trim() ?? '',
       dueAt: input.dueAt ?? null,
@@ -217,6 +258,7 @@ export class GroupWorkspaceService implements GroupWorkspaceAdminPort {
       title?: string;
       detail?: string;
       status?: GroupGoalStatus;
+      progress?: number;
       ownerName?: string;
       dueAt?: number | null;
     },
@@ -228,12 +270,19 @@ export class GroupWorkspaceService implements GroupWorkspaceAdminPort {
         ? undefined
         : clip(input.title, GOAL_TITLE_LIMIT);
     if (title !== undefined && !title) throw new Error('群目标标题不能为空');
+    const progress =
+      input.progress !== undefined ? clampProgress(input.progress) : undefined;
     const updated = await this.store.updateGoal(goal.id, {
       ...(title !== undefined ? { title } : {}),
       ...(input.detail !== undefined
         ? { detail: clip(input.detail, DETAIL_LIMIT) }
         : {}),
       ...(input.status !== undefined ? { status: input.status } : {}),
+      ...(progress !== undefined
+        ? { progress }
+        : input.status === 'achieved'
+          ? { progress: 100 }
+          : {}),
       ...(input.ownerName !== undefined
         ? { ownerName: input.ownerName.trim() }
         : {}),
@@ -256,6 +305,7 @@ export class GroupWorkspaceService implements GroupWorkspaceAdminPort {
     input: {
       title: string;
       detail?: string;
+      goalId?: string | null;
       assigneeName?: string;
       dueAt?: number | null;
     },
@@ -263,8 +313,10 @@ export class GroupWorkspaceService implements GroupWorkspaceAdminPort {
   ): Promise<GroupTaskRecord> {
     const title = clip(input.title, TASK_TITLE_LIMIT);
     if (!title) throw new Error('群任务标题不能为空');
+    const goalId = await this.resolveGoalLink(conversationId, input.goalId);
     return this.store.createTask({
       conversationId,
+      goalId: goalId ?? null,
       title,
       detail: clip(input.detail ?? '', DETAIL_LIMIT),
       status: 'todo',
@@ -283,6 +335,7 @@ export class GroupWorkspaceService implements GroupWorkspaceAdminPort {
       title?: string;
       detail?: string;
       status?: GroupTaskStatus;
+      goalId?: string | null;
       assigneeName?: string;
       dueAt?: number | null;
     },
@@ -294,6 +347,7 @@ export class GroupWorkspaceService implements GroupWorkspaceAdminPort {
         ? undefined
         : clip(input.title, TASK_TITLE_LIMIT);
     if (title !== undefined && !title) throw new Error('群任务标题不能为空');
+    const goalId = await this.resolveGoalLink(conversationId, input.goalId);
     const completing =
       input.status === 'done' && task.status !== 'done'
         ? this.now()
@@ -306,6 +360,7 @@ export class GroupWorkspaceService implements GroupWorkspaceAdminPort {
         ? { detail: clip(input.detail, DETAIL_LIMIT) }
         : {}),
       ...(input.status !== undefined ? { status: input.status } : {}),
+      ...(goalId !== undefined ? { goalId } : {}),
       ...(input.assigneeName !== undefined
         ? { assigneeName: input.assigneeName.trim() }
         : {}),
@@ -331,6 +386,46 @@ export class GroupWorkspaceService implements GroupWorkspaceAdminPort {
     return true;
   }
 
+  /** 当前群的长期语义记忆，按最近更新排序 */
+  public async listMemories(
+    conversationId: string,
+    options: { query?: string; limit?: number } = {},
+  ): Promise<SemanticMemoryRecord[]> {
+    if (!this.memories) return [];
+    const query = options.query?.trim();
+    const result = await this.memories.list({
+      scope: 'group',
+      subjectKey: conversationId,
+      status: 'active',
+      ...(query ? { query } : {}),
+      limit: Math.max(1, Math.min(200, options.limit ?? 20)),
+      offset: 0,
+    });
+    return result.items.filter(
+      (record) =>
+        record.scope === 'group' &&
+        record.subjectKey === conversationId &&
+        record.status === 'active',
+    );
+  }
+
+  /** 删除一条群记忆；仅管理员可操作，且只能删除本群条目 */
+  public async forgetMemory(
+    conversationId: string,
+    idOrPrefix: string,
+    staffId: string,
+  ): Promise<string> {
+    if (!this.memories) return '群记忆管理未启用。';
+    if (!this.isAdmin(staffId)) return '只有管理员可以删除群记忆。';
+    const records = await this.listMemories(conversationId, { limit: 200 });
+    const resolved = resolveByPrefix(records, idOrPrefix, '群记忆');
+    if ('error' in resolved) return resolved.error;
+    const removed = await this.memories.remove(resolved.record.id);
+    return removed
+      ? `已删除群记忆：${clip(resolved.record.content, 80)}`
+      : '删除失败，记忆可能已被移除。';
+  }
+
   /** 注入系统提示的群工作区简报；没有任何配置时返回空串 */
   public async buildBrief(
     conversationId: string,
@@ -339,8 +434,16 @@ export class GroupWorkspaceService implements GroupWorkspaceAdminPort {
     const [workspace, goals, tasks] = await Promise.all([
       this.store.getWorkspace(conversationId),
       this.store.listGoals(conversationId),
-      this.store.listTasks(conversationId),
+      this.store.listTasks(conversationId, { includeDone: true }),
     ]);
+    const taskStats = new Map<string, { done: number; total: number }>();
+    for (const task of tasks) {
+      if (!task.goalId || task.status === 'cancelled') continue;
+      const stats = taskStats.get(task.goalId) ?? { done: 0, total: 0 };
+      stats.total += 1;
+      if (task.status === 'done') stats.done += 1;
+      taskStats.set(task.goalId, stats);
+    }
     const activeGoals = goals.filter(
       (goal) => goal.status === 'active' || goal.status === 'paused',
     );
@@ -367,8 +470,10 @@ export class GroupWorkspaceService implements GroupWorkspaceAdminPort {
     if (activeGoals.length > 0) {
       lines.push('群目标：');
       for (const goal of activeGoals.slice(0, 8)) {
+        const stats = taskStats.get(goal.id);
         const meta = [
           GOAL_STATUS_LABELS[goal.status],
+          `进度 ${goal.progress}%${stats ? `（任务 ${stats.done}/${stats.total}）` : ''}`,
           ownerLabel(goal.ownerName),
           dueLabel(goal.dueAt),
         ].filter(Boolean);
@@ -390,11 +495,127 @@ export class GroupWorkspaceService implements GroupWorkspaceAdminPort {
         );
       }
     }
+    try {
+      const memories = await this.listMemories(conversationId, {
+        limit: BRIEF_MEMORY_LIMIT,
+      });
+      if (memories.length > 0) {
+        lines.push(
+          '群记忆（长期约定）：',
+          ...memories.map((record) => `- ${clip(record.content, 160)}`),
+        );
+      }
+    } catch {
+      // 记忆不可用时不阻塞群工作区简报
+    }
     lines.push(
       '以上是本群长期上下文；回答时保持与群目标一致，成员可用 /group 维护。',
     );
     const text = lines.join('\n');
     return text.length > maxChars ? `${text.slice(0, maxChars)}…` : text;
+  }
+
+  /** 确定性的群目标摘要，不经过模型；用于 /group digest 与定期播报 */
+  public async buildDigest(
+    conversationId: string,
+    now = this.now(),
+  ): Promise<string> {
+    const snapshot = await this.snapshot(conversationId);
+    const goals = snapshot.goals.filter((goal) => goal.status !== 'archived');
+    const tasks = snapshot.tasks.filter((task) => task.status !== 'cancelled');
+    const openTasks = tasks.filter(
+      (task) => task.status === 'todo' || task.status === 'doing',
+    );
+    const taskStats = new Map<string, { done: number; total: number }>();
+    for (const task of tasks) {
+      if (!task.goalId) continue;
+      const stats = taskStats.get(task.goalId) ?? { done: 0, total: 0 };
+      stats.total += 1;
+      if (task.status === 'done') stats.done += 1;
+      taskStats.set(task.goalId, stats);
+    }
+    const lines = [
+      `【群目标进度】${formatShanghaiDateTime(now)}`,
+    ];
+    if (snapshot.workspace.purpose.trim()) {
+      lines.push(`群定位：${snapshot.workspace.purpose.trim()}`);
+    }
+    if (goals.length === 0) {
+      lines.push('群目标：暂无，可用 `/group goal add` 创建。');
+    } else {
+      lines.push('群目标：');
+      for (const goal of goals.slice(0, 10)) {
+        const stats = taskStats.get(goal.id);
+        const meta = [
+          GOAL_STATUS_LABELS[goal.status],
+          `进度 ${goal.progress}%${stats ? `，任务 ${stats.done}/${stats.total}` : ''}`,
+          ownerLabel(goal.ownerName),
+          dueLabel(goal.dueAt),
+          goal.dueAt !== null &&
+          goal.dueAt < now &&
+          goal.status !== 'achieved'
+            ? '已逾期'
+            : '',
+        ].filter(Boolean);
+        lines.push(`- ${goal.title}（${meta.join(' · ')}）`);
+      }
+    }
+    const overdue = openTasks
+      .filter((task) => task.dueAt !== null && task.dueAt < now)
+      .sort((left, right) => (left.dueAt ?? 0) - (right.dueAt ?? 0));
+    const dueSoon = openTasks
+      .filter(
+        (task) =>
+          task.dueAt !== null &&
+          task.dueAt >= now &&
+          task.dueAt <= now + 3 * 24 * 60 * 60_000,
+      )
+      .sort((left, right) => (left.dueAt ?? 0) - (right.dueAt ?? 0));
+    const doing = openTasks.filter((task) => task.status === 'doing');
+    if (overdue.length > 0) {
+      lines.push('逾期任务：');
+      for (const task of overdue.slice(0, 8)) {
+        lines.push(
+          `- ${task.title}${ownerLabel(task.assigneeName) ? `（${ownerLabel(task.assigneeName)}）` : ''}`,
+        );
+      }
+    }
+    if (dueSoon.length > 0) {
+      lines.push('3 天内到期：');
+      for (const task of dueSoon.slice(0, 8)) {
+        lines.push(
+          `- ${task.title}（${dueLabel(task.dueAt)}${task.assigneeName ? ` · 负责人 ${task.assigneeName}` : ''}）`,
+        );
+      }
+    }
+    if (doing.length > 0) {
+      lines.push('进行中：');
+      for (const task of doing.slice(0, 8)) {
+        lines.push(`- ${task.title}`);
+      }
+    }
+    if (openTasks.length === 0) {
+      lines.push('未完成群任务：暂无。');
+    } else {
+      lines.push(`未完成群任务共 ${openTasks.length} 项。`);
+    }
+    if (this.memories) {
+      try {
+        const result = await this.memories.list({
+          scope: 'group',
+          subjectKey: conversationId,
+          status: 'active',
+          limit: 1,
+          offset: 0,
+        });
+        if (result.total > 0) {
+          lines.push(`群记忆：${result.total} 条长期约定（/group memory list 查看）。`);
+        }
+      } catch {
+        // 记忆不可用时不阻塞摘要
+      }
+    }
+    return lines.join('\n');
   }
 
   public async handleCommand(
@@ -439,6 +660,10 @@ export class GroupWorkspaceService implements GroupWorkspaceAdminPort {
           rest,
           personKey,
         );
+      case 'memory':
+        return this.handleMemoryCommand(message, rest, personKey);
+      case 'digest':
+        return this.buildDigest(conversationId);
       case 'note': {
         const content = rest.join(' ').trim();
         if (!content) return '用法：`/group note <要沉淀的群知识>`。';
@@ -500,13 +725,20 @@ export class GroupWorkspaceService implements GroupWorkspaceAdminPort {
     const conversationId = message.conversationId;
     switch (action?.toLowerCase()) {
       case 'add': {
-        const { text, dueAt } = extractDue(rest);
+        const { text, values } = extractFlags(rest, ['due', 'owner']);
+        const dueAt = values.has('due') ? parseDueAt(values.get('due')) : null;
         if (!text) {
-          return '用法：`/group goal add <标题> [--due 2026-11-30]`。';
+          return '用法：`/group goal add <标题> [--due 2026-11-30] [--owner 姓名]`。';
         }
         const goal = await this.createGoal(
           conversationId,
-          { title: text, dueAt },
+          {
+            title: text,
+            dueAt,
+            ...(values.get('owner')?.trim()
+              ? { ownerName: values.get('owner')!.trim() }
+              : {}),
+          },
           personKey,
         );
         return `已创建群目标 ${shortId(goal.id)}：${goal.title}`;
@@ -516,6 +748,68 @@ export class GroupWorkspaceService implements GroupWorkspaceAdminPort {
           includeArchived: true,
         });
         return this.formatGoals(goals);
+      }
+      case 'progress': {
+        const goal = await this.resolveGoal(conversationId, rest[0] ?? '');
+        if ('error' in goal) return goal.error;
+        if (!this.canManage(goal.goal, message.senderStaffId, personKey)) {
+          return '只有创建人或管理员可以变更群目标进度。';
+        }
+        const raw = rest.slice(1).join(' ').trim();
+        if (!raw) return '用法：`/group goal progress <ID> <0-100|+10|-10>`。';
+        const value = parseProgressInput(goal.goal.progress, raw);
+        if (typeof value === 'string') return value;
+        await this.updateGoal(
+          conversationId,
+          goal.goal.id,
+          { progress: value },
+          personKey,
+        );
+        return `群目标 ${shortId(goal.goal.id)} 进度已更新为 ${value}%。`;
+      }
+      case 'owner': {
+        const goal = await this.resolveGoal(conversationId, rest[0] ?? '');
+        if ('error' in goal) return goal.error;
+        if (!this.canManage(goal.goal, message.senderStaffId, personKey)) {
+          return '只有创建人或管理员可以调整群目标负责人。';
+        }
+        const ownerName = rest.slice(1).join(' ').trim();
+        if (!ownerName) {
+          return '用法：`/group goal owner <ID> <负责人姓名>`，传 `-` 清除。';
+        }
+        await this.updateGoal(
+          conversationId,
+          goal.goal.id,
+          { ownerName: ownerName === '-' ? '' : ownerName },
+          personKey,
+        );
+        return ownerName === '-'
+          ? `已清除群目标 ${shortId(goal.goal.id)} 的负责人。`
+          : `群目标 ${shortId(goal.goal.id)} 负责人已设为 ${ownerName}。`;
+      }
+      case 'due': {
+        const goal = await this.resolveGoal(conversationId, rest[0] ?? '');
+        if ('error' in goal) return goal.error;
+        if (!this.canManage(goal.goal, message.senderStaffId, personKey)) {
+          return '只有创建人或管理员可以调整群目标截止时间。';
+        }
+        const raw = rest.slice(1).join(' ').trim();
+        if (!raw) {
+          return '用法：`/group goal due <ID> <YYYY-MM-DD>`，传 `-` 清除。';
+        }
+        const dueAt = raw === '-' ? null : parseDueAt(raw);
+        if (raw !== '-' && dueAt === null) {
+          return '无法识别截止时间，请用 `YYYY-MM-DD` 或 ISO 时间。';
+        }
+        await this.updateGoal(
+          conversationId,
+          goal.goal.id,
+          { dueAt },
+          personKey,
+        );
+        return dueAt === null
+          ? `已清除群目标 ${shortId(goal.goal.id)} 的截止时间。`
+          : `群目标 ${shortId(goal.goal.id)} 截止时间已更新为 ${formatShanghaiDateTime(dueAt)}。`;
       }
       case 'done':
       case 'pause':
@@ -534,7 +828,12 @@ export class GroupWorkspaceService implements GroupWorkspaceAdminPort {
               : action === 'resume'
                 ? 'active'
                 : 'archived';
-        await this.store.updateGoal(goal.goal.id, { status });
+        await this.updateGoal(
+          conversationId,
+          goal.goal.id,
+          { status },
+          personKey,
+        );
         return `群目标 ${shortId(goal.goal.id)} 已更新为「${GOAL_STATUS_LABELS[status]}」。`;
       }
       default:
@@ -551,22 +850,107 @@ export class GroupWorkspaceService implements GroupWorkspaceAdminPort {
     const conversationId = message.conversationId;
     switch (action?.toLowerCase()) {
       case 'add': {
-        const { text, dueAt } = extractDue(rest);
+        const { text, values } = extractFlags(rest, ['due', 'goal', 'owner']);
+        const dueAt = values.has('due') ? parseDueAt(values.get('due')) : null;
         if (!text) {
-          return '用法：`/group task add <标题> [--due 2026-11-30]`。';
+          return '用法：`/group task add <标题> [--goal <目标ID>] [--owner 姓名] [--due 2026-11-30]`。';
         }
         const task = await this.createTask(
           conversationId,
-          { title: text, dueAt },
+          {
+            title: text,
+            dueAt,
+            ...(values.get('goal')?.trim()
+              ? { goalId: values.get('goal')!.trim() }
+              : {}),
+            ...(values.get('owner')?.trim()
+              ? { assigneeName: values.get('owner')!.trim() }
+              : {}),
+          },
           personKey,
         );
         return `已创建群任务 ${shortId(task.id)}：${task.title}`;
       }
       case 'list': {
-        const tasks = await this.store.listTasks(conversationId, {
-          includeDone: true,
-        });
-        return this.formatTasks(tasks);
+        const [tasks, goals] = await Promise.all([
+          this.store.listTasks(conversationId, { includeDone: true }),
+          this.store.listGoals(conversationId, { includeArchived: true }),
+        ]);
+        return this.formatTasks(tasks, goals);
+      }
+      case 'assign': {
+        const task = await this.resolveTask(conversationId, rest[0] ?? '');
+        if ('error' in task) return task.error;
+        if (!this.canManage(task.task, message.senderStaffId, personKey)) {
+          return '只有创建人或管理员可以调整群任务负责人。';
+        }
+        const assigneeName = rest.slice(1).join(' ').trim();
+        if (!assigneeName) {
+          return '用法：`/group task assign <ID> <负责人姓名>`，传 `-` 清除。';
+        }
+        await this.updateTask(
+          conversationId,
+          task.task.id,
+          { assigneeName: assigneeName === '-' ? '' : assigneeName },
+          personKey,
+        );
+        return assigneeName === '-'
+          ? `已清除群任务 ${shortId(task.task.id)} 的负责人。`
+          : `群任务 ${shortId(task.task.id)} 负责人已设为 ${assigneeName}。`;
+      }
+      case 'due': {
+        const task = await this.resolveTask(conversationId, rest[0] ?? '');
+        if ('error' in task) return task.error;
+        if (!this.canManage(task.task, message.senderStaffId, personKey)) {
+          return '只有创建人或管理员可以调整群任务截止时间。';
+        }
+        const raw = rest.slice(1).join(' ').trim();
+        if (!raw) {
+          return '用法：`/group task due <ID> <YYYY-MM-DD>`，传 `-` 清除。';
+        }
+        const dueAt = raw === '-' ? null : parseDueAt(raw);
+        if (raw !== '-' && dueAt === null) {
+          return '无法识别截止时间，请用 `YYYY-MM-DD` 或 ISO 时间。';
+        }
+        await this.updateTask(
+          conversationId,
+          task.task.id,
+          { dueAt },
+          personKey,
+        );
+        return dueAt === null
+          ? `已清除群任务 ${shortId(task.task.id)} 的截止时间。`
+          : `群任务 ${shortId(task.task.id)} 截止时间已更新为 ${formatShanghaiDateTime(dueAt)}。`;
+      }
+      case 'link':
+      case 'unlink': {
+        const task = await this.resolveTask(conversationId, rest[0] ?? '');
+        if ('error' in task) return task.error;
+        if (!this.canManage(task.task, message.senderStaffId, personKey)) {
+          return '只有创建人或管理员可以调整群任务关联的目标。';
+        }
+        if (action === 'unlink') {
+          await this.updateTask(
+            conversationId,
+            task.task.id,
+            { goalId: null },
+            personKey,
+          );
+          return `群任务 ${shortId(task.task.id)} 已取消目标关联。`;
+        }
+        const goalId = rest[1]?.trim();
+        if (!goalId) {
+          return '用法：`/group task link <任务ID> <目标ID>`。';
+        }
+        const goal = await this.resolveGoal(conversationId, goalId);
+        if ('error' in goal) return goal.error;
+        await this.updateTask(
+          conversationId,
+          task.task.id,
+          { goalId: goal.goal.id },
+          personKey,
+        );
+        return `群任务 ${shortId(task.task.id)} 已关联目标 ${shortId(goal.goal.id)}。`;
       }
       case 'start':
       case 'done':
@@ -612,9 +996,19 @@ export class GroupWorkspaceService implements GroupWorkspaceAdminPort {
     const tasks = snapshot.tasks.filter(
       (task) => task.status !== 'cancelled',
     );
-    sections.push(this.formatTasks(tasks));
+    sections.push(this.formatTasks(tasks, goals));
+    if (this.memories) {
+      try {
+        const memories = await this.listMemories(conversationId, { limit: 200 });
+        sections.push(
+          `群记忆：${memories.length} 条长期约定（发送 \`/group memory list\` 查看）。`,
+        );
+      } catch {
+        // 记忆不可用时不阻塞工作区查看
+      }
+    }
     sections.push(
-      '维护：`/group purpose ...`、`/group goal add ...`、`/group task add ...`、`/group note ...`。',
+      '维护：`/group purpose ...`、`/group goal add ...`、`/group task add ...`、`/group note ...`、`/group digest`。',
     );
     return sections.filter(Boolean).join('\n');
   }
@@ -626,6 +1020,7 @@ export class GroupWorkspaceService implements GroupWorkspaceAdminPort {
       ...goals.map((goal) => {
         const meta = [
           GOAL_STATUS_LABELS[goal.status],
+          `进度 ${goal.progress}%`,
           ownerLabel(goal.ownerName),
           dueLabel(goal.dueAt),
         ].filter(Boolean);
@@ -634,18 +1029,79 @@ export class GroupWorkspaceService implements GroupWorkspaceAdminPort {
     ].join('\n');
   }
 
-  private formatTasks(tasks: GroupTaskRecord[]): string {
+  private formatTasks(
+    tasks: GroupTaskRecord[],
+    goals: GroupGoalRecord[] = [],
+  ): string {
     if (tasks.length === 0) return '群任务：暂无。';
+    const goalTitles = new Map(
+      goals.map((goal) => [goal.id, goal.title] as const),
+    );
     return [
       '群任务：',
       ...tasks.map((task) => {
+        const goalTitle = task.goalId ? goalTitles.get(task.goalId) : undefined;
         const meta = [
           TASK_STATUS_LABELS[task.status],
           ownerLabel(task.assigneeName),
           dueLabel(task.dueAt),
+          goalTitle ? `目标：${clip(goalTitle, 30)}` : '',
         ].filter(Boolean);
         return `- ${shortId(task.id)} · ${task.title}（${meta.join(' · ')}）`;
       }),
+    ].join('\n');
+  }
+
+  private async handleMemoryCommand(
+    message: InboundMessage,
+    args: string[],
+    _personKey: string,
+  ): Promise<string> {
+    const [action, ...rest] = args;
+    const conversationId = message.conversationId;
+    if (!this.memories) return '群记忆管理未启用。';
+    switch (action?.toLowerCase()) {
+      case undefined:
+      case 'list': {
+        const records = await this.listMemories(conversationId, { limit: 20 });
+        return this.formatMemoryList(records, false);
+      }
+      case 'search': {
+        const query = rest.join(' ').trim();
+        if (!query) return '用法：`/group memory search <关键词>`。';
+        const records = await this.listMemories(conversationId, {
+          query,
+          limit: 20,
+        });
+        return this.formatMemoryList(records, true);
+      }
+      case 'forget':
+        return this.forgetMemory(
+          conversationId,
+          rest[0] ?? '',
+          message.senderStaffId,
+        );
+      default:
+        return '用法：`/group memory list|search <关键词>|forget <ID>`。';
+    }
+  }
+
+  private formatMemoryList(
+    records: SemanticMemoryRecord[],
+    searched: boolean,
+  ): string {
+    if (records.length === 0) {
+      return searched
+        ? '没有找到匹配的群记忆。'
+        : '本群还没有沉淀记忆；发送 `/group note <内容>` 添加。';
+    }
+    return [
+      searched ? '匹配的群记忆：' : '【群记忆】',
+      ...records.map(
+        (record) =>
+          `- ${shortId(record.id)} · ${clip(record.content, 160)}（更新 ${formatShanghaiDateTime(record.updatedAt)}）`,
+      ),
+      '删除：`/group memory forget <ID>`（仅管理员）。',
     ].join('\n');
   }
 
@@ -656,6 +1112,16 @@ export class GroupWorkspaceService implements GroupWorkspaceAdminPort {
     const goal = await this.resolveGoal(conversationId, goalId);
     if ('error' in goal) throw new Error(goal.error);
     return goal.goal;
+  }
+
+  private async resolveGoalLink(
+    conversationId: string,
+    goalId: string | null | undefined,
+  ): Promise<string | null | undefined> {
+    if (goalId === undefined) return undefined;
+    if (goalId === null || goalId.trim() === '') return null;
+    const goal = await this.requireGoal(conversationId, goalId);
+    return goal.id;
   }
 
   private async requireTask(
@@ -705,23 +1171,40 @@ export class GroupWorkspaceService implements GroupWorkspaceAdminPort {
   }
 }
 
-function extractDue(parts: string[]): { text: string; dueAt: number | null } {
+/** 从命令参数中提取 `--name value` / `--name=value`，其余部分拼回标题 */
+function extractFlags(
+  parts: string[],
+  names: string[],
+): { text: string; values: Map<string, string> } {
+  const allowed = new Set(names.map((name) => name.toLowerCase()));
+  const values = new Map<string, string>();
   const textParts: string[] = [];
-  let dueAt: number | null = null;
   for (let index = 0; index < parts.length; index += 1) {
     const part = parts[index] ?? '';
-    if (part === '--due') {
-      dueAt = parseDueAt(parts[index + 1]);
+    if (!part.startsWith('--')) {
+      textParts.push(part);
+      continue;
+    }
+    const body = part.slice(2);
+    const equals = body.indexOf('=');
+    const name = (equals >= 0 ? body.slice(0, equals) : body).toLowerCase();
+    if (!allowed.has(name)) {
+      textParts.push(part);
+      continue;
+    }
+    if (equals >= 0) {
+      values.set(name, body.slice(equals + 1));
+      continue;
+    }
+    const next = parts[index + 1];
+    if (next !== undefined && !next.startsWith('--')) {
+      values.set(name, next);
       index += 1;
-      continue;
+    } else {
+      values.set(name, '');
     }
-    if (part.startsWith('--due=')) {
-      dueAt = parseDueAt(part.slice('--due='.length));
-      continue;
-    }
-    textParts.push(part);
   }
-  return { text: clip(textParts.join(' '), GOAL_TITLE_LIMIT), dueAt };
+  return { text: textParts.join(' ').trim(), values };
 }
 
 function resolveByPrefix<T extends { id: string }>(

@@ -8,6 +8,12 @@ import type {
   GroupWorkspaceRecord,
   GroupWorkspaceStore,
 } from '../types/group-workspace.js';
+import type {
+  SemanticMemoryAdminFilter,
+  SemanticMemoryAdminPort,
+  SemanticMemoryPatch,
+  SemanticMemoryRecord,
+} from '../types/bystander-and-memory.js';
 import {
   GroupWorkspaceService,
   parseDueAt,
@@ -74,7 +80,13 @@ class MemoryGroupStore implements GroupWorkspaceStore {
     patch: Partial<
       Pick<
         GroupGoalRecord,
-        'title' | 'detail' | 'status' | 'ownerPersonKey' | 'ownerName' | 'dueAt'
+        | 'title'
+        | 'detail'
+        | 'status'
+        | 'progress'
+        | 'ownerPersonKey'
+        | 'ownerName'
+        | 'dueAt'
       >
     >,
   ): Promise<GroupGoalRecord | null> {
@@ -128,6 +140,7 @@ class MemoryGroupStore implements GroupWorkspaceStore {
         | 'title'
         | 'detail'
         | 'status'
+        | 'goalId'
         | 'assigneePersonKey'
         | 'assigneeName'
         | 'dueAt'
@@ -149,6 +162,75 @@ class MemoryGroupStore implements GroupWorkspaceStore {
   }
 }
 
+function semanticRecord(
+  overrides: Partial<SemanticMemoryRecord> = {},
+): SemanticMemoryRecord {
+  return {
+    id: 'mem-0001',
+    scope: 'group',
+    subjectKey: 'cid-group-1',
+    kind: 'terminology',
+    content: '客户只在周五下午开评审会',
+    keywords: [],
+    embedding: null,
+    shareableInGroup: true,
+    sensitivity: 'normal',
+    status: 'active',
+    sourceConversationId: 'cid-group-1',
+    sourceConversationType: '2',
+    sourceMessageId: null,
+    confidence: 0.9,
+    expiresAt: null,
+    createdAt: NOW,
+    updatedAt: NOW,
+    ...overrides,
+  };
+}
+
+class MemorySemanticStore implements SemanticMemoryAdminPort {
+  public readonly records: SemanticMemoryRecord[] = [];
+
+  public async list(
+    filter: SemanticMemoryAdminFilter,
+  ): Promise<{ total: number; items: SemanticMemoryRecord[] }> {
+    const query = filter.query?.trim();
+    const items = this.records.filter(
+      (record) =>
+        (filter.scope === undefined || record.scope === filter.scope) &&
+        (filter.subjectKey === undefined ||
+          record.subjectKey === filter.subjectKey) &&
+        (filter.status === undefined || record.status === filter.status) &&
+        (!query || record.content.includes(query)),
+    );
+    return { total: items.length, items: items.slice(0, filter.limit ?? 20) };
+  }
+
+  public async get(id: string): Promise<SemanticMemoryRecord | null> {
+    return this.records.find((record) => record.id === id) ?? null;
+  }
+
+  public async update(
+    id: string,
+    patch: SemanticMemoryPatch,
+  ): Promise<SemanticMemoryRecord> {
+    const record = this.records.find((item) => item.id === id);
+    if (!record) throw new Error('missing');
+    Object.assign(record, patch, { updatedAt: NOW });
+    return record;
+  }
+
+  public async remove(id: string): Promise<boolean> {
+    const index = this.records.findIndex((record) => record.id === id);
+    if (index < 0) return false;
+    this.records.splice(index, 1);
+    return true;
+  }
+
+  public async reassignSubjectKey(): Promise<number> {
+    return 0;
+  }
+}
+
 function message(overrides: Partial<InboundMessage> = {}): InboundMessage {
   return {
     messageId: 'msg-1',
@@ -165,13 +247,17 @@ function message(overrides: Partial<InboundMessage> = {}): InboundMessage {
 }
 
 function makeService(
-  options: { saveNote?: (note: GroupWorkspaceMemoryNote) => Promise<void> } = {},
+  options: {
+    saveNote?: (note: GroupWorkspaceMemoryNote) => Promise<void>;
+    memories?: SemanticMemoryAdminPort;
+  } = {},
 ) {
   const store = new MemoryGroupStore();
   const service = new GroupWorkspaceService({
     store,
     isAdmin: (staffId) => staffId === 'staff-admin',
     ...(options.saveNote ? { saveNote: options.saveNote } : {}),
+    ...(options.memories ? { memories: options.memories } : {}),
     now: () => NOW,
   });
   return { store, service };
@@ -415,5 +501,139 @@ describe('GroupWorkspaceService', () => {
     await expect(
       service.updateTask('cid-group-1', task.id, { title: '' }, 'staff:1'),
     ).rejects.toThrow('群任务标题不能为空');
+  });
+
+  it('目标进度支持绝对值与增减，任务可关联目标', async () => {
+    const { service, store } = makeService();
+    const goalReply = await service.handleCommand(
+      message(),
+      ['goal', 'add', '季度续约率', '90%', '--owner', '张三'],
+      'staff:1',
+    );
+    expect(goalReply).toContain('已创建群目标');
+    const goal = store.goals[0]!;
+    expect(goal.ownerName).toBe('张三');
+    expect(goal.progress).toBe(0);
+
+    expect(
+      await service.handleCommand(
+        message(),
+        ['goal', 'progress', goal.id.slice(0, 8), '+30'],
+        'staff:1',
+      ),
+    ).toContain('30%');
+    expect(
+      await service.handleCommand(
+        message(),
+        ['goal', 'progress', goal.id, '85'],
+        'staff:1',
+      ),
+    ).toContain('85%');
+    expect(store.goals[0]!.progress).toBe(85);
+
+    const taskReply = await service.handleCommand(
+      message(),
+      ['task', 'add', '整理续约清单', '--goal', goal.id.slice(0, 8)],
+      'staff:1',
+    );
+    expect(taskReply).toContain('已创建群任务');
+    const task = store.tasks[0]!;
+    expect(task.goalId).toBe(goal.id);
+
+    const list = await service.handleCommand(
+      message(),
+      ['task', 'list'],
+      'staff:1',
+    );
+    expect(list).toContain('目标：季度续约率 90%');
+  });
+
+  it('群记忆可查看、检索，且仅管理员可删除本群条目', async () => {
+    const memories = new MemorySemanticStore();
+    memories.records.push(
+      semanticRecord({ id: 'mem-0001' }),
+      semanticRecord({
+        id: 'mem-0002',
+        subjectKey: 'cid-other',
+        content: '其他群的约定',
+      }),
+    );
+    const { service } = makeService({ memories });
+
+    const list = await service.handleCommand(
+      message(),
+      ['memory', 'list'],
+      'staff:1',
+    );
+    expect(list).toContain('客户只在周五下午开评审会');
+    expect(list).not.toContain('其他群的约定');
+
+    const search = await service.handleCommand(
+      message(),
+      ['memory', 'search', '周五'],
+      'staff:1',
+    );
+    expect(search).toContain('客户只在周五下午开评审会');
+
+    const denied = await service.handleCommand(
+      message({ senderStaffId: 'staff-2' }),
+      ['memory', 'forget', 'mem-0001'],
+      'staff:2',
+    );
+    expect(denied).toContain('只有管理员');
+    expect(memories.records).toHaveLength(2);
+
+    const removed = await service.handleCommand(
+      message({ senderStaffId: 'staff-admin' }),
+      ['memory', 'forget', 'mem-0001'],
+      'staff:admin',
+    );
+    expect(removed).toContain('已删除群记忆');
+    expect(memories.records.map((record) => record.id)).toEqual(['mem-0002']);
+  });
+
+  it('摘要包含目标进度、逾期与近期到期任务', async () => {
+    const { service } = makeService();
+    const goal = await service.createGoal(
+      'cid-group-1',
+      {
+        title: 'SLA 达标',
+        ownerName: '张三',
+        dueAt: NOW - 60_000,
+      },
+      'staff:1',
+    );
+    await service.updateGoal(
+      'cid-group-1',
+      goal.id,
+      { progress: 60 },
+      'staff:1',
+    );
+    await service.createTask(
+      'cid-group-1',
+      {
+        title: '逾期复盘',
+        dueAt: NOW - 3_600_000,
+      },
+      'staff:1',
+    );
+    await service.createTask(
+      'cid-group-1',
+      {
+        title: '明天交付',
+        dueAt: NOW + 24 * 3_600_000,
+      },
+      'staff:1',
+    );
+
+    const digest = await service.buildDigest('cid-group-1');
+    expect(digest).toContain('群目标进度');
+    expect(digest).toContain('SLA 达标');
+    expect(digest).toContain('进度 60%');
+    expect(digest).toContain('已逾期');
+    expect(digest).toContain('逾期任务：');
+    expect(digest).toContain('逾期复盘');
+    expect(digest).toContain('3 天内到期：');
+    expect(digest).toContain('明天交付');
   });
 });

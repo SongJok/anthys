@@ -45,6 +45,8 @@ export interface GroupGoalRecord {
   title: string;
   detail: string;
   status: GroupGoalStatus;
+  /** 0–100；100 表示全部完成，不等同于已归档 */
+  progress: number;
   ownerPersonKey: string | null;
   ownerName: string;
   /** epoch ms；null 表示不设截止时间 */
@@ -57,6 +59,8 @@ export interface GroupGoalRecord {
 export interface GroupTaskRecord {
   id: string;
   conversationId: string;
+  /** 关联的群目标；null 表示独立任务 */
+  goalId: string | null;
   title: string;
   detail: string;
   status: GroupTaskStatus;
@@ -94,6 +98,7 @@ export interface GroupWorkspaceStore {
         | 'title'
         | 'detail'
         | 'status'
+        | 'progress'
         | 'ownerPersonKey'
         | 'ownerName'
         | 'dueAt'
@@ -117,6 +122,7 @@ export interface GroupWorkspaceStore {
         | 'title'
         | 'detail'
         | 'status'
+        | 'goalId'
         | 'assigneePersonKey'
         | 'assigneeName'
         | 'dueAt'
@@ -143,6 +149,7 @@ export interface GroupWorkspaceAdminPort {
     input: {
       title: string;
       detail?: string;
+      progress?: number;
       ownerName?: string;
       dueAt?: number | null;
     },
@@ -155,6 +162,7 @@ export interface GroupWorkspaceAdminPort {
       title?: string;
       detail?: string;
       status?: GroupGoalStatus;
+      progress?: number;
       ownerName?: string;
       dueAt?: number | null;
     },
@@ -166,6 +174,7 @@ export interface GroupWorkspaceAdminPort {
     input: {
       title: string;
       detail?: string;
+      goalId?: string | null;
       assigneeName?: string;
       dueAt?: number | null;
     },
@@ -178,6 +187,7 @@ export interface GroupWorkspaceAdminPort {
       title?: string;
       detail?: string;
       status?: GroupTaskStatus;
+      goalId?: string | null;
       assigneeName?: string;
       dueAt?: number | null;
     },

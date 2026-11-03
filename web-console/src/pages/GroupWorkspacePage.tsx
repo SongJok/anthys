@@ -6,8 +6,10 @@ import {
   Empty,
   Form,
   Input,
+  InputNumber,
   Modal,
   Popconfirm,
+  Progress,
   Select,
   Space,
   Table,
@@ -41,6 +43,7 @@ interface WorkspaceForm {
 interface GoalForm {
   title: string;
   detail: string;
+  progress?: number;
   ownerName: string;
   due?: string;
 }
@@ -48,6 +51,7 @@ interface GoalForm {
 interface TaskForm {
   title: string;
   detail: string;
+  goalId?: string;
   assigneeName: string;
   due?: string;
 }
@@ -143,6 +147,14 @@ export default function GroupWorkspacePage() {
     [groups],
   );
 
+  const goalOptions = useMemo(
+    () =>
+      (snapshot?.goals ?? [])
+        .filter((goal) => goal.status !== 'archived')
+        .map((goal) => ({ value: goal.id, label: goal.title })),
+    [snapshot],
+  );
+
   const saveWorkspace = async (values: WorkspaceForm) => {
     if (!conversationId) return;
     setSaving(true);
@@ -169,6 +181,7 @@ export default function GroupWorkspacePage() {
         await api.updateGroupGoal(conversationId, goalModal.editing.id, {
           title: values.title,
           detail: values.detail ?? '',
+          progress: values.progress,
           ownerName: values.ownerName ?? '',
           dueAt: dueToTimestamp(values.due),
         });
@@ -176,6 +189,7 @@ export default function GroupWorkspacePage() {
         await api.createGroupGoal(conversationId, {
           title: values.title,
           detail: values.detail ?? '',
+          progress: values.progress ?? 0,
           ownerName: values.ownerName ?? '',
           dueAt: dueToTimestamp(values.due),
         });
@@ -198,6 +212,7 @@ export default function GroupWorkspacePage() {
         await api.updateGroupTask(conversationId, taskModal.editing.id, {
           title: values.title,
           detail: values.detail ?? '',
+          goalId: values.goalId ?? null,
           assigneeName: values.assigneeName ?? '',
           dueAt: dueToTimestamp(values.due),
         });
@@ -205,6 +220,7 @@ export default function GroupWorkspacePage() {
         await api.createGroupTask(conversationId, {
           title: values.title,
           detail: values.detail ?? '',
+          goalId: values.goalId ?? null,
           assigneeName: values.assigneeName ?? '',
           dueAt: dueToTimestamp(values.due),
         });
@@ -360,6 +376,14 @@ export default function GroupWorkspacePage() {
                   ),
                 },
                 {
+                  title: '进度',
+                  dataIndex: 'progress',
+                  width: 130,
+                  render: (value: number) => (
+                    <Progress percent={value} size="small" />
+                  ),
+                },
+                {
                   title: '负责人',
                   dataIndex: 'ownerName',
                   width: 120,
@@ -402,6 +426,7 @@ export default function GroupWorkspacePage() {
                           goalForm.setFieldsValue({
                             title: row.title,
                             detail: row.detail,
+                            progress: row.progress,
                             ownerName: row.ownerName,
                             due: timestampToDue(row.dueAt),
                           });
@@ -472,6 +497,16 @@ export default function GroupWorkspacePage() {
                   ),
                 },
                 {
+                  title: '关联目标',
+                  dataIndex: 'goalId',
+                  width: 160,
+                  render: (value: string | null) =>
+                    value
+                      ? goalOptions.find((option) => option.value === value)
+                          ?.label ?? '-'
+                      : '-',
+                },
+                {
                   title: '负责人',
                   dataIndex: 'assigneeName',
                   width: 120,
@@ -521,6 +556,7 @@ export default function GroupWorkspacePage() {
                           taskForm.setFieldsValue({
                             title: row.title,
                             detail: row.detail,
+                            goalId: row.goalId ?? undefined,
                             assigneeName: row.assigneeName,
                             due: timestampToDue(row.dueAt),
                           });
@@ -575,6 +611,9 @@ export default function GroupWorkspacePage() {
           <Form.Item label="说明 / 验收标准" name="detail">
             <Input.TextArea rows={3} />
           </Form.Item>
+          <Form.Item label="进度（0–100）" name="progress">
+            <InputNumber min={0} max={100} precision={0} style={{ width: '100%' }} />
+          </Form.Item>
           <Form.Item label="负责人（可选）" name="ownerName">
             <Input />
           </Form.Item>
@@ -602,6 +641,15 @@ export default function GroupWorkspacePage() {
           </Form.Item>
           <Form.Item label="说明" name="detail">
             <Input.TextArea rows={3} />
+          </Form.Item>
+          <Form.Item label="关联目标（可选）" name="goalId">
+            <Select
+              allowClear
+              showSearch
+              optionFilterProp="label"
+              placeholder="选择该任务归属的群目标"
+              options={goalOptions}
+            />
           </Form.Item>
           <Form.Item label="负责人（可选）" name="assigneeName">
             <Input />

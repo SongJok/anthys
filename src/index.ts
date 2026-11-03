@@ -153,6 +153,9 @@ import { GroupModelRouteService } from './groups/GroupModelRouteService.js';
 import { PersonSettingsService } from './personal/PersonSettingsService.js';
 import { GroupWorkspaceToolProvider } from './tools/groups/GroupWorkspaceToolProvider.js';
 import { PersonSettingsToolProvider } from './tools/personal/PersonSettingsToolProvider.js';
+import { PersonalMemoryToolProvider } from './tools/personal/PersonalMemoryToolProvider.js';
+import { PersonalMemoryService } from './personal/PersonalMemoryService.js';
+import { GroupReportService } from './groups/GroupReportService.js';
 import { DrizzleGlossaryStore } from './db/glossarySchema.js';
 import { GlossaryService } from './glossary/GlossaryService.js';
 import { GlossaryToolProvider } from './tools/glossary/GlossaryToolProvider.js';
@@ -1651,6 +1654,7 @@ async function main(): Promise<void> {
     const groupWorkspace = new GroupWorkspaceService({
       store: new DrizzleGroupWorkspaceStore(dbHandle.db),
       isAdmin: (staffId) => configCenter.isAdmin(staffId),
+      memories: memoryStore,
       saveNote: async (note) => {
         await hierarchicalMemory.remember([
           {
@@ -1673,9 +1677,34 @@ async function main(): Promise<void> {
       preferences: new DrizzlePersonPreferencesStore(dbHandle.db),
       consents: new DrizzlePersonMemoryConsentStore(dbHandle.db),
     });
+    const personalMemory = new PersonalMemoryService({
+      memories: memoryStore,
+      remember: async (input) => {
+        await hierarchicalMemory.remember([
+          {
+            scope: 'user',
+            subjectKey: input.personKey,
+            kind: 'profile',
+            content: input.content,
+            shareableInGroup: input.shareableInGroup,
+            sensitivity: input.shareableInGroup ? 'normal' : 'private',
+            confidence: 0.95,
+            sourceConversationId: input.conversationId,
+            sourceConversationType: '1',
+            sourceMessageId: input.messageId ?? null,
+          },
+        ]);
+      },
+    });
+    const groupReport = new GroupReportService({
+      store: scheduledStore,
+      isAdmin: (staffId) => configCenter.isAdmin(staffId),
+      buildDigest: (conversationId) => groupWorkspace.buildDigest(conversationId),
+    });
     const interactionProviders = [
-      new GroupWorkspaceToolProvider({ service: groupWorkspace }),
+      new GroupWorkspaceToolProvider({ service: groupWorkspace, reports: groupReport }),
       new PersonSettingsToolProvider({ service: personSettings }),
+      new PersonalMemoryToolProvider({ service: personalMemory }),
     ];
     toolProviders.push(...interactionProviders);
     logger.info(
@@ -2560,12 +2589,13 @@ async function main(): Promise<void> {
         ].join('\n');
       },
       tasks: (message, args) => taskService.handleCommand(message, args),
-      group: async (message, args) =>
-        groupWorkspace.handleCommand(
-          message,
-          args,
-          await resolveCommandPersonKey(message),
-        ),
+      group: async (message, args) => {
+        const personKey = await resolveCommandPersonKey(message);
+        if (args[0]?.toLowerCase() === 'report') {
+          return groupReport.handleCommand(message, args.slice(1));
+        }
+        return groupWorkspace.handleCommand(message, args, personKey);
+      },
       pref: async (message, args) =>
         personSettings.handlePreferenceCommand(
           message,
@@ -2574,6 +2604,12 @@ async function main(): Promise<void> {
         ),
       privacy: async (message, args) =>
         personSettings.handleConsentCommand(
+          message,
+          args,
+          await resolveCommandPersonKey(message),
+        ),
+      memory: async (message, args) =>
+        personalMemory.handleCommand(
           message,
           args,
           await resolveCommandPersonKey(message),
@@ -3028,6 +3064,34 @@ async function main(): Promise<void> {
       );
     };
 
+    const sendGroupMessages = async (
+      task: ScheduledTask,
+      text: string,
+    ): Promise<void> => {
+      const now = Date.now();
+      const message: InboundMessage = {
+        messageId: `group_report_${task.id}_${now}`,
+        conversationId: task.conversationId,
+        conversationType: '2',
+        senderStaffId: task.createdBy || 'scheduler',
+        senderNick: '群目标播报',
+        isAtBot: false,
+        text: '',
+        rawPayload: { source: 'scheduled_task', taskId: task.id },
+        timestamp: now,
+      };
+      const streamer = createStreamer(message);
+      await streamer.start();
+      for (const chunk of splitForDelivery(text)) {
+        streamer.handle({ type: 'answer_delta', content: chunk });
+      }
+      await streamer.finish();
+      logger.info(
+        { taskId: task.id, conversationId: task.conversationId },
+        'group report delivered',
+      );
+    };
+
     const executeScheduledTask = async (task: ScheduledTask): Promise<void> => {
       const now = Date.now();
       if (task.kind === 'reminder') {
@@ -3036,6 +3100,12 @@ async function main(): Promise<void> {
           task,
           personalAssistant.reminderDeliveryText(task),
         );
+        return;
+      }
+      if (task.kind === 'group_report') {
+        metrics.inc('scheduled_task_runs_total', { kind: task.kind });
+        const text = await groupWorkspace.buildDigest(task.conversationId);
+        await sendGroupMessages(task, text);
         return;
       }
       if (

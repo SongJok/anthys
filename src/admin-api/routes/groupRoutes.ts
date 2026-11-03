@@ -46,6 +46,25 @@ function readStatus(body: Record<string, unknown>): string | undefined {
   return status === '' ? undefined : status;
 }
 
+function readProgress(body: Record<string, unknown>): number | undefined {
+  const progress = readNumber(body, 'progress');
+  if (progress === undefined) return undefined;
+  if (progress < 0 || progress > 100) {
+    throw new HTTPException(400, { message: 'progress 必须在 0–100 之间' });
+  }
+  return Math.round(progress);
+}
+
+function readGoalId(body: Record<string, unknown>): string | null | undefined {
+  const value = body.goalId ?? body.goal;
+  if (value === undefined) return undefined;
+  if (value === null || value === '') return null;
+  if (typeof value !== 'string') {
+    throw new HTTPException(400, { message: 'goalId 必须是字符串' });
+  }
+  return value.trim() || null;
+}
+
 export function createGroupRoutes(deps: GroupRouteDeps): Hono {
   const app = new Hono();
   const actorOf = (c: Parameters<typeof webActor>[0]): string => webActor(c);
@@ -98,6 +117,7 @@ export function createGroupRoutes(deps: GroupRouteDeps): Hono {
       throw new HTTPException(400, { message: '目标标题不能为空' });
     }
     const dueAt = readDueAt(body);
+    const progress = readProgress(body);
     const goal = await deps.workspace.createGoal(
       conversationId,
       {
@@ -105,6 +125,7 @@ export function createGroupRoutes(deps: GroupRouteDeps): Hono {
         ...(readString(body, 'detail') !== undefined
           ? { detail: readString(body, 'detail')! }
           : {}),
+        ...(progress !== undefined ? { progress } : {}),
         ...(readString(body, 'ownerName') !== undefined
           ? { ownerName: readString(body, 'ownerName')! }
           : {}),
@@ -135,6 +156,7 @@ export function createGroupRoutes(deps: GroupRouteDeps): Hono {
       throw new HTTPException(400, { message: '目标标题不能为空' });
     }
     const dueAt = readDueAt(body);
+    const progress = readProgress(body);
     const before = (await deps.workspace.snapshot(conversationId)).goals.find(
       (goal) => goal.id === goalId,
     );
@@ -147,6 +169,7 @@ export function createGroupRoutes(deps: GroupRouteDeps): Hono {
           ? { detail: readString(body, 'detail')! }
           : {}),
         ...(status && isGroupGoalStatus(status) ? { status } : {}),
+        ...(progress !== undefined ? { progress } : {}),
         ...(readString(body, 'ownerName') !== undefined
           ? { ownerName: readString(body, 'ownerName')! }
           : {}),
@@ -188,6 +211,7 @@ export function createGroupRoutes(deps: GroupRouteDeps): Hono {
       throw new HTTPException(400, { message: '任务标题不能为空' });
     }
     const dueAt = readDueAt(body);
+    const goalId = readGoalId(body);
     const task = await deps.workspace.createTask(
       conversationId,
       {
@@ -195,6 +219,7 @@ export function createGroupRoutes(deps: GroupRouteDeps): Hono {
         ...(readString(body, 'detail') !== undefined
           ? { detail: readString(body, 'detail')! }
           : {}),
+        ...(goalId !== undefined ? { goalId } : {}),
         ...(readString(body, 'assigneeName') !== undefined
           ? { assigneeName: readString(body, 'assigneeName')! }
           : {}),
@@ -225,6 +250,7 @@ export function createGroupRoutes(deps: GroupRouteDeps): Hono {
       throw new HTTPException(400, { message: '任务标题不能为空' });
     }
     const dueAt = readDueAt(body);
+    const goalId = readGoalId(body);
     const before = (await deps.workspace.snapshot(conversationId)).tasks.find(
       (task) => task.id === taskId,
     );
@@ -237,6 +263,7 @@ export function createGroupRoutes(deps: GroupRouteDeps): Hono {
           ? { detail: readString(body, 'detail')! }
           : {}),
         ...(status && isGroupTaskStatus(status) ? { status } : {}),
+        ...(goalId !== undefined ? { goalId } : {}),
         ...(readString(body, 'assigneeName') !== undefined
           ? { assigneeName: readString(body, 'assigneeName')! }
           : {}),

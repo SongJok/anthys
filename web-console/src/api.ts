@@ -275,6 +275,7 @@ export const api = {
     body: {
       title: string;
       detail?: string;
+      progress?: number;
       ownerName?: string;
       dueAt?: number | null;
     },
@@ -290,6 +291,7 @@ export const api = {
       title?: string;
       detail?: string;
       status?: GroupGoalStatus;
+      progress?: number;
       ownerName?: string;
       dueAt?: number | null;
     },
@@ -308,6 +310,7 @@ export const api = {
     body: {
       title: string;
       detail?: string;
+      goalId?: string | null;
       assigneeName?: string;
       dueAt?: number | null;
     },
@@ -323,6 +326,7 @@ export const api = {
       title?: string;
       detail?: string;
       status?: GroupTaskStatus;
+      goalId?: string | null;
       assigneeName?: string;
       dueAt?: number | null;
     },

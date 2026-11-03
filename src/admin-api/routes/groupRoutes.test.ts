@@ -35,6 +35,7 @@ function goalRecord(conversationId: string): GroupGoalRecord {
     title: '季度续约率 90%',
     detail: '',
     status: 'active',
+    progress: 0,
     ownerPersonKey: null,
     ownerName: '',
     dueAt: null,
@@ -48,6 +49,7 @@ function taskRecord(conversationId: string): GroupTaskRecord {
   return {
     id: 'task-0001',
     conversationId,
+    goalId: null,
     title: '整理续约清单',
     detail: '',
     status: 'todo',

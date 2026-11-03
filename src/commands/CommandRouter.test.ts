@@ -99,6 +99,11 @@ function runtime(overrides: Partial<CommandRuntime> = {}): {
       calls.privacy.push([msg.messageId, args]);
       return `跨群授权命令：${args.join(' ')}`;
     },
+    memory: async (msg, args) => {
+      calls.memory = calls.memory ?? [];
+      calls.memory.push([msg.messageId, args]);
+      return `个人记忆命令：${args.join(' ')}`;
+    },
     listJobs: async () => '本会话暂无后台任务。',
     jobStatus: async (_msg, id) => `任务 ${id} 详情。`,
     cancelJob: async (_msg, id) => `已取消后台任务 ${id}。`,

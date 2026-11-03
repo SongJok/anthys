@@ -520,9 +520,10 @@ sudo cp deploy/nginx.conf /etc/nginx/conf.d/ && sudo nginx -t && sudo systemctl 
 | `/dws-system` | 查看系统级 DWS 授权状态（仅管理员，仅用于旁听等基础设施） |
 | `/dws-system-login` | 发起系统级 DWS 设备授权（仅管理员） |
 | `/mute`、`/unmute` | 群内静音 / 恢复主动回复（仅管理员、仅群聊） |
-| `/group [show\|purpose\|responsibility\|goal\|task\|note] ...` | 群内维护本群定位、职责、目标与任务，或手动沉淀一条群记忆（仅群聊） |
+| `/group [show\|purpose\|responsibility\|goal\|task\|note\|memory\|digest\|report] ...` | 群内维护本群定位、职责、目标、任务与群记忆，查看进度摘要或设置定期播报（仅群聊；播报创建需管理员） |
 | `/pref [show\|length\|lang\|address\|extra\|on\|off\|reset]` | 单聊内查看 / 设置回答长度、语言、称呼与补充要求 |
 | `/privacy [show\|groups\|allow\|deny\|clear]` | 单聊内设置个人记忆在群聊中的使用档位与生效群白名单 |
+| `/memory [list\|search\|add\|share\|private\|forget] ...` | 单聊内查看、检索、添加或删除个人记忆，并控制单条记忆能否在群聊召回 |
 | `/feedback <内容>` | 对最近一次回答提交反馈，写入 `user_feedback` |
 | `/confirm` | 执行本会话待确认的写操作（仅发起人或管理员） |
 | `/cancel` | 取消本会话待确认的写操作 |
@@ -702,10 +703,11 @@ ReAct 循环内置看门狗（`src/watchdog/RunWatchdog.ts`），只观察不执
 
 每个群可以有独立的工作区，回答时自动带上该群的长期上下文：
 
-- `group_workspaces` 保存群定位与职责，`group_goals` 保存群目标，`group_tasks` 保存群任务；这些数据彼此隔离，不会跨群注入。
-- 每次群聊组装提示时会追加一段「本群工作区」简报：群定位、职责、进行中 / 已暂停的目标与未完成任务，超长时截断，未配置时完全不注入。
-- 群成员可在群里发送 `/group purpose ...`、`/group responsibility add|remove ...`、`/group goal add|list|done|pause|resume|archive ...`、`/group task add|list|start|done|cancel ...`、`/group note ...`；机器人也能调用 `group_workspace_view`、`group_goal_create`、`group_task_update`、`group_memory_save` 等群内工具。目标与任务的后续修改（状态、标题、负责人、截止时间）仅限创建人或管理员，群内指令与工具遵循同一规则。
-- 控制台「群工作区」页可以维护群定位、职责、目标与任务，与群内指令读写同一份数据。
+- `group_workspaces` 保存群定位与职责，`group_goals` 保存群目标（含 0–100 进度、负责人与截止时间），`group_tasks` 保存群任务并可关联到某个群目标（`goal_id`）；这些数据彼此隔离，不会跨群注入。
+- 每次群聊组装提示时会追加一段「本群工作区」简报：群定位、职责、进行中 / 已暂停的目标（含进度与关联任务完成数）、未完成任务与最多 5 条长期群记忆，超长时截断，未配置时完全不注入。
+- 群成员可在群里发送 `/group purpose ...`、`/group responsibility add|remove ...`、`/group goal add|list|progress|owner|due|done|pause|resume|archive ...`、`/group task add|list|assign|due|link|unlink|start|done|cancel ...`、`/group note ...`、`/group memory list|search|forget ...`、`/group digest`；机器人也能调用 `group_workspace_view`、`group_goal_create`、`group_goal_update`、`group_task_create`、`group_task_update`、`group_memory_save`、`group_memory_list`、`group_memory_forget`、`group_digest` 等群内工具。目标与任务的后续修改（状态、进度、标题、负责人、截止时间、关联目标）仅限创建人或管理员，群记忆删除仅限管理员，群内指令与工具遵循同一规则。
+- `/group digest` 直接生成确定性的进度摘要（目标进度、逾期任务、3 天内到期、进行中任务），不经过模型；`/group report daily 09:00`、`weekly 周一 09:00`、`monthly 1 09:00` 可把同一份摘要按 cron 定时推送到群聊（`scheduled_tasks.kind = group_report`，管理员创建，每群最多 4 个）。
+- 控制台「群工作区」页可以维护群定位、职责、目标（含进度）与任务（含关联目标），与群内指令读写同一份数据。
 - 按群模型路由（`group_model_routes`）让同一机器人在不同群使用不同供应商或模型，只对群聊生效（含该群的主动回复），单聊仍走默认角色模型。未填写的供应商、Base URL、温度、思维链与最大 Token 沿用默认模型档案；API Key 只保存环境变量名（例如 `GROUP_A_MODEL_KEY`），密钥仍留在部署环境，控制台只显示是否已配置。本实例保存后立即生效，跨实例最多 60 秒生效；若填了变量名但部署环境未提供对应密钥，该群自动回退默认引擎并记录告警，不会让群聊中断。
 
 ### 三层记忆
@@ -721,6 +723,7 @@ ReAct 循环内置看门狗（`src/watchdog/RunWatchdog.ts`），只观察不执
 语义记忆分为 `global` / `group` / `user` 三种作用域，并带来源、置信度、敏感级别、状态和过期时间：
 
 - 用户级记忆默认只在单聊召回；要在该员工所在的群里使用，需要把授权档位设为 `shareable`（默认，只召回显式可共享条目）或 `all`（全部非敏感记忆），并可用群白名单限定生效范围。敏感级记忆在任何档位下都不会进入群聊。员工可在单聊用 `/privacy` 调整，管理员可在控制台「人设与身份」页修改。
+- 员工可在单聊用 `/memory` 查看和检索自己的个人记忆，用 `/memory add [--share] <内容>` 手动补充，用 `/memory share|private <ID>` 控制单条记忆能否在群聊召回，用 `/memory forget <ID>` 删除；群聊一律拒绝个人记忆操作。机器人也可在单聊调用 `personal_memory_list`、`personal_memory_save`、`personal_memory_set_sharing`、`personal_memory_forget` 工具。
 - 群级记忆只在对应群召回，不会跨群泄露；全局记忆对所有会话可见。
 - 已停用（`retired`）或已过期的记忆不参与召回；修改记忆正文会清空 embedding，等待重新沉淀。
 - 控制台「记忆治理」页可按作用域、类型、状态、归属与关键词筛选，调整共享范围、敏感级别、置信度、状态与过期时间，所有写操作都落审计。
@@ -974,7 +977,7 @@ ReAct 循环内置看门狗（`src/watchdog/RunWatchdog.ts`），只观察不执
 | **大模型与人设** | 切换模型渠道与模型、修改 Base URL / API Key / 温度 / 原生思维链、调整 ReAct 预算、在线编辑人设与语气，并发起沙盒对话测试 |
 | **企业 MCP** | 增删改查节点、启停并热应用、一键连通性测试并浏览工具 Schema、维护按群 / 角色的工具权限 |
 | **群聊旁听策略** | 查看全局默认策略、按群覆盖旁听与主动回复参数、为该群配置独立模型路由、一键紧急静音 |
-| **群工作区** | 维护每个群的定位、职责、群目标与群任务，与群内 `/group` 指令共用同一份数据 |
+| **群工作区** | 维护每个群的定位、职责、群目标（含进度）与群任务（含关联目标），与群内 `/group` 指令共用同一份数据 |
 | **人设与身份** | 维护群职责与人设、员工个人表达偏好与跨群记忆授权；把 `staffId` / `openDingTalkId` 绑定为同一员工并迁移记忆与人设 |
 | **记忆治理** | 按作用域 / 类型 / 状态筛选语义记忆，调整群内共享、敏感级别、置信度与过期时间，停用或删除错误记忆 |
 | **ReAct 审计轨迹** | 按群过滤并分页查看每次回答的思维链、工具入参、耗时、沙盒输出与最终答案 |
@@ -1040,10 +1043,10 @@ ReAct 循环内置看门狗（`src/watchdog/RunWatchdog.ts`），只观察不执
 | GET | `/groups` | 已接入的群列表与最近活跃 |
 | GET / PUT | `/groups/:conversationId/policy` | 读取 / 更新单群旁听策略 |
 | GET / PUT | `/groups/:conversationId/workspace` | 读取 / 更新群定位、职责与备注 |
-| POST | `/groups/:conversationId/goals` | 新建群目标（`due` 支持 `YYYY-MM-DD` 或时间戳） |
-| PUT / DELETE | `/groups/:conversationId/goals/:goalId` | 更新 / 删除群目标 |
-| POST | `/groups/:conversationId/tasks` | 新建群任务 |
-| PUT / DELETE | `/groups/:conversationId/tasks/:taskId` | 更新 / 删除群任务（完成时自动记录完成时间） |
+| POST | `/groups/:conversationId/goals` | 新建群目标（`progress` 0–100、`due` 支持 `YYYY-MM-DD` 或时间戳） |
+| PUT / DELETE | `/groups/:conversationId/goals/:goalId` | 更新 / 删除群目标（状态改为 `achieved` 时进度自动置 100） |
+| POST | `/groups/:conversationId/tasks` | 新建群任务（`goalId` 关联群目标） |
+| PUT / DELETE | `/groups/:conversationId/tasks/:taskId` | 更新 / 删除群任务（可改 `goalId`；完成时自动记录完成时间） |
 | GET | `/group-model-routes` | 全部按群模型路由 |
 | GET / PUT / DELETE | `/groups/:conversationId/model-route` | 读取 / 保存 / 删除该群模型路由，并回显密钥环境变量是否已配置 |
 | POST | `/groups/emergency-mute` | 紧急静音（可指定单群或全部群） |

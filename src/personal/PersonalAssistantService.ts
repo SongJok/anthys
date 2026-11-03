@@ -55,6 +55,7 @@ const KIND_LABELS: Record<ScheduledTaskKind, string> = {
   daily_report: '每日工作简报',
   weekly_report: '每周工作周报',
   monthly_report: '每月工作月报',
+  group_report: '群目标播报',
 };
 
 interface ShanghaiParts {
@@ -510,6 +511,7 @@ export class PersonalAssistantService {
         (task) =>
           task.createdBy === staffId &&
           task.kind !== 'prompt' &&
+          task.kind !== 'group_report' &&
           task.enabled,
       )
       .sort((left, right) =>

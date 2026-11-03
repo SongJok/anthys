@@ -4,7 +4,11 @@ import type {
   ToolDefinition,
 } from '../../types/core.js';
 import type { GroupWorkspaceService } from '../../groups/GroupWorkspaceService.js';
+import type { GroupReportService } from '../../groups/GroupReportService.js';
+import { describeReportCron } from '../../groups/GroupReportService.js';
+import { parseReportSpec } from '../../personal/PersonalAssistantService.js';
 import { parseDueAt } from '../../groups/GroupWorkspaceService.js';
+import { formatShanghaiDateTime } from '../../time/shanghaiTime.js';
 import {
   isGroupGoalStatus,
   isGroupTaskStatus,
@@ -30,6 +34,35 @@ function optionalStringArray(
     .filter((item): item is string => typeof item === 'string')
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function optionalNumber(
+  args: Record<string, unknown>,
+  key: string,
+): number | undefined {
+  const value = args[key];
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim() !== '') {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return undefined;
+}
+
+function goalLinkArg(
+  args: Record<string, unknown>,
+): string | null | undefined {
+  if (!('goalId' in args)) return undefined;
+  const value = args.goalId;
+  if (value === null) return null;
+  if (typeof value !== 'string') return undefined;
+  const text = value.trim();
+  return text === '' ? null : text;
+}
+
+function formatDue(dueAt: number | null): string {
+  if (!dueAt) return '';
+  return `截止 ${formatShanghaiDateTime(dueAt)}`;
 }
 
 function actorOf(ctx: ExecutionContext): string {
@@ -73,24 +106,32 @@ function formatSnapshot(snapshot: Awaited<
     lines.push('群职责：', ...workspace.responsibilities.map((item) => `- ${item}`));
   }
   const activeGoals = goals.filter((goal) => goal.status !== 'archived');
+  const goalTitles = new Map(goals.map((goal) => [goal.id, goal.title] as const));
   lines.push(
     activeGoals.length > 0 ? '群目标：' : '群目标：暂无。',
-    ...activeGoals.map(
-      (goal) =>
-        `- ${goal.id.slice(0, 8)} · [${goal.status}] ${goal.title}${
-          goal.ownerName ? `（负责人 ${goal.ownerName}）` : ''
-        }`,
-    ),
+    ...activeGoals.map((goal) => {
+      const meta = [
+        goal.status,
+        `进度 ${goal.progress}%`,
+        goal.ownerName ? `负责人 ${goal.ownerName}` : '',
+        formatDue(goal.dueAt),
+      ].filter(Boolean);
+      return `- ${goal.id.slice(0, 8)} · ${goal.title}（${meta.join(' · ')}）`;
+    }),
   );
   const openTasks = tasks.filter((task) => task.status !== 'cancelled');
   lines.push(
     openTasks.length > 0 ? '群任务：' : '群任务：暂无。',
-    ...openTasks.map(
-      (task) =>
-        `- ${task.id.slice(0, 8)} · [${task.status}] ${task.title}${
-          task.assigneeName ? `（负责人 ${task.assigneeName}）` : ''
-        }`,
-    ),
+    ...openTasks.map((task) => {
+      const linkedGoal = task.goalId ? goalTitles.get(task.goalId) : undefined;
+      const meta = [
+        task.status,
+        task.assigneeName ? `负责人 ${task.assigneeName}` : '',
+        formatDue(task.dueAt),
+        linkedGoal ? `目标 ${linkedGoal}` : '',
+      ].filter(Boolean);
+      return `- ${task.id.slice(0, 8)} · ${task.title}（${meta.join(' · ')}）`;
+    }),
   );
   return lines.join('\n');
 }
@@ -102,9 +143,14 @@ function formatSnapshot(snapshot: Awaited<
 export class GroupWorkspaceToolProvider implements IToolProvider {
   public readonly providerName = 'group-workspace';
   private readonly service: GroupWorkspaceService;
+  private readonly reports?: GroupReportService;
 
-  constructor(options: { service: GroupWorkspaceService }) {
+  constructor(options: {
+    service: GroupWorkspaceService;
+    reports?: GroupReportService;
+  }) {
     this.service = options.service;
+    this.reports = options.reports;
   }
 
   public async getTools(ctx: ExecutionContext): Promise<ToolDefinition[]> {
@@ -134,6 +180,10 @@ export class GroupWorkspaceToolProvider implements IToolProvider {
           properties: {
             title: { type: 'string', description: '目标标题' },
             detail: { type: 'string', description: '目标说明或验收标准' },
+            progress: {
+              type: 'number',
+              description: '初始进度 0–100（可选，默认 0）',
+            },
             ownerName: { type: 'string', description: '负责人姓名（可选）' },
             due: {
               type: 'string',
@@ -148,6 +198,7 @@ export class GroupWorkspaceToolProvider implements IToolProvider {
         execute: async (args) => {
           const title = optionalString(args, 'title');
           if (!title) return '缺少目标标题。';
+          const progress = optionalNumber(args, 'progress');
           const goal = await this.service.createGoal(
             conversationId,
             {
@@ -155,6 +206,7 @@ export class GroupWorkspaceToolProvider implements IToolProvider {
               ...(optionalString(args, 'detail')
                 ? { detail: optionalString(args, 'detail')! }
                 : {}),
+              ...(progress !== undefined ? { progress } : {}),
               ...(optionalString(args, 'ownerName')
                 ? { ownerName: optionalString(args, 'ownerName')! }
                 : {}),
@@ -170,7 +222,7 @@ export class GroupWorkspaceToolProvider implements IToolProvider {
       {
         name: 'group_goal_update',
         description:
-          '更新当前群的群目标（状态、标题、说明、负责人、截止日期）。goalId 支持 ID 前缀。',
+          '更新当前群的群目标（状态、进度、标题、说明、负责人、截止日期）。goalId 支持 ID 前缀。状态改为 achieved 时进度自动置为 100。',
         parametersJsonSchema: {
           type: 'object',
           properties: {
@@ -182,6 +234,7 @@ export class GroupWorkspaceToolProvider implements IToolProvider {
             },
             title: { type: 'string' },
             detail: { type: 'string' },
+            progress: { type: 'number', description: '进度 0–100' },
             ownerName: { type: 'string' },
             due: { type: 'string', description: 'YYYY-MM-DD 或 ISO 时间' },
           },
@@ -210,11 +263,13 @@ export class GroupWorkspaceToolProvider implements IToolProvider {
             return `未知目标状态：${status}`;
           }
           const due = optionalString(args, 'due');
+          const progress = optionalNumber(args, 'progress');
           const updated = await this.service.updateGoal(
             conversationId,
             resolved.record.id,
             {
               ...(status && isGroupGoalStatus(status) ? { status } : {}),
+              ...(progress !== undefined ? { progress } : {}),
               ...(optionalString(args, 'title')
                 ? { title: optionalString(args, 'title')! }
                 : {}),
@@ -234,12 +289,16 @@ export class GroupWorkspaceToolProvider implements IToolProvider {
       {
         name: 'group_task_create',
         description:
-          '为当前群创建一个待办任务，并可记录负责人与截止日期。仅在群聊中可用。',
+          '为当前群创建一个待办任务，并可记录负责人、截止日期与关联的群目标。仅在群聊中可用。',
         parametersJsonSchema: {
           type: 'object',
           properties: {
             title: { type: 'string', description: '任务标题' },
             detail: { type: 'string', description: '任务说明' },
+            goalId: {
+              type: ['string', 'null'],
+              description: '关联的群目标 ID 或前缀（可选）',
+            },
             assigneeName: { type: 'string', description: '负责人姓名（可选）' },
             due: {
               type: 'string',
@@ -254,6 +313,7 @@ export class GroupWorkspaceToolProvider implements IToolProvider {
         execute: async (args) => {
           const title = optionalString(args, 'title');
           if (!title) return '缺少任务标题。';
+          const goalLink = goalLinkArg(args);
           const task = await this.service.createTask(
             conversationId,
             {
@@ -261,6 +321,7 @@ export class GroupWorkspaceToolProvider implements IToolProvider {
               ...(optionalString(args, 'detail')
                 ? { detail: optionalString(args, 'detail')! }
                 : {}),
+              ...(goalLink !== undefined ? { goalId: goalLink } : {}),
               ...(optionalString(args, 'assigneeName')
                 ? { assigneeName: optionalString(args, 'assigneeName')! }
                 : {}),
@@ -274,7 +335,7 @@ export class GroupWorkspaceToolProvider implements IToolProvider {
       {
         name: 'group_task_update',
         description:
-          '更新当前群的群任务（状态、标题、说明、负责人、截止日期）。taskId 支持 ID 前缀。',
+          '更新当前群的群任务（状态、标题、说明、负责人、截止日期、关联目标）。taskId 支持 ID 前缀。',
         parametersJsonSchema: {
           type: 'object',
           properties: {
@@ -285,6 +346,10 @@ export class GroupWorkspaceToolProvider implements IToolProvider {
             },
             title: { type: 'string' },
             detail: { type: 'string' },
+            goalId: {
+              type: ['string', 'null'],
+              description: '关联的群目标 ID 或前缀；传 null 取消关联',
+            },
             assigneeName: { type: 'string' },
             due: { type: 'string', description: 'YYYY-MM-DD 或 ISO 时间' },
           },
@@ -313,11 +378,13 @@ export class GroupWorkspaceToolProvider implements IToolProvider {
             return `未知任务状态：${status}`;
           }
           const due = optionalString(args, 'due');
+          const goalLink = goalLinkArg(args);
           const updated = await this.service.updateTask(
             conversationId,
             resolved.record.id,
             {
               ...(status && isGroupTaskStatus(status) ? { status } : {}),
+              ...(goalLink !== undefined ? { goalId: goalLink } : {}),
               ...(optionalString(args, 'title')
                 ? { title: optionalString(args, 'title')! }
                 : {}),
@@ -368,6 +435,190 @@ export class GroupWorkspaceToolProvider implements IToolProvider {
             : '群记忆写入未启用。';
         },
       },
+      {
+        name: 'group_memory_list',
+        description:
+          '查看或检索当前群的长期群记忆。回答“我们之前约定过什么”时使用；只返回本群条目。',
+        parametersJsonSchema: {
+          type: 'object',
+          properties: {
+            query: { type: 'string', description: '检索关键词（可选）' },
+            limit: { type: 'number', description: '返回条数，默认 20' },
+          },
+          additionalProperties: false,
+        },
+        risk: 'read',
+        source: 'group-workspace',
+        execute: async (args) => {
+          const query = optionalString(args, 'query');
+          const limit = optionalNumber(args, 'limit');
+          const records = await this.service.listMemories(conversationId, {
+            ...(query ? { query } : {}),
+            limit: limit === undefined ? 20 : Math.round(limit),
+          });
+          if (records.length === 0) {
+            return query
+              ? `没有找到匹配「${query}」的群记忆。`
+              : '本群还没有沉淀记忆。';
+          }
+          return [
+            query ? '匹配的群记忆：' : '群记忆：',
+            ...records.map(
+              (record) =>
+                `- ${record.id.slice(0, 8)} · ${record.content}（更新 ${formatShanghaiDateTime(record.updatedAt)}）`,
+            ),
+          ].join('\n');
+        },
+      },
+      {
+        name: 'group_memory_forget',
+        description:
+          '删除一条当前群的群记忆。只有管理员可以操作；memoryId 支持 ID 前缀。用户要求忘记某条群约定时使用。',
+        parametersJsonSchema: {
+          type: 'object',
+          properties: {
+            memoryId: { type: 'string', description: '群记忆 ID 或前缀' },
+          },
+          required: ['memoryId'],
+          additionalProperties: false,
+        },
+        risk: 'write',
+        source: 'group-workspace',
+        execute: async (args) => {
+          const memoryId = optionalString(args, 'memoryId');
+          if (!memoryId) return '缺少群记忆 ID。';
+          return this.service.forgetMemory(
+            conversationId,
+            memoryId,
+            ctx.senderStaffId,
+          );
+        },
+      },
+      {
+        name: 'group_digest',
+        description:
+          '生成当前群的目标与任务进度摘要：目标进度、逾期任务、3 天内到期任务、进行中任务。用户问“群里进展如何”时使用，无需再调用模型总结。',
+        parametersJsonSchema: {
+          type: 'object',
+          properties: {},
+          additionalProperties: false,
+        },
+        risk: 'read',
+        source: 'group-workspace',
+        execute: async () => this.service.buildDigest(conversationId),
+      },
+      ...(this.reports
+        ? [
+            {
+              name: 'group_report_schedule',
+              description:
+                '为本群设置定期群目标播报。管理员专用，按 cron 把目标进度与任务摘要推送到群里。用户说“每天/每周播报群进度”时使用。',
+              parametersJsonSchema: {
+                type: 'object',
+                properties: {
+                  frequency: {
+                    type: 'string',
+                    enum: ['daily', 'weekly', 'monthly'],
+                    description: '播报频率',
+                  },
+                  time: { type: 'string', description: '时间，如 09:00' },
+                  weekday: {
+                    type: 'string',
+                    description: 'weekly 时的星期，如 周一 或 1-7（可选）',
+                  },
+                  dayOfMonth: {
+                    type: 'string',
+                    description: 'monthly 时的日期 1-28（可选）',
+                  },
+                },
+                required: ['frequency', 'time'],
+                additionalProperties: false,
+              },
+              risk: 'write' as const,
+              source: 'group-workspace',
+              execute: async (args: Record<string, unknown>) => {
+                if (!this.reports!.canManage(ctx.senderStaffId)) {
+                  return '只有管理员可以创建群目标播报。';
+                }
+                const frequency = optionalString(args, 'frequency');
+                if (
+                  frequency !== 'daily' &&
+                  frequency !== 'weekly' &&
+                  frequency !== 'monthly'
+                ) {
+                  return 'frequency 需为 daily、weekly 或 monthly。';
+                }
+                const time = optionalString(args, 'time') ?? '';
+                const weekday = optionalString(args, 'weekday') ?? '周一';
+                const dayOfMonth = optionalString(args, 'dayOfMonth') ?? '1';
+                const raw =
+                  frequency === 'weekly'
+                    ? `weekly ${weekday} ${time}`
+                    : frequency === 'monthly'
+                      ? `monthly ${dayOfMonth} ${time}`
+                      : `daily ${time}`;
+                const spec = parseReportSpec(raw);
+                if (typeof spec === 'string') return spec;
+                try {
+                  const task = await this.reports!.create({
+                    conversationId,
+                    actor: ctx.senderStaffId,
+                    spec,
+                  });
+                  return `已创建群目标播报：${describeReportCron(task.cron ?? '')}`;
+                } catch (error) {
+                  return error instanceof Error ? error.message : String(error);
+                }
+              },
+            },
+            {
+              name: 'group_report_list',
+              description: '查看当前群的定时群目标播报。',
+              parametersJsonSchema: {
+                type: 'object',
+                properties: {},
+                additionalProperties: false,
+              },
+              risk: 'read' as const,
+              source: 'group-workspace',
+              execute: async () => {
+                const tasks = await this.reports!.list(conversationId);
+                if (tasks.length === 0) return '本群还没有定时播报。';
+                return [
+                  '当前群播报：',
+                  ...tasks.map(
+                    (task) =>
+                      `- ${describeReportCron(task.cron ?? '')} · ${task.enabled ? '已启用' : '已停用'} · ID ${task.id.slice(0, 8)}`,
+                  ),
+                ].join('\n');
+              },
+            },
+            {
+              name: 'group_report_cancel',
+              description:
+                '取消当前群的一条定时播报。reportId 支持 ID 前缀；仅创建人或管理员可操作。',
+              parametersJsonSchema: {
+                type: 'object',
+                properties: {
+                  reportId: { type: 'string', description: '播报 ID 或前缀' },
+                },
+                required: ['reportId'],
+                additionalProperties: false,
+              },
+              risk: 'write' as const,
+              source: 'group-workspace',
+              execute: async (args: Record<string, unknown>) => {
+                const reportId = optionalString(args, 'reportId');
+                if (!reportId) return '缺少播报 ID。';
+                return this.reports!.cancel(
+                  conversationId,
+                  reportId,
+                  ctx.senderStaffId,
+                );
+              },
+            },
+          ]
+        : []),
     ];
   }
 }

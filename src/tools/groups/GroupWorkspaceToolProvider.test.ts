@@ -72,7 +72,13 @@ class MemoryGroupStore implements GroupWorkspaceStore {
     patch: Partial<
       Pick<
         GroupGoalRecord,
-        'title' | 'detail' | 'status' | 'ownerPersonKey' | 'ownerName' | 'dueAt'
+        | 'title'
+        | 'detail'
+        | 'status'
+        | 'progress'
+        | 'ownerPersonKey'
+        | 'ownerName'
+        | 'dueAt'
       >
     >,
   ): Promise<GroupGoalRecord | null> {
@@ -126,6 +132,7 @@ class MemoryGroupStore implements GroupWorkspaceStore {
         | 'title'
         | 'detail'
         | 'status'
+        | 'goalId'
         | 'assigneePersonKey'
         | 'assigneeName'
         | 'dueAt'
@@ -201,6 +208,9 @@ describe('GroupWorkspaceToolProvider', () => {
       'group_task_create',
       'group_task_update',
       'group_memory_save',
+      'group_memory_list',
+      'group_memory_forget',
+      'group_digest',
     ]);
   });
 
@@ -361,5 +371,38 @@ describe('GroupWorkspaceToolProvider', () => {
     expect(await disabled.execute({ content: '内容' }, context())).toContain(
       '群记忆写入未启用',
     );
+  });
+
+  it('支持目标进度、任务关联与群摘要', async () => {
+    const { service, provider, store } = setup();
+    const goal = await service.createGoal(
+      'cid-group-1',
+      { title: '季度续约率 90%' },
+      'staff:1',
+    );
+    const tools = await toolsOf(provider, context());
+    const taskReply = await tools
+      .get('group_task_create')!
+      .execute(
+        { title: '整理续约清单', goalId: goal.id.slice(0, 8) },
+        context(),
+      );
+    expect(taskReply).toContain('已创建群任务');
+    expect(store.tasks[0]!.goalId).toBe(goal.id);
+
+    const progressReply = await tools
+      .get('group_goal_update')!
+      .execute({ goalId: goal.id, progress: 40 }, context());
+    expect(progressReply).toContain('已更新');
+    expect(store.goals[0]!.progress).toBe(40);
+
+    await tools
+      .get('group_task_update')!
+      .execute({ taskId: store.tasks[0]!.id, status: 'done' }, context());
+    const digest = await tools.get('group_digest')!.execute({}, context());
+    expect(digest).toContain('群目标进度');
+    expect(digest).toContain('季度续约率 90%');
+    expect(digest).toContain('进度 40%');
+    expect(digest).toContain('任务 1/1');
   });
 });

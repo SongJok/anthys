@@ -313,7 +313,8 @@ export type ScheduledTaskKind =
   | 'reminder'
   | 'daily_report'
   | 'weekly_report'
-  | 'monthly_report';
+  | 'monthly_report'
+  | 'group_report';
 
 /** 定时任务与主动播报 */
 export interface ScheduledTask {

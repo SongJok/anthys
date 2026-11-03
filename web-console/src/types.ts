@@ -927,6 +927,7 @@ export interface GroupGoalRecord {
   title: string;
   detail: string;
   status: GroupGoalStatus;
+  progress: number;
   ownerPersonKey: string | null;
   ownerName: string;
   dueAt: number | null;
@@ -938,6 +939,7 @@ export interface GroupGoalRecord {
 export interface GroupTaskRecord {
   id: string;
   conversationId: string;
+  goalId: string | null;
   title: string;
   detail: string;
   status: GroupTaskStatus;

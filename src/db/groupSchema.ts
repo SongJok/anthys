@@ -49,6 +49,7 @@ export const groupGoals = pgTable(
     title: text('title').notNull(),
     detail: text('detail').notNull().default(''),
     status: varchar('status', { length: 16 }).notNull().default('active'),
+    progress: integer('progress').notNull().default(0),
     ownerPersonKey: text('owner_person_key'),
     ownerName: text('owner_name').notNull().default(''),
     dueAt: timestamp('due_at', { withTimezone: true }),
@@ -73,6 +74,7 @@ export const groupTasks = pgTable(
   {
     id: uuid('id').primaryKey().defaultRandom(),
     conversationId: text('conversation_id').notNull(),
+    goalId: text('goal_id'),
     title: text('title').notNull(),
     detail: text('detail').notNull().default(''),
     status: varchar('status', { length: 16 }).notNull().default('todo'),
@@ -94,6 +96,7 @@ export const groupTasks = pgTable(
       table.updatedAt,
     ),
     index('group_tasks_status_idx').on(table.conversationId, table.status),
+    index('group_tasks_goal_idx').on(table.conversationId, table.goalId),
   ],
 );
 
@@ -141,6 +144,7 @@ function toGoal(row: GoalRow): GroupGoalRecord {
     title: row.title,
     detail: row.detail,
     status: row.status as GroupGoalStatus,
+    progress: row.progress,
     ownerPersonKey: row.ownerPersonKey,
     ownerName: row.ownerName,
     dueAt: row.dueAt ? row.dueAt.getTime() : null,
@@ -154,6 +158,7 @@ function toTask(row: TaskRow): GroupTaskRecord {
   return {
     id: row.id,
     conversationId: row.conversationId,
+    goalId: row.goalId,
     title: row.title,
     detail: row.detail,
     status: row.status as GroupTaskStatus,
@@ -263,6 +268,7 @@ export class DrizzleGroupWorkspaceStore implements GroupWorkspaceStore {
         title: goal.title,
         detail: goal.detail,
         status: goal.status,
+        progress: goal.progress,
         ownerPersonKey: goal.ownerPersonKey,
         ownerName: goal.ownerName,
         dueAt: goal.dueAt === null ? null : new Date(goal.dueAt),
@@ -282,6 +288,7 @@ export class DrizzleGroupWorkspaceStore implements GroupWorkspaceStore {
         | 'title'
         | 'detail'
         | 'status'
+        | 'progress'
         | 'ownerPersonKey'
         | 'ownerName'
         | 'dueAt'
@@ -294,6 +301,7 @@ export class DrizzleGroupWorkspaceStore implements GroupWorkspaceStore {
         ...(patch.title !== undefined ? { title: patch.title } : {}),
         ...(patch.detail !== undefined ? { detail: patch.detail } : {}),
         ...(patch.status !== undefined ? { status: patch.status } : {}),
+        ...(patch.progress !== undefined ? { progress: patch.progress } : {}),
         ...(patch.ownerPersonKey !== undefined
           ? { ownerPersonKey: patch.ownerPersonKey }
           : {}),
@@ -349,6 +357,7 @@ export class DrizzleGroupWorkspaceStore implements GroupWorkspaceStore {
       .insert(groupTasks)
       .values({
         conversationId: task.conversationId,
+        goalId: task.goalId,
         title: task.title,
         detail: task.detail,
         status: task.status,
@@ -373,6 +382,7 @@ export class DrizzleGroupWorkspaceStore implements GroupWorkspaceStore {
         | 'title'
         | 'detail'
         | 'status'
+        | 'goalId'
         | 'assigneePersonKey'
         | 'assigneeName'
         | 'dueAt'
@@ -386,6 +396,7 @@ export class DrizzleGroupWorkspaceStore implements GroupWorkspaceStore {
         ...(patch.title !== undefined ? { title: patch.title } : {}),
         ...(patch.detail !== undefined ? { detail: patch.detail } : {}),
         ...(patch.status !== undefined ? { status: patch.status } : {}),
+        ...(patch.goalId !== undefined ? { goalId: patch.goalId } : {}),
         ...(patch.assigneePersonKey !== undefined
           ? { assigneePersonKey: patch.assigneePersonKey }
           : {}),

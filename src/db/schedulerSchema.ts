@@ -54,7 +54,8 @@ function normalizeKind(value: string): ScheduledTaskKind {
   return value === 'reminder' ||
     value === 'daily_report' ||
     value === 'weekly_report' ||
-    value === 'monthly_report'
+    value === 'monthly_report' ||
+    value === 'group_report'
     ? value
     : 'prompt';
 }
