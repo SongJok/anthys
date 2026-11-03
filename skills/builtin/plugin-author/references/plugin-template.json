@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "id": "com.example.productivity-pack",
+  "name": "示例生产力插件",
+  "version": "1.0.0",
+  "description": "把一组技能和可选 MCP 节点打成声明式插件；不执行安装脚本。",
+  "publisher": "Example",
+  "engines": {
+    "agent": ">=0.1.0"
+  },
+  "trust": "declarative",
+  "skills": [
+    "skills/weekly-review",
+    "skills/decision-memo"
+  ],
+  "mcpServers": [
+    {
+      "id": "example-remote",
+      "name": "示例远程 MCP",
+      "domain": "general",
+      "transport": "streamable-http",
+      "endpointOrCommand": "${EXAMPLE_MCP_ENDPOINT}",
+      "envOrHeaders": {
+        "authorization": "Bearer ${EXAMPLE_MCP_TOKEN}"
+      },
+      "timeoutMs": 120000,
+      "maxResultChars": 16000,
+      "enabled": true
+    }
+  ],
+  "secrets": [
+    {
+      "key": "EXAMPLE_MCP_ENDPOINT",
+      "required": true,
+      "description": "示例 MCP 的 Streamable HTTP 地址"
+    },
+    {
+      "key": "EXAMPLE_MCP_TOKEN",
+      "required": true,
+      "description": "示例 MCP 的访问令牌"
+    }
+  ],
+  "permissions": {
+    "network": [
+      "mcp.example.com"
+    ],
+    "filesystem": "none"
+  }
+}

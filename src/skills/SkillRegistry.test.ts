@@ -112,16 +112,22 @@ describe('SkillRegistry', () => {
     expect(definitions.map((item) => item.name).sort()).toEqual([
       'code-reading',
       'data-analysis',
+      'data-insight',
       'dingtalk-office',
       'everyday-chat',
       'github-project-scan',
       'handbook-maintainer',
       'incident-triage',
       'link-reader',
+      'meeting-notes',
+      'office-docs',
+      'plugin-author',
+      'presentation-brief',
       'project-docs',
       'project-onboarding',
       'repo-review',
       'research-brief',
+      'skill-author',
       'work-report',
     ]);
     expect(definitions.every((item) => !item.loadError)).toBe(true);

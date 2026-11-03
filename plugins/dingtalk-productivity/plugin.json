@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "id": "com.anthys.dingtalk-productivity",
+  "name": "钉钉经营与决策助手",
+  "version": "1.0.0",
+  "description": "面向钉钉机器人的经营周会与决策备忘录技能包，只包含声明式技能，不执行安装脚本。",
+  "publisher": "Anthys",
+  "engines": {
+    "agent": ">=0.1.0"
+  },
+  "trust": "declarative",
+  "skills": [
+    "skills/weekly-business-review",
+    "skills/decision-memo"
+  ],
+  "permissions": {
+    "filesystem": "none"
+  }
+}

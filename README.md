@@ -751,7 +751,7 @@ ReAct 循环内置看门狗（`src/watchdog/RunWatchdog.ts`），只观察不执
 技能是一段受控的操作步骤，用来教机器人"这类任务应该怎么做"，而不是把新的可执行代码带进进程。
 
 - **渐进披露**：系统提示只注入技能目录（名称、描述、适用场景，受 `SKILL_CATALOG_LIMIT` 限制）；模型命中任务后调用 `use_skill` 加载正文，需要细节时再用 `skill_read` 分页读取技能目录内的参考文件。单次正文最多 4000 字符，参考文件单次最多 500 行 / 4000 字符，单文件上限 1MB。
-- **来源**：`SKILLS_BUILTIN_DIR`（默认 `skills/builtin`）随仓库发布，`SKILLS_LOCAL_DIR`（默认 `skills/local`）用于团队自建。内置技能分两类：代码与项目类 `code-reading`、`repo-review`、`incident-triage`、`project-onboarding`、`github-project-scan`、`handbook-maintainer`；办公与通用类 `everyday-chat`、`link-reader`、`data-analysis`、`work-report`、`project-docs`、`dingtalk-office`、`research-brief`。
+- **来源**：`SKILLS_BUILTIN_DIR`（默认 `skills/builtin`）随仓库发布，`SKILLS_LOCAL_DIR`（默认 `skills/local`）用于团队自建。内置技能分两类：代码与项目类 `code-reading`、`repo-review`、`incident-triage`、`project-onboarding`、`github-project-scan`、`handbook-maintainer`；办公与通用类 `everyday-chat`、`link-reader`、`data-analysis`、`data-insight`、`work-report`、`meeting-notes`、`project-docs`、`office-docs`、`presentation-brief`、`dingtalk-office`、`research-brief`、`skill-author`、`plugin-author`。
 - **格式**：每个技能是一个目录，`SKILL.md` 以 YAML frontmatter 开头，字段包括 `name`、`description`、`version`、`when_to_use`、`tags`、`allowed_tools`、`risk`、`visibility` 与 `max_instruction_chars`；正文按「适用场景 / 步骤 / 约束」组织，可附带 `references/` 等资源文件。
 - **管理**：控制台「技能 Skills」可查看目录预览、校验草稿、启用 / 停用、在线编辑 `SKILL.md` 与资源文件，并查看近 7 天调用次数。保存后立即热更新，无需重启。
 - **边界**：技能正文只来自管理员维护的本地目录；聊天内容、工具返回、仓库文件都不会被当作指令注入。`EXTENSIONS_SKILLS_ENABLED=false` 可整体关闭。
@@ -761,6 +761,7 @@ ReAct 循环内置看门狗（`src/watchdog/RunWatchdog.ts`），只观察不执
 插件是**纯声明包**，用于把技能与 MCP 节点成套分发，不执行任意安装脚本或运行时代码。
 
 - **包结构**：插件根目录包含 `plugin.json`，技能目录（默认 `skills/`）与可选的说明文件；通过控制台上传 zip，或填写服务器上已解包的目录。
+- **示例包**：`plugins/dingtalk-productivity/` 演示如何把团队经营周会与决策备忘录两类技能打成纯声明插件；安装后技能以 `plugin:com.anthys.dingtalk-productivity:<技能名>` 暴露。
 - **清单字段**：`schemaVersion`、`id`、`name`、`version`（SemVer）、`description`、`engines.agent`、`trust`、`skills`、`mcpServers`、`secrets`、`permissions`（仅展示与审计）。
 - **安装校验**：检查 id / 版本格式、agent 版本区间、技能名冲突、MCP 传输方式、stdio 裸命令是否在 `PLUGIN_ALLOWED_COMMANDS`（默认 `npx,uvx,node,python3,docker`）内、`${ENV_VAR}` 占位符是否有对应环境变量；任何 error 都不会落盘。
 - **版本与回滚**：可安装、升级、启用、停用、回滚、卸载，保留最近两个版本；升级或回滚后技能与 MCP 节点热替换。
