@@ -38,7 +38,7 @@ max_instruction_chars: 4000
 7. 用户明确同意写入后：
    - 新建文档用 `dws_doc_manage` 的 create，提供标题和正文。
    - 更新已有文档默认用 append；只有用户明确要求替换并确认原文已备份时才用 overwrite + confirmOverwrite。
-8. 写入属于待确认动作，提示用户回复 `/confirm`；不要编造文档链接，以工具返回为准。
+8. 新建与追加在本人 DWS 授权有效时直接执行；整篇覆盖等高危操作会返回待确认，此时提示用户回复 `/confirm`；不要编造文档链接，以工具返回为准。
 
 ## 约束
 

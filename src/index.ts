@@ -54,6 +54,7 @@ import {
   type BeginRunResult,
 } from './harness/RunControlRegistry.js';
 import {
+  classifyToolRisk,
   createToolApprovalGate,
   PendingActionStore,
 } from './harness/ToolApprovalGate.js';
@@ -180,6 +181,8 @@ import {
   formatDwsConsentText,
 } from './tools/dws/DwsIdentityService.js';
 import { DrizzleDwsIdentityStore } from './db/dwsIdentitySchema.js';
+import { DrizzleDwsWriteTaskStore } from './db/dwsWriteTaskSchema.js';
+import { DwsWriteTaskService } from './tools/dws/DwsWriteTaskService.js';
 import { PersonalReportBuilder } from './personal/PersonalReportBuilder.js';
 import { PersonalAssistantService } from './personal/PersonalAssistantService.js';
 import { PersonalAssistantToolProvider } from './tools/personal/PersonalAssistantToolProvider.js';
@@ -241,6 +244,21 @@ const EMPTY_RESULT: RunResult = {
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.stack ?? error.message : String(error);
+}
+
+/**
+ * DWS 普通写操作在本人已授权后直接执行；
+ * 取消日程、覆盖文档这类不可逆操作仍要求 /confirm。
+ */
+function requiresExplicitDwsConfirmation(
+  request: ToolApprovalRequest,
+): boolean {
+  if (request.risk === 'destructive') return true;
+  if (request.toolName === 'dws_calendar_cancel') return true;
+  return (
+    request.toolName === 'dws_doc_manage' &&
+    request.args.action === 'overwrite'
+  );
 }
 
 function readAgentVersion(): string {
@@ -917,17 +935,48 @@ async function main(): Promise<void> {
       enabled: envEnabled(process.env.TOOL_CONFIRMATION_ENABLED, true),
       logger: harnessLogger,
     });
-    // 写工具先校验本人 DWS 授权，避免授权缺失时先让用户 /confirm
+    // 写工具先校验本人 DWS 授权；已授权且非高危的普通写操作直接执行
+    let dwsWriteTasksService: DwsWriteTaskService | null = null;
     const resolveToolApproval = async (
       request: ToolApprovalRequest,
       context: ExecutionContext,
     ): Promise<ToolApprovalDecision> => {
-      const dwsWrite =
-        request.source === 'dws' &&
-        (request.risk === 'write' || request.risk === 'destructive');
+      const risk = classifyToolRisk({
+        name: request.toolName,
+        ...(request.risk ? { risk: request.risk } : {}),
+        ...(request.source ? { source: request.source } : {}),
+      });
+      const dwsWrite = request.source === 'dws' && risk !== 'read';
       if (dwsWrite) {
-        const prompt = await toolRegistry?.dwsAuthorizationPrompt(context, true);
-        if (prompt) return { approved: false, reason: prompt };
+        const gate = await toolRegistry?.dwsAuthorizationGate(context, true);
+        if (gate) {
+          if (gate.loginStarted) {
+            const message = runControl.messageById(context.messageId);
+            if (message && dwsWriteTasksService) {
+              try {
+                await dwsWriteTasksService.create({
+                  message,
+                  toolName: request.toolName,
+                  args: request.args,
+                  risk: risk === 'destructive' ? 'destructive' : 'write',
+                });
+              } catch (error) {
+                logger.warn(
+                  {
+                    conversationId: context.conversationId,
+                    toolName: request.toolName,
+                    error: errorText(error),
+                  },
+                  'failed to persist dws write task',
+                );
+              }
+            }
+          }
+          return { approved: false, reason: gate.userText };
+        }
+        if (risk === 'write' && !requiresExplicitDwsConfirmation(request)) {
+          return { approved: true };
+        }
       }
       return approvalGate(request);
     };
@@ -2018,6 +2067,36 @@ async function main(): Promise<void> {
       await streamer.finish();
     };
 
+    const notifyDwsWriteTask = async (
+      message: InboundMessage,
+      text: string,
+    ): Promise<void> => {
+      try {
+        await replyTo(message, text);
+      } catch (error) {
+        logger.warn(
+          {
+            conversationId: message.conversationId,
+            error: errorText(error),
+          },
+          'dws write task reply failed, fallback to direct message',
+        );
+        const result = await adminTextSender.send([message.senderStaffId], text);
+        if (!result.ok) {
+          throw new Error(result.failed[0]?.error ?? '单聊消息发送失败');
+        }
+      }
+    };
+
+    dwsWriteTasksService = new DwsWriteTaskService({
+      store: new DrizzleDwsWriteTaskStore(dbHandle.db),
+      identity: identityService,
+      resume: (message) => handleIncoming(message),
+      notify: notifyDwsWriteTask,
+      logger: harnessLogger,
+    });
+    await dwsWriteTasksService.start();
+
     const surfaceSilentInvestigation = async (
       message: InboundMessage,
       text: string,
@@ -2166,7 +2245,17 @@ async function main(): Promise<void> {
               ]
             : []),
           ...(record?.profile ? [`profile：${record.profile}`] : []),
-          ...(record ? [`授权范围：${record.writeEnabled ? '只读 + 写操作' : '仅只读'}`] : []),
+          ...(record
+            ? [
+                `授权范围：${
+                  record.writeEnabled
+                    ? '只读 + 自动写操作'
+                    : record.writeOptOut
+                      ? '仅只读（已手动关闭自动写）'
+                      : '仅只读（下次写请求会自动升级）'
+                }`,
+              ]
+            : []),
           ...(status.token?.expiresAt
             ? [`访问令牌到期：${status.token.expiresAt}`]
             : []),
@@ -2221,11 +2310,11 @@ async function main(): Promise<void> {
             message.senderStaffId,
           );
           return [
-            '已记录你对 DWS 只读授权范围的同意（日程、待办、审批、通讯录、文档 / 知识库）。',
+            '已记录你对 DWS 授权范围的同意（日程、待办、审批、通讯录、文档 / 知识库）。',
             '下一步请在单聊发送 /dws-login 完成设备码授权。',
             record.writeEnabled
-              ? ''
-              : '如需允许我代你创建或修改日程、待办、审批，可再发送 /dws-consent write。',
+              ? '授权完成后普通写操作会直接执行，高危操作仍需 /confirm。'
+              : '授权完成后，你提出创建或修改日程、待办、审批时，我会自动获得写权限并直接执行；只想只读可随时发送 /dws-consent read。',
           ]
             .filter(Boolean)
             .join('\n');
@@ -2245,17 +2334,33 @@ async function main(): Promise<void> {
             }
             throw error;
           }
-          return action === 'write'
-            ? '已额外授权写操作：可以代你创建或修改日程、待办、审批。发送 /dws-consent read 可改回只读。'
-            : '已改回只读授权：后续不会再代你执行写操作。';
+          if (action === 'write') {
+            return '已允许写操作：日程、待办、审批等普通写操作会直接执行；取消日程、覆盖文档等高危操作仍需 /confirm。发送 /dws-consent read 可改回只读。';
+          }
+          await dwsWriteTasksService?.cancelForStaff(
+            message.senderStaffId,
+            '用户已改回只读',
+            '已改回只读，等待授权后自动执行的写操作已取消。',
+          );
+          return '已改回只读：后续写操作不会自动执行，需要时发送 /dws-consent write 重新允许。';
         }
         if (action === 'revoke') {
+          await dwsWriteTasksService?.cancelForStaff(
+            message.senderStaffId,
+            '用户已撤销 DWS 授权',
+            '已撤销 DWS 授权，等待中的写操作已取消。',
+          );
           await identityService.revokeConsent(message.senderStaffId);
           return '已撤销 DWS 授权同意，并清除本机绑定的加密凭据目录。如需再次使用，请重新发送 /dws-consent agree 并完成 /dws-login。';
         }
         return '用法：/dws-consent、/dws-consent agree、/dws-consent write、/dws-consent read、/dws-consent revoke';
       },
       dwsLogout: async (message) => {
+        await dwsWriteTasksService?.cancelForStaff(
+          message.senderStaffId,
+          '用户已退出 DWS 登录',
+          '已退出 DWS 登录，等待授权后自动执行的写操作已取消。',
+        );
         const cleared = await identityService.logout(message.senderStaffId);
         return cleared
           ? '已清除你本机的 DWS 登录态，授权同意记录仍保留。如需重新授权，发送 /dws-login；如需彻底撤销同意，发送 /dws-consent revoke。'
@@ -2382,11 +2487,14 @@ async function main(): Promise<void> {
       },
       cancelAction: async (conversationId) => {
         const cancelled = pendingActions.cancel(conversationId);
+        const cancelledWrite =
+          (await dwsWriteTasksService?.cancelByConversation(conversationId)) ??
+          false;
         metrics.inc('agent_tool_confirmations_total', {
-          result: cancelled ? 'cancelled' : 'none',
+          result: cancelled || cancelledWrite ? 'cancelled' : 'none',
         });
-        return cancelled
-          ? '已取消待确认的操作。'
+        return cancelled || cancelledWrite
+          ? '已取消待确认或待授权后自动执行的操作。'
           : '没有待确认的操作。';
       },
       remind: (message, args) =>
@@ -2843,36 +2951,32 @@ async function main(): Promise<void> {
         },
         'personal dws identity linked',
       );
-      for (const entry of pending) {
-        const last = runControl.lastMessage(entry.conversationId);
-        if (!last || last.senderStaffId !== staffId) continue;
-        if (!entry.resume) {
-          void replyTo(
-            last,
-            `本人 DWS 授权已完成${
-              status.record?.userName ? `（${status.record.userName}）` : ''
-            }，可以继续使用 DWS 查询。`,
-          ).catch((error) =>
-            logger.warn(
-              { error: errorText(error) },
-              'personal dws notice failed',
-            ),
-          );
-          continue;
-        }
-        void (async () => {
+      void (async () => {
+        const claimed = new Set(
+          (await dwsWriteTasksService?.resumeForStaff(staffId)) ?? [],
+        );
+        for (const entry of pending) {
+          if (claimed.has(entry.conversationId)) continue;
+          const last = runControl.lastMessage(entry.conversationId);
+          if (!last || last.senderStaffId !== staffId) continue;
+          if (!entry.resume) {
+            await replyTo(
+              last,
+              `本人 DWS 授权已完成${
+                status.record?.userName ? `（${status.record.userName}）` : ''
+              }，可以继续使用 DWS 查询。`,
+            );
+            continue;
+          }
           await replyTo(last, '本人 DWS 授权已完成，正在继续刚才的问题…');
           await handleIncoming(last);
-        })().catch((error) =>
-          logger.warn(
-            {
-              conversationId: entry.conversationId,
-              error: errorText(error),
-            },
-            'personal dws resume failed',
-          ),
-        );
-      }
+        }
+      })().catch((error) =>
+        logger.warn(
+          { staffId, error: errorText(error) },
+          'personal dws resume failed',
+        ),
+      );
     });
     identityService.on('login-failed', ({ staffId, reason }) => {
       const pending = identityService.takePending(staffId);
@@ -2880,16 +2984,25 @@ async function main(): Promise<void> {
         { staffId, reason, pending: pending.length },
         'personal dws identity not linked',
       );
-      for (const entry of pending) {
-        const last = runControl.lastMessage(entry.conversationId);
-        if (!last || last.senderStaffId !== staffId) continue;
-        void replyTo(
-          last,
-          `本人 DWS 授权未完成：${reason}。发送 /dws-consent 查看授权范围后，再发送 /dws-login 重试。`,
-        ).catch((error) =>
-          logger.warn({ error: errorText(error) }, 'personal dws failure notice failed'),
+      void (async () => {
+        const failed = new Set(
+          (await dwsWriteTasksService?.failForStaff(staffId, reason)) ?? [],
         );
-      }
+        for (const entry of pending) {
+          if (failed.has(entry.conversationId)) continue;
+          const last = runControl.lastMessage(entry.conversationId);
+          if (!last || last.senderStaffId !== staffId) continue;
+          await replyTo(
+            last,
+            `本人 DWS 授权未完成：${reason}。发送 /dws-consent 查看授权范围后，再发送 /dws-login 重试。`,
+          );
+        }
+      })().catch((error) =>
+        logger.warn(
+          { staffId, error: errorText(error) },
+          'personal dws failure notice failed',
+        ),
+      );
     });
 
     const sendPersonalMessages = async (
@@ -3680,6 +3793,7 @@ async function main(): Promise<void> {
       runControl.stopAll();
       dwsAuth?.dispose();
       dwsIdentity?.dispose();
+      dwsWriteTasksService?.dispose();
       await taskScheduler.stop();
       await jobRunner.stop();
       retentionService?.stop();

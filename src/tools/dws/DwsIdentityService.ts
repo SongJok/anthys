@@ -56,6 +56,7 @@ export interface DwsIdentityExecution {
 
 export type DwsIdentityErrorCode =
   | 'consent-required'
+  | 'write-opt-out'
   | 'unbound'
   | 'binding-mismatch'
   | 'login-failed';
@@ -200,7 +201,11 @@ export function formatDwsConsentText(
   const agreed =
     record && record.consentVersion === DWS_CONSENT_VERSION
       ? `当前状态：已同意（v${record.consentVersion}）${
-          record.writeEnabled ? '，已允许写操作' : '，仅只读'
+          record.writeEnabled
+            ? '，已允许写操作'
+            : record.writeOptOut
+              ? '，仅只读（已手动关闭自动写）'
+              : '，仅只读'
         }`
       : '当前状态：尚未同意';
   return [
@@ -208,14 +213,16 @@ export function formatDwsConsentText(
     '为了用你本人的钉钉身份查询，而不是借用管理员账号，机器人需要在你本机单独完成一次设备码授权：',
     '- 只在你发起请求时使用你的身份，不会用于其他员工；',
     '- 默认只读范围：日程、待办、审批、通讯录、文档 / 知识库；',
+    '- 完成授权后，你让我创建或修改日程、待办、审批等普通写操作会直接执行，不再逐次确认；',
+    '- 取消日程、覆盖文档等高危操作仍会先请你回复 /confirm；',
     '- 令牌保存在本机 Keychain，并按你本人的 profile 单独存放，其他员工无法复用；',
     `- 发送 /dws-logout 会清除本机令牌；发送 /dws-consent revoke 会同时撤销同意。`,
     '',
     agreed,
     '',
-    '同意只读范围：发送 `/dws-consent agree`',
-    '额外允许写操作（建日程、建待办、发审批等）：发送 `/dws-consent write`',
-    '改回只读：发送 `/dws-consent read`',
+    '同意只读范围：发送 `/dws-consent agree`（首次写请求也会自动记录）',
+    '立即允许普通写操作：发送 `/dws-consent write`',
+    '改回只读（后续写请求不再自动执行）：发送 `/dws-consent read`',
     '撤销同意并清除本地绑定：发送 `/dws-consent revoke`',
   ].join('\n');
 }
@@ -343,37 +350,104 @@ export class DwsIdentityService extends EventEmitter {
     return record?.consentVersion === DWS_CONSENT_VERSION;
   }
 
-  public async recordConsent(staffId: string): Promise<DwsIdentityRecord> {
-    const record = await this.store.upsertConsent({
+  public async recordConsent(
+    staffId: string,
+    options: { write?: boolean } = {},
+  ): Promise<DwsIdentityRecord> {
+    const write = options.write ?? false;
+    let record = await this.store.upsertConsent({
       staffId,
       consentVersion: DWS_CONSENT_VERSION,
-      scopes: [...DWS_READ_SCOPES, ...DWS_WRITE_SCOPES],
+      scopes: write
+        ? [...DWS_READ_SCOPES, ...DWS_WRITE_SCOPES]
+        : [...DWS_READ_SCOPES],
       consentedAt: new Date(this.now()).toISOString(),
       homeDir: this.homeName(staffId),
+      ...(write ? { writeEnabled: true, writeOptOut: false } : {}),
     });
+    if (write && !record.writeEnabled) {
+      record = await this.store.setWritePolicy(staffId, {
+        writeEnabled: true,
+        writeOptOut: false,
+      });
+    }
     this.invalidate(staffId);
     return record;
   }
 
   /**
-   * 令牌问题自动触发：静默记录当前版本的只读同意，用户无需发送指令。
-   * 写操作仍需显式授权；旧版本同意里的写权限不随自动续同意继承。
+   * 令牌问题自动触发：静默记录当前版本的同意，用户无需发送指令。
+   * 写请求触发的首次授权会同时记录写范围；只读请求不附带写权限。
+   * 用户主动改回只读（writeOptOut）后，不会被自动升级。
    */
-  public async ensureReadConsent(staffId: string): Promise<DwsIdentityRecord> {
+  public async ensureReadConsent(
+    staffId: string,
+    options: { write?: boolean } = {},
+  ): Promise<DwsIdentityRecord> {
+    const write = options.write ?? false;
     const existing = await this.store.get(staffId);
-    if (existing?.consentVersion === DWS_CONSENT_VERSION) return existing;
+    if (existing?.consentVersion === DWS_CONSENT_VERSION) {
+      if (write && !existing.writeEnabled && !existing.writeOptOut) {
+        const updated = await this.store.setWritePolicy(staffId, {
+          writeEnabled: true,
+        });
+        this.invalidate(staffId);
+        return updated;
+      }
+      return existing;
+    }
     let record = await this.store.upsertConsent({
       staffId,
       consentVersion: DWS_CONSENT_VERSION,
-      scopes: [...DWS_READ_SCOPES],
+      scopes: write
+        ? [...DWS_READ_SCOPES, ...DWS_WRITE_SCOPES]
+        : [...DWS_READ_SCOPES],
       consentedAt: new Date(this.now()).toISOString(),
       homeDir: this.homeName(staffId),
+      ...(write ? { writeEnabled: true, writeOptOut: false } : {}),
     });
-    if (existing?.writeEnabled) {
-      record = await this.store.setWriteEnabled(staffId, false);
+    // 同意版本升级后旧的写权限不再继承；用户主动改回只读的选择保留
+    if (!write && record.writeEnabled) {
+      record = await this.store.setWritePolicy(staffId, {
+        writeEnabled: false,
+      });
+    }
+    if (write && !record.writeEnabled) {
+      record = await this.store.setWritePolicy(staffId, {
+        writeEnabled: true,
+        writeOptOut: false,
+      });
     }
     this.invalidate(staffId);
     return record;
+  }
+
+  /**
+   * 已授权用户发起写请求时自动补齐写权限；
+   * 仅当用户主动发送过 /dws-consent read 时才拒绝。
+   */
+  public async ensureWritePermission(
+    staffId: string,
+  ): Promise<DwsIdentityRecord> {
+    const record = await this.store.get(staffId);
+    if (!record || record.consentVersion !== DWS_CONSENT_VERSION) {
+      throw new DwsIdentityError(
+        'consent-required',
+        '请先完成 DWS 授权同意。',
+      );
+    }
+    if (record.writeEnabled) return record;
+    if (record.writeOptOut) {
+      throw new DwsIdentityError(
+        'write-opt-out',
+        '你已手动设为只读模式，如需写操作请发送 /dws-consent write 重新授权。',
+      );
+    }
+    const updated = await this.store.setWritePolicy(staffId, {
+      writeEnabled: true,
+    });
+    this.invalidate(staffId);
+    return updated;
   }
 
   public async setWriteEnabled(
@@ -387,7 +461,10 @@ export class DwsIdentityService extends EventEmitter {
         '请先发送 /dws-consent agree 同意只读授权范围。',
       );
     }
-    const updated = await this.store.setWriteEnabled(staffId, enabled);
+    const updated = await this.store.setWritePolicy(staffId, {
+      writeEnabled: enabled,
+      writeOptOut: !enabled,
+    });
     this.invalidate(staffId);
     return updated;
   }

@@ -35,6 +35,7 @@ function conversationKeyFor(message: InboundMessage): string {
 export class RunControlRegistry {
   private readonly queues = new Map<string, QueuedRun[]>();
   private readonly lastMessages = new Map<string, InboundMessage>();
+  private readonly messagesById = new Map<string, InboundMessage>();
   private readonly lastMessageLimit: number;
 
   constructor(
@@ -127,13 +128,26 @@ export class RunControlRegistry {
     const key = conversationKeyFor(message);
     this.lastMessages.delete(key);
     this.lastMessages.set(key, message);
-    if (this.lastMessages.size <= this.lastMessageLimit) return;
-    const oldest = this.lastMessages.keys().next();
-    if (!oldest.done) this.lastMessages.delete(oldest.value);
+    if (message.messageId) {
+      this.messagesById.delete(message.messageId);
+      this.messagesById.set(message.messageId, message);
+    }
+    if (this.lastMessages.size > this.lastMessageLimit) {
+      const oldest = this.lastMessages.keys().next();
+      if (!oldest.done) this.lastMessages.delete(oldest.value);
+    }
+    if (this.messagesById.size > this.lastMessageLimit) {
+      const oldestById = this.messagesById.keys().next();
+      if (!oldestById.done) this.messagesById.delete(oldestById.value);
+    }
   }
 
   public lastMessage(conversationId: string): InboundMessage | null {
     return this.lastMessages.get(conversationId) ?? null;
+  }
+
+  public messageById(messageId: string): InboundMessage | null {
+    return this.messagesById.get(messageId) ?? null;
   }
 
   private startRun(run: QueuedRun): void {

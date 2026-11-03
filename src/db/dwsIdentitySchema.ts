@@ -13,6 +13,7 @@ import type {
   DwsConsentInput,
   DwsIdentityRecord,
   DwsIdentityStore,
+  DwsWritePolicyInput,
 } from '../types/dws-identity.js';
 
 /**
@@ -25,6 +26,7 @@ export const dwsIdentities = pgTable('dws_identities', {
   consentedAt: timestamp('consented_at', { withTimezone: true }).notNull(),
   scopes: jsonb('scopes').$type<string[]>().notNull().default([]),
   writeEnabled: boolean('write_enabled').notNull().default(false),
+  writeOptOut: boolean('write_opt_out').notNull().default(false),
   homeDir: text('home_dir').notNull(),
   corpId: text('corp_id'),
   dwsUserId: text('dws_user_id'),
@@ -48,6 +50,7 @@ function toRecord(row: Row): DwsIdentityRecord {
     consentedAt: row.consentedAt.toISOString(),
     scopes: row.scopes,
     writeEnabled: row.writeEnabled,
+    writeOptOut: row.writeOptOut,
     homeDir: row.homeDir,
     corpId: row.corpId,
     dwsUserId: row.dwsUserId,
@@ -88,6 +91,12 @@ export class DrizzleDwsIdentityStore implements DwsIdentityStore {
         consentedAt: new Date(input.consentedAt),
         scopes: input.scopes,
         homeDir: input.homeDir,
+        ...(input.writeEnabled !== undefined
+          ? { writeEnabled: input.writeEnabled }
+          : {}),
+        ...(input.writeOptOut !== undefined
+          ? { writeOptOut: input.writeOptOut }
+          : {}),
       })
       .onConflictDoUpdate({
         target: dwsIdentities.staffId,
@@ -105,13 +114,21 @@ export class DrizzleDwsIdentityStore implements DwsIdentityStore {
     return toRecord(row);
   }
 
-  public async setWriteEnabled(
+  public async setWritePolicy(
     staffId: string,
-    enabled: boolean,
+    input: DwsWritePolicyInput,
   ): Promise<DwsIdentityRecord> {
     const rows = await this.db
       .update(dwsIdentities)
-      .set({ writeEnabled: enabled, updatedAt: new Date() })
+      .set({
+        ...(input.writeEnabled !== undefined
+          ? { writeEnabled: input.writeEnabled }
+          : {}),
+        ...(input.writeOptOut !== undefined
+          ? { writeOptOut: input.writeOptOut }
+          : {}),
+        updatedAt: new Date(),
+      })
       .where(eq(dwsIdentities.staffId, staffId))
       .returning();
     const row = rows[0];

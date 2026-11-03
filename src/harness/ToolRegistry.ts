@@ -8,7 +8,10 @@ import type {
 import { BuiltinToolProvider } from '../react/BuiltinTools.js';
 import { expandEnvPlaceholder } from '../config/envPlaceholder.js';
 import { DwsCliRunner } from '../tools/dws/DwsCliRunner.js';
-import { DwsCliToolProvider } from '../tools/dws/DwsCliToolProvider.js';
+import {
+  DwsCliToolProvider,
+  type DwsAuthorizationGate,
+} from '../tools/dws/DwsCliToolProvider.js';
 import type { DwsIdentityService } from '../tools/dws/DwsIdentityService.js';
 import type { DwsPermissionNotifier } from '../tools/dws/DwsPermissionNotice.js';
 import {
@@ -392,12 +395,20 @@ export class ToolRegistry {
     return tools;
   }
 
-  /** 写工具进入 /confirm 闸门前先完成本人授权检查；返回需要直接展示给用户的说明 */
+  /** 写工具进入审批闸门前先完成本人授权检查；返回需要直接展示给用户的说明 */
   public async dwsAuthorizationPrompt(
     ctx: ExecutionContext,
     write = true,
   ): Promise<string | null> {
     return (await this.dwsProvider?.authorizationPrompt(ctx, write)) ?? null;
+  }
+
+  /** 结构化授权检查：包含是否已发起设备码登录，供自动续跑写任务使用 */
+  public async dwsAuthorizationGate(
+    ctx: ExecutionContext,
+    write = true,
+  ): Promise<DwsAuthorizationGate | null> {
+    return (await this.dwsProvider?.authorizationGate(ctx, write)) ?? null;
   }
 
   /** DWS CLI 权限开关热切换：无需重建 MCP 连接或重启进程 */

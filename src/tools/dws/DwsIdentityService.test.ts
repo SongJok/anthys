@@ -7,6 +7,7 @@ import type {
   DwsConsentInput,
   DwsIdentityRecord,
   DwsIdentityStore,
+  DwsWritePolicyInput,
 } from '../../types/dws-identity.js';
 import type { DwsCommandRequest } from '../../types/mcp-and-sandbox.js';
 import type {
@@ -46,7 +47,8 @@ class MemoryStore implements DwsIdentityStore {
       consentVersion: input.consentVersion,
       consentedAt: input.consentedAt,
       scopes: input.scopes,
-      writeEnabled: existing?.writeEnabled ?? false,
+      writeEnabled: existing?.writeEnabled ?? input.writeEnabled ?? false,
+      writeOptOut: existing?.writeOptOut ?? input.writeOptOut ?? false,
       homeDir: input.homeDir,
       corpId: existing?.corpId ?? null,
       dwsUserId: existing?.dwsUserId ?? null,
@@ -60,13 +62,13 @@ class MemoryStore implements DwsIdentityStore {
     return record;
   }
 
-  async setWriteEnabled(
+  async setWritePolicy(
     staffId: string,
-    enabled: boolean,
+    input: DwsWritePolicyInput,
   ): Promise<DwsIdentityRecord> {
     const record = this.records.get(staffId);
     if (!record) throw new Error('missing');
-    const updated = { ...record, writeEnabled: enabled };
+    const updated = { ...record, ...input };
     this.records.set(staffId, updated);
     return updated;
   }
@@ -217,13 +219,15 @@ async function login(staffId: string, instance: DwsIdentityService) {
 }
 
 describe('DwsIdentityService', () => {
-  it('同意时写入版本、只读+写范围与独立的 home', async () => {
+  it('同意时写入版本、只读范围与独立的 home', async () => {
     const { service: instance, store } = service();
     const record = await instance.recordConsent('staff-1');
     expect(record.consentVersion).toBe(1);
     expect(record.homeDir).toMatch(/^u-[a-f0-9]{24}$/);
     expect(record.scopes).toContain('calendar.read');
+    expect(record.scopes.every((scope) => scope.endsWith('.read'))).toBe(true);
     expect(record.writeEnabled).toBe(false);
+    expect(record.writeOptOut).toBe(false);
     expect(await store.get('staff-1')).toMatchObject({ profile: null });
   });
 
@@ -250,11 +254,34 @@ describe('DwsIdentityService', () => {
       consentedAt: new Date(0).toISOString(),
       homeDir: 'u-0123456789abcdef01234567',
     });
-    await store.setWriteEnabled('staff-2', true);
+    await store.setWritePolicy('staff-2', { writeEnabled: true });
     const refreshed = await instance.ensureReadConsent('staff-2');
     expect(refreshed.consentVersion).toBe(1);
     expect(refreshed.writeEnabled).toBe(false);
     expect(refreshed.scopes).not.toContain('calendar.write');
+  });
+
+  it('写请求触发的首次授权直接记录写范围', async () => {
+    const { service: instance, store } = service();
+    const record = await instance.ensureReadConsent('staff-1', { write: true });
+    expect(record.writeEnabled).toBe(true);
+    expect(record.writeOptOut).toBe(false);
+    expect(record.scopes).toContain('calendar.write');
+    expect((await store.get('staff-1'))?.writeEnabled).toBe(true);
+  });
+
+  it('已授权用户写请求自动升级写权限，改回只读后不再升级', async () => {
+    const { service: instance, store } = service();
+    await instance.recordConsent('staff-1');
+    const upgraded = await instance.ensureWritePermission('staff-1');
+    expect(upgraded.writeEnabled).toBe(true);
+    expect(upgraded.writeOptOut).toBe(false);
+
+    await instance.setWriteEnabled('staff-1', false);
+    await expect(
+      instance.ensureWritePermission('staff-1'),
+    ).rejects.toMatchObject({ code: 'write-opt-out' });
+    expect((await store.get('staff-1'))?.writeEnabled).toBe(false);
   });
 
   it('设备码登录后校验 userId 一致并绑定', async () => {
@@ -367,6 +394,11 @@ describe('DwsIdentityService', () => {
     await login('staff-1', instance);
     const updated = await instance.setWriteEnabled('staff-1', true);
     expect(updated.writeEnabled).toBe(true);
+    expect(updated.writeOptOut).toBe(false);
+
+    const readOnly = await instance.setWriteEnabled('staff-1', false);
+    expect(readOnly.writeEnabled).toBe(false);
+    expect(readOnly.writeOptOut).toBe(true);
 
     await instance.logout('staff-1');
     const record = await store.get('staff-1');

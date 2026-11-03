@@ -8,7 +8,7 @@
 - [ ] `engines.agent` 覆盖目标机器人版本。
 - [ ] `trust` 为 `declarative`。
 - [ ] `skills` 中每个目录都存在 `SKILL.md`，技能名不与内置/本地技能冲突。
-- [ ] 技能正文符合 `skill-author` 规范，写操作有 `/confirm` 和脱敏要求。
+- [ ] 技能正文符合 `skill-author` 规范，写操作有分级（普通写授权后直接执行、高危写 `/confirm`）和脱敏要求。
 
 ## MCP 节点
 

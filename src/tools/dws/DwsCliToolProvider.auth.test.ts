@@ -2,10 +2,11 @@ import { describe, expect, it } from 'vitest';
 import type { ExecutionContext } from '../../types/core.js';
 import type { DwsCommandRequest } from '../../types/mcp-and-sandbox.js';
 import type { DwsIdentityRecord } from '../../types/dws-identity.js';
-import type {
-  DwsIdentityService,
-  DwsIdentityState,
-  DwsIdentityStatus,
+import {
+  DwsIdentityError,
+  type DwsIdentityService,
+  type DwsIdentityState,
+  type DwsIdentityStatus,
 } from './DwsIdentityService.js';
 import { DwsCliToolProvider } from './DwsCliToolProvider.js';
 import type { DwsCliRunner, DwsRunResult } from './DwsCliRunner.js';
@@ -26,6 +27,7 @@ function identityRecord(
     consentedAt: at,
     scopes: [],
     writeEnabled: false,
+    writeOptOut: false,
     homeDir: 'u-0123456789abcdef01234567',
     corpId: 'ding-corp',
     dwsUserId: 'staff-1',
@@ -63,7 +65,8 @@ function fakeIdentity(options: FakeIdentityOptions = {}): {
   identity: DwsIdentityService;
   calls: {
     runs: DwsCommandRequest[];
-    ensureReadConsent: number;
+    ensureReadConsent: Array<{ write?: boolean }>;
+    ensureWritePermission: number;
     startLogin: number;
     pending: Array<{ staffId: string; conversationId: string }>;
   };
@@ -72,7 +75,8 @@ function fakeIdentity(options: FakeIdentityOptions = {}): {
   const states = [...(options.states ?? [record ? 'authenticated' : 'unbound'])];
   const calls = {
     runs: [] as DwsCommandRequest[],
-    ensureReadConsent: 0,
+    ensureReadConsent: [] as Array<{ write?: boolean }>,
+    ensureWritePermission: 0,
     startLogin: 0,
     pending: [] as Array<{ staffId: string; conversationId: string }>,
   };
@@ -100,9 +104,29 @@ function fakeIdentity(options: FakeIdentityOptions = {}): {
   const service = {
     getRecord: async () => record,
     status,
-    ensureReadConsent: async () => {
-      calls.ensureReadConsent += 1;
-      return record ?? identityRecord({ profile: null, corpId: null, dwsUserId: null });
+    ensureReadConsent: async (
+      _staffId: string,
+      options: { write?: boolean } = {},
+    ) => {
+      calls.ensureReadConsent.push(options);
+      return (
+        record ??
+        identityRecord({
+          profile: null,
+          corpId: null,
+          dwsUserId: null,
+          ...(options.write ? { writeEnabled: true } : {}),
+        })
+      );
+    },
+    ensureWritePermission: async () => {
+      calls.ensureWritePermission += 1;
+      if (record?.writeOptOut) {
+        throw new DwsIdentityError('write-opt-out', '已改回只读');
+      }
+      return record
+        ? { ...record, writeEnabled: true }
+        : identityRecord({ writeEnabled: true });
     },
     startLogin: async () => {
       calls.startLogin += 1;
@@ -204,7 +228,7 @@ describe('DwsCliToolProvider 每员工独立身份闸门', () => {
     };
 
     expect(calls.runs).toHaveLength(0);
-    expect(calls.ensureReadConsent).toBe(1);
+    expect(calls.ensureReadConsent).toHaveLength(1);
     expect(calls.startLogin).toBe(1);
     expect(calls.pending).toEqual([
       { staffId: 'staff-1', conversationId: 'conv-1' },
@@ -365,9 +389,58 @@ describe('DwsCliToolProvider 每员工独立身份闸门', () => {
     expect(notes).toHaveLength(0);
   });
 
-  it('只读授权拒绝写工具并提示单独授权', async () => {
+  it('首次写请求授权时自动记录写范围并说明授权后直接执行', async () => {
+    const { identity, calls } = fakeIdentity();
+    const provider = new DwsCliToolProvider({ identity });
+    const { ctx, notes } = context();
+
+    const output = JSON.parse(await runCalendarCreate(provider, ctx)) as {
+      ok: boolean;
+      authRequired: boolean;
+      writeRequested: boolean;
+      writeConsentRecorded: boolean;
+      instruction: string;
+    };
+
+    expect(calls.runs).toHaveLength(0);
+    expect(calls.startLogin).toBe(1);
+    expect(calls.ensureReadConsent).toEqual([{ write: true }]);
+    expect(output.ok).toBe(false);
+    expect(output.authRequired).toBe(true);
+    expect(output.writeRequested).toBe(true);
+    expect(output.writeConsentRecorded).toBe(true);
+    expect(output.instruction).toContain('直接执行刚才的写操作');
+    expect(notes).toHaveLength(1);
+    expect(notes[0]).toContain('直接执行刚才的写操作');
+
+    const gate = await new DwsCliToolProvider({ identity }).authorizationGate(
+      ctx,
+      true,
+    );
+    expect(gate).toMatchObject({ loginStarted: true, code: 'auth' });
+  });
+
+  it('已授权但未开启写权限时自动升级并执行写工具', async () => {
     const { identity, calls } = fakeIdentity({
-      record: identityRecord({ writeEnabled: false }),
+      record: identityRecord({ writeEnabled: false, writeOptOut: false }),
+      states: ['authenticated'],
+    });
+    const provider = new DwsCliToolProvider({ identity });
+    const { ctx } = context();
+
+    const output = JSON.parse(await runCalendarCreate(provider, ctx)) as {
+      ok: boolean;
+    };
+
+    expect(output.ok).toBe(true);
+    expect(calls.ensureWritePermission).toBe(1);
+    expect(calls.runs).toHaveLength(1);
+    expect(calls.runs[0]?.subcommand).toBe('event create');
+  });
+
+  it('用户主动改回只读时拒绝写工具并提示 /dws-consent write', async () => {
+    const { identity, calls } = fakeIdentity({
+      record: identityRecord({ writeEnabled: false, writeOptOut: true }),
       states: ['authenticated'],
     });
     const provider = new DwsCliToolProvider({ identity });
@@ -385,7 +458,29 @@ describe('DwsCliToolProvider 每员工独立身份闸门', () => {
     expect(output.instruction).toContain('/dws-consent write');
   });
 
-  it('额外授权写操作后执行写工具', async () => {
+  it('已手动只读且令牌过期时不发起登录，直接提示恢复写授权', async () => {
+    const { identity, calls } = fakeIdentity({
+      record: identityRecord({ writeEnabled: false, writeOptOut: true }),
+      states: ['expired'],
+    });
+    const provider = new DwsCliToolProvider({ identity });
+    const { ctx } = context();
+
+    const output = JSON.parse(await runCalendarCreate(provider, ctx)) as {
+      ok: boolean;
+      writeConsentRequired: boolean;
+      instruction: string;
+    };
+
+    expect(calls.startLogin).toBe(0);
+    expect(calls.ensureWritePermission).toBe(0);
+    expect(calls.runs).toHaveLength(0);
+    expect(output.ok).toBe(false);
+    expect(output.writeConsentRequired).toBe(true);
+    expect(output.instruction).toContain('/dws-consent write');
+  });
+
+  it('已允许写操作时直接执行写工具', async () => {
     const { identity, calls } = fakeIdentity({
       record: identityRecord({ writeEnabled: true }),
       states: ['authenticated'],
@@ -440,7 +535,7 @@ describe('DwsCliToolProvider 每员工独立身份闸门', () => {
       instruction: string;
     };
 
-    expect(calls.ensureReadConsent).toBe(0);
+    expect(calls.ensureReadConsent).toHaveLength(0);
     expect(calls.startLogin).toBe(0);
     expect(calls.runs).toHaveLength(0);
     expect(output.ok).toBe(false);
@@ -459,20 +554,30 @@ describe('DwsCliToolProvider 每员工独立身份闸门', () => {
 
     expect(prompt).toContain('HVSD-BJVT');
     expect(prompt).not.toContain('/dws-consent');
-    expect(calls.ensureReadConsent).toBe(1);
+    expect(calls.ensureReadConsent).toHaveLength(1);
     expect(calls.startLogin).toBe(1);
     expect(notes).toHaveLength(1);
   });
 
   it('写工具闸门前校验写授权与有效令牌', async () => {
-    const readOnly = fakeIdentity({
-      record: identityRecord({ writeEnabled: false }),
+    const optedOut = fakeIdentity({
+      record: identityRecord({ writeEnabled: false, writeOptOut: true }),
       states: ['authenticated'],
     });
-    const readOnlyPrompt = await new DwsCliToolProvider({
-      identity: readOnly.identity,
+    const optedOutPrompt = await new DwsCliToolProvider({
+      identity: optedOut.identity,
     }).authorizationPrompt(context().ctx, true);
-    expect(readOnlyPrompt).toContain('/dws-consent write');
+    expect(optedOutPrompt).toContain('/dws-consent write');
+
+    const autoUpgrade = fakeIdentity({
+      record: identityRecord({ writeEnabled: false, writeOptOut: false }),
+      states: ['authenticated'],
+    });
+    const autoUpgradePrompt = await new DwsCliToolProvider({
+      identity: autoUpgrade.identity,
+    }).authorizationPrompt(context().ctx, true);
+    expect(autoUpgradePrompt).toBeNull();
+    expect(autoUpgrade.calls.ensureWritePermission).toBe(1);
 
     const ready = fakeIdentity({
       record: identityRecord({ writeEnabled: true }),

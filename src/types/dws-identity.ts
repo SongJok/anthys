@@ -6,6 +6,8 @@ export interface DwsIdentityRecord {
   consentedAt: string;
   scopes: string[];
   writeEnabled: boolean;
+  /** 用户主动发送 /dws-consent read 后置为 true，写请求不再自动升级 */
+  writeOptOut: boolean;
   homeDir: string;
   corpId: string | null;
   dwsUserId: string | null;
@@ -22,6 +24,14 @@ export interface DwsConsentInput {
   scopes: string[];
   consentedAt: string;
   homeDir: string;
+  /** 仅首次插入时生效，已有记录沿用原写权限设置 */
+  writeEnabled?: boolean;
+  writeOptOut?: boolean;
+}
+
+export interface DwsWritePolicyInput {
+  writeEnabled?: boolean;
+  writeOptOut?: boolean;
 }
 
 export interface DwsBindingInput {
@@ -37,7 +47,10 @@ export interface DwsIdentityStore {
   get(staffId: string): Promise<DwsIdentityRecord | null>;
   list(): Promise<DwsIdentityRecord[]>;
   upsertConsent(input: DwsConsentInput): Promise<DwsIdentityRecord>;
-  setWriteEnabled(staffId: string, enabled: boolean): Promise<DwsIdentityRecord>;
+  setWritePolicy(
+    staffId: string,
+    input: DwsWritePolicyInput,
+  ): Promise<DwsIdentityRecord>;
   bind(input: DwsBindingInput): Promise<DwsIdentityRecord>;
   unbind(staffId: string): Promise<void>;
   remove(staffId: string): Promise<boolean>;
