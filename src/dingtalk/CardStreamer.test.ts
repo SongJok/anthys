@@ -269,7 +269,7 @@ describe('CardStreamer', () => {
     });
     expect(
       fake.updates.find((update) => update.key === 'status_bar')?.content,
-    ).toBe('已完成 · 1.5s');
+    ).toBe('已完成 · 1.5s · 2 步');
   });
 
   it('error 事件以 isError 收尾并展示失败原因', async () => {

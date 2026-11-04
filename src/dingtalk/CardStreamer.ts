@@ -486,9 +486,10 @@ export class CardStreamer {
         return;
       }
       case 'completed': {
-        this.status = event.usage.stopped
-          ? `已停止 · ${(event.usage.durationMs / 1000).toFixed(1)}s`
-          : `已完成 · ${(event.usage.durationMs / 1000).toFixed(1)}s`;
+        const state = event.usage.stopped ? '已停止' : '已完成';
+        const steps =
+          event.usage.steps > 0 ? ` · ${event.usage.steps} 步` : '';
+        this.status = `${state} · ${(event.usage.durationMs / 1000).toFixed(1)}s${steps}`;
         this.terminalStatus = true;
         this.dirtyStatus = true;
         this.throttler.cancel();
