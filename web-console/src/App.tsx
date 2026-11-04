@@ -25,10 +25,12 @@ import {
   SafetyCertificateOutlined,
   SettingOutlined,
   TeamOutlined,
+  UserAddOutlined,
 } from '@ant-design/icons';
 import { getToken, setToken } from './api';
 import DashboardPage from './pages/DashboardPage';
 import SystemSettingsPage from './pages/SystemSettingsPage';
+import UserWhitelistPage from './pages/UserWhitelistPage';
 import LlmPersonaPage from './pages/LlmPersonaPage';
 import McpConfigPage from './pages/McpConfigPage';
 import GroupsPage from './pages/GroupsPage';
@@ -49,6 +51,7 @@ const MENU = [
   { key: 'dashboard', icon: <DashboardOutlined />, label: '运行大盘' },
   { key: 'chat', icon: <MessageOutlined />, label: '在线对话' },
   { key: 'dingtalk', icon: <SettingOutlined />, label: '钉钉企业配置' },
+  { key: 'whitelist', icon: <UserAddOutlined />, label: '用户使用白名单' },
   { key: 'llm', icon: <RobotOutlined />, label: '大模型与人设' },
   { key: 'personas', icon: <IdcardOutlined />, label: '人设与身份' },
   { key: 'mcp', icon: <ApiOutlined />, label: '企业 MCP' },
@@ -67,6 +70,7 @@ const PAGE_TITLES: Record<string, string> = {
   dashboard: '运行大盘',
   chat: '在线对话（SSE 流式）',
   dingtalk: '钉钉企业配置',
+  whitelist: '用户使用白名单',
   llm: '大模型与人设配置',
   personas: '人设分层与身份归并',
   mcp: '企业内部 MCP 配置',
@@ -128,6 +132,7 @@ export default function App() {
           {active === 'dashboard' && <DashboardPage />}
           {active === 'chat' && <ChatPage />}
           {active === 'dingtalk' && <SystemSettingsPage />}
+          {active === 'whitelist' && <UserWhitelistPage />}
           {active === 'llm' && <LlmPersonaPage />}
           {active === 'personas' && <PersonaLayersPage />}
           {active === 'mcp' && <McpConfigPage />}

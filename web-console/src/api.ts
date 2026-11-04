@@ -71,6 +71,11 @@ import type {
   StreamStatus,
   TracePage,
   UsageSummary,
+  WhitelistEntry,
+  WhitelistPage,
+  WhitelistStats,
+  WhitelistStatus,
+  WhitelistSyncResult,
 } from './types';
 
 const TOKEN_KEY = 'dingtalk-agent-admin-token';
@@ -792,6 +797,42 @@ export const api = {
     request<{ ok: boolean; result: GithubConnectionTestResult }>('/github/test', {
       method: 'POST',
       body: JSON.stringify(repo ? { repo } : {}),
+    }),
+
+  whitelist: (params: {
+    status?: WhitelistStatus;
+    query?: string;
+    page?: number;
+    pageSize?: number;
+  } = {}) => {
+    const search = new URLSearchParams();
+    if (params.status) search.set('status', params.status);
+    if (params.query?.trim()) search.set('query', params.query.trim());
+    if (params.page !== undefined) search.set('page', String(params.page));
+    if (params.pageSize !== undefined) search.set('pageSize', String(params.pageSize));
+    const suffix = search.toString();
+    return request<WhitelistPage & { ok: boolean }>(
+      `/whitelist${suffix ? `?${suffix}` : ''}`,
+    );
+  },
+  whitelistStats: () =>
+    request<{ ok: boolean; stats: WhitelistStats }>('/whitelist/stats'),
+  syncWhitelist: () =>
+    request<{ ok: boolean; result: WhitelistSyncResult }>('/whitelist/sync', {
+      method: 'POST',
+    }),
+  updateWhitelist: (
+    staffId: string,
+    body: { status: WhitelistStatus; note?: string },
+  ) =>
+    request<{ ok: boolean; entry: WhitelistEntry }>(
+      `/whitelist/${encodeURIComponent(staffId)}`,
+      { method: 'PUT', body: JSON.stringify(body) },
+    ),
+  batchWhitelist: (body: { staffIds: string[]; status: WhitelistStatus }) =>
+    request<{ ok: boolean; updated: number }>('/whitelist/batch', {
+      method: 'POST',
+      body: JSON.stringify(body),
     }),
 };
 

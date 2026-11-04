@@ -6,6 +6,7 @@ import {
   type StreamClient,
 } from './StreamGateway.js';
 import type { InboundMessage } from '../types/core.js';
+import { GroupTranscriptBuffer } from '../bystander/GroupTranscriptBuffer.js';
 
 class FakeClient implements StreamClient {
   public callback: ((message: StreamCallbackMessage) => void) | null = null;
@@ -269,6 +270,60 @@ describe('StreamGateway', () => {
       conversationId: 'cid-1',
       conversationType: '2',
     });
+  });
+
+  it('白名单拒绝的消息不写旁听缓冲、不回调处理链路', async () => {
+    const client = new FakeClient();
+    const handler = vi.fn(async () => undefined);
+    const bystanderHandler = vi.fn(async () => undefined);
+    const transcriptBuffer = new GroupTranscriptBuffer();
+    const isStaffAllowed = vi.fn(async () => false);
+    const gateway = new StreamGateway({
+      client,
+      handler,
+      bystanderHandler,
+      transcriptBuffer,
+      whitelist: { isStaffAllowed },
+    });
+
+    await gateway.dispatch(
+      payload({ conversationType: '2', atUsers: [] }),
+      'msg-denied',
+    );
+    expect(isStaffAllowed).toHaveBeenCalledWith('staff-1', '张三');
+    expect(handler).not.toHaveBeenCalled();
+    expect(bystanderHandler).not.toHaveBeenCalled();
+    expect(transcriptBuffer.snapshot('cid-1')?.entries ?? []).toHaveLength(0);
+  });
+
+  it('白名单判定异常按拒绝处理', async () => {
+    const client = new FakeClient();
+    const handler = vi.fn(async () => undefined);
+    const gateway = new StreamGateway({
+      client,
+      handler,
+      whitelist: {
+        isStaffAllowed: async () => {
+          throw new Error('db down');
+        },
+      },
+    });
+
+    await gateway.dispatch(payload(), 'msg-error');
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it('白名单放行后正常进入主处理链路', async () => {
+    const client = new FakeClient();
+    const handler = vi.fn(async () => undefined);
+    const gateway = new StreamGateway({
+      client,
+      handler,
+      whitelist: { isStaffAllowed: async () => true },
+    });
+
+    await gateway.dispatch(payload(), 'msg-allowed');
+    expect(handler).toHaveBeenCalledTimes(1);
   });
 
   it('未识别的卡片动作被忽略', async () => {

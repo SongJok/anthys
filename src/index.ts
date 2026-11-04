@@ -196,6 +196,12 @@ import { TaskResultMemory } from './memory/TaskResultMemory.js';
 import { TaskMemoryToolProvider } from './tools/taskMemory/TaskMemoryToolProvider.js';
 import { TraceCollector, createMcpAdminPort } from './admin-api/runtime.js';
 import { startAdminServer } from './admin-api/server.js';
+import { DrizzleWhitelistStore } from './db/whitelistSchema.js';
+import { WhitelistService } from './whitelist/WhitelistService.js';
+import {
+  DingTalkContactDirectorySource,
+  DwsContactDirectorySource,
+} from './whitelist/DirectorySources.js';
 import { MetricsRegistry } from './admin-api/metrics.js';
 import { createRedactingLogger } from './governance/logger.js';
 import { redactTraceRecord } from './governance/redaction.js';
@@ -490,6 +496,24 @@ async function main(): Promise<void> {
     const traceStore = new DrizzleReActTraceStore(dbHandle.db);
     const feedbackStore = new DrizzleFeedbackStore(dbHandle.db);
     const groupDirectory = new DrizzleGroupDirectory(dbHandle.db);
+    const dwsContactDirectory = new DwsContactDirectorySource({
+      binary: process.env.DWS_BINARY?.trim() || 'dws',
+      logger: harnessLogger,
+    });
+    const whitelist = new WhitelistService({
+      store: new DrizzleWhitelistStore(dbHandle.db),
+      configCenter,
+      directorySources: [
+        new DingTalkContactDirectorySource(
+          () => configCenter.getDingTalkConfig(),
+          harnessLogger,
+        ),
+        dwsContactDirectory,
+      ],
+      resolveOpenId: (openId, senderName) =>
+        dwsContactDirectory.resolveOpenId(openId, senderName),
+      logger: harnessLogger,
+    });
     const runControl = new RunControlRegistry();
     const metrics = new MetricsRegistry();
 
@@ -3460,8 +3484,24 @@ async function main(): Promise<void> {
       logger: gatewayLogger,
       transcriptBuffer,
       ...(sharedState ? { dedupeStore: sharedState } : {}),
+      whitelist,
       handler: handleIncoming,
       cardActionHandler: async (action: CardActionEvent) => {
+        const allowed = await whitelist.isStaffAllowed(
+          action.userId ?? '',
+          action.nick,
+        );
+        if (!allowed) {
+          logger.info(
+            {
+              actionId: action.actionId,
+              conversationId: action.conversationId,
+              userId: action.userId,
+            },
+            'card action denied by user whitelist',
+          );
+          return;
+        }
         const message: InboundMessage = {
           messageId: `card_${action.actionId}_${action.outTrackId || action.conversationId}_${Date.now()}`,
           conversationId: action.conversationId,
@@ -3542,6 +3582,11 @@ async function main(): Promise<void> {
         binary: process.env.DWS_BINARY?.trim() || 'dws',
         onMessage: handleBystanderMessage,
         shouldIgnore: (messageId) => gateway?.hasSeen(messageId) === true,
+        isSenderAllowed: (message) =>
+          whitelist.isOpenIdAllowed(
+            message.senderStaffId,
+            message.senderNick,
+          ),
         ignoreSenders: [
           ...parseList(process.env.BYSTANDER_LISTEN_IGNORE_SENDERS),
           configCenter.getLLMConfig().persona.name,
@@ -3911,6 +3956,7 @@ async function main(): Promise<void> {
       groupWorkspace,
       groupModelRoutes,
       personSettings,
+      whitelist,
       mcp: {
         status: () => mcpPort.status(),
         applyServers: (servers) => mcpPort.applyServers(servers),

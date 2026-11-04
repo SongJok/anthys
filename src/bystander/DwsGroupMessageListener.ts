@@ -48,6 +48,11 @@ export interface DwsGroupMessageListenerOptions {
   allowedConversations?: Iterable<string>;
   /** 已被 StreamGateway 处理过的 @ 消息直接跳过 */
   shouldIgnore?: (messageId: string) => boolean;
+  /**
+   * 用户白名单准入：DWS 群事件只有 openDingTalkId，
+   * 由调用方解析为员工后判定；未提供时保持旧行为。
+   */
+  isSenderAllowed?: (message: InboundMessage) => Promise<boolean> | boolean;
   /** 忽略的发送人（展示名或 sender_open_dingtalk_id），用于过滤机器人自己的发言 */
   ignoreSenders?: string[];
   /** 等待 StreamGateway 先处理 @ 消息的静默窗口，默认 3000ms */
@@ -233,6 +238,7 @@ export class DwsGroupMessageListener {
   private readonly logger?: DwsGroupListenerLogger;
   private readonly shouldIgnore?: (messageId: string) => boolean;
   private readonly ignoreSenders: Set<string>;
+  private readonly reportedDeniedSenders = new Set<string>();
   private allowed: Set<string>;
   private seen = new Map<string, number>();
   private readonly reportedUnlistened = new Set<string>();
@@ -506,6 +512,36 @@ export class DwsGroupMessageListener {
         'dws event already handled by stream gateway',
       );
       return;
+    }
+    if (this.options.isSenderAllowed) {
+      let allowed = false;
+      try {
+        allowed = await this.options.isSenderAllowed(message);
+      } catch (error) {
+        this.logger?.error(
+          {
+            messageId: message.messageId,
+            senderOpenId: message.senderStaffId,
+            error: error instanceof Error ? error.message : String(error),
+          },
+          'dws group message whitelist check failed, message denied',
+        );
+      }
+      if (!allowed) {
+        const senderKey = message.senderStaffId || message.senderNick;
+        if (!this.reportedDeniedSenders.has(senderKey)) {
+          this.reportedDeniedSenders.add(senderKey);
+          this.logger?.info(
+            {
+              conversationId: message.conversationId,
+              senderOpenId: message.senderStaffId,
+              sender: message.senderNick,
+            },
+            'dws group message denied by user whitelist',
+          );
+        }
+        return;
+      }
     }
     await this.options.onMessage(message);
   }

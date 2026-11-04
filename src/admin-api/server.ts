@@ -36,6 +36,7 @@ import { createPersonaRoutes } from './routes/personaRoutes.js';
 import { createMemoryRoutes } from './routes/memoryRoutes.js';
 import { createGroupRoutes } from './routes/groupRoutes.js';
 import { createPersonSettingsRoutes } from './routes/personSettingsRoutes.js';
+import { createWhitelistRoutes } from './routes/whitelistRoutes.js';
 import type { GroupWorkspaceAdminPort } from '../types/group-workspace.js';
 import type { GroupModelRouteService } from '../groups/GroupModelRouteService.js';
 import type { PersonSettingsAdminPort } from '../types/personal-settings.js';
@@ -46,6 +47,7 @@ import type {
   PersonaAdminPort,
 } from '../types/persona-and-identity.js';
 import type { SemanticMemoryAdminPort } from '../types/bystander-and-memory.js';
+import type { UserWhitelistAdminPort } from '../types/whitelist.js';
 import {
   handleChatStream,
   OneTimeTicketStore,
@@ -131,6 +133,8 @@ export interface AdminApiOptions {
   groupModelRoutes?: GroupModelRouteService;
   /** 个人表达偏好与跨群记忆授权 */
   personSettings?: PersonSettingsAdminPort;
+  /** 员工白名单：目录同步与授权审批 */
+  whitelist?: UserWhitelistAdminPort;
 }
 
 export interface AdminServerOptions extends AdminApiOptions {
@@ -310,6 +314,15 @@ export function createAdminApp(options: AdminApiOptions): Hono {
       '/',
       createPersonSettingsRoutes({
         settings: options.personSettings,
+        configCenter: options.configCenter,
+      }),
+    );
+  }
+  if (options.whitelist) {
+    admin.route(
+      '/',
+      createWhitelistRoutes({
+        whitelist: options.whitelist,
         configCenter: options.configCenter,
       }),
     );

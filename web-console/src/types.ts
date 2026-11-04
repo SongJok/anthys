@@ -996,3 +996,47 @@ export interface PersonMemoryConsent {
   updatedBy: string;
   updatedAt: number;
 }
+
+export type WhitelistStatus = 'pending' | 'approved' | 'rejected';
+export type WhitelistSource = 'directory' | 'dws' | 'auto' | 'manual';
+
+export interface WhitelistEntry {
+  staffId: string;
+  name: string;
+  deptPath: string;
+  status: WhitelistStatus;
+  source: WhitelistSource;
+  openDingTalkId: string | null;
+  note: string;
+  approvedBy: string | null;
+  approvedAt: string | null;
+  lastSeenAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WhitelistStats {
+  total: number;
+  pending: number;
+  approved: number;
+  rejected: number;
+  syncedAt: string | null;
+}
+
+export interface WhitelistPage {
+  items: WhitelistEntry[];
+  total: number;
+  page: number;
+  pageSize: number;
+  stats: WhitelistStats;
+}
+
+export interface WhitelistSyncResult {
+  source: 'dingtalk-api' | 'dws';
+  scanned: number;
+  created: number;
+  updated: number;
+  unchanged: number;
+  warnings: string[];
+  syncedAt: string;
+}

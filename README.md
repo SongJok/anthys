@@ -688,6 +688,17 @@ ReAct 循环内置看门狗（`src/watchdog/RunWatchdog.ts`），只观察不执
 | `SILENT_INVESTIGATION_MIN_QUERY_CHARS` | `10` | 待核实问题的最短字符数 |
 | `SILENT_INVESTIGATION_MAX_CONCURRENCY` | `1` | 进程内同时执行的调查数量上限 |
 
+### 用户使用白名单
+
+默认只有管理员和被授权的内部员工能触发机器人，所有入口共用同一套准入判定：
+
+- **三个入口统一拦截**：Stream 单聊 / 群 @ 消息、互动卡片回调、DWS 群旁听；判定发生在写入旁听缓冲、会话历史与语义记忆之前，被拒绝的消息不会调用任何工具，也不会产生任何回复。
+- **外部人员一律拒绝**：`$:LWCP_v1:$…` 等无法解析为组织 `staffId` 的发送者直接丢弃；DWS 群事件只带 `openDingTalkId`，先用 DWS 通讯录精确解析并缓存绑定，解析失败按外部人员拒绝。
+- **内部员工待授权**：同步通讯录或首次交互时，员工以「待授权」进入白名单；管理员在控制台「用户使用白名单」页通过 / 拒绝，支持按姓名、staffId、部门搜索与批量操作。待授权与已拒绝状态都不会获得回复。
+- **管理员始终放行**：`DINGTALK_ADMIN` 与控制台管理员白名单中的账号不受白名单状态限制。
+- **通讯录同步**：优先调用钉钉通讯录 API；若开发者后台「通讯录权限范围」未覆盖目标部门（错误码 50004），自动回退 DWS 通讯录。同步幂等，不覆盖已有授权状态，重复执行只更新姓名、部门与最近同步时间。
+- **失败即拒绝**：白名单判定出现数据库或通讯录异常时按拒绝处理（fail-closed），不会因故障放开访问。
+
 ### 身份归一与分层人设
 
 同一个员工在钉钉里可能有 `staffId`、`openDingTalkId` 与外部加密 ID 多个标识。系统把它们映射为稳定的 `personKey`（`staff:<staffId>` / `external:<id>`），作为记忆和人设的归属键：
@@ -967,13 +978,14 @@ ReAct 循环内置看门狗（`src/watchdog/RunWatchdog.ts`），只观察不执
 
 ## 管理控制台
 
-控制台与机器人同进程提供，默认地址 `http://<host>:8787/`，共十五个页面：
+控制台与机器人同进程提供，默认地址 `http://<host>:8787/`，共十六个页面：
 
 | 页面 | 可以做什么 |
 | --- | --- |
 | **运行大盘** | 查看 Stream 状态、今日对话轮次与 Token、MCP 节点健康与工具数、各群旁听与主动回复统计、最近管理操作审计 |
 | **在线对话** | 用一次性票据订阅 SSE，直接在浏览器体验与钉钉相同的流式推理、工具调用与最终回答 |
 | **钉钉企业配置** | 修改 AppKey / AppSecret、RobotCode、AI 卡片模板、管理员白名单、DWS 开关、公网联网搜索开关；发送测试卡片验证链路 |
+| **用户使用白名单** | 同步组织通讯录，查看员工 staffId / 姓名 / 部门，按待授权、已授权、已拒绝筛选并批量审批；未授权与外部人员不会获得任何回复 |
 | **大模型与人设** | 切换模型渠道与模型、修改 Base URL / API Key / 温度 / 原生思维链、调整 ReAct 预算、在线编辑人设与语气，并发起沙盒对话测试 |
 | **企业 MCP** | 增删改查节点、启停并热应用、一键连通性测试并浏览工具 Schema、维护按群 / 角色的工具权限 |
 | **群聊旁听策略** | 查看全局默认策略、按群覆盖旁听与主动回复参数、为该群配置独立模型路由、一键紧急静音 |
@@ -1040,6 +1052,11 @@ ReAct 循环内置看门狗（`src/watchdog/RunWatchdog.ts`），只观察不执
 | POST | `/config/dingtalk/test-card` | 发送测试卡片 |
 | GET / PUT | `/config/llm` | 读取 / 更新模型、人设与预算 |
 | POST | `/config/llm/test` | 沙盒对话测试 |
+| GET | `/whitelist` | 白名单分页查询（`status=pending/approved/rejected`、`query`、`page`、`pageSize`） |
+| GET | `/whitelist/stats` | 白名单统计与最近同步时间 |
+| POST | `/whitelist/sync` | 同步组织通讯录（应用 API 优先，DWS 回退） |
+| PUT | `/whitelist/:staffId` | 授权 / 拒绝单个员工 |
+| POST | `/whitelist/batch` | 批量授权 / 拒绝员工 |
 | GET | `/groups` | 已接入的群列表与最近活跃 |
 | GET / PUT | `/groups/:conversationId/policy` | 读取 / 更新单群旁听策略 |
 | GET / PUT | `/groups/:conversationId/workspace` | 读取 / 更新群定位、职责与备注 |

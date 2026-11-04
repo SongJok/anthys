@@ -124,6 +124,7 @@ describe('DwsGroupMessageListener', () => {
     allowed?: string[];
     shouldIgnore?: (messageId: string) => boolean;
     ignoreSenders?: string[];
+    isSenderAllowed?: (message: InboundMessage) => Promise<boolean> | boolean;
     logger?: typeof noopLogger;
   } = {}) {
     const children: FakeChild[] = [];
@@ -133,6 +134,7 @@ describe('DwsGroupMessageListener', () => {
       allowedConversations: options.allowed ?? ['cid-1'],
       shouldIgnore: options.shouldIgnore,
       ignoreSenders: options.ignoreSenders,
+      isSenderAllowed: options.isSenderAllowed,
       settleMs: 0,
       sleep: async () => undefined,
       spawn: () => {
@@ -195,8 +197,55 @@ describe('DwsGroupMessageListener', () => {
     expect(received[0]?.messageId).toBe('msg-1');
   });
 
-  it('skips messages already handled by the stream gateway', async () => {
-    const shouldIgnore = vi.fn((messageId: string) => messageId === 'msg-1');
+  it('白名单拒绝的群消息不交给旁听链路', async () => {
+    const isSenderAllowed = vi.fn(() => false);
+    const { listener, children, received } = setup({ isSenderAllowed });
+    listener.start();
+    children[0]!.stdout.write(line(FLAT_MESSAGE));
+
+    await vi.waitFor(() =>
+      expect(isSenderAllowed).toHaveBeenCalledWith(
+        expect.objectContaining({
+          senderStaffId: 'Dy5dflTlbmfSiPALBjB9ZumnAkn52BFAeg',
+          senderNick: '王五',
+        }),
+      ),
+    );
+    expect(received).toHaveLength(0);
+  });
+
+  it('白名单判定异常按拒绝处理', async () => {
+    const errorLog = vi.fn();
+    const { listener, children, received } = setup({
+      logger: { ...noopLogger, error: errorLog },
+      isSenderAllowed: async () => {
+        throw new Error('lookup failed');
+      },
+    });
+    listener.start();
+    children[0]!.stdout.write(line(FLAT_MESSAGE));
+
+    await vi.waitFor(() =>
+      expect(errorLog).toHaveBeenCalledWith(
+        expect.objectContaining({ messageId: 'msg-1' }),
+        expect.stringContaining('denied'),
+      ),
+    );
+    expect(received).toHaveLength(0);
+  });
+
+  it('白名单放行后正常交给旁听链路', async () => {
+    const { listener, children, received } = setup({
+      isSenderAllowed: async () => true,
+    });
+    listener.start();
+    children[0]!.stdout.write(line(FLAT_MESSAGE));
+
+    await vi.waitFor(() => expect(received).toHaveLength(1));
+    expect(received[0]?.messageId).toBe('msg-1');
+  });
+
+  it('skips messages already handled by the stream gateway', async () => {    const shouldIgnore = vi.fn((messageId: string) => messageId === 'msg-1');
     const { listener, children, received } = setup({ shouldIgnore });
     listener.start();
     children[0]!.stdout.write(line(FLAT_MESSAGE));

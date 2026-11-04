@@ -39,6 +39,13 @@ export interface StreamGatewayOptions {
   transcriptBuffer?: GroupTranscriptBuffer;
   /** 互动卡片按钮 / 快捷操作回调 */
   cardActionHandler?: (action: CardActionEvent) => Promise<void>;
+  /**
+   * 用户白名单准入：未授权或外部人员直接丢弃，
+   * 不回复、不写旁听缓冲、不进入记忆；判定异常按拒绝处理。
+   */
+  whitelist?: {
+    isStaffAllowed(staffId: string, senderNick?: string): Promise<boolean>;
+  };
   logger?: StreamGatewayLogger;
   now?: () => number;
   /** 已处理消息的去重窗口，默认 1000 条 */
@@ -206,6 +213,35 @@ export class StreamGateway {
         'stream message ignored, unsupported type or empty payload',
       );
       return;
+    }
+    if (this.options.whitelist) {
+      let allowed = false;
+      try {
+        allowed = await this.options.whitelist.isStaffAllowed(
+          message.senderStaffId,
+          message.senderNick,
+        );
+      } catch (error) {
+        this.options.logger?.error(
+          {
+            messageId,
+            senderStaffId: message.senderStaffId,
+            error: error instanceof Error ? error.message : String(error),
+          },
+          'user whitelist check failed, message denied',
+        );
+      }
+      if (!allowed) {
+        this.options.logger?.info(
+          {
+            messageId,
+            conversationId: message.conversationId,
+            senderStaffId: message.senderStaffId,
+          },
+          'stream message denied by user whitelist',
+        );
+        return;
+      }
     }
     if (message.conversationType === '2') {
       this.options.transcriptBuffer?.append(toTranscriptEntry(message));

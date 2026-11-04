@@ -113,7 +113,9 @@ export type AdminActionType =
   | 'DELETE_GROUP_TASK'
   | 'UPDATE_PERSON_SETTINGS'
   | 'UPDATE_GROUP_MODEL_ROUTE'
-  | 'DELETE_GROUP_MODEL_ROUTE';
+  | 'DELETE_GROUP_MODEL_ROUTE'
+  | 'UPDATE_WHITELIST'
+  | 'SYNC_WHITELIST';
 
 /** 2. 管理员单聊管控审计记录契约 */
 export interface AdminAuditLog {
