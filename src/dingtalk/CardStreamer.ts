@@ -487,8 +487,8 @@ export class CardStreamer {
       }
       case 'completed': {
         this.status = event.usage.stopped
-          ? `已停止 · ${(event.usage.durationMs / 1000).toFixed(1)}s · ${event.usage.totalTokens} tokens`
-          : `已完成 · ${(event.usage.durationMs / 1000).toFixed(1)}s · ${event.usage.totalTokens} tokens`;
+          ? `已停止 · ${(event.usage.durationMs / 1000).toFixed(1)}s`
+          : `已完成 · ${(event.usage.durationMs / 1000).toFixed(1)}s`;
         this.terminalStatus = true;
         this.dirtyStatus = true;
         this.throttler.cancel();

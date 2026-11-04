@@ -376,7 +376,7 @@ describe('阶段一链路集成（网关 → Harness → ReAct → 卡片）', (
       ctx.updates.some(
         (update) =>
           update.key === 'status_bar' &&
-          update.content === '已完成 · 0.0s · 15 tokens',
+          update.content === '已完成 · 0.0s',
       ),
     ).toBe(true);
 
