@@ -1,0 +1,10 @@
+{
+  "id": "company",
+  "name": "公司业务手册",
+  "aliases": ["公司业务", "业务手册", "陶乐科技", "北京陶乐科技", "我们公司", "本公司", "点点开黑", "兔小铲", "乐园杀", "company"],
+  "description": "北京陶乐科技有限公司的业务全貌：产品线、核心角色与术语、运营政策、流程与规则、知识库地图（由钉钉知识库梳理，需业务负责人审核）",
+  "source": { "type": "manual" },
+  "default": false,
+  "visibility": "team",
+  "sensitivity": "team"
+}

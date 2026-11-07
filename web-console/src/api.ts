@@ -13,6 +13,8 @@ import type {
   GlossaryValidationReport,
   GithubAdminStatus,
   GithubConnectionTestResult,
+  GroupDirectoryEntry,
+  GroupDirectorySyncResult,
   GroupGoalRecord,
   GroupGoalStatus,
   GroupMemorySharing,
@@ -204,6 +206,27 @@ export const api = {
 
   groups: () =>
     request<{ defaults: DefaultGroupPolicy; groups: KnownGroup[] }>('/groups'),
+  groupDirectory: (params?: {
+    query?: string;
+    onlyWithBots?: boolean;
+    botName?: string;
+    limit?: number;
+  }) => {
+    const search = new URLSearchParams();
+    if (params?.query) search.set('query', params.query);
+    if (params?.onlyWithBots) search.set('onlyWithBots', '1');
+    if (params?.botName) search.set('botName', params.botName);
+    if (params?.limit) search.set('limit', String(params.limit));
+    const qs = search.toString();
+    return request<{ items: GroupDirectoryEntry[]; total: number }>(
+      `/groups/directory${qs ? `?${qs}` : ''}`,
+    );
+  },
+  syncGroupDirectory: (includeBots = true) =>
+    request<{ result: GroupDirectorySyncResult }>('/groups/sync-directory', {
+      method: 'POST',
+      body: JSON.stringify({ includeBots }),
+    }),
   groupPolicy: (conversationId: string) =>
     request<{ policy: GroupPolicy }>(
       `/groups/${encodeURIComponent(conversationId)}/policy`,

@@ -196,7 +196,10 @@ export class ProjectToolProvider implements IToolProvider {
           const lines = [
             `[project:${result.projectId} @ ${result.commit ? result.commit.slice(0, 12) : '未索引'}] ${result.project.name} 手册 v${result.version}${result.stale ? '（stale：手册 commit 与当前索引不一致）' : ''}`,
           ];
-          if (result.content.sections.length === 0) {
+          if (
+            result.content.sections.length === 0 &&
+            result.manualEntries.length === 0
+          ) {
             lines.push(
               '尚未发布结构化手册章节；管理员可先维护人工条目，或使用 project_map / project_search 查询代码。',
             );
@@ -221,9 +224,16 @@ export class ProjectToolProvider implements IToolProvider {
             }
           }
           if (result.manualEntries.length > 0) {
+            const manualLimit = full
+              ? readString(args, 'section')
+                ? 8_000
+                : 3_000
+              : 400;
             lines.push('', '## 人工条目');
             for (const entry of result.manualEntries.slice(0, 20)) {
-              lines.push(`- [${entry.section}] ${entry.title}：${clip(entry.markdown, full ? 1_500 : 300)}`);
+              lines.push(
+                `- [${entry.section}] ${entry.title}：${clip(entry.markdown, manualLimit)}`,
+              );
             }
           }
           if (result.content.sections.length === 0 && result.manualEntries.length === 0) {

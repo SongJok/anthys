@@ -13,13 +13,21 @@ import {
 import type { Database } from './client.js';
 import { conversations } from './schema.js';
 import { bystanderPolicies } from './memorySchema.js';
+import {
+  dingtalkGroupDirectory,
+  toGroupDirectoryEntry,
+} from './groupSchema.js';
 import type {
   AdminAuditInput,
   AdminAuditLog,
   ConfigScope,
   EnterpriseBotSystemConfig,
   FeedbackStore,
+  GroupBotEntry,
   GroupBystanderPolicy,
+  GroupDirectory,
+  GroupDirectoryEntry,
+  GroupDirectorySyncResult,
   GroupTraceStat,
   KnownGroup,
   UserFeedbackInput,
@@ -397,21 +405,43 @@ export class DrizzleGroupPolicyStore implements GroupPolicyStore {
   }
 }
 
-/** 已接入群列表：conversations 提供群标识，bystander_policies 提供覆盖策略 */
-export class DrizzleGroupDirectory {
-  constructor(private readonly db: Database) {}
+export interface GroupDirectorySourcePort {
+  fetchGroups(options?: { includeBots?: boolean }): Promise<
+    Array<{
+      conversationId: string;
+      name: string;
+      bots: GroupBotEntry[];
+    }>
+  >;
+}
+
+/** 已接入群列表：conversations 提供群标识，bystander_policies 提供覆盖策略，dingtalk_group_directory 补齐群名与机器人 */
+export class DrizzleGroupDirectory implements GroupDirectory {
+  constructor(
+    private readonly db: Database,
+    private readonly options: {
+      botName?: () => string;
+      dwsSource?: GroupDirectorySourcePort;
+    } = {},
+  ) {}
 
   public async listGroups(): Promise<KnownGroup[]> {
-    const rows = await this.db
-      .select({
-        title: conversations.title,
-        metadata: conversations.metadata,
-        updatedAt: conversations.updatedAt,
-      })
-      .from(conversations)
-      .where(eq(conversations.conversationType, '2'))
-      .orderBy(desc(conversations.updatedAt));
-    const policies = await this.db.select().from(bystanderPolicies);
+    const [rows, policies, directoryRows] = await Promise.all([
+      this.db
+        .select({
+          title: conversations.title,
+          metadata: conversations.metadata,
+          updatedAt: conversations.updatedAt,
+        })
+        .from(conversations)
+        .where(eq(conversations.conversationType, '2'))
+        .orderBy(desc(conversations.updatedAt)),
+      this.db.select().from(bystanderPolicies),
+      this.db
+        .select()
+        .from(dingtalkGroupDirectory)
+        .catch(() => [] as Array<typeof dingtalkGroupDirectory.$inferSelect>),
+    ]);
     return mergeKnownGroups(
       rows.flatMap((row) => {
         const metadata = row.metadata as { conversationId?: unknown };
@@ -426,13 +456,265 @@ export class DrizzleGroupDirectory {
           : [];
       }),
       policies.map(toGroupPolicy),
+      directoryRows.map(toGroupDirectoryEntry),
+      this.options.botName?.(),
+    );
+  }
+
+  public async listDirectory(
+    options: {
+      query?: string;
+      onlyWithBots?: boolean;
+      botName?: string;
+      limit?: number;
+    } = {},
+  ): Promise<GroupDirectoryEntry[]> {
+    const rows = await this.db
+      .select()
+      .from(dingtalkGroupDirectory)
+      .orderBy(
+        desc(dingtalkGroupDirectory.botCount),
+        desc(dingtalkGroupDirectory.updatedAt),
+      );
+    const query = options.query?.trim().toLowerCase() ?? '';
+    const botName = options.botName?.trim().toLowerCase() ?? '';
+    const limit = Math.max(1, Math.min(1_000, options.limit ?? 500));
+    const filtered: GroupDirectoryEntry[] = [];
+    for (const row of rows) {
+      const entry = toGroupDirectoryEntry(row);
+      if (options.onlyWithBots && entry.bots.length === 0) continue;
+      if (
+        botName &&
+        !entry.bots.some((bot) => bot.name.toLowerCase().includes(botName))
+      ) {
+        continue;
+      }
+      if (query) {
+        const hitName = entry.name.toLowerCase().includes(query);
+        const hitId = entry.conversationId.toLowerCase().includes(query);
+        const hitBot = entry.bots.some((bot) =>
+          bot.name.toLowerCase().includes(query),
+        );
+        if (!hitName && !hitId && !hitBot) continue;
+      }
+      filtered.push(entry);
+      if (filtered.length >= limit) break;
+    }
+    return filtered;
+  }
+
+  public async getGroup(
+    conversationId: string,
+  ): Promise<GroupDirectoryEntry | null> {
+    const id = conversationId.trim();
+    if (!id) return null;
+    const rows = await this.db
+      .select()
+      .from(dingtalkGroupDirectory)
+      .where(eq(dingtalkGroupDirectory.conversationId, id))
+      .limit(1);
+    return rows[0] ? toGroupDirectoryEntry(rows[0]) : null;
+  }
+
+  public async upsertGroupTitle(
+    conversationId: string,
+    title: string,
+    source: 'dws' | 'stream' | 'manual' = 'stream',
+  ): Promise<void> {
+    const id = conversationId.trim();
+    const name = title.trim();
+    if (!id || !name) return;
+    await this.db
+      .insert(dingtalkGroupDirectory)
+      .values({
+        conversationId: id,
+        name,
+        bots: [],
+        botCount: 0,
+        source,
+        syncedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .onConflictDoUpdate({
+        target: dingtalkGroupDirectory.conversationId,
+        set: {
+          name: sql`case when excluded.name <> '' then excluded.name else ${dingtalkGroupDirectory.name} end`,
+          updatedAt: new Date(),
+        },
+      });
+    await this.db
+      .update(conversations)
+      .set({ title: name, updatedAt: new Date() })
+      .where(
+        and(
+          eq(conversations.conversationKey, `group:${id}`),
+          sql`(${conversations.title} is null or ${conversations.title} = '')`,
+        ),
+      );
+  }
+
+  public async upsertDirectoryEntries(
+    items: Array<{
+      conversationId: string;
+      name: string;
+      bots?: GroupBotEntry[];
+    }>,
+    source: 'dws' | 'stream' | 'manual' = 'dws',
+  ): Promise<GroupDirectorySyncResult> {
+    const deduped = new Map<
+      string,
+      { conversationId: string; name: string; bots?: GroupBotEntry[] }
+    >();
+    for (const item of items) {
+      const id = item.conversationId.trim();
+      if (!id) continue;
+      const name = item.name.trim();
+      const existing = deduped.get(id);
+      if (!existing) {
+        deduped.set(id, {
+          conversationId: id,
+          name,
+          ...(item.bots !== undefined ? { bots: item.bots } : {}),
+        });
+        continue;
+      }
+      if (!existing.name && name) existing.name = name;
+      if (item.bots && item.bots.length > 0) existing.bots = item.bots;
+    }
+
+    const syncedAt = new Date();
+    if (deduped.size === 0) {
+      return {
+        total: 0,
+        created: 0,
+        updated: 0,
+        unchanged: 0,
+        withBots: 0,
+        syncedAt: syncedAt.toISOString(),
+      };
+    }
+
+    const existingRows = await this.db.select().from(dingtalkGroupDirectory);
+    const existingMap = new Map(
+      existingRows.map((row) => [row.conversationId, row]),
+    );
+
+    let created = 0;
+    let updated = 0;
+    let unchanged = 0;
+    let withBots = 0;
+
+    const values = [...deduped.values()].map((item) => {
+      const before = existingMap.get(item.conversationId);
+      const nextName = item.name || before?.name || '';
+      const nextBots =
+        item.bots !== undefined
+          ? item.bots
+          : Array.isArray(before?.bots)
+            ? before.bots
+            : [];
+      if (nextBots.length > 0) withBots += 1;
+
+      if (!before) {
+        created += 1;
+      } else {
+        const sameName = nextName === before.name;
+        const sameBots =
+          JSON.stringify(nextBots) === JSON.stringify(before.bots ?? []);
+        if (sameName && sameBots) unchanged += 1;
+        else updated += 1;
+      }
+
+      return {
+        conversationId: item.conversationId,
+        name: nextName,
+        bots: nextBots,
+        botCount: nextBots.length,
+        source,
+        syncedAt,
+        updatedAt: syncedAt,
+      };
+    });
+
+    const chunkSize = 200;
+    for (let index = 0; index < values.length; index += chunkSize) {
+      await this.db
+        .insert(dingtalkGroupDirectory)
+        .values(values.slice(index, index + chunkSize))
+        .onConflictDoUpdate({
+          target: dingtalkGroupDirectory.conversationId,
+          set: {
+            name: sql`case when excluded.name <> '' then excluded.name else ${dingtalkGroupDirectory.name} end`,
+            bots: sql`excluded.bots`,
+            botCount: sql`excluded.bot_count`,
+            source: sql`excluded.source`,
+            syncedAt,
+            updatedAt: syncedAt,
+          },
+        });
+    }
+
+    // 同步回填会话表中尚无标题的群聊（如仅收到过 DWS 旁听事件的群）
+    for (const row of values) {
+      if (!row.name) continue;
+      await this.db
+        .update(conversations)
+        .set({ title: row.name, updatedAt: syncedAt })
+        .where(
+          and(
+            eq(conversations.conversationKey, `group:${row.conversationId}`),
+            sql`(${conversations.title} is null or ${conversations.title} = '')`,
+          ),
+        );
+    }
+
+    return {
+      total: values.length,
+      created,
+      updated,
+      unchanged,
+      withBots,
+      syncedAt: syncedAt.toISOString(),
+    };
+  }
+
+  public async listDistinctBotNames(): Promise<string[]> {
+    const rows = await this.db
+      .select({ bots: dingtalkGroupDirectory.bots })
+      .from(dingtalkGroupDirectory)
+      .where(sql`${dingtalkGroupDirectory.botCount} > 0`)
+      .catch(() => [] as Array<{ bots: GroupBotEntry[] }>);
+    const names = new Set<string>();
+    for (const row of rows) {
+      for (const bot of Array.isArray(row.bots) ? row.bots : []) {
+        const name = bot?.name?.trim();
+        if (name) names.add(name);
+      }
+    }
+    return [...names].sort();
+  }
+
+  public async syncFromDws(
+    options: { includeBots?: boolean } = {},
+  ): Promise<GroupDirectorySyncResult> {
+    if (!this.options.dwsSource) {
+      throw new Error('未配置 DWS 群目录同步源');
+    }
+    const items = await this.options.dwsSource.fetchGroups(options);
+    return this.upsertDirectoryEntries(
+      items.map((item) => ({
+        conversationId: item.conversationId,
+        name: item.name,
+        ...(options.includeBots ? { bots: item.bots } : {}),
+      })),
+      'dws',
     );
   }
 }
 
 /**
- * 合并「见过的群」与「配过策略的群」：
- * 只配了策略还没收到过消息的群也要能出现在控制台里，否则无法再编辑或关闭。
+ * 合并「见过的群」「配过策略的群」与「群目录中已安装本机器人的群」：
+ * 只配了策略还没收到过消息的群也要能出现在控制台里，且用群目录补齐缺失群名与机器人列表。
  */
 export function mergeKnownGroups(
   conversationsSeen: Array<{
@@ -441,9 +723,19 @@ export function mergeKnownGroups(
     lastActiveAt: number | null;
   }>,
   policies: GroupBystanderPolicy[],
+  directoryEntries?: Array<{
+    conversationId: string;
+    name: string;
+    bots: GroupBotEntry[];
+    botCount: number;
+  }>,
+  botName?: string,
 ): KnownGroup[] {
   const policyByGroup = new Map(
     policies.map((policy) => [policy.conversationId, policy]),
+  );
+  const directoryByGroup = new Map(
+    (directoryEntries ?? []).map((entry) => [entry.conversationId, entry]),
   );
   const seen = new Set<string>();
   const groups: KnownGroup[] = [];
@@ -451,26 +743,50 @@ export function mergeKnownGroups(
     if (seen.has(row.conversationId)) continue;
     seen.add(row.conversationId);
     const policy = policyByGroup.get(row.conversationId);
+    const dir = directoryByGroup.get(row.conversationId);
+    const title = row.title?.trim() || dir?.name?.trim() || null;
     groups.push({
       conversationId: row.conversationId,
-      title: row.title,
+      title,
       conversationType: '2',
       bystanderEnabled: policy?.bystanderEnabled ?? null,
       proactiveReplyEnabled: policy?.proactiveReplyEnabled ?? null,
       lastActiveAt: row.lastActiveAt,
+      ...(dir ? { bots: dir.bots, botCount: dir.botCount } : {}),
     });
   }
   for (const policy of policies) {
     if (seen.has(policy.conversationId)) continue;
     seen.add(policy.conversationId);
+    const dir = directoryByGroup.get(policy.conversationId);
     groups.push({
       conversationId: policy.conversationId,
-      title: null,
+      title: dir?.name?.trim() || null,
       conversationType: '2',
       bystanderEnabled: policy.bystanderEnabled,
       proactiveReplyEnabled: policy.proactiveReplyEnabled,
       lastActiveAt: null,
+      ...(dir ? { bots: dir.bots, botCount: dir.botCount } : {}),
     });
+  }
+  const normalizedBotName = botName?.trim();
+  if (normalizedBotName && directoryEntries) {
+    for (const dir of directoryEntries) {
+      if (seen.has(dir.conversationId)) continue;
+      const hasOurBot = dir.bots.some((bot) => bot.name === normalizedBotName);
+      if (!hasOurBot) continue;
+      seen.add(dir.conversationId);
+      groups.push({
+        conversationId: dir.conversationId,
+        title: dir.name?.trim() || null,
+        conversationType: '2',
+        bystanderEnabled: null,
+        proactiveReplyEnabled: null,
+        lastActiveAt: null,
+        bots: dir.bots,
+        botCount: dir.botCount,
+      });
+    }
   }
   return groups;
 }

@@ -8,6 +8,7 @@ dist/
 .DS_Store
 coverage/
 tmp/
+*newcorp*.json
 .workspace/
 .state/
 .idea/

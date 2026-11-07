@@ -1,6 +1,10 @@
 import type { ChatMessage, StoredMessage } from '../types/core.js';
 import type { AssembledMemoryContext } from '../types/bystander-and-memory.js';
 import {
+  buildOrgIdentityPrompt,
+  resolveOrgIdentity,
+} from '../persona/OrgIdentity.js';
+import {
   formatShanghaiMessageStamp,
   shanghaiPromptClock,
 } from '../time/shanghaiTime.js';
@@ -38,6 +42,8 @@ const TOOL_GUIDANCE = [
   '- 需要实时时间、精确计算或系统运行状态时，优先调用可用工具，不要凭空猜测。',
   '- 工具返回结果后直接基于结果作答；信息已足够时不要再调用工具。',
   '- 未标记错误的工具返回就是真实数据，即使内容很短、像闲聊或与预期格式不符（例如昵称本身很奇怪），也要如实采用，不要判定通道故障或反复重试。',
+  '- 回答公司内部业务与组织问题时，先查公司术语、知识库与项目手册，始终站在本公司与内部员工协同视角补充业务口径、上下游影响、内部待攻坚点与对口责任人，不要用外部求职/合作/投资尽调视角评判本公司；外部通用问题照常回答，不强加公司视角。',
+  '- 订单、指标数值、故障状态等易变数据必须实时取数并注明取数时间；知识库内容注明来源与更新时间，查不到就说明缺口，不要编造公司制度或数字。',
   '- 最终回答使用 Markdown，适合在钉钉卡片中阅读；不要输出与问题无关的客套话。',
   '- 需求预计需要 20 分钟以上、长时间运行或消耗大量 Token 时，直接说明机器人不认可该需求并建议拆分，不要开始执行。',
 ].join('\n');
@@ -52,6 +58,8 @@ export function buildSystemPrompt(
     `说话风格：${persona.speakingStyle}`,
     '',
     SAFETY_GUARDRAILS,
+    '',
+    buildOrgIdentityPrompt(resolveOrgIdentity()),
     '',
     TOOL_GUIDANCE,
     '',

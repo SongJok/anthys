@@ -115,7 +115,8 @@ export type AdminActionType =
   | 'UPDATE_GROUP_MODEL_ROUTE'
   | 'DELETE_GROUP_MODEL_ROUTE'
   | 'UPDATE_WHITELIST'
-  | 'SYNC_WHITELIST';
+  | 'SYNC_WHITELIST'
+  | 'SYNC_GROUP_DIRECTORY';
 
 /** 2. 管理员单聊管控审计记录契约 */
 export interface AdminAuditLog {
@@ -404,6 +405,32 @@ export interface FeedbackStore {
   list(limit?: number): Promise<UserFeedbackRecord[]>;
 }
 
+/** 群内已安装的机器人条目 */
+export interface GroupBotEntry {
+  name: string;
+  openBotId: string;
+}
+
+/** 组织钉钉群与群内机器人目录记录（持久化在数据库中） */
+export interface GroupDirectoryEntry {
+  conversationId: string;
+  name: string;
+  bots: GroupBotEntry[];
+  botCount: number;
+  source: 'dws' | 'stream' | 'manual';
+  syncedAt: string;
+  updatedAt: string;
+}
+
+export interface GroupDirectorySyncResult {
+  total: number;
+  created: number;
+  updated: number;
+  unchanged: number;
+  withBots: number;
+  syncedAt: string;
+}
+
 /** 已接入的钉钉群（用于 ChatOps 群列表与 Web 策略页） */
 export interface KnownGroup {
   conversationId: string;
@@ -412,10 +439,28 @@ export interface KnownGroup {
   bystanderEnabled: boolean | null;
   proactiveReplyEnabled: boolean | null;
   lastActiveAt: number | null;
+  bots?: GroupBotEntry[];
+  botCount?: number;
 }
 
 export interface GroupDirectory {
   listGroups(): Promise<KnownGroup[]>;
+  listDirectory?(options?: {
+    query?: string;
+    onlyWithBots?: boolean;
+    botName?: string;
+    limit?: number;
+  }): Promise<GroupDirectoryEntry[]>;
+  getGroup?(conversationId: string): Promise<GroupDirectoryEntry | null>;
+  upsertGroupTitle?(
+    conversationId: string,
+    title: string,
+    source?: 'dws' | 'stream' | 'manual',
+  ): Promise<void>;
+  listDistinctBotNames?(): Promise<string[]>;
+  syncFromDws?(options?: {
+    includeBots?: boolean;
+  }): Promise<GroupDirectorySyncResult>;
 }
 
 /** 单个 MCP 节点的连通性探测结果 */

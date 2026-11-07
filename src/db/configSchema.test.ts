@@ -71,4 +71,60 @@ describe('mergeKnownGroups', () => {
     expect(group?.bystanderEnabled).toBeNull();
     expect(group?.proactiveReplyEnabled).toBeNull();
   });
+
+  it('从数据库群目录补齐缺失群名、机器人信息，并自动纳入安装了当前机器人的群', () => {
+    const groups = mergeKnownGroups(
+      [{ conversationId: 'cid-1', title: null, lastActiveAt: 100 }],
+      [],
+      [
+        {
+          conversationId: 'cid-1',
+          name: '一个亿的小目标',
+          bots: [
+            { name: 'AI小钉', openBotId: 'bot-1' },
+            { name: '点仔', openBotId: 'bot-2' },
+          ],
+          botCount: 2,
+        },
+        {
+          conversationId: 'cid-2',
+          name: '点仔服务群',
+          bots: [{ name: '点仔', openBotId: 'bot-2' }],
+          botCount: 1,
+        },
+        {
+          conversationId: 'cid-3',
+          name: '无关外部群',
+          bots: [{ name: 'AI小钉', openBotId: 'bot-1' }],
+          botCount: 1,
+        },
+      ],
+      '点仔',
+    );
+    expect(groups).toEqual([
+      {
+        conversationId: 'cid-1',
+        title: '一个亿的小目标',
+        conversationType: '2',
+        bystanderEnabled: null,
+        proactiveReplyEnabled: null,
+        lastActiveAt: 100,
+        bots: [
+          { name: 'AI小钉', openBotId: 'bot-1' },
+          { name: '点仔', openBotId: 'bot-2' },
+        ],
+        botCount: 2,
+      },
+      {
+        conversationId: 'cid-2',
+        title: '点仔服务群',
+        conversationType: '2',
+        bystanderEnabled: null,
+        proactiveReplyEnabled: null,
+        lastActiveAt: null,
+        bots: [{ name: '点仔', openBotId: 'bot-2' }],
+        botCount: 1,
+      },
+    ]);
+  });
 });

@@ -104,6 +104,30 @@ export interface GroupPolicy {
 
 export type DefaultGroupPolicy = Omit<GroupPolicy, 'conversationId'>;
 
+export interface GroupBotEntry {
+  name: string;
+  openBotId: string;
+}
+
+export interface GroupDirectoryEntry {
+  conversationId: string;
+  name: string;
+  bots: GroupBotEntry[];
+  botCount: number;
+  source: 'dws' | 'stream' | 'manual';
+  syncedAt: string;
+  updatedAt: string;
+}
+
+export interface GroupDirectorySyncResult {
+  total: number;
+  created: number;
+  updated: number;
+  unchanged: number;
+  withBots: number;
+  syncedAt: string;
+}
+
 export interface KnownGroup {
   conversationId: string;
   title: string | null;
@@ -111,6 +135,8 @@ export interface KnownGroup {
   bystanderEnabled: boolean | null;
   proactiveReplyEnabled: boolean | null;
   lastActiveAt: number | null;
+  bots?: GroupBotEntry[];
+  botCount?: number;
   /** 是否已订阅旁听长连接（决定能否收到非 @ 消息） */
   listening?: boolean;
   /** 该群是否有独立策略行；false 表示用全局默认 */

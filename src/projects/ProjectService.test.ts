@@ -915,6 +915,14 @@ describe('ProjectService 同步与读取', () => {
     expect(fetched.manualEntries.map((entry) => entry.title)).toEqual(
       expect.arrayContaining(['值班安排', '发布步骤']),
     );
+    const operationsOnly = await service.getHandbook({
+      projectRef: 'anthys',
+      section: 'operations',
+      member: singleChatEmployee,
+    });
+    expect(operationsOnly.manualEntries.map((entry) => entry.title)).toEqual([
+      '发布步骤',
+    ]);
 
     const seededEntry = (await service.listManualEntries('anthys')).find(
       (entry) => entry.title === '值班安排',

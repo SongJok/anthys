@@ -799,9 +799,12 @@ export class ProjectService {
     }
     const snapshot = await this.findActiveSnapshot(project);
     const record = await this.store.getLatestHandbook(project.id, 'published');
-    const manualEntries = (await this.store.listManualEntries(project.id)).filter(
+    const allManualEntries = (await this.store.listManualEntries(project.id)).filter(
       (entry) => this.isEntryVisible(entry.visibility, entry.sensitivity, project, input.member),
     );
+    const manualEntries = input.section
+      ? allManualEntries.filter((entry) => entry.section === input.section)
+      : allManualEntries;
     const sections = record?.content.sections ?? [];
     const filtered = input.section
       ? sections.filter((section) => section.key === input.section)

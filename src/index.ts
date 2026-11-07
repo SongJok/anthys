@@ -158,6 +158,7 @@ import { PersonSettingsToolProvider } from './tools/personal/PersonSettingsToolP
 import { PersonalMemoryToolProvider } from './tools/personal/PersonalMemoryToolProvider.js';
 import { PersonalMemoryService } from './personal/PersonalMemoryService.js';
 import { GroupReportService } from './groups/GroupReportService.js';
+import { DwsGroupDirectorySource } from './groups/DwsGroupDirectorySource.js';
 import { DrizzleGlossaryStore } from './db/glossarySchema.js';
 import { GlossaryService } from './glossary/GlossaryService.js';
 import { GlossaryToolProvider } from './tools/glossary/GlossaryToolProvider.js';
@@ -495,7 +496,14 @@ async function main(): Promise<void> {
 
     const traceStore = new DrizzleReActTraceStore(dbHandle.db);
     const feedbackStore = new DrizzleFeedbackStore(dbHandle.db);
-    const groupDirectory = new DrizzleGroupDirectory(dbHandle.db);
+    const dwsGroupDirectorySource = new DwsGroupDirectorySource({
+      binary: process.env.DWS_BINARY?.trim() || 'dws',
+      logger: harnessLogger,
+    });
+    const groupDirectory = new DrizzleGroupDirectory(dbHandle.db, {
+      botName: () => configCenter.getLLMConfig().persona.name,
+      dwsSource: dwsGroupDirectorySource,
+    });
     const dwsContactDirectory = new DwsContactDirectorySource({
       binary: process.env.DWS_BINARY?.trim() || 'dws',
       logger: harnessLogger,
@@ -2930,6 +2938,24 @@ async function main(): Promise<void> {
     }
 
     async function handleIncoming(message: InboundMessage): Promise<void> {
+      if (message.conversationType === '2') {
+        if (message.conversationTitle?.trim()) {
+          void groupDirectory
+            .upsertGroupTitle(
+              message.conversationId,
+              message.conversationTitle,
+              'stream',
+            )
+            .catch(() => {});
+        } else {
+          const dirGroup = await groupDirectory
+            .getGroup(message.conversationId)
+            .catch(() => null);
+          if (dirGroup?.name) {
+            message = { ...message, conversationTitle: dirGroup.name };
+          }
+        }
+      }
       if (message.mentionOnly) {
         const context = findMentionOnlyContext(message, transcriptBuffer);
         if (!context) {
@@ -3417,6 +3443,24 @@ async function main(): Promise<void> {
     const handleBystanderMessage = async (
       message: InboundMessage,
     ): Promise<void> => {
+      if (message.conversationType === '2') {
+        if (message.conversationTitle?.trim()) {
+          void groupDirectory
+            .upsertGroupTitle(
+              message.conversationId,
+              message.conversationTitle,
+              'stream',
+            )
+            .catch(() => {});
+        } else {
+          const dirGroup = await groupDirectory
+            .getGroup(message.conversationId)
+            .catch(() => null);
+          if (dirGroup?.name) {
+            message = { ...message, conversationTitle: dirGroup.name };
+          }
+        }
+      }
       // 旁听消息不进入 ReAct，但控制台的「最近活跃」要反映真实群消息
       try {
         await repository.ensureConversation({
@@ -3578,6 +3622,9 @@ async function main(): Promise<void> {
     const startBystanderListener = async (): Promise<void> => {
       if (!envEnabled(process.env.BYSTANDER_LISTEN_ENABLED, true)) return;
       if (bystanderListener) return;
+      const knownBotNames = await groupDirectory
+        .listDistinctBotNames()
+        .catch(() => [] as string[]);
       const listener = new DwsGroupMessageListener({
         binary: process.env.DWS_BINARY?.trim() || 'dws',
         onMessage: handleBystanderMessage,
@@ -3588,8 +3635,11 @@ async function main(): Promise<void> {
             message.senderNick,
           ),
         ignoreSenders: [
-          ...parseList(process.env.BYSTANDER_LISTEN_IGNORE_SENDERS),
-          configCenter.getLLMConfig().persona.name,
+          ...new Set([
+            ...parseList(process.env.BYSTANDER_LISTEN_IGNORE_SENDERS),
+            configCenter.getLLMConfig().persona.name,
+            ...knownBotNames,
+          ]),
         ],
         settleMs:
           envSeconds(process.env.BYSTANDER_LISTEN_SETTLE_SECONDS, 3) * 1_000,

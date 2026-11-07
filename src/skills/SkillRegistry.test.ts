@@ -114,6 +114,7 @@ describe('SkillRegistry', () => {
       'data-analysis',
       'data-insight',
       'dingtalk-office',
+      'enterprise-lens',
       'everyday-chat',
       'github-project-scan',
       'handbook-maintainer',

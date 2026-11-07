@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { scanSecrets } from '../eval/GoldenSet.js';
@@ -63,6 +63,20 @@ describe('.env 安全约束', () => {
         () => git(['check-ignore', '-q', '--', filePath]),
         `${filePath} 不应被忽略`,
       ).toThrow();
+    }
+  });
+
+  it('禁止在工作区保留 newcorp-bots.json / newcorp-groups.json 组织群敏感快照文件（统一由数据库存储）', () => {
+    for (const forbidden of [
+      'newcorp-bots.json',
+      'newcorp-groups.json',
+      'tmp/newcorp-bots.json',
+      'tmp/newcorp-groups.json',
+    ]) {
+      expect(
+        existsSync(resolve(REPO_ROOT, forbidden)),
+        `${forbidden} 不应保存在代码目录中，应入库 dingtalk_group_directory`,
+      ).toBe(false);
     }
   });
 });

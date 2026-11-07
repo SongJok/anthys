@@ -125,6 +125,9 @@ export default function TracesPage() {
           expandedRowRender: (record) => (
             <Space direction="vertical" style={{ width: '100%' }} size={12}>
               <Descriptions size="small" column={4}>
+                <Descriptions.Item label="员工">
+                  {traceEmployee(record)}
+                </Descriptions.Item>
                 <Descriptions.Item label="Token">{record.totalTokens}</Descriptions.Item>
                 <Descriptions.Item label="步骤">{record.stepCount}</Descriptions.Item>
                 <Descriptions.Item label="耗时">{record.durationMs} ms</Descriptions.Item>
@@ -154,6 +157,13 @@ export default function TracesPage() {
           },
           { title: '会话', dataIndex: 'conversationId', ellipsis: true },
           {
+            title: '员工',
+            key: 'employee',
+            width: 140,
+            ellipsis: true,
+            render: (_, row) => traceEmployee(row),
+          },
+          {
             title: '类型',
             dataIndex: 'conversationType',
             width: 90,
@@ -180,4 +190,9 @@ export default function TracesPage() {
       />
     </Card>
   );
+}
+
+/** 轨迹所属员工：优先昵称，缺失时回退 staffId，避免显示空白 */
+function traceEmployee(trace: ReActTrace): string {
+  return trace.senderNick?.trim() || trace.senderStaffId?.trim() || '未知员工';
 }

@@ -22,6 +22,7 @@ import { api } from '../api';
 import { formatShanghaiDateTime } from '../time';
 import type {
   DefaultGroupPolicy,
+  GroupDirectoryEntry,
   GroupModelProvider,
   GroupPolicy,
   KnownGroup,
@@ -65,6 +66,30 @@ export default function GroupsPage() {
   }>({ open: false });
   const [modelSaving, setModelSaving] = useState(false);
   const [modelForm] = Form.useForm<ModelRouteForm>();
+  const [directoryItems, setDirectoryItems] = useState<GroupDirectoryEntry[]>([]);
+  const [directoryLoading, setDirectoryLoading] = useState(false);
+  const [syncingDirectory, setSyncingDirectory] = useState(false);
+  const [directoryQuery, setDirectoryQuery] = useState('');
+  const [onlyWithBots, setOnlyWithBots] = useState(true);
+
+  const loadDirectory = useCallback(
+    async (query = directoryQuery, withBots = onlyWithBots) => {
+      setDirectoryLoading(true);
+      try {
+        const res = await api.groupDirectory({
+          ...(query.trim() ? { query: query.trim() } : {}),
+          ...(withBots ? { onlyWithBots: true } : {}),
+          limit: 500,
+        });
+        setDirectoryItems(res.items);
+      } catch (error) {
+        message.error(error instanceof Error ? error.message : String(error));
+      } finally {
+        setDirectoryLoading(false);
+      }
+    },
+    [directoryQuery, onlyWithBots],
+  );
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -81,7 +106,23 @@ export default function GroupsPage() {
 
   useEffect(() => {
     void load();
-  }, [load]);
+    void loadDirectory();
+  }, [load, loadDirectory]);
+
+  const handleSyncDirectory = async () => {
+    setSyncingDirectory(true);
+    try {
+      const { result } = await api.syncGroupDirectory(true);
+      message.success(
+        `群与机器人目录已同步至数据库：共 ${result.total} 个群（含机器人 ${result.withBots} 个，新增 ${result.created}，更新 ${result.updated}）`,
+      );
+      await Promise.all([load(), loadDirectory()]);
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setSyncingDirectory(false);
+    }
+  };
 
   const openEdit = (group: KnownGroup) => {
     const source: GroupPolicy | undefined = group.policy;
@@ -272,6 +313,20 @@ export default function GroupsPage() {
               render: (value: string | null) => value ?? '-',
             },
             {
+              title: '群内机器人',
+              key: 'bots',
+              render: (_, row) =>
+                row.bots && row.bots.length > 0 ? (
+                  <Space size={[4, 4]} wrap>
+                    {row.bots.map((bot) => (
+                      <Tag key={`${bot.openBotId}:${bot.name}`}>{bot.name}</Tag>
+                    ))}
+                  </Space>
+                ) : (
+                  '-'
+                ),
+            },
+            {
               title: '旁听',
               key: 'bystander',
               render: (_, row) => {
@@ -348,6 +403,101 @@ export default function GroupsPage() {
                     模型路由
                   </Button>
                 </Space>
+              ),
+            },
+          ]}
+        />
+      </Card>
+
+      <Card
+        title="组织群与机器人目录（数据库）"
+        className="console-card"
+        extra={
+          <Space>
+            <Input.Search
+              allowClear
+              placeholder="按群名、群 ID 或机器人名筛选"
+              value={directoryQuery}
+              onChange={(e) => setDirectoryQuery(e.target.value)}
+              onSearch={(val) => void loadDirectory(val, onlyWithBots)}
+              style={{ width: 240 }}
+            />
+            <Space size={4}>
+              <Switch
+                size="small"
+                checked={onlyWithBots}
+                onChange={(checked) => {
+                  setOnlyWithBots(checked);
+                  void loadDirectory(directoryQuery, checked);
+                }}
+              />
+              <Typography.Text type="secondary">仅含机器人</Typography.Text>
+            </Space>
+            <Button
+              loading={syncingDirectory}
+              onClick={() => void handleSyncDirectory()}
+            >
+              从 DWS 同步群与机器人
+            </Button>
+          </Space>
+        }
+      >
+        <Table<GroupDirectoryEntry>
+          rowKey="conversationId"
+          size="small"
+          loading={directoryLoading}
+          dataSource={directoryItems}
+          pagination={{ pageSize: 10, showSizeChanger: true }}
+          columns={[
+            { title: '群名称', dataIndex: 'name', width: 220 },
+            { title: '群 ID', dataIndex: 'conversationId', ellipsis: true },
+            {
+              title: '已装机器人',
+              key: 'bots',
+              render: (_, row) =>
+                row.bots.length > 0 ? (
+                  <Space size={[4, 4]} wrap>
+                    {row.bots.map((bot) => (
+                      <Tag key={`${bot.openBotId}:${bot.name}`}>{bot.name}</Tag>
+                    ))}
+                  </Space>
+                ) : (
+                  '-'
+                ),
+            },
+            {
+              title: '同步时间',
+              dataIndex: 'syncedAt',
+              width: 170,
+              render: (value: string) => formatShanghaiDateTime(value),
+            },
+            {
+              title: '操作',
+              key: 'actions',
+              width: 120,
+              render: (_, row) => (
+                <Button
+                  size="small"
+                  onClick={() => {
+                    const existing = groups.find(
+                      (g) => g.conversationId === row.conversationId,
+                    );
+                    openEdit(
+                      existing ?? {
+                        conversationId: row.conversationId,
+                        title: row.name || null,
+                        conversationType: '2',
+                        bystanderEnabled: null,
+                        proactiveReplyEnabled: null,
+                        lastActiveAt: null,
+                        bots: row.bots,
+                        botCount: row.botCount,
+                      },
+                    );
+                  }}
+                >
+                  配置策略
+                </Button>
               ),
             },
           ]}

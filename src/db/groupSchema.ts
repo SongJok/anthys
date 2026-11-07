@@ -23,6 +23,10 @@ import type {
   GroupWorkspaceStore,
 } from '../types/group-workspace.js';
 import type { ThinkingMode } from '../types/core.js';
+import type {
+  GroupBotEntry,
+  GroupDirectoryEntry,
+} from '../types/admin-and-console.js';
 
 export const groupWorkspaces = pgTable('group_workspaces', {
   conversationId: text('conversation_id').primaryKey(),
@@ -493,4 +497,46 @@ export class DrizzleGroupModelRouteStore implements GroupModelRouteStore {
       .returning({ conversationId: groupModelRoutes.conversationId });
     return rows.length > 0;
   }
+}
+
+/**
+ * 组织钉钉群与群内机器人目录表：
+ * 将原本散落在本地 JSON 的真实群名称、openConversationId 与群机器人持久化到数据库。
+ */
+export const dingtalkGroupDirectory = pgTable(
+  'dingtalk_group_directory',
+  {
+    conversationId: text('conversation_id').primaryKey(),
+    name: text('name').notNull().default(''),
+    bots: jsonb('bots').$type<GroupBotEntry[]>().notNull().default([]),
+    botCount: integer('bot_count').notNull().default(0),
+    source: varchar('source', { length: 16 }).notNull().default('dws'),
+    syncedAt: timestamp('synced_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index('dingtalk_group_directory_name_idx').on(table.name),
+    index('dingtalk_group_directory_bot_count_idx').on(table.botCount),
+  ],
+);
+
+export function toGroupDirectoryEntry(
+  row: typeof dingtalkGroupDirectory.$inferSelect,
+): GroupDirectoryEntry {
+  const bots = Array.isArray(row.bots) ? row.bots : [];
+  const source =
+    row.source === 'stream' || row.source === 'manual' ? row.source : 'dws';
+  return {
+    conversationId: row.conversationId,
+    name: row.name,
+    bots,
+    botCount: typeof row.botCount === 'number' ? row.botCount : bots.length,
+    source,
+    syncedAt: row.syncedAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+  };
 }

@@ -377,6 +377,49 @@ export function createConfigRoutes(deps: ConfigRouteDeps): Hono {
     });
   });
 
+  app.get('/groups/directory', async (c) => {
+    if (!deps.groups.listDirectory) {
+      return c.json({ ok: true, items: [], total: 0 });
+    }
+    const query = c.req.query('query')?.trim() ?? '';
+    const onlyWithBots =
+      c.req.query('onlyWithBots') === '1' ||
+      c.req.query('onlyWithBots') === 'true';
+    const botName = c.req.query('botName')?.trim() ?? '';
+    const limit = Math.min(
+      1_000,
+      Math.max(1, Number(c.req.query('limit') ?? 500) || 500),
+    );
+    const items = await deps.groups.listDirectory({
+      ...(query ? { query } : {}),
+      ...(onlyWithBots ? { onlyWithBots: true } : {}),
+      ...(botName ? { botName } : {}),
+      limit,
+    });
+    return c.json({ ok: true, items, total: items.length });
+  });
+
+  app.post('/groups/sync-directory', async (c) => {
+    if (!deps.groups.syncFromDws) {
+      throw new HTTPException(501, {
+        message: '当前未配置 DWS 群与机器人目录同步源',
+      });
+    }
+    const body = await readJsonBody(c).catch(
+      () => ({}) as Record<string, unknown>,
+    );
+    const includeBots = readBoolean(body, 'includeBots') ?? true;
+    const result = await deps.groups.syncFromDws({ includeBots });
+    await recordWebAudit(
+      deps.configCenter,
+      webActor(c),
+      'SYNC_GROUP_DIRECTORY',
+      { includeBots },
+      { ...result },
+    );
+    return c.json({ ok: true, result });
+  });
+
   app.get('/groups/:conversationId/policy', async (c) => {
     const conversationId = c.req.param('conversationId');
     return c.json({

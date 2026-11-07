@@ -589,6 +589,7 @@ export class AdminChatOpsToolProvider implements IToolProvider {
     return {
       id: trace.id,
       conversationId: trace.conversationId,
+      senderStaffId: trace.senderStaffId,
       senderNick: trace.senderNick,
       question: trace.question,
       durationMs: trace.durationMs,
