@@ -1,12 +1,13 @@
 import type { ChatMessage, ChatModel, StoredMessage } from '../types/core.js';
-import type {
-  AssembledMemoryContext,
-  EpisodicSummaryRecord,
-  SemanticMemoryKind,
-  SemanticMemoryRecord,
-  SemanticMemoryScope,
-  SemanticRecallQuery,
-  SemanticRecallResult,
+import {
+  groupMemberSubjectKey,
+  type AssembledMemoryContext,
+  type EpisodicSummaryRecord,
+  type SemanticMemoryKind,
+  type SemanticMemoryRecord,
+  type SemanticMemoryScope,
+  type SemanticRecallQuery,
+  type SemanticRecallResult,
 } from '../types/bystander-and-memory.js';
 import type {
   EpisodicSummaryStore,
@@ -167,8 +168,8 @@ export interface SemanticFactExtractor {
 }
 
 const EXTRACTION_SYSTEM_PROMPT = [
-  '你是企业记忆抽取器，只输出 JSON：{"facts":[{"scope":"user|group|global","kind":"profile|terminology","content":"...","keywords":["..."]}]}',
-  '只提取对话中明确陈述、长期有效的事实：员工职责/负责系统、团队常用术语、项目代号/缩写。',
+  '你是企业记忆抽取器，只输出 JSON：{"facts":[{"scope":"user|group|group_member|global","kind":"profile|terminology","content":"...","keywords":["..."]}]}',
+  '只提取对话中明确陈述、长期有效的事实：员工跨群通用职责/负责系统（user）、群内成员仅在本群的角色/分工/偏好（群聊用 group_member）、本群团队常用术语/项目代号/约定（group）。',
   '不要提取临时故障状态、一次性问题、猜测内容。没有可提取内容时返回 {"facts":[]}。',
 ].join('\n');
 
@@ -224,8 +225,10 @@ export class LlmSemanticFactExtractor implements SemanticFactExtractor {
     return facts.flatMap((fact): ExtractedSemanticFact[] => {
       if (fact === null || typeof fact !== 'object') return [];
       const record = fact as Record<string, unknown>;
-      const scope =
-        record.scope === 'group' || record.scope === 'global'
+      const scope: SemanticMemoryScope =
+        record.scope === 'group' ||
+        record.scope === 'group_member' ||
+        record.scope === 'global'
           ? record.scope
           : 'user';
       const kind = record.kind === 'terminology' ? 'terminology' : 'profile';
@@ -558,35 +561,64 @@ export class HierarchicalMemoryManager {
             },
             queryVector,
           );
-    const [userRecallResult, groupRecall, episodicSummary] = await Promise.all([
-      userRecall,
-      inGroup && input.groupConversationId
-        ? this.recall(
-            {
-              query: queryText,
-              scope: 'group',
-              subjectKey: input.groupConversationId,
-            },
-            queryVector,
-          )
-        : this.recall({ query: queryText, scope: 'global' }, queryVector),
-      input.conversationId
-        ? this.latestEpisodicSummary(input.conversationId)
-        : Promise.resolve(''),
-    ]);
+    const [userRecallResult, groupMemberRecall, groupRecall, episodicSummary] =
+      await Promise.all([
+        userRecall,
+        inGroup && input.groupConversationId
+          ? this.recall(
+              {
+                query: queryText,
+                scope: 'group_member',
+                subjectKey: groupMemberSubjectKey(
+                  input.groupConversationId,
+                  input.userId,
+                ),
+                excludeSensitive: true,
+              },
+              queryVector,
+            )
+          : Promise.resolve({ profileLines: [], glossaryLines: [] }),
+        inGroup && input.groupConversationId
+          ? this.recall(
+              {
+                query: queryText,
+                scope: 'group',
+                subjectKey: input.groupConversationId,
+              },
+              queryVector,
+            )
+          : this.recall({ query: queryText, scope: 'global' }, queryVector),
+        input.conversationId
+          ? this.latestEpisodicSummary(input.conversationId)
+          : Promise.resolve(''),
+      ]);
 
     const profileLines = [`发言人：${input.speakerNick}`];
     for (const line of userRecallResult.profileLines) {
       if (!profileLines.includes(line)) profileLines.push(line);
     }
+    const groupMemberProfileLines = groupMemberRecall.profileLines.filter(
+      (line) =>
+        !profileLines.includes(line) &&
+        !groupRecall.profileLines.includes(line),
+    );
+    if (groupMemberProfileLines.length > 0) {
+      profileLines.push(
+        `本群成员记忆（${input.speakerNick}）：`,
+        ...groupMemberProfileLines,
+      );
+    }
     if (
-      userRecallResult.glossaryLines.length + groupRecall.glossaryLines.length >
+      userRecallResult.glossaryLines.length +
+        groupMemberRecall.glossaryLines.length +
+        groupRecall.glossaryLines.length >
       0
     ) {
       profileLines.push(
         '团队术语：',
         ...[
           ...userRecallResult.glossaryLines,
+          ...groupMemberRecall.glossaryLines,
           ...groupRecall.glossaryLines,
         ].filter(
           (line, index, all) => all.indexOf(line) === index,
@@ -626,24 +658,28 @@ export class HierarchicalMemoryManager {
 
     return this.remember(
       facts.map((fact) => {
-        // 单聊没有群上下文，抽取器误标为 group 的事实归回该员工，
+        // 单聊没有群上下文，抽取器误标为 group / group_member 的事实归回该员工，
         // 否则会落在永远无法召回的伪群作用域里
-        const scope =
-          fact.scope === 'group' && input.conversationType === '1'
+        const scope: SemanticMemoryScope =
+          (fact.scope === 'group' || fact.scope === 'group_member') &&
+          input.conversationType === '1'
             ? 'user'
             : fact.scope;
-        return {
-          scope,
-          subjectKey:
-            scope === 'user'
-              ? input.userId
+        const subjectKey =
+          scope === 'user'
+            ? input.userId
+            : scope === 'group_member'
+              ? groupMemberSubjectKey(input.conversationId, input.userId)
               : scope === 'group'
                 ? input.conversationId
-                : 'global',
-          kind: fact.kind,
+                : 'global';
+        return {
+          scope,
+          subjectKey,
+          kind: scope === 'group_member' ? 'profile' : fact.kind,
           content: fact.content,
           keywords: fact.keywords,
-          // 私聊沉淀的个人事实默认不跨群共享，需管理员显式放开
+          // 私聊沉淀的个人事实默认不跨群共享，需管理员显式放开；群内成员记忆仅在本群对该成员生效
           shareableInGroup: scope === 'user' ? false : true,
           sensitivity: scope === 'user' ? 'private' : 'normal',
           confidence: 0.8,

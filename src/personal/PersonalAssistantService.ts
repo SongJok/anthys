@@ -4,6 +4,7 @@ import type {
   ScheduledTaskKind,
   ScheduledTaskStore,
 } from '../types/admin-and-console.js';
+import { nextCronRun } from '../scheduler/CronSchedule.js';
 import { computeNextRun } from '../scheduler/ScheduledTaskScheduler.js';
 import {
   PersonalReportBuilder,
@@ -11,6 +12,7 @@ import {
 } from './PersonalReportBuilder.js';
 
 export type ReportFrequency = 'daily' | 'weekly' | 'monthly';
+export type PersonalTaskMode = 'reminder' | 'prompt';
 
 export interface PersonalAssistantServiceOptions {
   store: ScheduledTaskStore;
@@ -25,6 +27,7 @@ export interface PersonalAssistantServiceOptions {
 export interface ParsedReminder {
   atMs: number;
   text: string;
+  cron?: string;
 }
 
 export interface ReportSpec {
@@ -39,6 +42,7 @@ const SH_OFFSET_MS = 8 * 60 * 60_000;
 const DAY_MS = 24 * 60 * 60_000;
 const MIN_LEAD_MS = 30_000;
 const MAX_LEAD_MS = 366 * DAY_MS;
+const PERSONAL_PROMPT_PREFIX = '定时任务：';
 const REPORT_KINDS: readonly ScheduledTaskKind[] = [
   'daily_report',
   'weekly_report',
@@ -101,29 +105,57 @@ function invalidAt(atMs: number, nowMs: number): string | null {
   return null;
 }
 
-function splitClock(text: string): { hour: number; minute: number; rest: string } | null {
-  const colon = text.match(/^(\d{1,2})\s*[:：]\s*(\d{1,2})\s*/u);
+function adjustHourByMeridiem(hour: number, meridiem?: string): number {
+  if (!meridiem) return hour;
+  if (
+    meridiem === '下午' ||
+    meridiem === '傍晚' ||
+    meridiem === '晚上' ||
+    meridiem === '晚间'
+  ) {
+    return hour >= 1 && hour <= 11 ? hour + 12 : hour;
+  }
+  if (meridiem === '中午') {
+    return hour >= 1 && hour <= 2 ? hour + 12 : hour;
+  }
+  if (meridiem === '凌晨' && hour === 12) {
+    return 0;
+  }
+  return hour;
+}
+
+function splitClock(
+  text: string,
+  defaultMeridiem?: string,
+): { hour: number; minute: number; rest: string } | null {
+  const meridiemMatch = text.match(
+    /^(凌晨|早上|早晨|上午|中午|下午|傍晚|晚上|晚间)\s*/u,
+  );
+  const meridiem = meridiemMatch?.[1] ?? defaultMeridiem;
+  const remainder = meridiemMatch ? text.slice(meridiemMatch[0].length) : text;
+
+  const colon = remainder.match(/^(\d{1,2})\s*[:：]\s*(\d{1,2})\s*分?\s*/u);
   if (colon) {
     return {
-      hour: Number(colon[1]),
+      hour: adjustHourByMeridiem(Number(colon[1]), meridiem),
       minute: Number(colon[2]),
-      rest: text.slice(colon[0].length).trim(),
+      rest: remainder.slice(colon[0].length).trim(),
     };
   }
-  const half = text.match(/^(\d{1,2})\s*[点时]\s*半\s*/u);
+  const half = remainder.match(/^(\d{1,2})\s*[点时]\s*半\s*/u);
   if (half) {
     return {
-      hour: Number(half[1]),
+      hour: adjustHourByMeridiem(Number(half[1]), meridiem),
       minute: 30,
-      rest: text.slice(half[0].length).trim(),
+      rest: remainder.slice(half[0].length).trim(),
     };
   }
-  const clock = text.match(/^(\d{1,2})\s*[点时]\s*(\d{1,2})?\s*分?\s*/u);
+  const clock = remainder.match(/^(\d{1,2})\s*[点时]\s*(\d{1,2})?\s*分?\s*/u);
   if (clock) {
     return {
-      hour: Number(clock[1]),
+      hour: adjustHourByMeridiem(Number(clock[1]), meridiem),
       minute: clock[2] ? Number(clock[2]) : 0,
-      rest: text.slice(clock[0].length).trim(),
+      rest: remainder.slice(clock[0].length).trim(),
     };
   }
   return null;
@@ -136,6 +168,7 @@ function validClock(hour: number, minute: number): boolean {
 /**
  * 解析 `/remind` 的时间前缀，支持：
  * 25分钟后 / 2小时后 / 3天后、明天9点、今天18:30、
+ * 每天16:05 / 每天下午16:05分 / 每周一 09:00 / 工作日 09:30 / 每月1日 09:00、
  * 2026-11-01 09:00、11月1日 9点、9:00（已过则顺延到明天）。
  */
 export function parseReminderArgs(
@@ -144,6 +177,17 @@ export function parseReminderArgs(
 ): ParsedReminder | string {
   const text = raw.trim();
   if (text === '') return '请补充提醒内容，例如：/remind 25分钟后 开会';
+
+  const halfHour = text.match(
+    /^半个?小时\s*(?:后|之后|以后)\s*([\s\S]*)$/u,
+  );
+  if (halfHour) {
+    const atMs = nowMs + 30 * 60_000;
+    const message = halfHour[1]!.trim();
+    if (message === '') return '请补充提醒内容，例如：/remind 25分钟后 开会';
+    const error = invalidAt(atMs, nowMs);
+    return error ?? { atMs, text: message };
+  }
 
   const relative = text.match(
     /^(\d+)\s*(分钟|分|个小时|小时|天|周)\s*(?:后|之后|以后)\s*([\s\S]*)$/u,
@@ -165,14 +209,81 @@ export function parseReminderArgs(
     return error ?? { atMs, text: message };
   }
 
+  const dailyRecurring = text.match(/^(?:每天|每日)\s*([\s\S]*)$/u);
+  if (dailyRecurring) {
+    const clock = splitClock(dailyRecurring[1]!);
+    if (!clock || !validClock(clock.hour, clock.minute)) {
+      return '无法识别时间，请写成“每天 09:00 晨会”或“每天下午16:05 新闻简报”这样的格式。';
+    }
+    if (clock.rest === '') return '请补充提醒内容，例如：/remind 每天 09:00 晨会';
+    const cron = `${clock.minute} ${clock.hour} * * *`;
+    return { atMs: nextCronRun(cron, nowMs), text: clock.rest, cron };
+  }
+
+  const workdayRecurring = text.match(
+    /^(?:(?:每个?)?工作日|(?:每周)?周一(?:至|到|-)周五)\s*([\s\S]*)$/u,
+  );
+  if (workdayRecurring) {
+    const clock = splitClock(workdayRecurring[1]!);
+    if (!clock || !validClock(clock.hour, clock.minute)) {
+      return '无法识别时间，请写成“工作日 09:00 站会”这样的格式。';
+    }
+    if (clock.rest === '') return '请补充提醒内容，例如：/remind 工作日 09:00 站会';
+    const cron = `${clock.minute} ${clock.hour} * * 1-5`;
+    return { atMs: nextCronRun(cron, nowMs), text: clock.rest, cron };
+  }
+
+  const weeklyRecurring = text.match(
+    /^每(?:周|星期|礼拜)([1-7一二三四五六日天])\s*([\s\S]*)$/u,
+  );
+  if (weeklyRecurring) {
+    const weekday = WEEKDAY_MAP[weeklyRecurring[1]!];
+    const clock = splitClock(weeklyRecurring[2]!);
+    if (weekday === undefined || !clock || !validClock(clock.hour, clock.minute)) {
+      return '无法识别时间，请写成“每周一 09:00 周会”这样的格式。';
+    }
+    if (clock.rest === '') return '请补充提醒内容，例如：/remind 每周一 09:00 周会';
+    const cron = `${clock.minute} ${clock.hour} * * ${weekday}`;
+    return { atMs: nextCronRun(cron, nowMs), text: clock.rest, cron };
+  }
+
+  const monthlyRecurring = text.match(
+    /^每月\s*(\d{1,2})\s*[日号]?\s*([\s\S]*)$/u,
+  );
+  if (monthlyRecurring) {
+    const day = Number(monthlyRecurring[1]);
+    if (day < 1 || day > 28) {
+      return '每月定时任务的日期请在 1–28 之间，避免部分月份没有该日期。';
+    }
+    const clock = splitClock(monthlyRecurring[2]!);
+    if (!clock || !validClock(clock.hour, clock.minute)) {
+      return '无法识别时间，请写成“每月1日 09:00 复盘”这样的格式。';
+    }
+    if (clock.rest === '') return '请补充提醒内容，例如：/remind 每月1日 09:00 复盘';
+    const cron = `${clock.minute} ${clock.hour} ${day} * *`;
+    return { atMs: nextCronRun(cron, nowMs), text: clock.rest, cron };
+  }
+
   const nowParts = shanghaiParts(nowMs);
-  const dayPrefix = text.match(/^(今天|明天|后天)\s*([\s\S]*)$/u);
+  const dayPrefix = text.match(/^(今天|明天|后天|今晚|明早|明晨|明晚)\s*([\s\S]*)$/u);
   if (dayPrefix) {
-    const clock = splitClock(dayPrefix[2]!);
+    const token = dayPrefix[1]!;
+    const defaultMeridiem =
+      token === '今晚' || token === '明晚'
+        ? '晚上'
+        : token === '明早' || token === '明晨'
+          ? '早上'
+          : undefined;
+    const clock = splitClock(dayPrefix[2]!, defaultMeridiem);
     if (!clock || !validClock(clock.hour, clock.minute)) {
       return '无法识别时间，请写成“明天 9:00 开会”这样的格式。';
     }
-    const offset = dayPrefix[1] === '今天' ? 0 : dayPrefix[1] === '明天' ? 1 : 2;
+    const offset =
+      token === '今天' || token === '今晚'
+        ? 0
+        : token === '明天' || token === '明早' || token === '明晨' || token === '明晚'
+          ? 1
+          : 2;
     const base = new Date(
       Date.UTC(nowParts.year, nowParts.month - 1, nowParts.day) + offset * DAY_MS,
     );
@@ -343,11 +454,41 @@ function describeCron(cron: string): string {
   const time = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
   if (dayOfMonth !== '*') return `每月 ${Number(dayOfMonth)} 日 ${time}`;
   if (weekday !== '*') {
+    if (weekday === '1-5') return `每个工作日 ${time}`;
     const labels = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
     const index = Number(weekday) % 7;
     return `每${labels[index]} ${time}`;
   }
   return `每天 ${time}`;
+}
+
+function inferReminderMode(text: string): PersonalTaskMode {
+  if (
+    /(?:检索|搜索|查询|抓取|汇总|整理|生成|盘点)[\s\S]*(?:新闻|资讯|动态|简报|日报|周报|报告|摘要|总结|热点|热搜|天气|行情)|(?:给我|帮我|向我)?(?:发|发送|推送|提供|整理|播报)(?:一份|最新|今日|每日|全球|近期)?[\s\S]*(?:新闻|资讯|动态|简报|热点|热搜|天气|行情)/u.test(
+      text,
+    )
+  ) {
+    return 'prompt';
+  }
+  return 'reminder';
+}
+
+function normalizePromptInstruction(text: string): string {
+  const manualReplyWrapper = text.match(
+    /^.*?回复[「“"'][^」”"']+[」”"'][，,、\s]*(?:点仔|机器人|我)?(?:会|将)?([\s\S]+)$/u,
+  );
+  if (manualReplyWrapper?.[1]?.trim()) {
+    return `请直接执行以下定时任务并把结果发给用户（无需让用户再次回复确认）：${manualReplyWrapper[1].trim()}`;
+  }
+  return text;
+}
+
+function isPersonalTask(task: ScheduledTask): boolean {
+  if (task.kind === 'group_report') return false;
+  if (task.kind === 'prompt') {
+    return task.title.startsWith(PERSONAL_PROMPT_PREFIX);
+  }
+  return true;
 }
 
 /** 个人提醒与定时报告：命令、模型工具和定时投递共用的唯一入口。 */
@@ -387,8 +528,11 @@ export class PersonalAssistantService {
         conversationId: message.conversationId,
         raw,
       });
+      const scheduleLabel = task.cron
+        ? `${describeCron(task.cron)}（下次 ${formatShanghai(Date.parse(task.nextRunAt!))}）`
+        : formatShanghai(Date.parse(task.nextRunAt!));
       return [
-        `已设置提醒：${formatShanghai(Date.parse(task.nextRunAt!))}`,
+        `已设置提醒：${scheduleLabel}`,
         `内容：${task.prompt}`,
         '到点会用机器人单聊发给你。发送 /remind list 查看全部，/remind cancel <ID> 取消。',
       ].join('\n');
@@ -451,20 +595,28 @@ export class PersonalAssistantService {
     staffId: string;
     conversationId: string;
     raw: string;
+    mode?: PersonalTaskMode;
   }): Promise<ScheduledTask> {
     const parsed = parseReminderArgs(input.raw, this.now());
     if (typeof parsed === 'string') throw new Error(parsed);
     await this.assertQuota(input.staffId, 'reminder');
-    const text = parsed.text.slice(0, 200);
+    const rawText = parsed.text.slice(0, 200);
+    const mode = input.mode ?? inferReminderMode(rawText);
+    const kind: ScheduledTaskKind = mode === 'prompt' ? 'prompt' : 'reminder';
+    const text =
+      kind === 'prompt'
+        ? normalizePromptInstruction(rawText).slice(0, 500)
+        : rawText;
+    const titlePrefix = kind === 'prompt' ? PERSONAL_PROMPT_PREFIX : '提醒：';
     return this.store.create(
       {
         conversationId: input.conversationId,
         conversationType: '1',
-        kind: 'reminder',
-        title: `提醒：${text.slice(0, 40)}`,
+        kind,
+        title: `${titlePrefix}${rawText.slice(0, 40)}`,
         prompt: text,
         intervalSeconds: null,
-        cron: null,
+        cron: parsed.cron ?? null,
         enabled: true,
         createdBy: input.staffId,
       },
@@ -510,8 +662,7 @@ export class PersonalAssistantService {
       .filter(
         (task) =>
           task.createdBy === staffId &&
-          task.kind !== 'prompt' &&
-          task.kind !== 'group_report' &&
+          isPersonalTask(task) &&
           task.enabled,
       )
       .sort((left, right) =>
@@ -567,7 +718,7 @@ export class PersonalAssistantService {
     return this.listOwn(staffId).then((all) => {
       const tasks = all.filter((task) =>
         filter === 'reminder'
-          ? task.kind === 'reminder'
+          ? task.kind === 'reminder' || task.kind === 'prompt'
           : REPORT_KINDS.includes(task.kind),
       );
       if (tasks.length === 0) {
@@ -577,15 +728,16 @@ export class PersonalAssistantService {
       return [
         header,
         ...tasks.map((task) => {
-          const schedule =
-            task.kind === 'reminder'
-              ? task.nextRunAt
-                ? formatShanghai(Date.parse(task.nextRunAt))
-                : '未排期'
-              : task.cron
-                ? describeCron(task.cron)
-                : '未排期';
-          return `- ${KIND_LABELS[task.kind]} · ${schedule} · ID ${task.id.slice(0, 8)}`;
+          const schedule = task.cron
+            ? describeCron(task.cron)
+            : task.nextRunAt
+              ? formatShanghai(Date.parse(task.nextRunAt))
+              : '未排期';
+          const label =
+            task.kind === 'reminder' && task.cron
+              ? '周期提醒'
+              : KIND_LABELS[task.kind];
+          return `- ${label} · ${schedule} · ID ${task.id.slice(0, 8)}`;
         }),
         '发送 `/report cancel <ID>` 或 `/remind cancel <ID>` 取消。',
       ].join('\n');

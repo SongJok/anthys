@@ -60,16 +60,35 @@ export interface EpisodicSummaryRecord {
   createdAt: number;
 }
 
-export type SemanticMemoryScope = 'global' | 'group' | 'user';
+export type SemanticMemoryScope = 'global' | 'group' | 'group_member' | 'user';
 export type SemanticMemoryKind = 'terminology' | 'profile';
 export type SemanticMemoryStatus = 'active' | 'retired';
 export type SemanticMemorySensitivity = 'normal' | 'private' | 'sensitive';
+
+/** 群内成员专属记忆的主体键：`<groupConversationId>::<personKey>`，严格按群与成员双重隔离 */
+export function groupMemberSubjectKey(
+  conversationId: string,
+  personKey: string,
+): string {
+  return `${conversationId.trim()}::${personKey.trim()}`;
+}
+
+export function parseGroupMemberSubjectKey(
+  subjectKey: string,
+): { conversationId: string; personKey: string } | null {
+  const separator = subjectKey.indexOf('::');
+  if (separator <= 0 || separator >= subjectKey.length - 2) return null;
+  const conversationId = subjectKey.slice(0, separator).trim();
+  const personKey = subjectKey.slice(separator + 2).trim();
+  if (!conversationId || !personKey) return null;
+  return { conversationId, personKey };
+}
 
 /** 语义记忆：企业黑话/项目代号映射或员工职责画像 */
 export interface SemanticMemoryRecord {
   id: string;
   scope: SemanticMemoryScope;
-  /** group 会话 ID、canonical personKey 或 'global' */
+  /** group 会话 ID、`groupConversationId::personKey`、canonical personKey 或 'global' */
   subjectKey: string;
   kind: SemanticMemoryKind;
   content: string;

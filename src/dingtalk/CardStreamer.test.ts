@@ -5,6 +5,7 @@ import {
   type CardCreateInput,
   type CardUpdate,
 } from './CardStreamer.js';
+import { isStaffUserId } from './userIds.js';
 import type { InboundMessage } from '../types/core.js';
 
 function inbound(overrides: Partial<InboundMessage> = {}): InboundMessage {
@@ -113,6 +114,37 @@ describe('CardStreamer', () => {
     await streamer.start();
     expect(fake.created[0]?.spaceId).toBe('dtv1.card//IM_GROUP.cid-9');
     expect(fake.created[0]?.deliver.conversationType).toBe('2');
+  });
+
+  it('群定时任务卡片仅投放到本群 IM_GROUP 且不绑定个人 userId，isStaffUserId 排除系统占位符', async () => {
+    expect(isStaffUserId('013526256623740528')).toBe(true);
+    expect(isStaffUserId('scheduler')).toBe(false);
+    expect(isStaffUserId('admin-api')).toBe(false);
+    expect(isStaffUserId('cidwqXH/LtYy4mKtwMvRE8YAV+nCmLQXVnOMZrzhdKWKIE=')).toBe(false);
+    expect(isStaffUserId('$:LWCP_v1:$abc')).toBe(false);
+    expect(isStaffUserId('')).toBe(false);
+
+    const fake = fakeApi();
+    const groupScheduledStreamer = new CardStreamer({
+      api: fake.api,
+      message: inbound({
+        conversationType: '2',
+        conversationId: 'cid-group-9',
+        senderStaffId: 'scheduler',
+        cardDeliverUserId: '',
+        isAtBot: false,
+      }),
+      cardTemplateId: 'tpl-1',
+      robotCode: 'robot-1',
+    });
+    await groupScheduledStreamer.start();
+    expect(fake.created[0]?.spaceId).toBe('dtv1.card//IM_GROUP.cid-group-9');
+    expect(fake.created[0]?.deliver).toEqual({
+      conversationType: '2',
+      robotCode: 'robot-1',
+      userId: '',
+      conversationId: 'cid-group-9',
+    });
   });
 
   it('DWS 群消息只有 openDingTalkId 时按群维度投递卡片', async () => {

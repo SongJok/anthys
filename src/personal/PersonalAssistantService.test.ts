@@ -167,6 +167,43 @@ describe('parseReminderArgs', () => {
     });
   });
 
+  it('解析每天/每周/工作日/每月周期时间及上下午前缀', () => {
+    expect(
+      parseReminderArgs(
+        '每天下午16:05分 给我发送一份全球最新的AI领域的新闻',
+        NOW,
+      ),
+    ).toEqual({
+      atMs: shanghai('2026-10-31T16:05:00+08:00'),
+      text: '给我发送一份全球最新的AI领域的新闻',
+      cron: '5 16 * * *',
+    });
+    expect(parseReminderArgs('每天16:05 每日AI新闻', NOW)).toEqual({
+      atMs: shanghai('2026-10-31T16:05:00+08:00'),
+      text: '每日AI新闻',
+      cron: '5 16 * * *',
+    });
+    expect(parseReminderArgs('下午4:05 开会', NOW)).toEqual({
+      atMs: shanghai('2026-10-31T16:05:00+08:00'),
+      text: '开会',
+    });
+    expect(parseReminderArgs('每周一 09:00 周会', NOW)).toEqual({
+      atMs: shanghai('2026-11-02T09:00:00+08:00'),
+      text: '周会',
+      cron: '0 9 * * 1',
+    });
+    expect(parseReminderArgs('工作日 09:30 站会', NOW)).toEqual({
+      atMs: shanghai('2026-11-02T09:30:00+08:00'),
+      text: '站会',
+      cron: '30 9 * * 1-5',
+    });
+    expect(parseReminderArgs('每月1日 09:00 复盘', NOW)).toEqual({
+      atMs: shanghai('2026-11-01T09:00:00+08:00'),
+      text: '复盘',
+      cron: '0 9 1 * *',
+    });
+  });
+
   it('拒绝缺少内容或时间过近', () => {
     expect(parseReminderArgs('', NOW)).toContain('请补充');
     expect(parseReminderArgs('25分钟后', NOW)).toContain('请补充');
@@ -312,6 +349,19 @@ describe('PersonalAssistantService', () => {
     });
     expect((await assistant.listOwn('staff-1')).map((item) => item.id)).toEqual([
       task.id,
+    ]);
+
+    const aiTask = await assistant.createReminderFromText({
+      staffId: 'staff-1',
+      conversationId: 'cid-dm',
+      raw: '每天下午16:05分 给我发送一份全球最新的AI领域的新闻',
+    });
+    expect(aiTask.kind).toBe('prompt');
+    expect(aiTask.cron).toBe('5 16 * * *');
+    expect(aiTask.title).toContain('定时任务：');
+    expect((await assistant.listOwn('staff-1')).map((item) => item.id)).toEqual([
+      task.id,
+      aiTask.id,
     ]);
   });
 

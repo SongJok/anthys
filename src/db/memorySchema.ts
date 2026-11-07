@@ -339,17 +339,17 @@ export class DrizzleMemoryStore
 
     if (query.scope) {
       if (query.subjectKey) {
+        const scopedMatch = and(
+          eq(semanticMemories.scope, query.scope),
+          eq(semanticMemories.subjectKey, query.subjectKey),
+          ...(query.shareableOnly
+            ? [eq(semanticMemories.shareableInGroup, true)]
+            : []),
+        );
         conditions.push(
-          or(
-            and(
-              eq(semanticMemories.scope, query.scope),
-              eq(semanticMemories.subjectKey, query.subjectKey),
-              ...(query.shareableOnly
-                ? [eq(semanticMemories.shareableInGroup, true)]
-                : []),
-            ),
-            eq(semanticMemories.scope, 'global'),
-          ),
+          query.scope === 'group_member'
+            ? scopedMatch
+            : or(scopedMatch, eq(semanticMemories.scope, 'global')),
         );
       } else {
         conditions.push(eq(semanticMemories.scope, query.scope));
@@ -513,7 +513,7 @@ export class DrizzleMemoryStore
     return rows.length > 0;
   }
 
-  /** 身份绑定后把旧 personKey 的用户级记忆并入新身份，并清理重复条目 */
+  /** 身份绑定后把旧 personKey 的用户级记忆与群成员专属记忆并入新身份，并清理重复条目 */
   public async reassignSubjectKey(
     from: string,
     to: string,
@@ -539,7 +539,28 @@ export class DrizzleMemoryStore
         ),
       )
       .returning({ id: semanticMemories.id });
-    return rows.length;
+
+    const fromSuffix = `::${from}`;
+    const toSuffix = `::${to}`;
+    await this.db.execute(sql`
+      DELETE FROM semantic_memories AS source
+      USING semantic_memories AS target
+      WHERE source.scope = 'group_member'
+        AND target.scope = 'group_member'
+        AND right(source.subject_key, length(${fromSuffix})) = ${fromSuffix}
+        AND target.subject_key = left(source.subject_key, length(source.subject_key) - length(${fromSuffix})) || ${toSuffix}
+        AND source.kind = target.kind
+        AND source.content = target.content
+    `);
+    const memberRows = await this.db.execute<{ id: string }>(sql`
+      UPDATE semantic_memories
+      SET subject_key = left(subject_key, length(subject_key) - length(${fromSuffix})) || ${toSuffix},
+          updated_at = NOW()
+      WHERE scope = 'group_member'
+        AND right(subject_key, length(${fromSuffix})) = ${fromSuffix}
+      RETURNING id
+    `);
+    return rows.length + memberRows.rows.length;
   }
 
   public async getPolicy(

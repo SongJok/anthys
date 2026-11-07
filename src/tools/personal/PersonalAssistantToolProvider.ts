@@ -6,6 +6,7 @@ import type {
 import {
   parseReportSpec,
   type PersonalAssistantService,
+  type PersonalTaskMode,
   type ReportFrequency,
 } from '../../personal/PersonalAssistantService.js';
 import type { PersonalReportKind } from '../../personal/PersonalReportBuilder.js';
@@ -57,8 +58,9 @@ export class PersonalAssistantToolProvider implements IToolProvider {
     return {
       name: 'personal_reminder',
       description:
-        '查看当前用户的钉钉个人提醒（仅单聊）。action=list 列出提醒；创建和取消请使用 personal_reminder_manage。',
+        '查看当前用户的钉钉个人提醒与个人定时任务（仅单聊）。action=list 列出待触发的提醒和定时任务；创建和取消请使用 personal_reminder_manage。',
       risk: 'read',
+      source: 'personal-assistant',
       parametersJsonSchema: {
         type: 'object',
         properties: {
@@ -79,11 +81,13 @@ export class PersonalAssistantToolProvider implements IToolProvider {
         return JSON.stringify({
           ok: true,
           reminders: tasks
-            .filter((task) => task.kind === 'reminder')
+            .filter((task) => task.kind === 'reminder' || task.kind === 'prompt')
             .map((task) => ({
               id: task.id,
               title: task.title,
               at: task.nextRunAt,
+              ...(task.cron ? { cron: task.cron } : {}),
+              ...(task.kind === 'prompt' ? { mode: 'prompt' } : {}),
             })),
         });
       },
@@ -94,21 +98,30 @@ export class PersonalAssistantToolProvider implements IToolProvider {
     return {
       name: 'personal_reminder_manage',
       description:
-        '创建或取消当前用户的钉钉个人提醒（仅单聊）。action=create 时用 when 描述时间（如“25分钟后”“明天9点”“2026-11-01 09:00”），text 写提醒内容；action=cancel 按 id 取消。提醒到点由机器人单聊发送。',
+        '创建或取消当前用户的钉钉个人提醒与个人定时 AI 任务（仅单聊）。action=create 时用 when 描述时间，支持一次性时间（如“25分钟后”“明天9点”“今天下午16:05”“2026-11-01 09:00”）和周期时间（如“每天16:05”“每天下午16:05分”“每周一 09:00”“工作日 09:30”“每月1日 09:00”）；mode="reminder" 到点发送固定提醒文本，mode="prompt" 到点由机器人自动执行 AI 指令（如联网搜索全球最新 AI 新闻并整理成简报发给用户，无需用户手动回复触发）；action=cancel 按 id 取消。',
       risk: 'write',
+      source: 'personal-assistant',
       parametersJsonSchema: {
         type: 'object',
         properties: {
           action: { type: 'string', enum: ['create', 'cancel'] },
           when: {
             type: 'string',
-            description: '提醒时间描述，create 时必填，如“25分钟后”“明天9点”',
+            description:
+              '时间描述，create 时必填，支持一次性（如“25分钟后”“明天9点”“今天16:05”）或周期性（如“每天16:05”“每天下午16:05分”“每周一 09:00”“工作日 09:30”“每月1日 09:00”）',
           },
           text: {
             type: 'string',
-            description: '提醒内容，create 时必填，如“开会”“提交周报”',
+            description:
+              '提醒文本或定时 AI 任务指令，create 时必填，如“开会”或“检索并整理一份全球最新的AI领域新闻简报发给我”',
           },
-          id: { type: 'string', description: '提醒 ID，cancel 时必填' },
+          mode: {
+            type: 'string',
+            enum: ['reminder', 'prompt'],
+            description:
+              '任务模式：reminder=到点发送固定文本提醒；prompt=到点由 AI 自动执行 text 指令（可调用联网搜索等工具）并将生成结果发送给用户',
+          },
+          id: { type: 'string', description: '提醒或定时任务 ID，cancel 时必填' },
         },
         required: ['action'],
         additionalProperties: false,
@@ -121,16 +134,22 @@ export class PersonalAssistantToolProvider implements IToolProvider {
         if (action === 'create') {
           const when = requireString(args, 'when', '提醒时间');
           const text = requireString(args, 'text', '提醒内容');
+          const rawMode = optionalString(args, 'mode');
+          const mode: PersonalTaskMode | undefined =
+            rawMode === 'prompt' || rawMode === 'reminder' ? rawMode : undefined;
           const task = await this.service.createReminderFromText({
             staffId: execCtx.senderStaffId,
             conversationId: execCtx.conversationId,
             raw: `${when} ${text}`,
+            ...(mode ? { mode } : {}),
           });
           return JSON.stringify({
             ok: true,
             taskId: task.id,
             at: task.nextRunAt,
-            message: `已设置提醒：${task.title}`,
+            ...(task.cron ? { cron: task.cron } : {}),
+            ...(task.kind === 'prompt' ? { mode: 'prompt' } : {}),
+            message: `已设置${task.kind === 'prompt' ? '定时任务' : '提醒'}：${task.title}`,
           });
         }
         if (action === 'cancel') {
@@ -152,6 +171,7 @@ export class PersonalAssistantToolProvider implements IToolProvider {
       description:
         '查看当前用户的日/周/月工作简报（仅单聊）。action=preview 立即用钉钉日程/待办/审批生成一份；action=list 查看已配置报告；创建和取消请使用 personal_report_manage。报告为确定性汇总，不调用大模型。',
       risk: 'read',
+      source: 'personal-assistant',
       parametersJsonSchema: {
         type: 'object',
         properties: {
@@ -175,7 +195,12 @@ export class PersonalAssistantToolProvider implements IToolProvider {
           return JSON.stringify({
             ok: true,
             reports: tasks
-              .filter((task) => task.kind !== 'reminder')
+              .filter(
+                (task) =>
+                  task.kind === 'daily_report' ||
+                  task.kind === 'weekly_report' ||
+                  task.kind === 'monthly_report',
+              )
               .map((task) => ({
                 id: task.id,
                 title: task.title,
@@ -203,6 +228,7 @@ export class PersonalAssistantToolProvider implements IToolProvider {
       description:
         '创建或取消当前用户的日/周/月工作简报（仅单聊）。action=create 需要 frequency 与 time，可选 weekday（1-7，周日用 7）或 dayOfMonth（1-28）；action=cancel 取消。报告为确定性汇总，不调用大模型。',
       risk: 'write',
+      source: 'personal-assistant',
       parametersJsonSchema: {
         type: 'object',
         properties: {

@@ -1,17 +1,21 @@
 import type { InboundMessage } from '../types/core.js';
 import type {
   ScheduledTask,
+  ScheduledTaskKind,
   ScheduledTaskStore,
 } from '../types/admin-and-console.js';
 import {
   buildReportCron,
+  parseReminderArgs,
   parseReportSpec,
+  type PersonalTaskMode,
   type ReportSpec,
 } from '../personal/PersonalAssistantService.js';
 import { computeNextRun } from '../scheduler/ScheduledTaskScheduler.js';
 import { formatShanghaiDateTime } from '../time/shanghaiTime.js';
 
 const GROUP_REPORT_LIMIT = 4;
+const GROUP_SCHEDULE_LIMIT = 8;
 const REPORT_TITLES: Record<ReportSpec['frequency'], string> = {
   daily: '群目标每日播报',
   weekly: '群目标每周播报',
@@ -30,6 +34,7 @@ export interface GroupReportServiceOptions {
   store: ScheduledTaskStore;
   isAdmin: (staffId: string) => boolean;
   buildDigest: (conversationId: string) => Promise<string>;
+  now?: () => number;
 }
 
 export function describeReportCron(cron: string): string {
@@ -37,10 +42,22 @@ export function describeReportCron(cron: string): string {
   const time = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
   if (dayOfMonth !== '*') return `每月 ${Number(dayOfMonth)} 日 ${time}`;
   if (weekday !== '*') {
+    if (weekday === '1-5') return `每个工作日 ${time}`;
     const labels = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
     return `每${labels[Number(weekday) % 7]} ${time}`;
   }
   return `每天 ${time}`;
+}
+
+function inferGroupTaskMode(text: string): PersonalTaskMode {
+  if (
+    /(?:检索|搜索|查询|抓取|汇总|整理|生成|盘点)[\s\S]*(?:新闻|资讯|动态|简报|日报|周报|报告|摘要|总结|热点|热搜|天气|行情)|(?:发|发送|推送|提供|整理|播报)(?:一份|最新|今日|每日|全球|近期)?[\s\S]*(?:新闻|资讯|动态|简报|热点|热搜|天气|行情)/u.test(
+      text,
+    )
+  ) {
+    return 'prompt';
+  }
+  return 'reminder';
 }
 
 /** 群目标定期播报：按 cron 把确定性摘要推送到群聊，不消耗模型 token。 */
@@ -48,11 +65,13 @@ export class GroupReportService {
   private readonly store: ScheduledTaskStore;
   private readonly isAdmin: (staffId: string) => boolean;
   private readonly buildDigest: (conversationId: string) => Promise<string>;
+  private readonly now: () => number;
 
   constructor(options: GroupReportServiceOptions) {
     this.store = options.store;
     this.isAdmin = options.isAdmin;
     this.buildDigest = options.buildDigest;
+    this.now = options.now ?? Date.now;
   }
 
   public usage(): string {
@@ -131,6 +150,78 @@ export class GroupReportService {
     return removed
       ? `已取消群播报：${describeReportCron(task.cron ?? '')}（ID ${task.id.slice(0, 8)}）。`
       : '取消失败，播报可能已被删除。';
+  }
+
+  public async listSchedules(conversationId: string): Promise<ScheduledTask[]> {
+    const tasks = await this.store.list();
+    return tasks.filter(
+      (task) =>
+        task.conversationId === conversationId &&
+        task.conversationType === '2' &&
+        (task.kind === 'prompt' || task.kind === 'reminder') &&
+        task.enabled,
+    );
+  }
+
+  public async createScheduleFromText(input: {
+    conversationId: string;
+    actor: string;
+    raw: string;
+    mode?: PersonalTaskMode;
+  }): Promise<ScheduledTask> {
+    const parsed = parseReminderArgs(input.raw, this.now());
+    if (typeof parsed === 'string') throw new Error(parsed);
+    const existing = await this.listSchedules(input.conversationId);
+    if (existing.length >= GROUP_SCHEDULE_LIMIT) {
+      throw new Error(
+        `本群定时任务已达上限（${GROUP_SCHEDULE_LIMIT} 个），请先取消不用的任务。`,
+      );
+    }
+    const rawText = parsed.text.slice(0, 200);
+    const mode = input.mode ?? inferGroupTaskMode(rawText);
+    const kind: ScheduledTaskKind = mode === 'prompt' ? 'prompt' : 'reminder';
+    const titlePrefix = kind === 'prompt' ? '群定时任务：' : '群提醒：';
+    return this.store.create(
+      {
+        conversationId: input.conversationId,
+        conversationType: '2',
+        kind,
+        title: `${titlePrefix}${rawText.slice(0, 40)}`,
+        prompt: rawText,
+        intervalSeconds: null,
+        cron: parsed.cron ?? null,
+        enabled: true,
+        createdBy: input.actor,
+      },
+      parsed.atMs,
+    );
+  }
+
+  public async cancelSchedule(
+    conversationId: string,
+    idOrPrefix: string,
+    staffId: string,
+  ): Promise<string> {
+    const needle = idOrPrefix.trim().toLowerCase();
+    if (!needle) return '请输入群定时任务 ID 前缀。';
+    const tasks = await this.listSchedules(conversationId);
+    const exact = tasks.find((task) => task.id.toLowerCase() === needle);
+    const matches = tasks.filter((task) =>
+      task.id.toLowerCase().startsWith(needle),
+    );
+    const task = exact ?? (matches.length === 1 ? matches[0] : undefined);
+    if (!task) {
+      return matches.length > 1
+        ? `ID 前缀 ${idOrPrefix} 匹配到多个群定时任务，请多输入几位。`
+        : `未找到本群定时任务 ${idOrPrefix}。`;
+    }
+    if (task.createdBy !== staffId && !this.isAdmin(staffId)) {
+      return '只有创建人或管理员可以取消该群定时任务。';
+    }
+    const removed = await this.store.remove(task.id);
+    return removed
+      ? `已取消群定时任务：${task.title}（ID ${task.id.slice(0, 8)}）。`
+      : '取消失败，任务可能已被删除。';
   }
 
   public async handleCommand(

@@ -6,7 +6,10 @@ import type {
 import type { GroupWorkspaceService } from '../../groups/GroupWorkspaceService.js';
 import type { GroupReportService } from '../../groups/GroupReportService.js';
 import { describeReportCron } from '../../groups/GroupReportService.js';
-import { parseReportSpec } from '../../personal/PersonalAssistantService.js';
+import {
+  parseReportSpec,
+  type PersonalTaskMode,
+} from '../../personal/PersonalAssistantService.js';
 import { parseDueAt } from '../../groups/GroupWorkspaceService.js';
 import { formatShanghaiDateTime } from '../../time/shanghaiTime.js';
 import {
@@ -507,6 +510,114 @@ export class GroupWorkspaceToolProvider implements IToolProvider {
         source: 'group-workspace',
         execute: async () => this.service.buildDigest(conversationId),
       },
+      ...(this.service.hasMemberMemorySupport()
+        ? [
+            {
+              name: 'group_member_memory_save',
+              description:
+                '保存当前发言人在本群内的专属个人记忆（如该成员在本群的角色、分工、偏好、负责模块）。仅在当前群对该成员生效，与全群共享记忆（group_memory_save）和其他群/其他人的记忆完全隔离。',
+              parametersJsonSchema: {
+                type: 'object',
+                properties: {
+                  content: {
+                    type: 'string',
+                    description: '要保存的本群成员专属记忆内容',
+                  },
+                  keywords: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    description: '检索关键词（可选）',
+                  },
+                },
+                required: ['content'],
+                additionalProperties: false,
+              },
+              risk: 'write' as const,
+              source: 'group-workspace',
+              execute: async (args: Record<string, unknown>) => {
+                const content = optionalString(args, 'content');
+                if (!content) return '缺少要保存的内容。';
+                const saved = await this.service.rememberMemberNote({
+                  conversationId,
+                  personKey: actorOf(ctx),
+                  speakerNick: ctx.senderNick,
+                  content: content.slice(0, 500),
+                  keywords: optionalStringArray(args, 'keywords') ?? [],
+                  ...(ctx.messageId ? { sourceMessageId: ctx.messageId } : {}),
+                });
+                return saved
+                  ? '已写入你在本群的成员专属记忆。'
+                  : '群成员记忆写入未启用。';
+              },
+            },
+            {
+              name: 'group_member_memory_list',
+              description:
+                '查看或检索当前发言人在本群内的专属记忆（仅返回该成员在本群的记忆，不包含其他群或其他成员的记忆）。',
+              parametersJsonSchema: {
+                type: 'object',
+                properties: {
+                  query: { type: 'string', description: '检索关键词（可选）' },
+                  limit: { type: 'number', description: '返回条数，默认 20' },
+                },
+                additionalProperties: false,
+              },
+              risk: 'read' as const,
+              source: 'group-workspace',
+              execute: async (args: Record<string, unknown>) => {
+                const query = optionalString(args, 'query');
+                const limit = optionalNumber(args, 'limit');
+                const records = await this.service.listMemberMemories(
+                  conversationId,
+                  actorOf(ctx),
+                  {
+                    ...(query ? { query } : {}),
+                    limit: limit === undefined ? 20 : Math.round(limit),
+                  },
+                );
+                if (records.length === 0) {
+                  return query
+                    ? `没有找到你在本群匹配「${query}」的成员专属记忆。`
+                    : '你在本群还没有成员专属记忆。';
+                }
+                return [
+                  query ? '匹配的本群成员记忆：' : '你在本群的成员专属记忆：',
+                  ...records.map(
+                    (record) =>
+                      `- ${record.id.slice(0, 8)} · ${record.content}（更新 ${formatShanghaiDateTime(record.updatedAt)}）`,
+                  ),
+                ].join('\n');
+              },
+            },
+            {
+              name: 'group_member_memory_forget',
+              description:
+                '删除当前发言人在本群内的一条专属记忆。memoryId 支持 ID 前缀，仅能操作本人在此群的记忆。',
+              parametersJsonSchema: {
+                type: 'object',
+                properties: {
+                  memoryId: {
+                    type: 'string',
+                    description: '本群成员记忆 ID 或前缀',
+                  },
+                },
+                required: ['memoryId'],
+                additionalProperties: false,
+              },
+              risk: 'write' as const,
+              source: 'group-workspace',
+              execute: async (args: Record<string, unknown>) => {
+                const memoryId = optionalString(args, 'memoryId');
+                if (!memoryId) return '缺少本群成员记忆 ID。';
+                return this.service.forgetMemberMemory(
+                  conversationId,
+                  actorOf(ctx),
+                  memoryId,
+                );
+              },
+            },
+          ]
+        : []),
       ...(this.reports
         ? [
             {
@@ -615,6 +726,115 @@ export class GroupWorkspaceToolProvider implements IToolProvider {
                   reportId,
                   ctx.senderStaffId,
                 );
+              },
+            },
+            {
+              name: 'group_schedule_list',
+              description:
+                '查看当前群的定时提醒与群定时 AI 任务（仅群聊）。列出本群待触发的提醒和周期任务。',
+              parametersJsonSchema: {
+                type: 'object',
+                properties: {},
+                additionalProperties: false,
+              },
+              risk: 'read' as const,
+              source: 'group-workspace',
+              execute: async () => {
+                const tasks = await this.reports!.listSchedules(conversationId);
+                if (tasks.length === 0) return '本群当前没有定时提醒或定时任务。';
+                return [
+                  '当前群定时任务：',
+                  ...tasks.map((task) => {
+                    const schedule = task.cron
+                      ? describeReportCron(task.cron)
+                      : task.nextRunAt
+                        ? formatShanghaiDateTime(Date.parse(task.nextRunAt))
+                        : '未排期';
+                    return `- ${task.title} · ${schedule} · ID ${task.id.slice(0, 8)}`;
+                  }),
+                ].join('\n');
+              },
+            },
+            {
+              name: 'group_schedule_manage',
+              description:
+                '在当前群创建或取消群定时提醒与群定时 AI 任务（仅群聊，到点后推送到本群，不会私发给个人）。action=create 时用 when 描述时间（如“25分钟后”“明天9点”“每天下午16:05分”“每周一 09:00”“工作日 09:30”），text 写群提醒内容或 AI 执行指令，mode="reminder" 到点在群内发送提醒文本，mode="prompt" 到点由 AI 自动执行指令（如联网搜索新闻简报）并直接发到本群；action=cancel 按 id 取消本群定时任务。',
+              parametersJsonSchema: {
+                type: 'object',
+                properties: {
+                  action: { type: 'string', enum: ['create', 'cancel'] },
+                  when: {
+                    type: 'string',
+                    description:
+                      '时间描述，create 时必填，支持一次性（如“25分钟后”“明天9点”）或周期性（如“每天16:05”“每天下午16:05分”“每周一 09:00”“工作日 09:30”）',
+                  },
+                  text: {
+                    type: 'string',
+                    description:
+                      '群提醒内容或群定时 AI 任务指令，create 时必填',
+                  },
+                  mode: {
+                    type: 'string',
+                    enum: ['reminder', 'prompt'],
+                    description:
+                      '任务模式：reminder=到点在群内发送固定文本提醒；prompt=到点由 AI 自动执行指令并将结果发到本群',
+                  },
+                  id: {
+                    type: 'string',
+                    description: '群定时任务 ID 或前缀，cancel 时必填',
+                  },
+                },
+                required: ['action'],
+                additionalProperties: false,
+              },
+              risk: 'write' as const,
+              source: 'group-workspace',
+              execute: async (args: Record<string, unknown>) => {
+                const action = optionalString(args, 'action');
+                if (action === 'create') {
+                  const when = optionalString(args, 'when');
+                  const text = optionalString(args, 'text');
+                  if (!when || !text) {
+                    return '创建群定时任务需要同时提供 when（时间）与 text（内容）。';
+                  }
+                  const rawMode = optionalString(args, 'mode');
+                  const mode: PersonalTaskMode | undefined =
+                    rawMode === 'prompt' || rawMode === 'reminder'
+                      ? rawMode
+                      : undefined;
+                  try {
+                    const task = await this.reports!.createScheduleFromText({
+                      conversationId,
+                      actor: ctx.senderStaffId,
+                      raw: `${when} ${text}`,
+                      ...(mode ? { mode } : {}),
+                    });
+                    return JSON.stringify({
+                      ok: true,
+                      taskId: task.id,
+                      conversationId: task.conversationId,
+                      conversationType: task.conversationType,
+                      at: task.nextRunAt,
+                      ...(task.cron ? { cron: task.cron } : {}),
+                      mode: task.kind === 'prompt' ? 'prompt' : 'reminder',
+                      message: `已在本群设置${task.title}（到点将推送到本群）`,
+                    });
+                  } catch (error) {
+                    return error instanceof Error
+                      ? error.message
+                      : String(error);
+                  }
+                }
+                if (action === 'cancel') {
+                  const id = optionalString(args, 'id');
+                  if (!id) return '取消群定时任务需要提供 id。';
+                  return this.reports!.cancelSchedule(
+                    conversationId,
+                    id,
+                    ctx.senderStaffId,
+                  );
+                }
+                return `不支持的 action：${action ?? ''}`;
               },
             },
           ]

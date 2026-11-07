@@ -4,5 +4,11 @@
  */
 export function isStaffUserId(value: string | undefined): boolean {
   const id = value?.trim();
-  return !!id && !id.startsWith('$:');
+  return (
+    !!id &&
+    !id.startsWith('$:') &&
+    !id.startsWith('cid') &&
+    id !== 'scheduler' &&
+    id !== 'admin-api'
+  );
 }

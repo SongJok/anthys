@@ -28,6 +28,7 @@ import {
   OpenApiRobotEmotionApi,
 } from './dingtalk/EmotionReplier.js';
 import { replyMention, webhookMention } from './dingtalk/Mentions.js';
+import { isStaffUserId } from './dingtalk/userIds.js';
 import { sendTextFallback } from './dingtalk/TextFallback.js';
 import { DingTalkMediaSender } from './dingtalk/MediaSender.js';
 import { DingTalkAdminTextSender } from './dingtalk/AdminTextSender.js';
@@ -132,6 +133,7 @@ import {
   LlmSemanticFactExtractor,
 } from './memory/HierarchicalMemoryManager.js';
 import { DrizzleMemoryStore } from './db/memorySchema.js';
+import { groupMemberSubjectKey } from './types/bystander-and-memory.js';
 import {
   DrizzlePersonIdentityStore,
   DrizzlePersonaProfileStore,
@@ -998,6 +1000,22 @@ async function main(): Promise<void> {
         ...(request.risk ? { risk: request.risk } : {}),
         ...(request.source ? { source: request.source } : {}),
       });
+      if (
+        !context.proactive &&
+        risk === 'write' &&
+        ((context.conversationType === '1' &&
+          (request.source === 'personal-assistant' ||
+            request.source === 'personal-memory' ||
+            request.toolName === 'personal_reminder_manage' ||
+            request.toolName === 'personal_report_manage')) ||
+          (context.conversationType === '2' &&
+            (request.toolName === 'group_schedule_manage' ||
+              request.toolName === 'group_memory_save' ||
+              request.toolName === 'group_member_memory_save' ||
+              request.toolName === 'group_member_memory_forget')))
+      ) {
+        return { approved: true };
+      }
       const dwsWrite = request.source === 'dws' && risk !== 'read';
       if (dwsWrite) {
         const gate = await toolRegistry?.dwsAuthorizationGate(context, true);
@@ -1728,6 +1746,26 @@ async function main(): Promise<void> {
           },
         ]);
       },
+      saveMemberNote: async (note) => {
+        await hierarchicalMemory.remember([
+          {
+            scope: 'group_member',
+            subjectKey: groupMemberSubjectKey(
+              note.conversationId,
+              note.personKey,
+            ),
+            kind: 'profile',
+            content: note.content,
+            keywords: note.keywords,
+            shareableInGroup: true,
+            sensitivity: 'normal',
+            confidence: 0.95,
+            sourceConversationId: note.conversationId,
+            sourceConversationType: '2',
+            sourceMessageId: note.sourceMessageId ?? null,
+          },
+        ]);
+      },
     });
     const personalMemory = new PersonalMemoryService({
       memories: memoryStore,
@@ -2128,6 +2166,36 @@ async function main(): Promise<void> {
       }
     };
 
+    const deliverFallbackText = async (
+      message: InboundMessage,
+      text: string,
+      proactive = false,
+    ): Promise<void> => {
+      const webhook = message.rawPayload.sessionWebhook;
+      if (typeof webhook === 'string' && webhook) {
+        await sendSessionWebhook(message, text, cardLogger, {
+          mention: !proactive,
+        });
+        return;
+      }
+      if (message.conversationType === '1') {
+        const staffId = (
+          message.cardDeliverUserId ||
+          message.senderStaffId ||
+          ''
+        ).trim();
+        if (staffId && staffId !== 'scheduler' && staffId !== 'admin-api') {
+          for (const chunk of splitForDelivery(text)) {
+            await adminTextSender.send([staffId], chunk);
+          }
+          return;
+        }
+      }
+      await sendSessionWebhook(message, text, cardLogger, {
+        mention: !proactive,
+      });
+    };
+
     const replyTo = async (
       message: InboundMessage,
       text: string,
@@ -2146,6 +2214,9 @@ async function main(): Promise<void> {
       await streamer.start();
       streamer.handle({ type: 'answer_delta', content: text });
       await streamer.finish();
+      if (!streamer.isAvailable) {
+        await deliverFallbackText(message, text, proactive);
+      }
     };
 
     const notifyDwsWriteTask = async (
@@ -2905,15 +2976,11 @@ async function main(): Promise<void> {
         await streamer.finish();
         const overflow = streamer.takeOverflowAnswer();
         if (overflow) {
-          await sendSessionWebhook(message, overflow, cardLogger, {
-            mention: !proactive,
-          });
+          await deliverFallbackText(message, overflow, proactive);
         }
         await recordTrace(collector, message, result, proactive);
         if (result && !streamer.isAvailable && result.answer) {
-          await sendSessionWebhook(message, result.answer, cardLogger, {
-            mention: !proactive,
-          });
+          await deliverFallbackText(message, result.answer, proactive);
         }
       } catch (error) {
         logger.error(
@@ -2924,11 +2991,10 @@ async function main(): Promise<void> {
         await streamer.finish();
         await recordTrace(collector, message, EMPTY_RESULT, proactive);
         if (!streamer.isAvailable) {
-          await sendSessionWebhook(
+          await deliverFallbackText(
             message,
             FALLBACK_ERROR_TEXT,
-            cardLogger,
-            { mention: !proactive },
+            proactive,
           );
         }
       } finally {
@@ -3220,8 +3286,11 @@ async function main(): Promise<void> {
       task: ScheduledTask,
       text: string,
     ): Promise<void> => {
+      if (task.conversationType !== '1') {
+        throw new Error(`个人任务 ${task.id} 仅允许在单聊投递`);
+      }
       const staffId = task.createdBy.trim();
-      if (!staffId || staffId === 'admin-api' || staffId === 'scheduler') {
+      if (!isStaffUserId(staffId)) {
         throw new Error(`个人任务 ${task.id} 缺少有效的创建人`);
       }
       const chunks = splitForDelivery(text);
@@ -3243,13 +3312,17 @@ async function main(): Promise<void> {
       task: ScheduledTask,
       text: string,
     ): Promise<void> => {
+      if (task.conversationType !== '2') {
+        throw new Error(`群任务 ${task.id} 仅允许在群聊投递`);
+      }
       const now = Date.now();
       const message: InboundMessage = {
         messageId: `group_report_${task.id}_${now}`,
         conversationId: task.conversationId,
         conversationType: '2',
-        senderStaffId: task.createdBy || 'scheduler',
-        senderNick: '群目标播报',
+        senderStaffId: 'scheduler',
+        senderNick: '群定时播报',
+        cardDeliverUserId: '',
         isAtBot: false,
         text: '',
         rawPayload: { source: 'scheduled_task', taskId: task.id },
@@ -3271,10 +3344,12 @@ async function main(): Promise<void> {
       const now = Date.now();
       if (task.kind === 'reminder') {
         metrics.inc('scheduled_task_runs_total', { kind: task.kind });
-        await sendPersonalMessages(
-          task,
-          personalAssistant.reminderDeliveryText(task),
-        );
+        const text = personalAssistant.reminderDeliveryText(task);
+        if (task.conversationType === '2') {
+          await sendGroupMessages(task, text);
+        } else {
+          await sendPersonalMessages(task, text);
+        }
         return;
       }
       if (task.kind === 'group_report') {
@@ -3293,13 +3368,25 @@ async function main(): Promise<void> {
         await sendPersonalMessages(task, text);
         return;
       }
+      const isPersonal = task.conversationType === '1';
+      const targetStaffId = isPersonal
+        ? isStaffUserId(task.createdBy)
+          ? task.createdBy.trim()
+          : isStaffUserId(task.conversationId)
+            ? task.conversationId.trim()
+            : ''
+        : '';
+      if (isPersonal && !targetStaffId) {
+        throw new Error(`个人定时任务 ${task.id} 缺少有效的创建人 staffId`);
+      }
       const message: InboundMessage = {
         messageId: `scheduled_${task.id}_${now}`,
         conversationId: task.conversationId,
         conversationType: task.conversationType,
-        senderStaffId: task.createdBy || 'scheduler',
+        senderStaffId: isPersonal ? targetStaffId : 'scheduler',
         senderNick: '定时任务',
-        isAtBot: true,
+        cardDeliverUserId: isPersonal ? targetStaffId : '',
+        isAtBot: isPersonal,
         text: task.prompt,
         rawPayload: { source: 'scheduled_task', taskId: task.id },
         timestamp: now,

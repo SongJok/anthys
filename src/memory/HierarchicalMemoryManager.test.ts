@@ -138,7 +138,9 @@ class InMemorySemanticStore implements SemanticMemoryStore {
           record.scope === query.scope &&
           (!query.subjectKey || record.subjectKey === query.subjectKey) &&
           (!query.shareableOnly || record.shareableInGroup);
-        return inScope || record.scope === 'global';
+        return query.scope === 'group_member'
+          ? inScope
+          : inScope || record.scope === 'global';
       })
       .filter((record) => {
         if (terms.length === 0) return true;
@@ -679,5 +681,123 @@ describe('HierarchicalMemoryManager', () => {
         keywords: ['支付网关'],
       },
     ]);
+  });
+
+  it('三层记忆严格隔离：个人记忆按人隔离、群记忆按群隔离、群内成员记忆按群+人双重隔离', async () => {
+    const ctx = setup();
+    await ctx.manager.remember([
+      {
+        scope: 'user',
+        subjectKey: 'staff-1',
+        kind: 'profile',
+        content: '张三个人私密记忆：习惯用 Vim',
+        keywords: ['偏好', '分工'],
+        shareableInGroup: false,
+      },
+      {
+        scope: 'user',
+        subjectKey: 'staff-2',
+        kind: 'profile',
+        content: '李四个人私密记忆：习惯用 VSCode',
+        keywords: ['偏好', '分工'],
+        shareableInGroup: false,
+      },
+      {
+        scope: 'group',
+        subjectKey: 'cid-group-1',
+        kind: 'terminology',
+        content: '一群众共享记忆：项目代号 Phoenix',
+        keywords: ['偏好', '分工', '项目'],
+      },
+      {
+        scope: 'group',
+        subjectKey: 'cid-group-2',
+        kind: 'terminology',
+        content: '二群共享记忆：项目代号 Titan',
+        keywords: ['偏好', '分工', '项目'],
+      },
+      {
+        scope: 'group_member',
+        subjectKey: 'cid-group-1::staff-1',
+        kind: 'profile',
+        content: '张三在一群的成员记忆：担任一群值班组长',
+        keywords: ['偏好', '分工'],
+      },
+      {
+        scope: 'group_member',
+        subjectKey: 'cid-group-1::staff-2',
+        kind: 'profile',
+        content: '李四在一群的成员记忆：负责一群前端回归',
+        keywords: ['偏好', '分工'],
+      },
+      {
+        scope: 'group_member',
+        subjectKey: 'cid-group-2::staff-1',
+        kind: 'profile',
+        content: '张三在二群的成员记忆：只作为二群观察员',
+        keywords: ['偏好', '分工'],
+      },
+    ]);
+
+    // 1. 张三单聊：只召回张三个人记忆，不混入李四个人记忆或任何群/群成员记忆
+    const single1 = await ctx.manager.assemble({
+      personaSystemPrompt: 'system',
+      userId: 'staff-1',
+      speakerNick: '张三',
+      audience: 'single',
+      semanticQuery: '偏好 分工 项目',
+    });
+    expect(single1.userSemanticProfile).toContain('张三个人私密记忆：习惯用 Vim');
+    expect(single1.userSemanticProfile).not.toContain('李四个人私密记忆');
+    expect(single1.userSemanticProfile).not.toContain('一群值班组长');
+    expect(single1.userSemanticProfile).not.toContain('二群观察员');
+    expect(single1.userSemanticProfile).not.toContain('Phoenix');
+
+    // 2. 张三在一群发言：召回一群共享记忆 + 张三在一群的专属成员记忆，不混入李四在一群的成员记忆、不混入二群记忆或张三在二群的成员记忆
+    const group1Member1 = await ctx.manager.assemble({
+      personaSystemPrompt: 'system',
+      userId: 'staff-1',
+      speakerNick: '张三',
+      groupConversationId: 'cid-group-1',
+      audience: 'group',
+      semanticQuery: '偏好 分工 项目',
+    });
+    expect(group1Member1.userSemanticProfile).toContain(
+      '本群成员记忆（张三）：',
+    );
+    expect(group1Member1.userSemanticProfile).toContain(
+      '张三在一群的成员记忆：担任一群值班组长',
+    );
+    expect(group1Member1.userSemanticProfile).toContain(
+      '一群众共享记忆：项目代号 Phoenix',
+    );
+    expect(group1Member1.userSemanticProfile).not.toContain(
+      '李四在一群的成员记忆',
+    );
+    expect(group1Member1.userSemanticProfile).not.toContain(
+      '张三在二群的成员记忆',
+    );
+    expect(group1Member1.userSemanticProfile).not.toContain(
+      '二群共享记忆：项目代号 Titan',
+    );
+    expect(group1Member1.userSemanticProfile).not.toContain(
+      '张三个人私密记忆',
+    );
+
+    // 3. 李四在一群发言：只召回一群共享记忆 + 李四在一群的成员记忆，不混入张三在一群的成员记忆
+    const group1Member2 = await ctx.manager.assemble({
+      personaSystemPrompt: 'system',
+      userId: 'staff-2',
+      speakerNick: '李四',
+      groupConversationId: 'cid-group-1',
+      audience: 'group',
+      semanticQuery: '偏好 分工 项目',
+    });
+    expect(group1Member2.userSemanticProfile).toContain(
+      '李四在一群的成员记忆：负责一群前端回归',
+    );
+    expect(group1Member2.userSemanticProfile).not.toContain(
+      '张三在一群的成员记忆',
+    );
   });
 });

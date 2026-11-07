@@ -17,11 +17,11 @@ export function computeNextRun(
   fromMs: number,
 ): number | null {
   if (!task.enabled) return null;
-  if (task.kind === 'reminder') return null;
   if (task.cron?.trim()) return nextCronRun(task.cron, fromMs);
   if (task.intervalSeconds && task.intervalSeconds > 0) {
     return fromMs + task.intervalSeconds * 1_000;
   }
+  if (task.kind === 'reminder') return null;
   throw new Error('定时任务必须配置 cron 或 intervalSeconds');
 }
 
@@ -106,7 +106,10 @@ export class ScheduledTaskScheduler {
           );
         }
         try {
-          const next = computeNextRun(item, nowMs);
+          const isOneShot =
+            !item.cron?.trim() &&
+            !(item.intervalSeconds && item.intervalSeconds > 0);
+          const next = isOneShot ? null : computeNextRun(item, nowMs);
           if (next === null && item.enabled) {
             await this.store.update(item.id, { enabled: false }, null);
           }

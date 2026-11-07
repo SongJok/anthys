@@ -9,9 +9,10 @@ import type {
   GroupWorkspaceSnapshot,
   GroupWorkspaceStore,
 } from '../types/group-workspace.js';
-import type {
-  SemanticMemoryAdminPort,
-  SemanticMemoryRecord,
+import {
+  groupMemberSubjectKey,
+  type SemanticMemoryAdminPort,
+  type SemanticMemoryRecord,
 } from '../types/bystander-and-memory.js';
 import { formatShanghaiDateTime } from '../time/shanghaiTime.js';
 
@@ -52,6 +53,7 @@ const USAGE = [
   '- `/group task assign|due|link|unlink <ID> ...` 调整负责人、截止时间或关联目标',
   '- `/group note <内容>` 手动沉淀一条群记忆',
   '- `/group memory list|search|forget ...` 查看、检索或删除群记忆（删除需管理员）',
+  '- `/group my-memory list|search|add|forget ...` 查看、检索、添加或删除你在本群的专属记忆',
   '- `/group digest` 生成本群目标与任务进度摘要',
   '- `/group report daily 09:00` 定期播报群目标进度（管理员）',
 ].join('\n');
@@ -64,11 +66,22 @@ export interface GroupWorkspaceMemoryNote {
   sourceMessageId?: string;
 }
 
+export interface GroupWorkspaceMemberMemoryNote {
+  conversationId: string;
+  personKey: string;
+  speakerNick?: string;
+  content: string;
+  keywords: string[];
+  sourceMessageId?: string;
+}
+
 export interface GroupWorkspaceServiceOptions {
   store: GroupWorkspaceStore;
   isAdmin: (staffId: string) => boolean;
   /** 手动群记忆沉淀；未配置时 /group note 只返回不可用提示 */
   saveNote?: (note: GroupWorkspaceMemoryNote) => Promise<void>;
+  /** 手动沉淀群内成员在本群的专属记忆（scope = group_member，按群+人隔离） */
+  saveMemberNote?: (note: GroupWorkspaceMemberMemoryNote) => Promise<void>;
   /** 群记忆查看与删除；未配置时 /group memory 只返回不可用提示 */
   memories?: SemanticMemoryAdminPort;
   now?: () => number;
@@ -161,6 +174,7 @@ export class GroupWorkspaceService implements GroupWorkspaceAdminPort {
   private readonly store: GroupWorkspaceStore;
   private readonly isAdmin: (staffId: string) => boolean;
   private readonly saveNote?: GroupWorkspaceServiceOptions['saveNote'];
+  private readonly saveMemberNote?: GroupWorkspaceServiceOptions['saveMemberNote'];
   private readonly memories?: SemanticMemoryAdminPort;
   private readonly now: () => number;
 
@@ -168,8 +182,13 @@ export class GroupWorkspaceService implements GroupWorkspaceAdminPort {
     this.store = options.store;
     this.isAdmin = options.isAdmin;
     this.saveNote = options.saveNote;
+    this.saveMemberNote = options.saveMemberNote;
     this.memories = options.memories;
     this.now = options.now ?? Date.now;
+  }
+
+  public hasMemberMemorySupport(): boolean {
+    return Boolean(this.saveMemberNote || this.memories);
   }
 
   public usage(): string {
@@ -426,6 +445,58 @@ export class GroupWorkspaceService implements GroupWorkspaceAdminPort {
       : '删除失败，记忆可能已被移除。';
   }
 
+  /** 手动沉淀一条当前成员在本群的专属记忆（scope = group_member，仅在本群对该成员召回） */
+  public async rememberMemberNote(
+    note: GroupWorkspaceMemberMemoryNote,
+  ): Promise<boolean> {
+    if (!this.saveMemberNote) return false;
+    await this.saveMemberNote(note);
+    return true;
+  }
+
+  /** 查看或检索当前成员在本群的专属记忆（严格按 conversationId::personKey 隔离） */
+  public async listMemberMemories(
+    conversationId: string,
+    personKey: string,
+    options: { query?: string; limit?: number } = {},
+  ): Promise<SemanticMemoryRecord[]> {
+    if (!this.memories) return [];
+    const subjectKey = groupMemberSubjectKey(conversationId, personKey);
+    const query = options.query?.trim();
+    const result = await this.memories.list({
+      scope: 'group_member',
+      subjectKey,
+      status: 'active',
+      ...(query ? { query } : {}),
+      limit: Math.max(1, Math.min(200, options.limit ?? 20)),
+      offset: 0,
+    });
+    return result.items.filter(
+      (record) =>
+        record.scope === 'group_member' &&
+        record.subjectKey === subjectKey &&
+        record.status === 'active',
+    );
+  }
+
+  /** 删除当前成员在本群的一条专属记忆；仅能操作该成员在本群的条目 */
+  public async forgetMemberMemory(
+    conversationId: string,
+    personKey: string,
+    idOrPrefix: string,
+  ): Promise<string> {
+    if (!this.memories) return '群成员记忆管理未启用。';
+    const records = await this.listMemberMemories(conversationId, personKey, {
+      limit: 200,
+    });
+    const resolved = resolveByPrefix(records, idOrPrefix, '本群成员记忆');
+    if ('error' in resolved) return resolved.error;
+    const removed = await this.memories.remove(resolved.record.id);
+    return removed
+      ? `已删除你在本群的成员记忆：${clip(resolved.record.content, 80)}`
+      : '删除失败，记忆可能已被移除。';
+  }
+
   /** 注入系统提示的群工作区简报；没有任何配置时返回空串 */
   public async buildBrief(
     conversationId: string,
@@ -662,6 +733,9 @@ export class GroupWorkspaceService implements GroupWorkspaceAdminPort {
         );
       case 'memory':
         return this.handleMemoryCommand(message, rest, personKey);
+      case 'my-memory':
+      case 'member-memory':
+        return this.handleMemberMemoryCommand(message, rest, personKey);
       case 'digest':
         return this.buildDigest(conversationId);
       case 'note': {
@@ -1102,6 +1176,80 @@ export class GroupWorkspaceService implements GroupWorkspaceAdminPort {
           `- ${shortId(record.id)} · ${clip(record.content, 160)}（更新 ${formatShanghaiDateTime(record.updatedAt)}）`,
       ),
       '删除：`/group memory forget <ID>`（仅管理员）。',
+    ].join('\n');
+  }
+
+  private async handleMemberMemoryCommand(
+    message: InboundMessage,
+    args: string[],
+    personKey: string,
+  ): Promise<string> {
+    const [action, ...rest] = args;
+    const conversationId = message.conversationId;
+    switch (action?.toLowerCase()) {
+      case undefined:
+      case 'list': {
+        if (!this.memories) return '群成员记忆管理未启用。';
+        const records = await this.listMemberMemories(
+          conversationId,
+          personKey,
+          { limit: 20 },
+        );
+        return this.formatMemberMemoryList(records, false);
+      }
+      case 'search': {
+        if (!this.memories) return '群成员记忆管理未启用。';
+        const query = rest.join(' ').trim();
+        if (!query) return '用法：`/group my-memory search <关键词>`。';
+        const records = await this.listMemberMemories(
+          conversationId,
+          personKey,
+          { query, limit: 20 },
+        );
+        return this.formatMemberMemoryList(records, true);
+      }
+      case 'add': {
+        const content = rest.join(' ').trim();
+        if (!content) return '用法：`/group my-memory add <你在本群的角色/偏好/分工>`。';
+        const saved = await this.rememberMemberNote({
+          conversationId,
+          personKey,
+          speakerNick: message.senderNick,
+          content: clip(content, 500),
+          keywords: [],
+          sourceMessageId: message.messageId,
+        });
+        return saved
+          ? '已保存你在本群的专属记忆（仅在本群对你生效，不会泄露到其他群或其他人）。'
+          : '群成员记忆写入未启用。';
+      }
+      case 'forget':
+        return this.forgetMemberMemory(
+          conversationId,
+          personKey,
+          rest[0] ?? '',
+        );
+      default:
+        return '用法：`/group my-memory list|search <关键词>|add <内容>|forget <ID>`。';
+    }
+  }
+
+  private formatMemberMemoryList(
+    records: SemanticMemoryRecord[],
+    searched: boolean,
+  ): string {
+    if (records.length === 0) {
+      return searched
+        ? '没有找到匹配的本群成员记忆。'
+        : '你在本群还没有专属成员记忆；发送 `/group my-memory add <内容>` 添加。';
+    }
+    return [
+      searched ? '匹配的本群成员记忆：' : '【你在本群的专属记忆】',
+      ...records.map(
+        (record) =>
+          `- ${shortId(record.id)} · ${clip(record.content, 160)}（更新 ${formatShanghaiDateTime(record.updatedAt)}）`,
+      ),
+      '删除：`/group my-memory forget <ID>`。',
     ].join('\n');
   }
 

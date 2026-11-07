@@ -24,7 +24,12 @@ export interface MemoryRouteDeps {
   memories: SemanticMemoryAdminPort;
 }
 
-const SCOPES: SemanticMemoryScope[] = ['global', 'group', 'user'];
+const SCOPES: SemanticMemoryScope[] = [
+  'global',
+  'group',
+  'group_member',
+  'user',
+];
 const KINDS: SemanticMemoryKind[] = ['terminology', 'profile'];
 const STATUSES: SemanticMemoryStatus[] = ['active', 'retired'];
 const SENSITIVITIES: SemanticMemorySensitivity[] = [

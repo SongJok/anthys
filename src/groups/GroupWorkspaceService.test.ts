@@ -18,7 +18,10 @@ import {
   GroupWorkspaceService,
   parseDueAt,
 } from './GroupWorkspaceService.js';
-import type { GroupWorkspaceMemoryNote } from './GroupWorkspaceService.js';
+import type {
+  GroupWorkspaceMemberMemoryNote,
+  GroupWorkspaceMemoryNote,
+} from './GroupWorkspaceService.js';
 
 const NOW = 1_764_500_000_000;
 
@@ -249,6 +252,7 @@ function message(overrides: Partial<InboundMessage> = {}): InboundMessage {
 function makeService(
   options: {
     saveNote?: (note: GroupWorkspaceMemoryNote) => Promise<void>;
+    saveMemberNote?: (note: GroupWorkspaceMemberMemoryNote) => Promise<void>;
     memories?: SemanticMemoryAdminPort;
   } = {},
 ) {
@@ -257,6 +261,9 @@ function makeService(
     store,
     isAdmin: (staffId) => staffId === 'staff-admin',
     ...(options.saveNote ? { saveNote: options.saveNote } : {}),
+    ...(options.saveMemberNote
+      ? { saveMemberNote: options.saveMemberNote }
+      : {}),
     ...(options.memories ? { memories: options.memories } : {}),
     now: () => NOW,
   });
@@ -590,6 +597,79 @@ describe('GroupWorkspaceService', () => {
     );
     expect(removed).toContain('已删除群记忆');
     expect(memories.records.map((record) => record.id)).toEqual(['mem-0002']);
+  });
+
+  it('群内成员专属记忆按群+人双重隔离，成员只能查看与删除自己在本群的记忆', async () => {
+    const memories = new MemorySemanticStore();
+    const savedMemberNotes: GroupWorkspaceMemberMemoryNote[] = [];
+    memories.records.push(
+      semanticRecord({
+        id: 'gm-g1-u1',
+        scope: 'group_member',
+        subjectKey: 'cid-group-1::staff:1',
+        kind: 'profile',
+        content: '我在一群负责网关值班',
+      }),
+      semanticRecord({
+        id: 'gm-g1-u2',
+        scope: 'group_member',
+        subjectKey: 'cid-group-1::staff:2',
+        kind: 'profile',
+        content: '李四在一群负责前端发布',
+      }),
+      semanticRecord({
+        id: 'gm-g2-u1',
+        scope: 'group_member',
+        subjectKey: 'cid-group-2::staff:1',
+        kind: 'profile',
+        content: '我在二群担任观察员',
+      }),
+    );
+    const { service } = makeService({
+      memories,
+      saveMemberNote: async (note) => {
+        savedMemberNotes.push(note);
+      },
+    });
+
+    const addReply = await service.handleCommand(
+      message(),
+      ['my-memory', 'add', '周三下午集中处理本群工单'],
+      'staff:1',
+    );
+    expect(addReply).toContain('已保存你在本群的专属记忆');
+    expect(savedMemberNotes[0]).toMatchObject({
+      conversationId: 'cid-group-1',
+      personKey: 'staff:1',
+      content: '周三下午集中处理本群工单',
+    });
+
+    const listU1 = await service.handleCommand(
+      message(),
+      ['my-memory', 'list'],
+      'staff:1',
+    );
+    expect(listU1).toContain('我在一群负责网关值班');
+    expect(listU1).not.toContain('李四在一群负责前端发布');
+    expect(listU1).not.toContain('我在二群担任观察员');
+
+    // 李四尝试删除张三在一群的成员记忆，因作用域隔离找不到该条目
+    const crossDelete = await service.handleCommand(
+      message({ senderStaffId: 'staff-2' }),
+      ['my-memory', 'forget', 'gm-g1-u1'],
+      'staff:2',
+    );
+    expect(crossDelete).toContain('未找到本群成员记忆');
+    expect(memories.records).toHaveLength(3);
+
+    // 张三本人可以删除自己在一群的成员记忆
+    const selfDelete = await service.handleCommand(
+      message({ senderStaffId: 'staff-1' }),
+      ['my-memory', 'forget', 'gm-g1-u1'],
+      'staff:1',
+    );
+    expect(selfDelete).toContain('已删除你在本群的成员记忆');
+    expect(memories.records.map((r) => r.id)).toEqual(['gm-g1-u2', 'gm-g2-u1']);
   });
 
   it('摘要包含目标进度、逾期与近期到期任务', async () => {

@@ -78,10 +78,14 @@ describe('computeNextRun', () => {
     expect(() => computeNextRun(task(), Date.now())).toThrow('cron');
   });
 
-  it('一次性提醒不推进下一次时间', () => {
+  it('一次性提醒不推进下一次时间，周期提醒按 cron 推进', () => {
+    const now = Date.UTC(2026, 9, 30, 2, 2, 0);
     expect(
-      computeNextRun(task({ kind: 'reminder' }), Date.now()),
+      computeNextRun(task({ kind: 'reminder' }), now),
     ).toBeNull();
+    expect(
+      computeNextRun(task({ kind: 'reminder', cron: '*/5 * * * *' }), now),
+    ).toBe(Date.UTC(2026, 9, 30, 2, 5, 0));
   });
 });
 
@@ -104,6 +108,19 @@ describe('ScheduledTaskScheduler', () => {
 
   it('一次性提醒执行后停用任务', async () => {
     const store = new FakeStore([task({ kind: 'reminder' })]);
+    const scheduler = new ScheduledTaskScheduler({
+      store,
+      execute: async () => {},
+      now: () => 10_000,
+    });
+
+    await scheduler.tick();
+    expect(store.updates).toEqual([['task-1', { enabled: false }, null]]);
+    expect(store.runs).toEqual([['task-1', 10_000, null]]);
+  });
+
+  it('一次性 prompt 定时任务执行后停用任务，不因缺少 cron 报错', async () => {
+    const store = new FakeStore([task({ kind: 'prompt', cron: null, intervalSeconds: null })]);
     const scheduler = new ScheduledTaskScheduler({
       store,
       execute: async () => {},

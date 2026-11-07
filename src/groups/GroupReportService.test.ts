@@ -181,4 +181,40 @@ describe('GroupReportService', () => {
       }),
     ).rejects.toThrow('已达上限');
   });
+
+  it('群内定时提醒与 AI 定时任务绑定本群 conversationType=2，与其他群及个人任务隔离', async () => {
+    const store = new MemoryScheduledStore();
+    const service = new GroupReportService({
+      store,
+      isAdmin: (staffId) => staffId === 'staff-admin',
+      buildDigest: async () => 'digest',
+      now: () => NOW,
+    });
+
+    const task = await service.createScheduleFromText({
+      conversationId: 'cid-group-1',
+      actor: 'staff-1',
+      raw: '每天下午16:05分 检索并整理一份全球最新的AI领域新闻简报',
+    });
+    expect(task.conversationType).toBe('2');
+    expect(task.conversationId).toBe('cid-group-1');
+    expect(task.kind).toBe('prompt');
+    expect(task.cron).toBe('5 16 * * *');
+    expect(task.createdBy).toBe('staff-1');
+
+    // 其他群查不到本群的定时任务
+    expect(await service.listSchedules('cid-group-2')).toHaveLength(0);
+    expect(await service.listSchedules('cid-group-1')).toHaveLength(1);
+
+    // 非创建人且非管理员不可取消
+    expect(
+      await service.cancelSchedule('cid-group-1', task.id.slice(0, 8), 'staff-2'),
+    ).toContain('只有创建人或管理员');
+
+    // 创建人可取消本群定时任务
+    expect(
+      await service.cancelSchedule('cid-group-1', task.id.slice(0, 8), 'staff-1'),
+    ).toContain('已取消群定时任务');
+    expect(await service.listSchedules('cid-group-1')).toHaveLength(0);
+  });
 });
