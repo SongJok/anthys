@@ -110,6 +110,7 @@ describe('SkillRegistry', () => {
     });
     const definitions = await registry.scan();
     expect(definitions.map((item) => item.name).sort()).toEqual([
+      'attachment-analysis',
       'code-reading',
       'data-analysis',
       'data-insight',

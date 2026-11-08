@@ -1,4 +1,5 @@
 import { open, realpath, stat } from 'node:fs/promises';
+import { decodeTextBuffer } from '../../documents/DocumentExtractor.js';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 
 export interface ResolvedWorkspaceFile {
@@ -89,7 +90,7 @@ export async function readWorkspaceText(
   }
   return {
     ...file,
-    content: new TextDecoder('utf-8').decode(buffer),
+    content: decodeTextBuffer(buffer).text,
     truncated: file.size > buffer.length,
     bytesRead: buffer.length,
   };

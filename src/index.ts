@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import { resolve } from 'node:path';
+import { extname, resolve } from 'node:path';
 import { DWClient } from 'dingtalk-stream';
 import { EnvConfigProvider } from './config/EnvConfigProvider.js';
 import type { IConfigProvider } from './config/IConfigProvider.js';
@@ -3137,6 +3137,11 @@ async function main(): Promise<void> {
               store: attachmentStore,
               ...(visionDescriber ? { vision: visionDescriber } : {}),
               logger: harnessLogger,
+              onDocument: (info) =>
+                metrics.inc('agent_document_extract_total', {
+                  format: info.format ?? extname(info.fileName).slice(1).toLowerCase() ?? 'unknown',
+                  result: info.ok ? 'ok' : (info.reason ?? 'failed'),
+                }),
             });
             effective = enriched.message;
             if (enriched.attachments.length > 0) {

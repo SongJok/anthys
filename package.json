@@ -41,7 +41,8 @@
     "isolated-vm": "^7.0.1",
     "openai": "^7.45.1",
     "pg": "^8.13.1",
-    "pino": "^9.5.0"
+    "pino": "^9.5.0",
+    "unpdf": "^2.1.0"
   },
   "devDependencies": {
     "@types/node": "^20.17.6",
