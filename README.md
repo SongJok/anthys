@@ -5,11 +5,13 @@
 - **开箱即用的钉钉接入**：基于 Stream 模式，不需要公网域名、Webhook 或内网穿透。
 - **过程可见的回答**：AI 卡片实时展示状态角标与流式正文，工具调用与推理过程仍完整落库可审计。
 - **克制的主动回复**：群内全量旁听，经三级漏斗判断后才对高优故障、技术求助作出回应。
-- **越用越懂团队**：工作记忆 + 情景摘要 + 语义画像三层记忆，跨会话保留上下文；企业术语库把内部黑话沉淀成可检索、可校验的固定模板。
+- **越用越懂团队**：工作记忆 + 情景摘要 + 语义画像三层记忆，跨会话保留上下文；语义记忆再按全局 / 群 / 群内成员 / 个人四种作用域隔离，企业术语库把内部黑话沉淀成可检索、可校验的固定模板。
 - **可扩展的知识层**：技能按目录渐进披露，声明式插件只声明技能与 MCP、不执行代码，项目手册把仓库事实沉淀成可发布的 12 章说明，并可接 GitHub 只读工具做跨仓对比。
-- **办公场景技能包**：内置日常聊天、链接阅读、数据分析、日周月报、项目文档、钉钉办公与调研简报等技能，覆盖从群聊链接到钉钉原生事务的常见工作流。
+- **办公场景技能包**：内置 20 个技能，覆盖日常聊天、链接阅读、数据分析、日周月报、项目文档、钉钉办公、调研简报与内部同事视角等常见工作流。
+- **会自己到点干活**：个人提醒与定时 AI 任务（每天 / 工作日 / 每周 / 每月）、工作简报、群目标播报与群定时任务，投递严格按个人与群隔离。
+- **不用记命令**：授权与写操作确认支持「同意授权」「允许写操作」「确认」「取消」等中文口令，与斜杠命令等价。
 - **双通道动态管控**：管理员既可以在钉钉单聊里用自然语言下达指令，也可以在 Web 控制台逐项配置，保存即生效。
-- **企业级边界**：管理员白名单、DWS 命令白名单与写操作分级确认、沙箱隔离、凭据掩码与全量操作审计。
+- **企业级边界**：管理员白名单、员工使用白名单、DWS 命令白名单与写操作分级确认、沙箱隔离、凭据掩码与全量操作审计。
 
 ---
 
@@ -36,7 +38,9 @@
 | 数据速查 | 单聊询问「上周订单超时的集中原因」，机器人调用数据服务并用沙盒做聚合统计 |
 | 流程查询 | @ 机器人问「本周日程」「我的待办」「这份文档怎么规定的」，机器人调用 DWS 查询；确认后也可建日程、建待办、发审批 |
 | 代码理解 | 问「这个项目从哪开始读」「这个符号在哪定义」，机器人基于项目快照给出文件、行号与提交；也可同步 GitHub 仓库、查看 Issue 与 PR |
-| 知识沉淀 | 团队术语、同事职责、历史结论被逐步记住，后续回答不再从零解释 |
+| 知识沉淀 | 团队术语、同事职责、历史结论被逐步记住，后续回答不再从零解释；自己在某个群里的分工只在那个群生效 |
+| 定时干活 | 单聊说「每天下午 4 点检索一份 AI 新闻简报发我」，到点机器人自己联网检索并把简报私发给你；群里说「每周一 9 点播报群进度」则只发到该群 |
+| 公司口径 | 问「我们公司这条业务线怎么样」，机器人以内部同事视角讲业务基本盘、跨岗位协同与待攻坚点，而不是外部尽调口吻 |
 | 运营管控 | 管理员调整人设、预算、MCP 与群策略，或一键紧急静音；模型与密钥在 `LLM_MODEL_SOURCE=env` 时由 `.env` 统一管理 |
 | 需求把关 | 超过 15 分钟 / 12 万 Token 或明文写着重活的需求，机器人直接说明不认可并停止执行，避免长时间空转 |
 
@@ -172,6 +176,8 @@ pnpm run db:seed      # 可选：预写入默认人设与模型配置，已有�
 | `PERSONA_NAME` | `小钉` | 机器人名称 |
 | `PERSONA_ROLE_PROMPT` | 见示例 | 人设 Prompt |
 | `PERSONA_SPEAKING_STYLE` | 见示例 | 语气与表达风格 |
+| `ORG_NAME` | `北京陶乐科技有限公司` | 机器人所属组织名，注入系统提示的组织身份段 |
+| `BOT_ADMIN_NAME` | `Joony` | 开发者 / 管理员称呼，员工遇到问题时被引导联系此人 |
 
 `LLM_ADMIN_*` 与 `LLM_PROACTIVE_*` 使用与 `LLM_*` 相同的后缀。任一角色的 `BASE_URL` / `API_KEY` / `MODEL` 缺失时回退默认角色，默认角色不可用时回退 `LLM_PROACTIVE_*`，启动日志会写出回退原因。供应商方言影响请求格式：DeepSeek 发送 `thinking` 与 `reasoning_effort`，Kimi 省略 `temperature` 并使用 `max_completion_tokens`，GLM-5.3 系列强制思考、只能通过 `reasoning_effort` 调节强度（`off` 会降级为 `low`），工具循环会把 `reasoning_content` 原样回传。
 
@@ -181,7 +187,7 @@ pnpm run db:seed      # 可选：预写入默认人设与模型配置，已有�
 | --- | --- | --- |
 | `WEB_SEARCH_ENABLED` | `true` | 是否向模型暴露 `web_search`；控制台「钉钉企业配置」可运行期开关并持久化 |
 | `WEB_SEARCH_BASE_URL` | 沿用智谱地址 | 智谱 Web Search API 地址；大模型不是智谱时默认 `https://open.bigmodel.cn/api/paas/v4` |
-| `WEB_SEARCH_API_KEY` | 沿用 `LLM_API_KEY` | 仅当 Base URL 指向智谱时复用模型密钥，避免把别家 Key 发到智谱 |
+| `WEB_SEARCH_API_KEY` | 见下方回退链 | 默认按 `GLM_API_KEY` → `LLM_PROACTIVE_API_KEY` 回退；仅当 Base URL 指向智谱时才复用 `LLM_API_KEY`，避免把别家 Key 发到智谱 |
 | `WEB_SEARCH_ENGINE` | `search_pro` | `search_std` / `search_pro` / `search_pro_sogou` / `search_pro_quark` |
 | `WEB_SEARCH_COUNT` | `5` | 单次返回条数 1–50；搜狗引擎仅支持 10/20/30/40/50，会自动向上取整 |
 | `WEB_SEARCH_CONTENT_SIZE` | `medium` | 摘要长度，`medium` 或 `high` |
@@ -304,7 +310,7 @@ pnpm run db:seed      # 可选：预写入默认人设与模型配置，已有�
 
 | 变量 | 默认值 | 说明 |
 | --- | --- | --- |
-| `TOOL_CONFIRMATION_ENABLED` | `true` | 是否要求非 DWS 写操作与 DWS 高危操作先经 `/confirm` 确认；DWS 普通写操作在本人授权后直接执行 |
+| `TOOL_CONFIRMATION_ENABLED` | `true` | 是否要求非 DWS 写操作与 DWS 高危操作先经「确认」确认；DWS 普通写操作在本人授权后直接执行 |
 | `TOOL_CONFIRMATION_TTL_SECONDS` | `300` | 待确认动作的有效期（秒） |
 | `TOOL_EXECUTION_ALLOWLIST` | 空 | 只允许执行的工具名单（逗号分隔，支持结尾 `*`）；留空不限制 |
 | `TOOL_EXECUTION_DENYLIST` | 空 | 禁止执行的工具名单，优先级高于 allow；确认路径同样拦截 |
@@ -493,17 +499,18 @@ sudo cp deploy/nginx.conf /etc/nginx/conf.d/ && sudo nginx -t && sudo systemctl 
 ### 写操作确认与引用来源
 
 - 非 DWS 写操作工具（MCP 中声明为 `write` / `destructive`，或按工具名推断）不会直接执行：机器人先登记一次待确认动作，把参数与风险等级展示出来，并结束本轮回答。
-- DWS 是例外：本人授权有效时，创建/修改日程、待办、审批、文档（追加）、通讯录与提交日志等普通写操作直接执行；取消日程、覆盖文档等高危操作仍进入 `/confirm`。
-- 用户回复 `/confirm` 才真正执行，回复 `/cancel` 丢弃；确认请求 5 分钟（`TOOL_CONFIRMATION_TTL_SECONDS`）内有效，同一会话新请求会覆盖旧请求。
+- DWS 是例外：本人授权有效时，创建/修改日程、待办、审批、文档（追加）、通讯录与提交日志等普通写操作直接执行；取消日程、覆盖文档等高危操作仍进入确认闸门。
+- 用户回复「确认」（或 `/confirm`）才真正执行，回复「取消」（或 `/cancel`）丢弃；确认请求 5 分钟（`TOOL_CONFIRMATION_TTL_SECONDS`）内有效，同一会话新请求会覆盖旧请求。
 - 待确认动作只允许发起人或管理员确认；确认时执行的是登记时缓存的参数，不会让模型重新生成一遍调用。
-- 待确认动作持久化在 `pending_actions` 表，进程重启后未过期的请求仍可继续 `/confirm`。
+- 待确认动作持久化在 `pending_actions` 表，进程重启后未过期的请求仍可继续确认。
 - 设置 `TOOL_CONFIRMATION_ENABLED=false` 可关闭闸门，所有工具直接执行（DWS 高危操作也不再询问，请谨慎）。
-- 执行层另有一道全局白名单：`TOOL_EXECUTION_ALLOWLIST` / `TOOL_EXECUTION_DENYLIST` 在工具提供方外层统一过滤，主代理、静默调查、Worker 与子代理都看不到被禁工具；`/confirm` 执行前会再次校验，避免策略变更后旧待确认动作绕过限制。
+- 执行层另有一道全局白名单：`TOOL_EXECUTION_ALLOWLIST` / `TOOL_EXECUTION_DENYLIST` 在工具提供方外层统一过滤，主代理、静默调查、Worker 与子代理都看不到被禁工具；确认执行前会再次校验，避免策略变更后旧待确认动作绕过限制。
+- **确认提示只能由系统生成**：确认文案由 `ToolApprovalGate` 在真实登记待确认动作后输出。模型若不调用任何工具就自己编造「操作需要确认…」文本，会被 Harness 真实性拦截拦下（见「动态推理预算」），历史里的此类文本在回放时也会被替换为系统记录，避免模型照着模仿。
 - 工具输出中的 URL 会自动提取为「参考来源」：去重、保留前若干个，并随 `citation` 事件推送到卡片引用区与轨迹。
 
 ### 对话内命令
 
-在单聊或群里 @ 机器人发送以下命令（支持全角 `／`），不会触发模型推理：
+在单聊或群里 @ 机器人发送以下命令（支持全角 `／`），不会触发模型推理。**授权与写操作确认另有中文口令**，员工不必记斜杠命令，见下方「中文口令」。
 
 | 命令 | 作用 |
 | --- | --- |
@@ -520,15 +527,15 @@ sudo cp deploy/nginx.conf /etc/nginx/conf.d/ && sudo nginx -t && sudo systemctl 
 | `/dws-system` | 查看系统级 DWS 授权状态（仅管理员，仅用于旁听等基础设施） |
 | `/dws-system-login` | 发起系统级 DWS 设备授权（仅管理员） |
 | `/mute`、`/unmute` | 群内静音 / 恢复主动回复（仅管理员、仅群聊） |
-| `/group [show\|purpose\|responsibility\|goal\|task\|note\|memory\|digest\|report] ...` | 群内维护本群定位、职责、目标、任务与群记忆，查看进度摘要或设置定期播报（仅群聊；播报创建需管理员） |
+| `/group [show\|purpose\|responsibility\|goal\|task\|note\|memory\|my-memory\|digest\|report] ...` | 群内维护本群定位、职责、目标、任务、群记忆与本人在本群的专属记忆，查看进度摘要或设置定期播报（仅群聊；播报创建需管理员） |
 | `/pref [show\|length\|lang\|address\|extra\|on\|off\|reset]` | 单聊内查看 / 设置回答长度、语言、称呼与补充要求 |
 | `/privacy [show\|groups\|allow\|deny\|clear]` | 单聊内设置个人记忆在群聊中的使用档位与生效群白名单 |
 | `/memory [list\|search\|add\|share\|private\|forget] ...` | 单聊内查看、检索、添加或删除个人记忆，并控制单条记忆能否在群聊召回 |
 | `/feedback <内容>` | 对最近一次回答提交反馈，写入 `user_feedback` |
 | `/confirm` | 执行本会话待确认的写操作（仅发起人或管理员） |
 | `/cancel` | 取消本会话待确认的写操作 |
-| `/remind <时间> <内容>` | 单聊内创建一次性提醒，到点用机器人单聊推送；`/remind list`、`/remind cancel <ID>` |
-| `/report <周期> <时间>` | 单聊内订阅日 / 周 / 月工作简报；`/report list`、`/report preview [weekly\|monthly]`、`/report cancel <ID>` |
+| `/remind <时间> <内容>` | 单聊内创建提醒或定时 AI 任务，支持一次性与每天 / 工作日 / 每周 / 每月周期；`/remind list`、`/remind cancel <ID>` |
+| `/report <周期> <时间>` | 单聊内订阅日 / 周 / 月工作简报；`/report list`、`/report preview [weekly\|monthly]`、`/report cancel <ID>`（`/reports` 是等价别名） |
 | `/job <需求>` | 提交后台任务，完成后机器人单聊通知结果；任务持久化到 `agent_jobs`，进程重启不丢 |
 | `/worker <research\|ops\|report> <需求>` | 交给指定 Worker 执行：独立工具白名单、预算与结构化回执 |
 | `/task new <需求>` | 创建任务线程并提交后台任务，自动关联来源消息、会话与作业 |
@@ -540,6 +547,23 @@ sudo cp deploy/nginx.conf /etc/nginx/conf.d/ && sudo nginx -t && sudo systemctl 
 | `/job-status <ID>` | 查看后台任务状态、耗时与结果摘要（ID 支持前缀） |
 | `/job-cancel <ID>` | 取消排队或执行中的后台任务（仅发起人或管理员） |
 | `/job-resume <ID> [补充要求]` | 恢复被看门狗暂停的任务，可追加一句约束后重新排队（仅发起人或管理员） |
+
+**中文口令**：授权与确认这类高频操作可以直接发中文，与对应斜杠命令完全等价（首尾的引号、句号、感叹号会被忽略）。机器人所有面向员工的提示文案也统一使用中文口令。
+
+| 中文口令 | 等价命令 |
+| --- | --- |
+| 确认 / 确认执行 / 同意执行 | `/confirm` |
+| 取消 / 取消执行 / 取消操作 / 放弃 | `/cancel` |
+| 授权 / 开始授权 / 重新授权 / 钉钉授权 / 登录授权 | `/dws-login` |
+| 授权状态 / 查看授权 | `/dws-status` |
+| 授权范围 / 授权说明 | `/dws-consent` |
+| 同意授权 | `/dws-consent agree` |
+| 允许写操作 / 开启写权限 / 允许写入 | `/dws-consent write` |
+| 改回只读 / 仅只读 / 关闭写权限 | `/dws-consent read` |
+| 撤销授权 | `/dws-consent revoke` |
+| 退出授权 / 清除授权 | `/dws-logout` |
+| 系统授权状态 | `/dws-system`（管理员） |
+| 系统重新授权 | `/dws-system-login`（管理员） |
 
 同一会话（单聊或群聊）严格按到达顺序串行处理：群里多人先后 @ 机器人时，先 @ 的问题先回答完整，后来的问题进入队列等待，不会为了回答下一条而中断未完成的任务。只有 `/stop`（或进程退出）会中止当前回答，并同时清空该会话排队中的问题；排队中的卡片会显示前面还有几条问题。后台任务不占用该会话队列，由独立 JobRunner 按配额领取执行。
 
@@ -567,7 +591,7 @@ sudo cp deploy/nginx.conf /etc/nginx/conf.d/ && sudo nginx -t && sudo systemctl 
 | Worker | 工具范围 | 默认预算（墙钟 / Token / 轮数） |
 | --- | --- | --- |
 | `research` | 只读工具；排除管理工具、破坏性工具与递归委派 | 600s / 100k / 20 |
-| `ops` | 业务工具（破坏性工具除外），非 DWS 写操作与 DWS 高危操作仍需 `/confirm` | 900s / 160k / 30 |
+| `ops` | 业务工具（破坏性工具除外），非 DWS 写操作与 DWS 高危操作仍需回复「确认」 | 900s / 160k / 30 |
 | `report` | 默认只读，只汇总数据源并生成报告 | 900s / 120k / 25 |
 
 - 工具过滤在执行层完成：`ScopedToolProvider` 只向 Worker 暴露白名单内工具，模型即使被提示词诱导也看不到写工具或管理工具；`research` 始终只读，无法通过配置放开。
@@ -613,11 +637,15 @@ ReAct 循环内置看门狗（`src/watchdog/RunWatchdog.ts`），只观察不执
 
 这两个能力只在**单聊**中开放，避免把个人事务和工作数据发到群里；群里发送会直接提示改用单聊。
 
-**一次性提醒**（`/remind`）
+**个人提醒与定时 AI 任务**（`/remind`）
 
-- 时间支持相对量与绝对量：`25分钟后`、`2小时后`、`3天后`、`今天18:30`、`明天9点`、`2026-11-01 09:00`、`11月1日 9点`；只写时刻且已过则顺延到明天。
-- 提醒至少要在 30 秒之后、一年之内；到点后由机器人以单聊文本推送 `⏰ 提醒：<内容>`，任务随即自动停用，不会重复触发。
+- 时间支持相对量与绝对量：`半小时后`、`25分钟后`、`2小时后`、`3天后`、`1周后`、`今天18:30`、`明天9点`、`后天下午3点`、`2026-11-01 09:00`、`11月1日 9点`；只写时刻且已过则顺延到明天，只写月日且已过则顺延到明年。
+- 也支持周期时间：`每天16:05`、`工作日上午9:30`（等价 `周一至周五`）、`每周一 09:00`、`每月1日 09:00`（日期限制 1–28）；周期任务落库为 cron，按 Asia/Shanghai 解释。
+- 两种模式：`reminder` 到点发送固定提醒文本；`prompt` 到点由机器人自动执行一条 AI 指令（可联网搜索、调用工具），把生成结果直接发给用户，无需用户再回复触发。内容里出现「检索 / 汇总 / 整理…新闻 / 资讯 / 简报 / 天气 / 行情」这类意图时自动判定为 `prompt`；模型工具可显式指定 `mode`。
+- 一次性任务至少要在 30 秒之后、一年之内；到点推送后任务自动停用，不会重复触发。
 - 每人同时最多保留 12 个个人定时任务；`/remind list` 只列出自己的任务，ID 支持前缀匹配取消。
+- 改期与去重：`/remind` 本身没有 update 子命令，但相同周期 + 相同标题再次创建会**直接更新原任务**而不是堆积重复项；模型工具 `personal_reminder_manage` 支持 `action=update` 并传 `id`（8 位前缀即可）精确改期改内容。工具回执同时返回 UTC 时间与 `nextRunLocal` 本地时间，避免模型把时区读错。
+- 群里的定时需求走另一套：`group_schedule_manage` 创建**群**定时提醒 / 群定时 AI 任务，到点发到本群而不是私发个人，每群最多 8 个，只有创建人或管理员可取消。
 
 **定时工作简报**（`/report`）
 
@@ -627,15 +655,18 @@ ReAct 循环内置看门狗（`src/watchdog/RunWatchdog.ts`），只观察不执
 - 每人最多订阅 4 份周期报告；任意 DWS 查询失败不会中断报告，失败原因会列在报告末尾的「数据提示」中，并提示可在单聊直接问授权状态。
 - 报告与提醒按创建者的 DWS 身份查询和推送；创建者首次在单聊提问时机器人会自动发起授权，不会借用管理员账号。
 
-单聊里也可以直接用自然语言让模型设置，例如「25 分钟后提醒我开会」「每周一 9 点给我发工作周报」；群聊中对应的工具不会挂载。创建只影响本人的提醒与订阅，因此不经过 `/confirm` 写操作闸门。
+单聊里也可以直接用自然语言让模型设置，例如「25 分钟后提醒我开会」「每天下午 4 点检索一份 AI 新闻简报发我」「每周一 9 点给我发工作周报」；群聊中个人工具不会挂载，改用 `group_schedule_manage` 创建群任务。创建只影响本人的提醒与订阅，因此不经过写操作确认闸门。
 
 ### 定时任务与主动播报
 
 管理端可以创建定时任务，在指定单聊或群聊中按固定间隔或 cron 主动发起一轮回答，例如每天 9 点汇总昨日错误日志、每小时巡检一次线上状态。
 
 - 调度支持 `intervalSeconds`（最小 30 秒）或 5 段 cron（按 Asia/Shanghai 解释，支持 `*`、`*/n`、区间、列表，周日可写 `0` 或 `7`），二者只能选其一。
-- 任务分三类 `kind`：`prompt`（管理端创建的主动播报，默认）、`reminder`（一次性个人提醒，触发后自动停用）、`daily_report` / `weekly_report` / `monthly_report`（个人定时报告）。后两类由单聊的 `/remind`、`/report` 或模型工具创建，投递走管理员文本通道（1200 字分片），不经过模型。
+- `scheduled_tasks.kind` 共六类：`prompt`（主动播报 / 定时 AI 任务）、`reminder`（一次性提醒，触发后自动停用）、`daily_report` / `weekly_report` / `monthly_report`（个人定时报告）、`group_report`（群目标进度播报）。个人任务由单聊 `/remind`、`/report` 或模型工具创建，群任务由群内工具创建，管理端只创建 `prompt`。
+- **投递隔离**：个人任务（`conversationType=1`）只投递给创建者本人，创建人 staffId 无效（外部加密 ID、`cid` 开头的群 ID、`scheduler` / `admin-api` 等）时直接报错而不是误发到群；群任务（`conversationType=2`）只投递到该群，反向越界同样报错。
+- **两条投递通道**：`reminder` 与个人报告是确定性文本，走机器人单聊文本通道（按 1200 字分片），不经过模型；`group_report` 与群提醒把同一份确定性文本写入群内 AI 卡片；`prompt` 类型走完整 ReAct 链路。
 - `prompt` 类型到点后以「定时任务」身份走完整的 ReAct 链路：卡片流式输出、工具调用、记忆与用量记账与正常问答一致。
+- **审计可归属**：定时任务、群播报、后台任务、卡片回调与管理端测试卡片产生的轨迹，员工列显示为 `定时任务（张三）` 这样的「触发类型（关联员工）」格式；员工名依次从任务 `creatorNick`、身份表、白名单与 DWS 记录解析，解析不到就只显示触发类型，不会写进身份表污染真实员工昵称。
 - 单次失败不会阻塞其他任务，也不会在原定时间反复重试；失败原因写入日志，下一次仍按计划触发。
 - 支持「立即执行」用于验证配置，执行后同样推进下一次触发时间。
 
@@ -650,7 +681,7 @@ ReAct 循环内置看门狗（`src/watchdog/RunWatchdog.ts`），只观察不执
 **入站来源**：钉钉机器人回调只推送 @ 机器人的群消息，非 @ 消息不会到达 Stream，因此旁听额外接一路 DWS 个人事件长连接：
 
 - 启动时以 `dws event consume user_im_message_receive_group_all --flatten --ephemeral --format ndjson` 拉取当前账号收到的群消息，进程异常退出后按退避重连。
-- 需要使用**系统级** DWS 登录态（管理员 `/dws-system-login`，默认读取本机 `~/.dws`），且该登录账号必须本身就在目标群里；这是平台限制下唯一能拿到非 @ 消息的途径。员工个人身份不参与旁听。
+- 需要使用**系统级** DWS 登录态（管理员发送「系统重新授权」，默认读取本机 `~/.dws`），且该登录账号必须本身就在目标群里；这是平台限制下唯一能拿到非 @ 消息的途径。员工个人身份不参与旁听。
 - 只旁听**显式开启**的群：`BYSTANDER_LISTEN_GROUPS` 指定的 `openConversationId`，加上控制台里 `bystander_policies` 中 `bystanderEnabled=true` 的群，白名单每分钟重新加载一次。
 - 收到消息后先等待 `BYSTANDER_LISTEN_SETTLE_SECONDS`，让 Stream 先处理 @ 消息；同一条 `messageId` 已被 Stream 处理则跳过，避免双重回复。
 - 富文本/卡片 JSON 与图片等非文本消息直接丢弃；机器人自己的发言通过 `BYSTANDER_LISTEN_IGNORE_SENDERS`（默认补充人设名）过滤，防止自问自答。
@@ -709,6 +740,17 @@ ReAct 循环内置看门狗（`src/watchdog/RunWatchdog.ts`），只观察不执
 - 人设按「系统默认 → 群设定 → 个人设定」逐层覆盖：群设定描述该群负责什么、不负责什么；个人设定在单聊中可整体覆盖，在群聊中只调整说话风格，不改变群职责。安全与权限边界固定写入系统提示，不会被任何人设覆盖。
 - 员工个人偏好（`person_preferences`）只影响单聊表达：回答长度、回答语言、称呼与额外要求可在单聊用 `/pref` 调整，也可在控制台「人设与身份」页维护；群聊不注入个人偏好，避免个人设定影响群职责。
 - 跨群记忆授权（`person_memory_consents`）决定个人语义记忆能否在群聊召回：`off` 完全不用，`shareable`（默认）只用显式标记可共享的条目，`all` 使用全部非敏感记忆；可再配置生效群白名单。员工可在单聊用 `/privacy` 调整，管理员可在控制台修改。标记为敏感的记忆在任何档位下都不会进入群聊上下文。
+- 身份表只收录真实员工昵称：定时任务、群定时播报、后台任务、卡片用户、管理员、管理控制台、静默调查、系统任务这些触发类型不会被当成员工名写入；`定时任务（张三）` 这类复合昵称入库前会剥出括号里的真实姓名。
+
+### 组织身份与内部视角
+
+机器人被明确告知自己部署在哪个组织、面对的是内部同事，这段说明固定写入系统提示，不被人设覆盖：
+
+- `ORG_NAME`（默认 `北京陶乐科技有限公司`）与 `BOT_ADMIN_NAME`（默认 `Joony`）决定组织名与管理员称呼；迁移到其他组织时改这两个变量即可。
+- 员工问「我们公司怎么样」「公司这条业务线」时，机器人以本公司一员与内部同事视角回答：业务基本盘与产品定位、核心价值链与跨岗位协同、已沉淀的运营 / 产研 / 合规机制、当前需要协同攻坚的痛点，以及对同事日常工作的实际指引（去哪查、找谁对接、注意哪些口径）。
+- 严禁外部求职尽调（值不值得去、加班待遇）、外部商务合作评估、外部投资尽调或第三方旁观分析师口吻；引用公司介绍里的静态规模数据时会说明是基线口径而非实时经营报表。
+- 遇到回答有误、权限不足、工具失败、授权失效、知识库过期等问题，机器人在做完自己能做的处理后，会引导员工联系管理员并说明需要反馈的现象、时间与所在会话；不会冒充管理员，也不替管理员承诺修复时间。
+- 外部通用问题照常回答，不强加公司视角。配套的 `enterprise-lens` 技能进一步规定取证顺序与回答框架。
 
 ### 群工作区与按群模型路由
 
@@ -716,8 +758,10 @@ ReAct 循环内置看门狗（`src/watchdog/RunWatchdog.ts`），只观察不执
 
 - `group_workspaces` 保存群定位与职责，`group_goals` 保存群目标（含 0–100 进度、负责人与截止时间），`group_tasks` 保存群任务并可关联到某个群目标（`goal_id`）；这些数据彼此隔离，不会跨群注入。
 - 每次群聊组装提示时会追加一段「本群工作区」简报：群定位、职责、进行中 / 已暂停的目标（含进度与关联任务完成数）、未完成任务与最多 5 条长期群记忆，超长时截断，未配置时完全不注入。
-- 群成员可在群里发送 `/group purpose ...`、`/group responsibility add|remove ...`、`/group goal add|list|progress|owner|due|done|pause|resume|archive ...`、`/group task add|list|assign|due|link|unlink|start|done|cancel ...`、`/group note ...`、`/group memory list|search|forget ...`、`/group digest`；机器人也能调用 `group_workspace_view`、`group_goal_create`、`group_goal_update`、`group_task_create`、`group_task_update`、`group_memory_save`、`group_memory_list`、`group_memory_forget`、`group_digest` 等群内工具。目标与任务的后续修改（状态、进度、标题、负责人、截止时间、关联目标）仅限创建人或管理员，群记忆删除仅限管理员，群内指令与工具遵循同一规则。
-- `/group digest` 直接生成确定性的进度摘要（目标进度、逾期任务、3 天内到期、进行中任务），不经过模型；`/group report daily 09:00`、`weekly 周一 09:00`、`monthly 1 09:00` 可把同一份摘要按 cron 定时推送到群聊（`scheduled_tasks.kind = group_report`，管理员创建，每群最多 4 个）。
+- 群成员可在群里发送 `/group purpose ...`、`/group responsibility add|remove ...`、`/group goal add|list|progress|owner|due|done|pause|resume|archive ...`、`/group task add|list|assign|due|link|unlink|start|done|cancel ...`、`/group note ...`、`/group memory list|search|forget ...`、`/group my-memory list|search|add|forget ...`、`/group digest`；机器人也能调用 `group_workspace_view`、`group_goal_create`、`group_goal_update`、`group_task_create`、`group_task_update`、`group_memory_save`、`group_memory_list`、`group_memory_forget`、`group_member_memory_save`、`group_member_memory_list`、`group_member_memory_forget`、`group_digest` 等群内工具。目标与任务的后续修改（状态、进度、标题、负责人、截止时间、关联目标）仅限创建人或管理员，群记忆删除仅限管理员，群内指令与工具遵循同一规则。
+- **群内成员专属记忆**：`/group my-memory`（等价 `member-memory`）维护「你在这个群里的角色、分工与偏好」，作用域为 `group_member`，主体键是 `<群会话ID>::<personKey>`，按群与成员双重隔离——不会出现在其他群、也不会被同群其他人召回。与全群共享的 `/group memory` 是两个独立入口，成员本人即可增删自己的条目。
+- **群定时任务**：`group_schedule_list` 查看本群待触发的提醒与定时 AI 任务，`group_schedule_manage` 创建或取消（`mode=reminder` 到点发群提醒文本，`mode=prompt` 到点由 AI 执行指令并把结果发到本群），每群最多 8 个，只有创建人或管理员可取消；到点只投递到本群，不会私发给个人。
+- `/group digest` 直接生成确定性的进度摘要（目标进度、逾期任务、3 天内到期、进行中任务），不经过模型；`/group report daily 09:00`、`weekly 周一 09:00`、`monthly 1 09:00` 可把同一份摘要按 cron 定时推送到群聊（`scheduled_tasks.kind = group_report`，管理员创建，每群最多 4 个），对应工具为 `group_report_schedule`、`group_report_list`、`group_report_cancel`。
 - 控制台「群工作区」页可以维护群定位、职责、目标（含进度）与任务（含关联目标），与群内指令读写同一份数据。
 - 按群模型路由（`group_model_routes`）让同一机器人在不同群使用不同供应商或模型，只对群聊生效（含该群的主动回复），单聊仍走默认角色模型。未填写的供应商、Base URL、温度、思维链与最大 Token 沿用默认模型档案；API Key 只保存环境变量名（例如 `GROUP_A_MODEL_KEY`），密钥仍留在部署环境，控制台只显示是否已配置。本实例保存后立即生效，跨实例最多 60 秒生效；若填了变量名但部署环境未提供对应密钥，该群自动回退默认引擎并记录告警，不会让群聊中断。
 
@@ -731,11 +775,19 @@ ReAct 循环内置看门狗（`src/watchdog/RunWatchdog.ts`），只观察不执
 
 语义记忆在上下文组装时召回少量长期知识，避免把整段历史塞进提示词。配置 embedding 后按 pgvector 余弦距离检索，否则回退关键词匹配；embedding 服务异常时同样降级，不会阻塞回答。
 
-语义记忆分为 `global` / `group` / `user` 三种作用域，并带来源、置信度、敏感级别、状态和过期时间：
+语义记忆分为 `global` / `group` / `group_member` / `user` 四种作用域，并带来源、置信度、敏感级别、状态和过期时间：
+
+| 作用域 | 归属 | 召回范围 |
+| --- | --- | --- |
+| `global` | 全组织 | 所有会话 |
+| `group` | 某个群 | 只在该群，全群成员共享 |
+| `group_member` | 某个群里的某个人 | 只在该群、只对该成员，键为 `<群会话ID>::<personKey>` |
+| `user` | 某个员工 | 默认只在该员工单聊；群内需按授权档位放行 |
 
 - 用户级记忆默认只在单聊召回；要在该员工所在的群里使用，需要把授权档位设为 `shareable`（默认，只召回显式可共享条目）或 `all`（全部非敏感记忆），并可用群白名单限定生效范围。敏感级记忆在任何档位下都不会进入群聊。员工可在单聊用 `/privacy` 调整，管理员可在控制台「人设与身份」页修改。
 - 员工可在单聊用 `/memory` 查看和检索自己的个人记忆，用 `/memory add [--share] <内容>` 手动补充，用 `/memory share|private <ID>` 控制单条记忆能否在群聊召回，用 `/memory forget <ID>` 删除；群聊一律拒绝个人记忆操作。机器人也可在单聊调用 `personal_memory_list`、`personal_memory_save`、`personal_memory_set_sharing`、`personal_memory_forget` 工具。
-- 群级记忆只在对应群召回，不会跨群泄露；全局记忆对所有会话可见。
+- 群级记忆只在对应群召回，不会跨群泄露；群内成员记忆再按成员二次隔离，同群同事之间互不可见；全局记忆对所有会话可见。
+- 后台抽取器按会话类型判定作用域：群聊里「某人在本群的角色/分工/偏好」落 `group_member`，「本群团队术语与约定」落 `group`，「跨群通用职责」落 `user`；单聊没有群上下文，抽取器误标为 `group` / `group_member` 的事实会归回该员工的 `user` 记忆。
 - 已停用（`retired`）或已过期的记忆不参与召回；修改记忆正文会清空 embedding，等待重新沉淀。
 - 控制台「记忆治理」页可按作用域、类型、状态、归属与关键词筛选，调整共享范围、敏感级别、置信度、状态与过期时间，所有写操作都落审计。
 
@@ -766,7 +818,7 @@ ReAct 循环内置看门狗（`src/watchdog/RunWatchdog.ts`），只观察不执
 技能是一段受控的操作步骤，用来教机器人"这类任务应该怎么做"，而不是把新的可执行代码带进进程。
 
 - **渐进披露**：系统提示只注入技能目录（名称、描述、适用场景，受 `SKILL_CATALOG_LIMIT` 限制）；模型命中任务后调用 `use_skill` 加载正文，需要细节时再用 `skill_read` 分页读取技能目录内的参考文件。单次正文最多 4000 字符，参考文件单次最多 500 行 / 4000 字符，单文件上限 1MB。
-- **来源**：`SKILLS_BUILTIN_DIR`（默认 `skills/builtin`）随仓库发布，`SKILLS_LOCAL_DIR`（默认 `skills/local`）用于团队自建。内置技能分两类：代码与项目类 `code-reading`、`repo-review`、`incident-triage`、`project-onboarding`、`github-project-scan`、`handbook-maintainer`；办公与通用类 `everyday-chat`、`link-reader`、`data-analysis`、`data-insight`、`work-report`、`meeting-notes`、`project-docs`、`office-docs`、`presentation-brief`、`dingtalk-office`、`research-brief`、`skill-author`、`plugin-author`。
+- **来源**：`SKILLS_BUILTIN_DIR`（默认 `skills/builtin`）随仓库发布，`SKILLS_LOCAL_DIR`（默认 `skills/local`）用于团队自建。内置技能共 20 个，分两类：代码与项目类 `code-reading`、`repo-review`、`incident-triage`、`project-onboarding`、`github-project-scan`、`handbook-maintainer`；办公与通用类 `everyday-chat`、`link-reader`、`data-analysis`、`data-insight`、`work-report`、`meeting-notes`、`project-docs`、`office-docs`、`presentation-brief`、`dingtalk-office`、`research-brief`、`enterprise-lens`、`skill-author`、`plugin-author`。其中 `enterprise-lens` 规定回答公司内部业务与组织问题时的内部同事视角与取证顺序（术语 → 项目手册与钉钉知识库 → MCP/DWS 实时数据），禁止外部求职 / 商务 / 投资尽调口吻。
 - **格式**：每个技能是一个目录，`SKILL.md` 以 YAML frontmatter 开头，字段包括 `name`、`description`、`version`、`when_to_use`、`tags`、`allowed_tools`、`risk`、`visibility` 与 `max_instruction_chars`；正文按「适用场景 / 步骤 / 约束」组织，可附带 `references/` 等资源文件。
 - **管理**：控制台「技能 Skills」可查看目录预览、校验草稿、启用 / 停用、在线编辑 `SKILL.md` 与资源文件，并查看近 7 天调用次数。保存后立即热更新，无需重启。
 - **边界**：技能正文只来自管理员维护的本地目录；聊天内容、工具返回、仓库文件都不会被当作指令注入。`EXTENSIONS_SKILLS_ENABLED=false` 可整体关闭。
@@ -796,7 +848,7 @@ ReAct 循环内置看门狗（`src/watchdog/RunWatchdog.ts`），只观察不执
 - **项目手册**：按固定 12 章生成草稿——项目概览、架构设计、模块地图、数据模型、配置与密钥、构建与部署、运维与故障、编码约定、测试与验收、历史决策、常见问题、风险与边界。草稿可以预览、重新生成和发布；发布后才进入模型上下文，并递增 `handbookVersion`。手册内容只汇总变量名、脚本路径与命令，不展开密钥值或部署脚本正文；本地仓库绝对路径、服务器地址、主机名与端口不会进入手册或项目简报。若来源是 GitHub，或在 `package.json` 中配置了 GitHub `repository`，概览会展示公开项目地址，并邀请读者到 GitHub 点 Star。
 - **章节编辑与状态**：控制台可基于最新草稿（没有草稿时基于最新发布版）逐章修改标题与 Markdown，保存会生成新草稿而不改动已发布版本；审核后再发布。`GET /projects/:id/status` 汇总索引文件数 / 分块数 / 已向量化分块数、最近同步任务与错误、发布与草稿版本、是否过期；控制台会如实展示这些状态与降级原因。
 - **人工条目**：管理员可在任意章节新增、编辑、删除人工条目，设置可见性、敏感级别、是否注入项目简报与优先级。人工条目优先于自动生成内容，重新生成不会覆盖管理员编辑。
-- **种子目录**：启动时读取 `PROJECT_SEED_DIR`（默认 `projects`）下的 `<projectId>/project.json` 与 `manual/*.md`。项目不存在才创建，配置更新不会覆盖已有记录；种子人工条目只更新由 `seed:projects/manual` 自己写入的版本，管理员改过的条目会被跳过。
+- **种子目录**：启动时读取 `PROJECT_SEED_DIR`（默认 `projects`）下的 `<projectId>/project.json` 与 `manual/*.md`。项目不存在才创建，配置更新不会覆盖已有记录；种子人工条目只更新由 `seed:projects/manual` 自己写入的版本，管理员改过的条目会被跳过。仓库自带两个种子：`anthys`（`local` 来源、指向本仓库、默认项目、每 30 分钟自动同步，用于代码理解与 golden set 评测）与 `company`（`manual` 来源的公司业务手册，只维护人工条目、不扫描代码，沉淀产品线、核心角色与术语、运营政策与知识库地图）。
 - `EXTENSIONS_PROJECTS_ENABLED=false` 可整体关闭；`EXTENSIONS_DEFAULT_PROJECT_ID` 指定问题未点名项目时的默认项目。
 
 #### GitHub 只读工具
@@ -832,11 +884,18 @@ ReAct 循环内置看门狗（`src/watchdog/RunWatchdog.ts`），只观察不执
 | 项目 | `project_list` / `project_map` / `project_search` / `project_read` / `project_symbol` / `project_history` 读取已登记项目快照，`project_handbook` 读取已发布手册 |
 | GitHub（只读） | `github_repo` / `github_tree` / `github_file` / `github_search` / `github_pr`，按白名单 HTTPS 访问并缓存 |
 | 企业 MCP | 通过 MCP 协议接入代码、数据、日志、接口文档等外部服务，可增删改查与热重载 |
-| 钉钉 DWS | 查询文档、知识库、日历、待办、通讯录、审批、日志、听记与 AI 表格；本人授权后普通写操作（建日程、建待办、改通讯录、发审批、写文档、提交日志）直接执行，取消日程 / 覆盖文档等仍经 `/confirm` |
+| 钉钉 DWS | 查询文档、知识库、日历、待办、通讯录、审批、日志、听记与 AI 表格；本人授权后普通写操作（建日程、建待办、改通讯录、发审批、写文档、提交日志）直接执行，取消日程 / 覆盖文档等仍需回复「确认」 |
 | 公网搜索 | `web_search` 调用智谱 Web Search API 检索公开网页，返回标题、链接、发布时间与摘要，并作为引用展示；相同查询短期缓存、单会话与进程级调用配额，单聊与群聊均可用，可在控制台关闭 |
 | 公网链接 | `web_fetch` 打开群聊或单聊中的公开网页链接，提取标题、描述与正文并生成引用；拒绝本机与内网地址，跟随跳转时重新校验，短时缓存与调用配额 |
 | 工作区文件 | `workspace_read_file` 读取消息附件或工作区内的文本文件（CSV/JSON/Markdown 等），带路径校验、二进制识别与字符截断 |
 | 隔离沙盒 | `sandbox_analyze_and_aggregate` 对工作区文件、消息附件或工具返回的大批量数据做脚本化统计与聚合，支持嵌套附件路径 |
+| 产物回传 | `deliver_artifact` 把工作区白名单目录内的文件上传为钉钉文件消息 |
+| 术语 | `glossary_lookup` 查询企业术语的规范说法、别名、示例与易误解点 |
+| 群工作区 | `group_workspace_view` / `group_goal_create` / `group_goal_update` / `group_task_create` / `group_task_update` / `group_digest` 维护本群定位、目标与任务；`group_memory_*` 管理全群共享记忆，`group_member_memory_*` 管理发言人在本群的专属记忆；`group_report_*` 管理群目标定期播报，`group_schedule_list` / `group_schedule_manage` 管理群定时提醒与群定时 AI 任务（均仅群聊） |
+| 个人事务 | `personal_reminder` / `personal_reminder_manage`（含 `action=update` 改期）、`personal_report` / `personal_report_manage` 管理本人提醒、定时 AI 任务与工作简报（均仅单聊） |
+| 个人记忆与偏好 | `personal_memory_list` / `personal_memory_save` / `personal_memory_set_sharing` / `personal_memory_forget` 管理个人记忆，`personal_preference_get` / `personal_preference_set` 调整表达偏好，`personal_memory_consent_get` / `personal_memory_consent_set` 调整跨群记忆授权（均仅单聊） |
+| 任务结果 | `task_result_search` 检索本会话已完成后台任务的精简结果，严格按会话隔离 |
+| 子代理 | `delegate_research` 派发只读子代理做专题检索，需 `SUBAGENT_ENABLED=true` |
 | 管理员工具 | 仅在管理员单聊中出现的管控指令，普通员工与群聊不可见 |
 
 #### 企业 MCP
@@ -883,7 +942,7 @@ ReAct 循环内置看门狗（`src/watchdog/RunWatchdog.ts`），只观察不执
 
 启用后，机器人可以通过本机的 `dws` 命令行查询并办理文档、知识库、日历、待办、通讯录、审批、日志、听记与 AI 表格等事务：
 
-| 域 | 只读命令 | 写命令（本人授权后普通写直接执行，高危需 `/confirm`） |
+| 域 | 只读命令 | 写命令（本人授权后普通写直接执行，高危需回复「确认」） |
 | --- | --- | --- |
 | 文档 / 知识库 | `search`、`read`、`list`、`get` | `create`、`update`（追加 / 覆盖） |
 | 日历 | `event list`、`+today`、`+search-event`、`busy search` | `event create`、`event update`、`event delete` |
@@ -913,25 +972,25 @@ ReAct 循环内置看门狗（`src/watchdog/RunWatchdog.ts`），只观察不执
 
 模型工具使用稳定的 action 名称（日历 `list` / `today` / `search` / `freebusy`，待办 `list` / `search` / `get` / `today`，日志 `templates` / `template` / `inbox` / `outbox` / `entry` / `stats` / `latest`），再映射到上表的真实 CLI 子命令，避免 `dws` 升级后提示词漂移；`dws_org_and_schedule` 只接受只读 action，写操作必须走对应的专用写工具。
 
-写工具统一声明 `write` / `destructive`。本人 DWS 授权有效时，`write` 类普通写操作直接执行；`destructive` 类（如取消日程）以及文档覆盖（`overwrite`）仍进入「写操作确认」闸门：机器人展示参数与风险，用户回复 `/confirm` 后才真正执行。执行时携带 `--yes`，避免 CLI 在无终端环境中等待交互确认。文档覆盖还会要求显式 `confirmOverwrite=true`；提交日志必须至少提供一个接收人，否则日志对任何人都不可见。AI 表格单次记录查询上限 100 条、分组统计上限 1000 条，超出时建议缩小过滤范围或改用沙盒分析。
+写工具统一声明 `write` / `destructive`。本人 DWS 授权有效时，`write` 类普通写操作直接执行；`destructive` 类（如取消日程）以及文档覆盖（`overwrite`）仍进入「写操作确认」闸门：机器人展示参数与风险，用户回复「确认」后才真正执行。执行时携带 `--yes`，避免 CLI 在无终端环境中等待交互确认。文档覆盖还会要求显式 `confirmOverwrite=true`；提交日志必须至少提供一个接收人，否则日志对任何人都不可见。AI 表格单次记录查询上限 100 条、分组统计上限 1000 条，超出时建议缩小过滤范围或改用沙盒分析。
 
 使用前需要在运行机器上安装 `dws` CLI。所有业务查询和写操作都使用**提问人本人**的 DWS 身份，不再借用管理员账号；调用时不拼接 shell，单次调用有 15 秒超时与输出长度上限。文档与知识库结果因此只覆盖该员工本人有权限查看的内容，不会返回全组织文档；找不到时也可能只是无权访问。
 
 #### 每员工独立 DWS 身份（同意 + 设备码授权 + 加密令牌）
 
 - **独立 home**：每个员工在 `DWS_PROFILE_ROOT`（默认 `.state/dws-profiles`）下有独立的 `0700` 目录，设置 `DWS_CONFIG_DIR`、`XDG_DATA_HOME`，配置、日志、待绑定状态互不干扰；令牌由钉钉 CLI 按 `corpId:userId` profile 存入本机 macOS Keychain，每个员工独立一条，其他员工无法复用。`DWS_DISABLE_KEYCHAIN=1` 的 file-DEK 模式首次授权会因 `dek missing` 无法落盘，因此不启用。
-- **自动授权、无需记命令**：员工提问时如果令牌缺失或过期，机器人会自动记录当前版本的只读同意并发起该员工本人的设备码登录。单聊直接把授权链接与授权码发在对话里；群聊只通过私聊发给提问人，群里不回传链接和授权码。用户只需打开链接完成授权。`/dws-consent`、`/dws-login` 仍保留，用于员工主动查看范围或手动重发。
-- **默认只读、写请求自动升级**：首次授权默认只读（日程、待办、审批、通讯录、文档/知识库、日志、听记与 AI 表格）。当员工在已授权状态下提出普通写操作时，机器人自动把写权限升级并直接执行，不再要求 `/dws-consent write`；首次写请求触发的授权会直接包含写范围。员工主动发送 `/dws-consent read` 后视为只读选择，写请求会被拒绝并提示重新授权，不会被自动升级。
+- **自动授权、无需记命令**：员工提问时如果令牌缺失或过期，机器人会自动记录当前版本的只读同意并发起该员工本人的设备码登录。单聊直接把授权链接与授权码发在对话里；群聊只通过私聊发给提问人，群里不回传链接和授权码。用户只需打开链接完成授权。「授权范围」「授权」（等价 `/dws-consent`、`/dws-login`）仍保留，用于员工主动查看范围或手动重发。
+- **默认只读、写请求自动升级**：首次授权默认只读（日程、待办、审批、通讯录、文档/知识库、日志、听记与 AI 表格）。当员工在已授权状态下提出普通写操作时，机器人自动把写权限升级并直接执行，不再要求先发「允许写操作」；首次写请求触发的授权会直接包含写范围。员工主动发送「改回只读」后视为只读选择，写请求会被拒绝并提示重新授权，不会被自动升级。
 - **身份校验**：登录完成后读取 `dws profile list`，只有 profile 的 `userId` 与当前钉钉 StaffId 一致才绑定；不一致会取消绑定并清空该员工的 home。配置 `DWS_CORP_ID` 时还会限定企业。
 - **授权完成自动续跑**：授权成功后自动通知原会话，并自动重跑刚才那条问题。等待授权期间机器人会主动轮询授权状态并原子抢锁恢复，无需用户重新提问或确认是否写入；任务持久化在 `dws_write_tasks` 表，进程重启后未过期的等待任务仍会继续。同一对话 2 分钟内不会重复推送授权链接。
-- **写操作分级**：普通写操作（建日程、建待办、发审批、追加文档、提交日志等）在授权有效时直接执行；取消日程、覆盖文档等高危操作仍要求 `/confirm`。
-- **撤销**：`/dws-logout` 清除本机登录态但保留同意记录；`/dws-consent revoke` 同时撤销同意并删除加密凭据目录。
-- **系统级身份**：旁听等基础设施仍需一个系统级 DWS 登录态，由管理员通过 `/dws-system` / `/dws-system-login` 管理；它不参与任何员工业务查询。
+- **写操作分级**：普通写操作（建日程、建待办、发审批、追加文档、提交日志等）在授权有效时直接执行；取消日程、覆盖文档等高危操作仍要求回复「确认」。
+- **撤销**：「退出授权」清除本机登录态但保留同意记录；「撤销授权」同时撤销同意并删除加密凭据目录，并取消该员工等待授权中的写任务。
+- **系统级身份**：旁听等基础设施仍需一个系统级 DWS 登录态，由管理员通过「系统授权状态」/「系统重新授权」管理；它不参与任何员工业务查询。
 
 **权限缺失时主动通知管理员：**
 
 - DWS 返回应用/接口级权限错误（如 `AccessTokenPermissionDenied`、`没有调用该接口的权限`）时，机器人会停止重复调用，并给 `ADMIN_STAFF_IDS` 中的管理员（不含提问人本人）发一条单聊通知。
-- 通知包含提问人、会话、命令、原始错误、需要开通的权限点，以及处理办法：开放平台权限管理开通、`dws dev app permission ...` 命令行开通、权限点需审批时创建版本 → 提审 → 发布生效、员工本人在单聊重新 `/dws-login` 刷新个人授权、或暂时在「钉钉企业配置」关闭 DWS 开关。
+- 通知包含提问人、会话、命令、原始错误、需要开通的权限点，以及处理办法：开放平台权限管理开通、`dws dev app permission ...` 命令行开通、权限点需审批时创建版本 → 提审 → 发布生效、员工本人在单聊发送「重新授权」刷新个人授权、或暂时在「钉钉企业配置」关闭 DWS 开关。
 - 同一会话同一操作 10 分钟内只通知一次，避免刷屏；文档/知识库的单篇文档无权访问不会升级为管理员通知。
 - 工具结果会附带指令，要求模型向提问人说明「缺少哪项权限、已通知管理员」，而不是编造操作成功。
 
@@ -940,7 +999,7 @@ ReAct 循环内置看门狗（`src/watchdog/RunWatchdog.ts`），只观察不执
 - 每次调用 DWS 前检查该员工自己的 `dws auth status`（按员工缓存 60 秒）；工具执行失败且报错涉及登录/令牌时立即强制复检。
 - 一旦确认令牌缺失或过期，立刻自动发起**该员工本人**的设备码授权：单聊直接推送可打开的链接与授权码（15 分钟内有效），群聊通过私聊发给提问人，群里只说明已私聊发送。本轮回答继续完成，不需要等待授权。
 - 未同意或未绑定的用户也一样：机器人自动记录只读同意并拉起登录，不会让用户去记或执行命令，也不会使用管理员令牌代替其查询。
-- 员工仍可随时发送 `/dws-status` 查看本人授权状态，或用 `/dws-consent`、`/dws-login` 主动管理授权；这些命令只是可选入口。
+- 员工仍可随时发送「授权状态」查看本人授权状态，或用「授权范围」「授权」主动管理授权；这些口令只是可选入口，对应的斜杠命令见「对话内命令」。
 - 授权完成后会自动通知原会话，并自动重跑刚才那条问题，无需用户重新提问。
 - 授权完成后会校验 profile 的 `userId` 与提问人一致；不一致会拒绝绑定，避免把别人的钉钉账号绑定到当前用户。
 - 如果 `dws` 因 Node 版本或 PATH 问题无法启动，会按「不可用」处理并保留原始错误，不会误报成授权过期。
@@ -974,6 +1033,8 @@ ReAct 循环内置看门狗（`src/watchdog/RunWatchdog.ts`），只观察不执
 
 预算耗尽属于「需求过重」，机器人会输出拒接说明并关闭执行，不再做收尾汇总。
 
+**真实性拦截**：模型偶尔会在没有任何 `tool_calls` 的情况下直接输出「定时任务已创建」「任务 ID：…」或整段伪造的「操作需要确认」提示。ReAct 循环在第一步就识别这类文本，清空该轮正文（发 `answer_reset`），追加一条 Harness 约束消息要求真实调用对应工具，然后继续本轮而不是把幻觉当成答案交付。仅在工具可用、循环还未降级且允许多轮时生效，避免与预算拒接冲突。上下文组装侧同样做了两道防模仿处理：历史 assistant 消息里的伪造确认提示会被替换成系统记录；消息时间戳前缀只保留一份，并明确要求模型不要在正文开头模仿输出时间戳。
+
 ---
 
 ## 管理控制台
@@ -988,11 +1049,11 @@ ReAct 循环内置看门狗（`src/watchdog/RunWatchdog.ts`），只观察不执
 | **用户使用白名单** | 同步组织通讯录，查看员工 staffId / 姓名 / 部门，按待授权、已授权、已拒绝筛选并批量审批；未授权与外部人员不会获得任何回复 |
 | **大模型与人设** | 切换模型渠道与模型、修改 Base URL / API Key / 温度 / 原生思维链、调整 ReAct 预算、在线编辑人设与语气，并发起沙盒对话测试 |
 | **企业 MCP** | 增删改查节点、启停并热应用、一键连通性测试并浏览工具 Schema、维护按群 / 角色的工具权限 |
-| **群聊旁听策略** | 查看全局默认策略、按群覆盖旁听与主动回复参数、为该群配置独立模型路由、一键紧急静音 |
+| **群聊旁听策略** | 查看全局默认策略、按群覆盖旁听与主动回复参数、为该群配置独立模型路由、同步群与机器人目录、一键紧急静音 |
 | **群工作区** | 维护每个群的定位、职责、群目标（含进度）与群任务（含关联目标），与群内 `/group` 指令共用同一份数据 |
 | **人设与身份** | 维护群职责与人设、员工个人表达偏好与跨群记忆授权；把 `staffId` / `openDingTalkId` 绑定为同一员工并迁移记忆与人设 |
-| **记忆治理** | 按作用域 / 类型 / 状态筛选语义记忆，调整群内共享、敏感级别、置信度与过期时间，停用或删除错误记忆 |
-| **ReAct 审计轨迹** | 按群过滤并分页查看每次回答的思维链、工具入参、耗时、沙盒输出与最终答案 |
+| **记忆治理** | 按 `global` / `group` / `group_member` / `user` 作用域与类型 / 状态筛选语义记忆，调整群内共享、敏感级别、置信度与过期时间，停用或删除错误记忆 |
+| **ReAct 审计轨迹** | 按群过滤并分页查看每次回答的思维链、工具入参、耗时、沙盒输出与最终答案；定时任务等非员工触发的记录以「触发类型（关联员工）」展示归属 |
 | **术语知识库** | 按固定模板增删改查内部黑话，按名称 / 别名 / 时效性 / 敏感级别检索，查看注入命中统计、质量校验结果与系统提示预览 |
 | **技能 Skills** | 浏览技能目录与触发条件预览、校验草稿、启用 / 停用、在线编辑 `SKILL.md` 与资源文件，查看近 7 天调用次数 |
 | **声明式插件** | 校验并安装插件包，升级 / 回滚 / 启停 / 卸载，查看版本记录、缺失密钥与合并后的技能和 MCP 节点 |
@@ -1058,6 +1119,8 @@ ReAct 循环内置看门狗（`src/watchdog/RunWatchdog.ts`），只观察不执
 | PUT | `/whitelist/:staffId` | 授权 / 拒绝单个员工 |
 | POST | `/whitelist/batch` | 批量授权 / 拒绝员工 |
 | GET | `/groups` | 已接入的群列表与最近活跃 |
+| GET | `/groups/directory` | 群与机器人目录查询（`query`、`onlyWithBots`、`botName`、`limit`） |
+| POST | `/groups/sync-directory` | 从 DWS 同步群与机器人目录（`includeBots` 默认 true，写审计；未配置同步源返回 501） |
 | GET / PUT | `/groups/:conversationId/policy` | 读取 / 更新单群旁听策略 |
 | GET / PUT | `/groups/:conversationId/workspace` | 读取 / 更新群定位、职责与备注 |
 | POST | `/groups/:conversationId/goals` | 新建群目标（`progress` 0–100、`due` 支持 `YYYY-MM-DD` 或时间戳） |
@@ -1102,6 +1165,7 @@ ReAct 循环内置看门狗（`src/watchdog/RunWatchdog.ts`），只观察不执
 | POST | `/projects/:id/handbook/generate`、`/publish` | 生成草稿 / 发布指定版本或最新草稿 |
 | GET | `/github/status` | GitHub 工具的真实运行状态（不读取 `.env` 文件中的未生效值） |
 | POST | `/github/test` | 对指定或默认仓库做连通性测试（绕过缓存，写审计） |
+| GET | `/personas` | 分层人设列表（可选 `scope` 过滤） |
 | GET / PUT / DELETE | `/personas/:scope/:subjectKey` | 读取 / 更新 / 删除群或员工的分层人设（`scope` 为 `group` / `user`） |
 | GET | `/identities` | 员工身份列表（含别名与合并关系） |
 | POST | `/identities/bind` | 绑定 `staffId` / `openDingTalkId` 并迁移旧身份的记忆与人设 |
@@ -1132,7 +1196,7 @@ ReAct 循环内置看门狗（`src/watchdog/RunWatchdog.ts`），只观察不执
 | --- | --- |
 | 管理入口 | 管理 API 用 Bearer Token；ChatOps 用管理员 StaffId 白名单；未设置 Token 时会在启动日志中明确告警 |
 | 凭据保护 | AppSecret、模型 API Key、MCP 请求头在接口与审计中只出现掩码，前端不可回读明文 |
-| 命令执行 | DWS 子命令白名单 + 参数校验；DWS 普通写操作在本人授权后直接执行，取消日程、覆盖文档等高危操作必须经 `/confirm` 二次确认 |
+| 命令执行 | DWS 子命令白名单 + 参数校验；DWS 普通写操作在本人授权后直接执行，取消日程、覆盖文档等高危操作必须回复「确认」二次确认 |
 | 技能与插件 | 技能只来自本地受控目录；插件是纯声明包，安装前校验清单、命令白名单与密钥占位，不执行安装脚本；插件技能与 MCP 节点使用独立命名空间，不能覆盖手工配置 |
 | 公网访问 | `web_fetch` 只允许 http/https 标准端口，固定 DNS 后连接并在每次跳转重新校验，拒绝本机、内网与保留地址；限制重定向次数、响应体大小与超时；网页内容按不可信数据处理，不执行其中指令 |
 | 工作区文件 | `workspace_read_file` 与沙盒数据加载只解析工作区内路径，真实路径校验防目录穿越与软链接逃逸；二进制与超大文件直接拒绝 |
@@ -1149,7 +1213,7 @@ ReAct 循环内置看门狗（`src/watchdog/RunWatchdog.ts`），只观察不执
 | --- | --- |
 | `conversations` / `messages` | 会话与消息（含推理过程、Token 用量） |
 | `conversation_summaries` | 情景摘要 |
-| `semantic_memories` | 术语与职责画像（含向量） |
+| `semantic_memories` | 术语与职责画像（含向量），按 `global` / `group` / `group_member` / `user` 四种作用域隔离 |
 | `glossary_terms` | 企业术语知识库：固定模板字段、注入权重、命中次数与向量 |
 | `skills` / `skill_usage` | 技能元数据（正文仍在技能目录）与调用统计 |
 | `plugins` / `plugin_versions` | 插件当前状态、清单与可回滚版本 |
@@ -1157,13 +1221,26 @@ ReAct 循环内置看门狗（`src/watchdog/RunWatchdog.ts`），只观察不执
 | `project_documents` / `project_chunks` / `project_symbols` | 项目文件、分块与符号索引（分块可选向量） |
 | `project_handbooks` / `project_manual_entries` | 项目手册版本与人工条目 |
 | `bystander_policies` | 群级旁听策略 |
-| `sys_configs` | 动态配置（钉钉、模型、预算、MCP、默认群策略） |
+| `group_workspaces` / `group_goals` / `group_tasks` | 群定位与职责、群目标（含进度）、群任务（可关联目标） |
+| `group_model_routes` | 按群模型路由（只存密钥的环境变量名） |
+| `dingtalk_group_directory` | DWS 同步的群与机器人目录 |
+| `person_identities` / `person_identity_aliases` | 员工稳定身份与 `staffId` / `openDingTalkId` 别名映射 |
+| `persona_profiles` | 群与员工的分层人设覆盖 |
+| `person_preferences` / `person_memory_consents` | 个人表达偏好与跨群记忆授权档位 |
+| `user_whitelist` | 员工使用白名单与授权状态 |
+| `dws_identities` | 每员工 DWS 同意记录与 profile 绑定 |
+| `dws_write_tasks` | 等待授权后自动续跑的写任务 |
+| `pending_actions` | 待确认的写操作与缓存参数 |
+| `silent_investigations` | 静默调查审计（证据分、Token、耗时、丢弃原因） |
+| `agent_jobs` / `agent_job_events` | 后台任务队列与执行事件（含看门狗干预） |
+| `agent_tasks` / `agent_task_links` / `agent_task_subscriptions` | 任务线程、关联引用与订阅者 |
+| `sys_configs` / `agent_configs` | 动态配置（钉钉、模型、预算、MCP、默认群策略）与基础 KV 配置 |
 | `react_traces` | ReAct 执行轨迹 |
 | `admin_audit_logs` | 管理操作审计 |
 | `user_feedback` | 用户对回答的反馈（`/feedback` 命令） |
 | `usage_ledger` | 每次模型调用的 Token 拆分、模型、耗时、场景与估算成本 |
 | `task_results` | 已完成后台任务的精简结果快照，供同会话历史追问检索 |
-| `scheduled_tasks` | 定时主动播报任务与下次触发时间 |
+| `scheduled_tasks` | 六类定时任务（主动播报 / 提醒 / 日周月报 / 群播报）与下次触发时间 |
 | `cluster_shared_state` | 多实例共享的去重窗口、旁听冷却与群聊转录状态（仅集群模式写入） |
 | `governance_settings` | 管理端调整的保留期策略（覆盖 env 默认值） |
 
@@ -1194,8 +1271,8 @@ ReAct 循环内置看门狗（`src/watchdog/RunWatchdog.ts`），只观察不执
 | 卡片一直停在「处理中」，答案另发一条消息 | 日志 `streamingUpdate failed` 若为 `500 未知错误`，多为模板不是「AI 卡片」场景或模板没有 `content` 变量；按上文重新创建模板或调整 `DINGTALK_CARD_CONTENT_KEY` |
 | 消息上没有出现处理中表情 | 应用未开通机器人表情权限，日志中会有 `reply emotion failed`；可置 `DINGTALK_BOT_EMOTION_ENABLED=false` 关闭 |
 | 审计轨迹为空 | 还没有产生过 ReAct 调用；先让机器人回答一次问题 |
-| DWS 查询报错 | 员工个人登录态过期：机器人会在提问时自动发起设备码授权并私聊推送链接；若员工长时间未授权，可让其在下一次提问时重试，或在单聊发送 `/dws-login` 手动重发 |
-| DWS 提示缺权限 | 应用未开通对应权限点：管理员会收到含权限点与开通命令的单聊通知；按通知开通后，员工在单聊重新 `/dws-login` 刷新个人授权 |
+| DWS 查询报错 | 员工个人登录态过期：机器人会在提问时自动发起设备码授权并私聊推送链接；若员工长时间未授权，可让其在下一次提问时重试，或在单聊发送「重新授权」手动重发 |
+| DWS 提示缺权限 | 应用未开通对应权限点：管理员会收到含权限点与开通命令的单聊通知；按通知开通后，员工在单聊发送「重新授权」刷新个人授权 |
 | 工具结果被截断 | 超过了节点 `maxResultChars`，可调大上限或用沙盒对落盘数据做聚合 |
 
 ### 测试与质量评测
@@ -1250,6 +1327,9 @@ pnpm eval:flow -- --days=7 --cases=eval/flow/cases.json
 
 - 动态配置面向单实例进程；多实例部署需要额外的配置分发与广播机制。
 - 群聊旁听缓冲位于进程内存，重启后由新消息重新积累；摘要与语义记忆不受影响。
+- 中文口令与斜杠命令都是精确匹配，不做自然语言理解；口令之外的说法会当作普通提问交给模型。
+- 真实性拦截只覆盖「伪造确认提示」与「伪造定时任务/提醒结果及任务 ID」这几类可确定性识别的幻觉，不是通用的事实校验；其他类型的编造仍依赖工具证据与引用核对。
+- 个人提醒的周期任务靠「相同 cron + 相同标题」去重，改动标题文字会新建一条而不是改期；精确改期请让模型用 `personal_reminder_manage` 的 `action=update` 并带上任务 ID。
 - 按群模型路由只覆盖交互式群聊（含主动回复）；静默调查仍沿用默认调查引擎，不读取群路由。
 - 群目标与群任务是轻量工作项，用于给群聊提供长期上下文，不复用后台任务队列的租约、重试与 Worker 预算。
 - 未绑定的 DWS `openDingTalkId` 会按 `external:<id>` 独立隔离，避免误并到其他员工；需要管理员在控制台确认后绑定，才能与同一员工的 `staffId` 共享记忆与人设。
