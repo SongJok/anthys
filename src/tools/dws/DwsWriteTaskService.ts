@@ -174,7 +174,7 @@ export class DwsWriteTaskService {
         entry.task,
         'failed',
         reason,
-        `本人 DWS 授权未完成：${reason}。刚才的写操作没有执行，请重新发起或发送 /dws-login 重试。`,
+        `本人 DWS 授权未完成：${reason}。刚才的写操作没有执行，请重新发起或发送「重新授权」重试。`,
       );
       failed.push(conversationId);
     }
@@ -266,7 +266,7 @@ export class DwsWriteTaskService {
             entry.task,
             'expired',
             '授权等待超时',
-            '授权链接已超时，刚才的写操作没有执行。请重新发起，或发送 /dws-login 获取新的授权链接。',
+            '授权链接已超时，刚才的写操作没有执行。请重新发起，或发送「重新授权」获取新的授权链接。',
           );
           continue;
         }

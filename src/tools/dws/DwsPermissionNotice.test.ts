@@ -52,7 +52,7 @@ describe('权限通知文案', () => {
     expect(text).toContain('张三（staff-1）');
     expect(text).toContain('Calendar.Event.Write');
     expect(text).toContain('dws dev app permission add');
-    expect(text).toContain('/dws-login');
+    expect(text).toContain('重新授权');
     expect(text).toContain('DWS_CLI_ENABLED=false');
   });
 

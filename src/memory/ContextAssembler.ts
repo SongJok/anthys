@@ -40,6 +40,8 @@ const SAFETY_GUARDRAILS = [
 const TOOL_GUIDANCE = [
   '工作方式：',
   '- 需要实时时间、精确计算或系统运行状态时，优先调用可用工具，不要凭空猜测。',
+  '- 任何创建、修改或取消定时任务、提醒、日程、待办、审批、记忆等操作，必须真实发起对应的 tool_calls 工具调用；严禁不调用工具就直接声称“已创建/已设置/已修改/已取消”或编造任务 ID，也严禁自己输出“操作需要确认：机器人准备调用工具…”文本。',
+  '- 历史消息开头的 [YYYY-MM-DD HH:mm 周X] 仅作时间参考，回复时不要在正文开头模仿输出该时间戳前缀。',
   '- 工具返回结果后直接基于结果作答；信息已足够时不要再调用工具。',
   '- 未标记错误的工具返回就是真实数据，即使内容很短、像闲聊或与预期格式不符（例如昵称本身很奇怪），也要如实采用，不要判定通道故障或反复重试。',
   '- 回答公司内部业务与组织问题时，先查公司术语、知识库与项目手册，始终站在本公司与内部员工协同视角补充业务口径、上下游影响、内部待攻坚点与对口责任人，不要用外部求职/合作/投资尽调视角评判本公司；外部通用问题照常回答，不强加公司视角。',
@@ -101,18 +103,27 @@ export class ContextAssembler {
         item.createdAt > 0
           ? `[${formatShanghaiMessageStamp(item.createdAt)}] `
           : '';
+      const rawContent = item.content.replace(
+        /^(?:\[\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}(?:\s+周[一二三四五六日天])?\]\s*)+/u,
+        '',
+      );
       if (item.role === 'user') {
         const speaker =
           input.groupChat && item.senderNick ? `${item.senderNick}：` : '';
         messages.push({
           role: 'user',
-          content: `${stamp}${speaker}${item.content}`,
+          content: `${stamp}${speaker}${rawContent}`,
         });
         continue;
       }
+      const sanitizedAssistant = /操作需要确认[：:]\s*机器人准备调用工具/u.test(
+        rawContent,
+      )
+        ? '[系统记录：该轮写操作曾等待用户确认；若用户要求继续、修改或取消，请真实发起对应的 tool_calls 工具调用，严禁直接输出确认提示文本]'
+        : rawContent;
       messages.push({
         role: 'assistant',
-        content: `${stamp}${item.content}`,
+        content: `${stamp}${sanitizedAssistant}`,
       });
     }
 

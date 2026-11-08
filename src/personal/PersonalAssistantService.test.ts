@@ -363,6 +363,14 @@ describe('PersonalAssistantService', () => {
       task.id,
       aiTask.id,
     ]);
+
+    const updatedAiTask = await assistant.createReminderFromText({
+      staffId: 'staff-1',
+      conversationId: 'cid-dm',
+      raw: '每天下午17:46分 给我发送一份全球最新的AI领域的新闻',
+    });
+    expect(updatedAiTask.id).toBe(aiTask.id);
+    expect(updatedAiTask.cron).toBe('46 17 * * *');
   });
 
   it('命令在群里拒绝，在单聊创建并返回提示', async () => {

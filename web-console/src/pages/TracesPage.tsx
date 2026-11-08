@@ -159,7 +159,7 @@ export default function TracesPage() {
           {
             title: '员工',
             key: 'employee',
-            width: 140,
+            width: 180,
             ellipsis: true,
             render: (_, row) => traceEmployee(row),
           },
@@ -192,7 +192,30 @@ export default function TracesPage() {
   );
 }
 
-/** 轨迹所属员工：优先昵称，缺失时回退 staffId，避免显示空白 */
+const NON_EMPLOYEE_LABELS = new Set([
+  '定时任务',
+  '群定时播报',
+  '后台任务',
+  '卡片用户',
+  '管理员',
+  '管理控制台',
+  '静默调查',
+  '系统任务',
+]);
+
+/** 轨迹所属员工：优先昵称，定时任务/非员工类型带括号显示关联员工 */
 function traceEmployee(trace: ReActTrace): string {
-  return trace.senderNick?.trim() || trace.senderStaffId?.trim() || '未知员工';
+  const nick = trace.senderNick?.trim() ?? '';
+  const staffId = trace.senderStaffId?.trim() ?? '';
+  if (
+    nick &&
+    NON_EMPLOYEE_LABELS.has(nick) &&
+    staffId &&
+    staffId !== 'scheduler' &&
+    staffId !== 'admin-api' &&
+    staffId !== 'job-runner'
+  ) {
+    return `${nick}（${staffId}）`;
+  }
+  return nick || staffId || '未知员工';
 }

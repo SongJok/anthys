@@ -106,6 +106,66 @@ interface OpenToolStep {
   startedAt: number;
 }
 
+const NON_EMPLOYEE_LABELS = new Set([
+  '定时任务',
+  '群定时播报',
+  '后台任务',
+  '卡片用户',
+  '管理员',
+  '管理控制台',
+  '静默调查',
+  '系统任务',
+]);
+
+const SOURCE_TYPE_LABELS: Record<string, string> = {
+  scheduled_task: '定时任务',
+  agent_job: '后台任务',
+  card_action: '卡片用户',
+};
+
+export function isNonEmployeeTraceLabel(value: string): boolean {
+  const trimmed = value.trim();
+  if (!trimmed) return true;
+  if (NON_EMPLOYEE_LABELS.has(trimmed)) return true;
+  const wrapped = trimmed.match(/^([^（(]+)[（(].*[)）]$/u);
+  return Boolean(wrapped?.[1] && NON_EMPLOYEE_LABELS.has(wrapped[1].trim()));
+}
+
+/**
+ * 定时任务或非员工触发类型统一在括号内附上员工名称，例如：定时任务（Joony）。
+ */
+export function formatTraceSenderNick(input: {
+  senderNick: string;
+  source?: string;
+  employeeName?: string;
+}): string {
+  const rawNick = input.senderNick.trim();
+  const sourceLabel = input.source ? SOURCE_TYPE_LABELS[input.source] : undefined;
+  const existingWrapped = rawNick.match(/^([^（(]+)[（(]([^（）()]+)[)）]$/u);
+  if (
+    existingWrapped?.[1] &&
+    NON_EMPLOYEE_LABELS.has(existingWrapped[1].trim()) &&
+    existingWrapped[2]?.trim()
+  ) {
+    return `${existingWrapped[1].trim()}（${existingWrapped[2].trim()}）`;
+  }
+
+  const employee =
+    input.employeeName?.trim() && !isNonEmployeeTraceLabel(input.employeeName)
+      ? input.employeeName.trim()
+      : !isNonEmployeeTraceLabel(rawNick)
+        ? rawNick
+        : '';
+
+  if (NON_EMPLOYEE_LABELS.has(rawNick)) {
+    return employee ? `${rawNick}（${employee}）` : rawNick;
+  }
+  if (sourceLabel) {
+    return employee ? `${sourceLabel}（${employee}）` : sourceLabel;
+  }
+  return rawNick;
+}
+
 /**
  * 把 AgentStreamEvent 流累积成一条 ReAct 轨迹：
  * 原生思维链片段合并为 reasoning 步骤，工具调用记录入参/耗时/输出，
@@ -239,12 +299,24 @@ export class TraceCollector {
       });
     }
     const reasoning = this.reasoningText || input.result.reasoning;
+    const rawSource =
+      typeof input.message.rawPayload?.source === 'string'
+        ? input.message.rawPayload.source
+        : undefined;
+    const rawCreatorNick =
+      typeof input.message.rawPayload?.creatorNick === 'string'
+        ? input.message.rawPayload.creatorNick
+        : undefined;
     return {
       id: randomUUID(),
       conversationId: input.message.conversationId,
       messageId: input.message.messageId,
       senderStaffId: input.message.senderStaffId,
-      senderNick: input.message.senderNick,
+      senderNick: formatTraceSenderNick({
+        senderNick: input.message.senderNick,
+        ...(rawSource ? { source: rawSource } : {}),
+        ...(rawCreatorNick ? { employeeName: rawCreatorNick } : {}),
+      }),
       conversationType: input.message.conversationType,
       proactive: input.proactive,
       question: input.question ?? input.message.text,

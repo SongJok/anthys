@@ -89,7 +89,7 @@ function fromShanghai(
   return Date.UTC(year, month - 1, day, hour, minute) - SH_OFFSET_MS;
 }
 
-function formatShanghai(ms: number): string {
+export function formatShanghai(ms: number): string {
   const parts = shanghaiParts(ms);
   const date = new Date(ms + SH_OFFSET_MS);
   const pad = (value: number): string => String(value).padStart(2, '0');
@@ -596,10 +596,10 @@ export class PersonalAssistantService {
     conversationId: string;
     raw: string;
     mode?: PersonalTaskMode;
+    replaceId?: string;
   }): Promise<ScheduledTask> {
     const parsed = parseReminderArgs(input.raw, this.now());
     if (typeof parsed === 'string') throw new Error(parsed);
-    await this.assertQuota(input.staffId, 'reminder');
     const rawText = parsed.text.slice(0, 200);
     const mode = input.mode ?? inferReminderMode(rawText);
     const kind: ScheduledTaskKind = mode === 'prompt' ? 'prompt' : 'reminder';
@@ -608,12 +608,42 @@ export class PersonalAssistantService {
         ? normalizePromptInstruction(rawText).slice(0, 500)
         : rawText;
     const titlePrefix = kind === 'prompt' ? PERSONAL_PROMPT_PREFIX : '提醒：';
+    const title = `${titlePrefix}${rawText.slice(0, 40)}`;
+
+    const ownTasks = await this.listOwn(input.staffId);
+    const targetId = input.replaceId?.trim().toLowerCase();
+    const existing = targetId
+      ? ownTasks.find((item) => item.id.toLowerCase() === targetId) ??
+        ownTasks.find((item) => item.id.toLowerCase().startsWith(targetId))
+      : parsed.cron
+        ? ownTasks.find(
+            (item) =>
+              item.kind === kind &&
+              Boolean(item.cron) &&
+              item.title === title,
+          )
+        : undefined;
+    if (existing) {
+      return this.store.update(
+        existing.id,
+        {
+          title,
+          prompt: text,
+          intervalSeconds: null,
+          cron: parsed.cron ?? null,
+          enabled: true,
+        },
+        parsed.atMs,
+      );
+    }
+
+    await this.assertQuota(input.staffId, 'reminder');
     return this.store.create(
       {
         conversationId: input.conversationId,
         conversationType: '1',
         kind,
-        title: `${titlePrefix}${rawText.slice(0, 40)}`,
+        title,
         prompt: text,
         intervalSeconds: null,
         cron: parsed.cron ?? null,

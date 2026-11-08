@@ -118,7 +118,7 @@ function runtime(overrides: Partial<CommandRuntime> = {}): {
 }
 
 describe('parseCommand', () => {
-  it('支持半角/全角斜杠与参数', () => {
+  it('支持半角/全角斜杠与参数，以及简单中文确认与授权口令', () => {
     expect(parseCommand('  /feedback 回答不准  ')).toEqual({
       name: 'feedback',
       args: ['回答不准'],
@@ -126,6 +126,43 @@ describe('parseCommand', () => {
     });
     expect(parseCommand('／stop')?.name).toBe('stop');
     expect(parseCommand('你好 /stop')).toBeNull();
+    expect(parseCommand('确认')).toEqual({
+      name: 'confirm',
+      args: [],
+      raw: '确认',
+    });
+    expect(parseCommand('「确认」')?.name).toBe('confirm');
+    expect(parseCommand('取消')?.name).toBe('cancel');
+    expect(parseCommand('放弃')?.name).toBe('cancel');
+    expect(parseCommand('授权')?.name).toBe('dws-login');
+    expect(parseCommand('重新授权')?.name).toBe('dws-login');
+    expect(parseCommand('授权状态')?.name).toBe('dws-status');
+    expect(parseCommand('授权范围')).toEqual({
+      name: 'dws-consent',
+      args: [],
+      raw: '授权范围',
+    });
+    expect(parseCommand('同意授权')).toEqual({
+      name: 'dws-consent',
+      args: ['agree'],
+      raw: '同意授权',
+    });
+    expect(parseCommand('允许写操作')).toEqual({
+      name: 'dws-consent',
+      args: ['write'],
+      raw: '允许写操作',
+    });
+    expect(parseCommand('改回只读')).toEqual({
+      name: 'dws-consent',
+      args: ['read'],
+      raw: '改回只读',
+    });
+    expect(parseCommand('撤销授权')).toEqual({
+      name: 'dws-consent',
+      args: ['revoke'],
+      raw: '撤销授权',
+    });
+    expect(parseCommand('退出授权')?.name).toBe('dws-logout');
   });
 });
 

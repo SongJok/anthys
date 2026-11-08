@@ -4,6 +4,7 @@ import type {
   ToolDefinition,
 } from '../../types/core.js';
 import {
+  formatShanghai,
   parseReportSpec,
   type PersonalAssistantService,
   type PersonalTaskMode,
@@ -86,6 +87,9 @@ export class PersonalAssistantToolProvider implements IToolProvider {
               id: task.id,
               title: task.title,
               at: task.nextRunAt,
+              ...(task.nextRunAt
+                ? { nextRunLocal: formatShanghai(Date.parse(task.nextRunAt)) }
+                : {}),
               ...(task.cron ? { cron: task.cron } : {}),
               ...(task.kind === 'prompt' ? { mode: 'prompt' } : {}),
             })),
@@ -98,22 +102,22 @@ export class PersonalAssistantToolProvider implements IToolProvider {
     return {
       name: 'personal_reminder_manage',
       description:
-        '创建或取消当前用户的钉钉个人提醒与个人定时 AI 任务（仅单聊）。action=create 时用 when 描述时间，支持一次性时间（如“25分钟后”“明天9点”“今天下午16:05”“2026-11-01 09:00”）和周期时间（如“每天16:05”“每天下午16:05分”“每周一 09:00”“工作日 09:30”“每月1日 09:00”）；mode="reminder" 到点发送固定提醒文本，mode="prompt" 到点由机器人自动执行 AI 指令（如联网搜索全球最新 AI 新闻并整理成简报发给用户，无需用户手动回复触发）；action=cancel 按 id 取消。',
+        '创建、修改或取消当前用户的钉钉个人提醒与个人定时 AI 任务（仅单聊）。action=create/update 时用 when 描述时间，支持一次性时间（如“25分钟后”“明天9点”“今天下午16:05”“2026-11-01 09:00”）和周期时间（如“每天16:05”“每天下午16:05分”“每周一 09:00”“工作日 09:30”“每月1日 09:00”）；mode="reminder" 到点发送固定提醒文本，mode="prompt" 到点由机器人自动执行 AI 指令（如联网搜索全球最新 AI 新闻并整理成简报发给用户，无需用户手动回复触发）；action=update 可传入 id 直接修改已有任务的时间与内容；action=cancel 按 id 取消。',
       risk: 'write',
       source: 'personal-assistant',
       parametersJsonSchema: {
         type: 'object',
         properties: {
-          action: { type: 'string', enum: ['create', 'cancel'] },
+          action: { type: 'string', enum: ['create', 'update', 'cancel'] },
           when: {
             type: 'string',
             description:
-              '时间描述，create 时必填，支持一次性（如“25分钟后”“明天9点”“今天16:05”）或周期性（如“每天16:05”“每天下午16:05分”“每周一 09:00”“工作日 09:30”“每月1日 09:00”）',
+              '时间描述，create/update 时必填，支持一次性（如“25分钟后”“明天9点”“今天16:05”）或周期性（如“每天16:05”“每天下午16:05分”“每周一 09:00”“工作日 09:30”“每月1日 09:00”）',
           },
           text: {
             type: 'string',
             description:
-              '提醒文本或定时 AI 任务指令，create 时必填，如“开会”或“检索并整理一份全球最新的AI领域新闻简报发给我”',
+              '提醒文本或定时 AI 任务指令，create/update 时必填，如“开会”或“检索并整理一份全球最新的AI领域新闻简报发给我”',
           },
           mode: {
             type: 'string',
@@ -121,7 +125,10 @@ export class PersonalAssistantToolProvider implements IToolProvider {
             description:
               '任务模式：reminder=到点发送固定文本提醒；prompt=到点由 AI 自动执行 text 指令（可调用联网搜索等工具）并将生成结果发送给用户',
           },
-          id: { type: 'string', description: '提醒或定时任务 ID，cancel 时必填' },
+          id: {
+            type: 'string',
+            description: '提醒或定时任务 ID（支持 8 位前缀），cancel 时必填，update 时可选',
+          },
         },
         required: ['action'],
         additionalProperties: false,
@@ -131,10 +138,11 @@ export class PersonalAssistantToolProvider implements IToolProvider {
           throw new Error('个人提醒仅在单聊中可用');
         }
         const action = requireString(args, 'action', '操作');
-        if (action === 'create') {
+        if (action === 'create' || action === 'update') {
           const when = requireString(args, 'when', '提醒时间');
           const text = requireString(args, 'text', '提醒内容');
           const rawMode = optionalString(args, 'mode');
+          const replaceId = optionalString(args, 'id');
           const mode: PersonalTaskMode | undefined =
             rawMode === 'prompt' || rawMode === 'reminder' ? rawMode : undefined;
           const task = await this.service.createReminderFromText({
@@ -142,11 +150,15 @@ export class PersonalAssistantToolProvider implements IToolProvider {
             conversationId: execCtx.conversationId,
             raw: `${when} ${text}`,
             ...(mode ? { mode } : {}),
+            ...(replaceId ? { replaceId } : {}),
           });
           return JSON.stringify({
             ok: true,
             taskId: task.id,
             at: task.nextRunAt,
+            ...(task.nextRunAt
+              ? { nextRunLocal: formatShanghai(Date.parse(task.nextRunAt)) }
+              : {}),
             ...(task.cron ? { cron: task.cron } : {}),
             ...(task.kind === 'prompt' ? { mode: 'prompt' } : {}),
             message: `已设置${task.kind === 'prompt' ? '定时任务' : '提醒'}：${task.title}`,

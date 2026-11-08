@@ -219,7 +219,7 @@ export function formatApprovalPrompt(
   return [
     `操作需要确认：机器人准备调用工具 \`${action.toolName}\`（${label}）。`,
     `参数：${formatArgs(action.args)}`,
-    `回复 \`/confirm\` 执行，或 \`/cancel\` 取消；${ttlSeconds} 秒内有效。`,
+    `回复「确认」执行，或「取消」放弃；${ttlSeconds} 秒内有效。`,
   ].join('\n');
 }
 

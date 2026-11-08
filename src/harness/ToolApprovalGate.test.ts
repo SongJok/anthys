@@ -144,7 +144,7 @@ describe('createToolApprovalGate', () => {
     });
     expect(decision.approved).toBe(false);
     expect(decision.reason).toContain('create_ticket');
-    expect(decision.reason).toContain('/confirm');
+    expect(decision.reason).toContain('「确认」');
     expect(decision.reason).toContain('60 秒内有效');
     expect(store.peek('cid-1')).toMatchObject({
       toolName: 'mcp__crm__create_ticket',
@@ -213,7 +213,7 @@ describe('formatApprovalPrompt', () => {
       300,
     );
     expect(prompt).toContain('高危写操作');
-    expect(prompt).toContain('/cancel');
+    expect(prompt).toContain('「取消」');
     expect(prompt.length).toBeLessThan(900);
   });
 });

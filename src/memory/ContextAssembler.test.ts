@@ -177,4 +177,22 @@ describe('ContextAssembler', () => {
     expect(JSON.stringify(messages)).not.toContain('内部推理不应出现');
     expect(messages[1]).toEqual({ role: 'assistant', content: '公开答案' });
   });
+
+  it('清洗历史中的二次确认提示并去除重复时间戳前缀', () => {
+    const assembler = new ContextAssembler({ windowMessages: 20, now: fixedNow });
+    const messages = assembler.build({
+      persona,
+      history: [
+        historyMessage(
+          'a1',
+          'assistant',
+          '[2026-11-07 16:04 周六] 操作需要确认：机器人准备调用工具 `personal_reminder_manage`（写操作）。\n回复「确认」执行',
+        ),
+      ],
+      userText: '确认更换',
+    });
+    expect(messages[1]?.content).toContain('[2026-10-30 09:00 周五]');
+    expect(messages[1]?.content).not.toContain('操作需要确认：机器人准备调用工具');
+    expect(messages[1]?.content).toContain('真实发起对应的 tool_calls');
+  });
 });

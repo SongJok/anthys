@@ -83,16 +83,16 @@ const HELP_TEXT = [
   '- `/retry` 重试上一条问题',
   '- `/reset` 清空本会话上下文',
   '- `/trace` 查看最近一次执行轨迹摘要',
-  '- `/dws-status` 查看本人 DWS 授权状态',
-  '- `/dws-consent` 查看并同意本人 DWS 授权范围（单聊）',
-  '- `/dws-login` 发起本人 DWS 设备授权（单聊）',
-  '- `/dws-logout` 清除本人本机 DWS 登录态（单聊）',
-  '- `/dws-system` 查看系统级 DWS 授权状态（管理员）',
-  '- `/dws-system-login` 重新发起系统级 DWS 授权（管理员）',
+  '- 发送「授权状态」查看本人钉钉授权状态',
+  '- 发送「授权范围」查看授权说明，发送「同意授权」「允许写操作」「改回只读」「撤销授权」调整授权（单聊）',
+  '- 发送「授权」或「重新授权」发起本人钉钉设备授权（单聊）',
+  '- 发送「退出授权」清除本人本机登录态（单聊）',
+  '- 发送「系统授权状态」查看系统级 DWS 授权状态（管理员）',
+  '- 发送「系统重新授权」重新发起系统级 DWS 授权（管理员）',
   '- `/mute` / `/unmute` 暂停或恢复本群旁听（管理员）',
   '- `/feedback <内容>` 提交对本次回答的反馈',
-  '- `/confirm` 执行等待确认的写操作',
-  '- `/cancel` 取消等待确认的写操作',
+  '- 回复「确认」执行等待确认的写操作',
+  '- 回复「取消」放弃等待确认的写操作',
   '- `/remind 25分钟后 开会` 创建个人提醒（单聊）',
   '- `/report daily 09:00` 定时推送日/周/月报（单聊）',
   '- `/job <需求>` 提交后台长任务，完成后主动通知',
@@ -109,11 +109,57 @@ const HELP_TEXT = [
   '- `/job-resume <id> [补充要求]` 恢复已暂停的任务',
 ].join('\n');
 
+const CHINESE_COMMAND_ALIASES: Record<
+  string,
+  { name: string; args: string[] }
+> = {
+  确认: { name: 'confirm', args: [] },
+  确认执行: { name: 'confirm', args: [] },
+  同意执行: { name: 'confirm', args: [] },
+  取消: { name: 'cancel', args: [] },
+  取消执行: { name: 'cancel', args: [] },
+  取消操作: { name: 'cancel', args: [] },
+  放弃: { name: 'cancel', args: [] },
+  授权: { name: 'dws-login', args: [] },
+  开始授权: { name: 'dws-login', args: [] },
+  重新授权: { name: 'dws-login', args: [] },
+  钉钉授权: { name: 'dws-login', args: [] },
+  登录授权: { name: 'dws-login', args: [] },
+  授权状态: { name: 'dws-status', args: [] },
+  查看授权: { name: 'dws-status', args: [] },
+  授权范围: { name: 'dws-consent', args: [] },
+  授权说明: { name: 'dws-consent', args: [] },
+  同意授权: { name: 'dws-consent', args: ['agree'] },
+  允许写操作: { name: 'dws-consent', args: ['write'] },
+  开启写权限: { name: 'dws-consent', args: ['write'] },
+  允许写入: { name: 'dws-consent', args: ['write'] },
+  改回只读: { name: 'dws-consent', args: ['read'] },
+  仅只读: { name: 'dws-consent', args: ['read'] },
+  关闭写权限: { name: 'dws-consent', args: ['read'] },
+  撤销授权: { name: 'dws-consent', args: ['revoke'] },
+  退出授权: { name: 'dws-logout', args: [] },
+  清除授权: { name: 'dws-logout', args: [] },
+  系统授权状态: { name: 'dws-system', args: [] },
+  系统重新授权: { name: 'dws-system-login', args: [] },
+};
+
 export function parseCommand(text: string): ParsedCommand | null {
   const trimmed = text.trim();
   const normalized = trimmed.startsWith('／')
     ? `/${trimmed.slice(1)}`
     : trimmed;
+  const plainKey = normalized
+    .replace(/^\/+/u, '')
+    .replace(/^[「『“"']+|[」』”"'。！!？?]+$/gu, '')
+    .trim();
+  const chineseAlias = CHINESE_COMMAND_ALIASES[plainKey];
+  if (chineseAlias) {
+    return {
+      name: chineseAlias.name,
+      args: [...chineseAlias.args],
+      raw: normalized,
+    };
+  }
   if (!normalized.startsWith('/')) return null;
   const tokens = normalized.slice(1).split(/\s+/).filter(Boolean);
   if (tokens.length === 0) return null;

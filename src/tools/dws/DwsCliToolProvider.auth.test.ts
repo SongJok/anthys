@@ -438,7 +438,7 @@ describe('DwsCliToolProvider 每员工独立身份闸门', () => {
     expect(calls.runs[0]?.subcommand).toBe('event create');
   });
 
-  it('用户主动改回只读时拒绝写工具并提示 /dws-consent write', async () => {
+  it('用户主动改回只读时拒绝写工具并提示「允许写操作」', async () => {
     const { identity, calls } = fakeIdentity({
       record: identityRecord({ writeEnabled: false, writeOptOut: true }),
       states: ['authenticated'],
@@ -455,7 +455,7 @@ describe('DwsCliToolProvider 每员工独立身份闸门', () => {
     expect(calls.runs).toHaveLength(0);
     expect(output.ok).toBe(false);
     expect(output.writeConsentRequired).toBe(true);
-    expect(output.instruction).toContain('/dws-consent write');
+    expect(output.instruction).toContain('允许写操作');
   });
 
   it('已手动只读且令牌过期时不发起登录，直接提示恢复写授权', async () => {
@@ -477,7 +477,7 @@ describe('DwsCliToolProvider 每员工独立身份闸门', () => {
     expect(calls.runs).toHaveLength(0);
     expect(output.ok).toBe(false);
     expect(output.writeConsentRequired).toBe(true);
-    expect(output.instruction).toContain('/dws-consent write');
+    expect(output.instruction).toContain('允许写操作');
   });
 
   it('已允许写操作时直接执行写工具', async () => {
@@ -567,7 +567,7 @@ describe('DwsCliToolProvider 每员工独立身份闸门', () => {
     const optedOutPrompt = await new DwsCliToolProvider({
       identity: optedOut.identity,
     }).authorizationPrompt(context().ctx, true);
-    expect(optedOutPrompt).toContain('/dws-consent write');
+    expect(optedOutPrompt).toContain('允许写操作');
 
     const autoUpgrade = fakeIdentity({
       record: identityRecord({ writeEnabled: false, writeOptOut: false }),

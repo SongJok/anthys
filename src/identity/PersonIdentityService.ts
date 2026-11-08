@@ -84,8 +84,27 @@ function readRawString(
   return undefined;
 }
 
+function sanitizeCandidateDisplayName(nick: string): string {
+  const trimmed = nick.trim();
+  const wrapped = trimmed.match(
+    /^(?:定时任务|群定时播报|后台任务|卡片用户|管理员|管理控制台|静默调查|系统任务)[（(]([^（）()]+)[)）]$/u,
+  );
+  if (wrapped?.[1]?.trim()) {
+    return wrapped[1].trim();
+  }
+  if (
+    /^(?:定时任务|群定时播报|后台任务|卡片用户|管理员|管理控制台|静默调查|系统任务)$/u.test(
+      trimmed,
+    )
+  ) {
+    return '';
+  }
+  return trimmed;
+}
+
 function collectCandidates(message: InboundMessage): Candidate[] {
   const raw = message.rawPayload ?? {};
+  const displayName = sanitizeCandidateDisplayName(message.senderNick);
   const rawStaffId = readRawString(raw, ['senderStaffId', 'sender_staff_id']);
   const openDingTalkId = readRawString(raw, [
     'senderOpenDingTalkId',
@@ -105,21 +124,21 @@ function collectCandidates(message: InboundMessage): Candidate[] {
     candidates.push({
       alias: staffAlias(staffId),
       source: 'staff',
-      displayName: message.senderNick,
+      displayName,
     });
   }
   if (openDingTalkId) {
     candidates.push({
       alias: openAlias(openDingTalkId),
       source: 'open',
-      displayName: message.senderNick,
+      displayName,
     });
   }
   if (candidates.length === 0) {
     candidates.push({
       alias: externalAlias(message.senderStaffId || `message:${message.messageId}`),
       source: 'external',
-      displayName: message.senderNick,
+      displayName,
     });
   }
   return candidates;

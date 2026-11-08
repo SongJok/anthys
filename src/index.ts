@@ -141,6 +141,7 @@ import {
 import {
   PersonIdentityService,
   defaultPersonKeyFor,
+  normalizeIdentityAlias,
 } from './identity/PersonIdentityService.js';
 import { PersonaResolver } from './persona/PersonaResolver.js';
 import {
@@ -197,7 +198,12 @@ import { PersonalAssistantService } from './personal/PersonalAssistantService.js
 import { PersonalAssistantToolProvider } from './tools/personal/PersonalAssistantToolProvider.js';
 import { TaskResultMemory } from './memory/TaskResultMemory.js';
 import { TaskMemoryToolProvider } from './tools/taskMemory/TaskMemoryToolProvider.js';
-import { TraceCollector, createMcpAdminPort } from './admin-api/runtime.js';
+import {
+  TraceCollector,
+  createMcpAdminPort,
+  formatTraceSenderNick,
+  isNonEmployeeTraceLabel,
+} from './admin-api/runtime.js';
 import { startAdminServer } from './admin-api/server.js';
 import { DrizzleWhitelistStore } from './db/whitelistSchema.js';
 import { WhitelistService } from './whitelist/WhitelistService.js';
@@ -510,8 +516,9 @@ async function main(): Promise<void> {
       binary: process.env.DWS_BINARY?.trim() || 'dws',
       logger: harnessLogger,
     });
+    const whitelistStore = new DrizzleWhitelistStore(dbHandle.db);
     const whitelist = new WhitelistService({
-      store: new DrizzleWhitelistStore(dbHandle.db),
+      store: whitelistStore,
       configCenter,
       directorySources: [
         new DingTalkContactDirectorySource(
@@ -2146,6 +2153,41 @@ async function main(): Promise<void> {
       logger: cardLogger,
     });
 
+    const resolveEmployeeDisplayName = async (
+      staffId: string | undefined,
+    ): Promise<string | undefined> => {
+      const trimmed = staffId?.trim() ?? '';
+      if (
+        !trimmed ||
+        trimmed === 'scheduler' ||
+        trimmed === 'admin-api' ||
+        trimmed === 'job-runner'
+      ) {
+        return undefined;
+      }
+      const normalized = normalizeIdentityAlias(trimmed);
+      if (normalized) {
+        const found = await personIdentityStore
+          .findPersonByAlias(normalized.alias)
+          .catch(() => null);
+        const displayName = found?.displayName?.trim();
+        if (displayName && !isNonEmployeeTraceLabel(displayName)) {
+          return displayName;
+        }
+      }
+      const wl = await whitelistStore.get(trimmed).catch(() => null);
+      const wlName = wl?.name?.trim();
+      if (wlName && !isNonEmployeeTraceLabel(wlName)) {
+        return wlName;
+      }
+      const dwsRecord = await identityService.getRecord(trimmed).catch(() => null);
+      const dwsName = dwsRecord?.userName?.trim();
+      if (dwsName && !isNonEmployeeTraceLabel(dwsName)) {
+        return dwsName;
+      }
+      return undefined;
+    };
+
     const recordTrace = async (
       collector: TraceCollector,
       message: InboundMessage,
@@ -2155,6 +2197,28 @@ async function main(): Promise<void> {
       if (!result) return;
       try {
         const record = collector.build({ message, result, proactive });
+        const rawSource =
+          typeof message.rawPayload?.source === 'string'
+            ? message.rawPayload.source
+            : undefined;
+        if (isNonEmployeeTraceLabel(record.senderNick) || rawSource) {
+          const creatorStaffId =
+            typeof message.rawPayload?.createdBy === 'string' &&
+            message.rawPayload.createdBy.trim()
+              ? message.rawPayload.createdBy.trim()
+              : record.senderStaffId;
+          const employeeName =
+            (typeof message.rawPayload?.creatorNick === 'string' &&
+            message.rawPayload.creatorNick.trim()
+              ? message.rawPayload.creatorNick.trim()
+              : undefined) ??
+            (await resolveEmployeeDisplayName(creatorStaffId));
+          record.senderNick = formatTraceSenderNick({
+            senderNick: record.senderNick,
+            ...(rawSource ? { source: rawSource } : {}),
+            ...(employeeName ? { employeeName } : {}),
+          });
+        }
         await traceStore.append(
           redactionEnabled ? redactTraceRecord(record) : record,
         );
@@ -2505,7 +2569,7 @@ async function main(): Promise<void> {
             : []),
           ...(status.message ? [`说明：${status.message}`] : []),
           ...(status.state !== 'authenticated'
-            ? ['发送 /dws-consent 查看授权范围，同意后发送 /dws-login 完成设备码授权。']
+            ? ['发送「授权范围」查看授权说明，同意后发送「授权」完成设备码授权。']
             : []),
         ].join('\n');
       },
@@ -2516,14 +2580,14 @@ async function main(): Promise<void> {
         if (current.state === 'authenticated') {
           return `本人 DWS 授权当前有效${
             current.record?.userName ? `（${current.record.userName}）` : ''
-          }，无需重新登录。如需切换到其他账号或撤销授权，先发送 /dws-logout 或 /dws-consent revoke。`;
+          }，无需重新登录。如需切换到其他账号或撤销授权，先发送「退出授权」或「撤销授权」。`;
         }
         let ticket;
         try {
           ticket = await identityService.startLogin(message.senderStaffId);
         } catch (error) {
           if (error instanceof DwsIdentityError && error.code === 'consent-required') {
-            return '请先发送 /dws-consent 查看授权范围，再发送 /dws-consent agree 表示同意。';
+            return '请先发送「授权范围」查看授权说明，再发送「同意授权」表示同意。';
           }
           const reason =
             error instanceof Error ? error.message : String(error);
@@ -2553,10 +2617,10 @@ async function main(): Promise<void> {
           );
           return [
             '已记录你对 DWS 授权范围的同意（日程、待办、审批、通讯录、文档 / 知识库）。',
-            '下一步请在单聊发送 /dws-login 完成设备码授权。',
+            '下一步请在单聊发送「授权」完成设备码授权。',
             record.writeEnabled
-              ? '授权完成后普通写操作会直接执行，高危操作仍需 /confirm。'
-              : '授权完成后，你提出创建或修改日程、待办、审批时，我会自动获得写权限并直接执行；只想只读可随时发送 /dws-consent read。',
+              ? '授权完成后普通写操作会直接执行，高危操作仍需回复「确认」。'
+              : '授权完成后，你提出创建或修改日程、待办、审批时，我会自动获得写权限并直接执行；只想只读可随时发送「改回只读」。',
           ]
             .filter(Boolean)
             .join('\n');
@@ -2572,19 +2636,19 @@ async function main(): Promise<void> {
               error instanceof DwsIdentityError &&
               error.code === 'consent-required'
             ) {
-              return '请先发送 /dws-consent agree 同意只读授权范围。';
+              return '请先发送「同意授权」同意只读授权范围。';
             }
             throw error;
           }
           if (action === 'write') {
-            return '已允许写操作：日程、待办、审批等普通写操作会直接执行；取消日程、覆盖文档等高危操作仍需 /confirm。发送 /dws-consent read 可改回只读。';
+            return '已允许写操作：日程、待办、审批等普通写操作会直接执行；取消日程、覆盖文档等高危操作仍需回复「确认」。发送「改回只读」可改回只读。';
           }
           await dwsWriteTasksService?.cancelForStaff(
             message.senderStaffId,
             '用户已改回只读',
             '已改回只读，等待授权后自动执行的写操作已取消。',
           );
-          return '已改回只读：后续写操作不会自动执行，需要时发送 /dws-consent write 重新允许。';
+          return '已改回只读：后续写操作不会自动执行，需要时发送「允许写操作」重新允许。';
         }
         if (action === 'revoke') {
           await dwsWriteTasksService?.cancelForStaff(
@@ -2593,9 +2657,9 @@ async function main(): Promise<void> {
             '已撤销 DWS 授权，等待中的写操作已取消。',
           );
           await identityService.revokeConsent(message.senderStaffId);
-          return '已撤销 DWS 授权同意，并清除本机绑定的加密凭据目录。如需再次使用，请重新发送 /dws-consent agree 并完成 /dws-login。';
+          return '已撤销 DWS 授权同意，并清除本机绑定的加密凭据目录。如需再次使用，请重新发送「同意授权」并发送「授权」。';
         }
-        return '用法：/dws-consent、/dws-consent agree、/dws-consent write、/dws-consent read、/dws-consent revoke';
+        return '可用口令：发送「授权范围」、「同意授权」、「允许写操作」、「改回只读」、「撤销授权」';
       },
       dwsLogout: async (message) => {
         await dwsWriteTasksService?.cancelForStaff(
@@ -2605,8 +2669,8 @@ async function main(): Promise<void> {
         );
         const cleared = await identityService.logout(message.senderStaffId);
         return cleared
-          ? '已清除你本机的 DWS 登录态，授权同意记录仍保留。如需重新授权，发送 /dws-login；如需彻底撤销同意，发送 /dws-consent revoke。'
-          : '当前没有可清除的 DWS 登录态。如需撤销同意记录，发送 /dws-consent revoke。';
+          ? '已清除你本机的 DWS 登录态，授权同意记录仍保留。如需重新授权，发送「重新授权」；如需彻底撤销同意，发送「撤销授权」。'
+          : '当前没有可清除的 DWS 登录态。如需撤销同意记录，发送「撤销授权」。';
       },
       dwsSystemStatus: async () => {
         const status = await authManager.status({ force: true });
@@ -2635,7 +2699,7 @@ async function main(): Promise<void> {
       dwsSystemLogin: async (message) => {
         const current = await authManager.status({ force: true });
         if (current.state === 'authenticated') {
-          return '系统级 DWS 授权当前有效，无需重新登录。员工个人业务请让他们自行 /dws-login。';
+          return '系统级 DWS 授权当前有效，无需重新登录。员工个人业务请让他们自行发送「授权」。';
         }
         let ticket = authManager.activeLogin();
         if (!ticket) {
@@ -3210,7 +3274,7 @@ async function main(): Promise<void> {
         if (!last) continue;
         void replyTo(
           last,
-          `DWS 重新授权未完成：${reason}。发送 /dws-login 可重试。`,
+          `DWS 重新授权未完成：${reason}。发送「系统重新授权」可重试。`,
         ).catch((error) =>
           logger.warn({ error: errorText(error) }, 'dws failure notice failed'),
         );
@@ -3271,7 +3335,7 @@ async function main(): Promise<void> {
           if (!last) continue;
           await replyTo(
             last,
-            `本人 DWS 授权未完成：${reason}。发送 /dws-consent 查看授权范围后，再发送 /dws-login 重试。`,
+            `本人 DWS 授权未完成：${reason}。发送「授权范围」查看授权说明后，再发送「重新授权」重试。`,
           );
         }
       })().catch((error) =>
@@ -3316,16 +3380,25 @@ async function main(): Promise<void> {
         throw new Error(`群任务 ${task.id} 仅允许在群聊投递`);
       }
       const now = Date.now();
+      const creatorName = await resolveEmployeeDisplayName(task.createdBy);
       const message: InboundMessage = {
         messageId: `group_report_${task.id}_${now}`,
         conversationId: task.conversationId,
         conversationType: '2',
         senderStaffId: 'scheduler',
-        senderNick: '群定时播报',
+        senderNick: formatTraceSenderNick({
+          senderNick: '群定时播报',
+          ...(creatorName ? { employeeName: creatorName } : {}),
+        }),
         cardDeliverUserId: '',
         isAtBot: false,
         text: '',
-        rawPayload: { source: 'scheduled_task', taskId: task.id },
+        rawPayload: {
+          source: 'scheduled_task',
+          taskId: task.id,
+          createdBy: task.createdBy,
+          ...(creatorName ? { creatorNick: creatorName } : {}),
+        },
         timestamp: now,
       };
       const streamer = createStreamer(message);
@@ -3379,16 +3452,29 @@ async function main(): Promise<void> {
       if (isPersonal && !targetStaffId) {
         throw new Error(`个人定时任务 ${task.id} 缺少有效的创建人 staffId`);
       }
+      const creatorStaffId = isStaffUserId(task.createdBy)
+        ? task.createdBy.trim()
+        : targetStaffId;
+      const creatorName = await resolveEmployeeDisplayName(creatorStaffId);
       const message: InboundMessage = {
         messageId: `scheduled_${task.id}_${now}`,
         conversationId: task.conversationId,
         conversationType: task.conversationType,
         senderStaffId: isPersonal ? targetStaffId : 'scheduler',
-        senderNick: '定时任务',
+        senderNick: formatTraceSenderNick({
+          senderNick: '定时任务',
+          source: 'scheduled_task',
+          ...(creatorName ? { employeeName: creatorName } : {}),
+        }),
         cardDeliverUserId: isPersonal ? targetStaffId : '',
         isAtBot: isPersonal,
         text: task.prompt,
-        rawPayload: { source: 'scheduled_task', taskId: task.id },
+        rawPayload: {
+          source: 'scheduled_task',
+          taskId: task.id,
+          createdBy: task.createdBy,
+          ...(creatorName ? { creatorNick: creatorName } : {}),
+        },
         timestamp: now,
       };
       logger.info(
@@ -3633,12 +3719,19 @@ async function main(): Promise<void> {
           );
           return;
         }
+        const cardUserName =
+          action.nick?.trim() ||
+          (await resolveEmployeeDisplayName(action.userId));
         const message: InboundMessage = {
           messageId: `card_${action.actionId}_${action.outTrackId || action.conversationId}_${Date.now()}`,
           conversationId: action.conversationId,
           conversationType: action.conversationType,
           senderStaffId: action.userId || `card_user_${action.conversationId}`,
-          senderNick: action.nick ?? '卡片用户',
+          senderNick: formatTraceSenderNick({
+            senderNick: '卡片用户',
+            source: 'card_action',
+            ...(cardUserName ? { employeeName: cardUserName } : {}),
+          }),
           isAtBot: true,
           text: action.command,
           rawPayload: {
@@ -3964,12 +4057,16 @@ async function main(): Promise<void> {
           return { ok: false, error: '未配置管理员 StaffId，无法发送测试卡片' };
         }
         const now = Date.now();
+        const adminName = await resolveEmployeeDisplayName(target);
         const streamer = createStreamer({
           messageId: `admin-test-${now}`,
           conversationId: target,
           conversationType: '1',
           senderStaffId: target,
-          senderNick: '管理员',
+          senderNick: formatTraceSenderNick({
+            senderNick: '管理员',
+            ...(adminName ? { employeeName: adminName } : {}),
+          }),
           isAtBot: true,
           text: '管理后台连通性测试',
           rawPayload: {},

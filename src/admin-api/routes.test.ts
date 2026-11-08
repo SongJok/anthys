@@ -28,6 +28,10 @@ import type {
   TraceDailyStats,
 } from '../types/admin-and-console.js';
 import type { EnterpriseMcpServerConfig } from '../types/mcp-and-sandbox.js';
+import {
+  TraceCollector,
+  formatTraceSenderNick,
+} from './runtime.js';
 import type { GroupBystanderPolicy } from '../types/bystander-and-memory.js';
 import {
   GlossaryConflictError,
@@ -1226,5 +1230,52 @@ describe('术语知识库管理接口', () => {
       }),
     });
     expect(invalid.status).toBe(400);
+  });
+
+  it('ReAct 轨迹员工字段在定时任务或非员工类型时附带员工名称括号', () => {
+    expect(
+      formatTraceSenderNick({
+        senderNick: '定时任务',
+        source: 'scheduled_task',
+        employeeName: 'Joony',
+      }),
+    ).toBe('定时任务（Joony）');
+    expect(
+      formatTraceSenderNick({
+        senderNick: '定时任务（Joony）',
+        source: 'scheduled_task',
+        employeeName: 'Joony',
+      }),
+    ).toBe('定时任务（Joony）');
+    expect(
+      formatTraceSenderNick({
+        senderNick: 'Joony',
+      }),
+    ).toBe('Joony');
+
+    const collector = new TraceCollector(() => NOW);
+    const trace = collector.build({
+      message: {
+        messageId: 'scheduled_1',
+        conversationId: 'cid-1',
+        conversationType: '1',
+        senderStaffId: '013526256623740528',
+        senderNick: '定时任务',
+        isAtBot: true,
+        text: '每日AI新闻',
+        rawPayload: {
+          source: 'scheduled_task',
+          creatorNick: 'Joony',
+        },
+        timestamp: NOW,
+      },
+      result: {
+        answer: '今日新闻',
+        reasoning: '',
+        usage: { totalTokens: 100, steps: 1, durationMs: 500 },
+      },
+      proactive: true,
+    });
+    expect(trace.senderNick).toBe('定时任务（Joony）');
   });
 });
