@@ -1,6 +1,7 @@
 # 外部技能兼容矩阵与导入 Runbook
 
 状态：矩阵中 3 个技能为**实测**（已安装并逐字节核对），其余 14 个为**待实测**（仅有市场元数据，分级是推断）。
+**2026-11-10 更新**：15 个包已全部安装并实测，13 个已按本 runbook 导入仓库（见第 7 节）；量化研究包因来源不明暂缓。
 前置依赖：[skill-module-split-design.md](./skill-module-split-design.md) 的 P2 阶段必须先落地，否则导入的技能没有 module 归属，且会加剧目录清单溢出。
 
 ## 1. 本项目的执行能力边界（决定"能不能完整使用"）
@@ -173,3 +174,42 @@
 - 整个模块：删模块目录，同上。
 - 因为 module 不进技能 id，删模块不会污染其他技能的启用状态。
 - Qoder 用户目录里已安装的那份不受项目回滚影响，需要在 Qoder 设置里单独处理。
+
+## 7. 导入结果（2026-11-10）
+
+15 个市场包已全部安装并逐包实测，最终导入 **13 个**，落在 `skills/market/<module>/<name>/`。
+
+| 模块 | 技能 | 分级 | 落地方式 |
+| --- | --- | --- | --- |
+| engineering | analyze-prompt | A | 补 `when_to_use`，删除上游指向的三个不存在文件/命令 |
+| engineering | analyze-code | B | 去掉子代理（Task + consultant CLI），改为主会话用 `project_*` 工具 |
+| engineering | bug-review | B | 删掉 6 个不存在的插件依赖与 TodoWrite 流程，静态分析器改为交给用户执行 |
+| engineering | code-quality-analyzer | B | 删掉 USDC 定价与"团队订阅"商业内容，只留方法论 |
+| engineering | production-code-audit | A | 正文超上限，按章节拆 2 个 references |
+| engineering | frontend-dev | B | 删 5.5 MB 字体、4 个素材脚本与 p5.js 模板，素材章节降级为需求清单 |
+| testing | systematic-debugging | A | 删掉 `superpowers:*` 引用，补 3 个 references |
+| testing | automation-testing | B | 上游 4 个引用文件全部缺失，主准则内联进正文 |
+| testing | auto-gen-testcase-from-req | B | 去掉"可由 auto-test-from-testcase 直接执行"的承诺 |
+| testing | test-browser | C | `agent-browser` CLI 全部换成 `mcp__playwright__browser_*`，`visibility: admin` |
+| data | database-optimizer | A | 上游缺失的 `resources/implementation-playbook.md` 已在正文说明 |
+| data | analytics-data-analysis | B | 说明沙箱无网络、装不了 pandas，标准库可用 |
+| other | amap-lbs-skill | C | `node + axios` 脚本换成 `mcp__amap__*`，`visibility: admin` |
+
+每个技能的 `IMPORT.md` 记录了市场 id、canonicalName、市场与包内两个版本、publisher、上游 source_url、license、security_audit 结论、importedAt、转换改动摘要与阻塞点。**安装凭证 installRef 不落盘。**
+
+### 7.1 实测结论
+
+- **扫描零错误**：`skills/builtin` + `skills/market` 共 34 个技能，0 个 `loadError`、0 条警告。
+- **模块分布**：builtin 5 个模块 21 个技能 + market 4 个模块 13 个技能（engineering 6 / testing 4 / data 2 / other 1）。
+- **新模块别名**：`testing` / `finance` / `other` 已补进 `MODULE_ALIASES`，否则这些模块只能靠单个技能的 tags 被搜到。
+- **路由抽检**：`生成测试用例` → `auto-gen-testcase-from-req` 14 分居首；`sql 慢查询怎么优化` → `database-optimizer` 12 分居首；`北京南站附近酒店` → `amap-lbs-skill` 8 分居首。
+- **体积**：全部 SKILL.md ≤ 65536 字节；超 8000 字符的按章节拆到 `references/`，主文件保留标题、适配说明与索引。
+
+### 7.2 仍未落地的四项
+
+1. **量化研究包（multi-strategy-quant-research-pro）**：包内无 license 文件、无上游 URL，正文版本（v1.1.2）与市场版本（1.0.1）也不一致。来源不明，按第 5 节第 6 条的建议**暂不导入**；需要先联系发布者或换可审计的替代源。
+2. **同花顺问财**：官方市场没有该技能，仍未导入。
+3. **钉钉 dws 技能**：D 级，与本项目 12 个原生 `dws_*` 工具冲突，未导入。
+4. **Android 测试**：D 级，运行前提（adb/模拟器/gradle）不具备，未导入。
+
+另：15 个市场包仍安装在 `~/.qoder-cn/skills/`（`install_extension` 没有卸载接口），需要时在 Qoder 设置里手动移除；项目仓库里的副本与之无关，回滚仓库不影响用户目录。

@@ -28,6 +28,9 @@ const MODULE_ALIASES: Record<string, readonly string[]> = {
   data: ['数据', '分析', '指标', '附件', '调研', '经营', '表格'],
   meta: ['技能', '插件', '手册', '规范'],
   general: ['闲聊', '链接', '网页'],
+  testing: ['测试', '调试', '缺陷', '回归', '用例', '浏览器', '端到端'],
+  finance: ['量化', '选股', '回测', '因子', '策略', '行情', '持仓'],
+  other: ['地图', '路线', '地理', '位置', '出行', '周边', '附近'],
 };
 const MODULE_ALIAS_BONUS = 2;
 

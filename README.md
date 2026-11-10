@@ -7,7 +7,7 @@
 - **克制的主动回复**：群内全量旁听，经三级漏斗判断后才对高优故障、技术求助作出回应。
 - **越用越懂团队**：工作记忆 + 情景摘要 + 语义画像三层记忆，跨会话保留上下文；语义记忆再按全局 / 群 / 群内成员 / 个人四种作用域隔离，企业术语库把内部黑话沉淀成可检索、可校验的固定模板。
 - **可扩展的知识层**：技能按目录渐进披露，声明式插件只声明技能与 MCP、不执行代码，项目手册把仓库事实沉淀成可发布的 12 章说明，并可接 GitHub 只读工具做跨仓对比。
-- **办公场景技能包**：内置 21 个技能，按办公协作、研发工程、数据洞察、元能力、通用兜底 5 个模块分组，覆盖日常聊天、链接阅读、数据分析、日周月报、项目文档、钉钉办公、调研简报与内部同事视角等常见工作流。
+- **办公场景技能包**：内置 21 个技能，按办公协作、研发工程、数据洞察、元能力、通用兜底 5 个模块分组，覆盖日常聊天、链接阅读、数据分析、日周月报、项目文档、钉钉办公、调研简报与内部同事视角等常见工作流；另从能力市场导入 13 个技能（代码审计、代码分析、缺陷排查、提示词优化、代码质量分析、生产就绪审计、系统化调试、自动化测试、需求生成测试用例、浏览器测试、前端开发、数据分析、SQL 优化、高德地图）覆盖研发与测试全链路。
 - **会自己到点干活**：个人提醒与定时 AI 任务（每天 / 工作日 / 每周 / 每月）、工作简报、群目标播报与群定时任务，投递严格按个人与群隔离。
 - **不用记命令**：授权与写操作确认支持「同意授权」「允许写操作」「确认」「取消」等中文口令，与斜杠命令等价。
 - **双通道动态管控**：管理员既可以在钉钉单聊里用自然语言下达指令，也可以在 Web 控制台逐项配置，保存即生效。
@@ -839,9 +839,10 @@ ReAct 循环内置看门狗（`src/watchdog/RunWatchdog.ts`），只观察不执
 
 技能是一段受控的操作步骤，用来教机器人"这类任务应该怎么做"，而不是把新的可执行代码带进进程。
 
-- **渐进披露**：系统提示只注入两级技能目录——每个模块一行摘要（模块名、真实技能数、按相关度点名的技能名），再对 router top-4 展开完整明细行；整段受 `SKILL_CATALOG_MAX_CHARS` 约束，明细用不完的预算回流给摘要，所以加技能不会把已有技能挤出提示词。模型命中任务后调用 `use_skill` 加载正文，需要细节时再用 `skill_read` 分页读取技能目录内的参考文件，也可用 `skill_search` 检索没被点名的技能。单次正文最多 4000 字符，参考文件单次最多 500 行 / 4000 字符，单文件上限 1MB。
+- **渐进披露**：系统提示只注入两级技能目录——每个模块一行摘要（模块名、真实技能数、按相关度点名的技能名），再对 router top-4 展开完整明细行；整段受 `SKILL_CATALOG_MAX_CHARS` 约束，明细用不完的预算回流给摘要，所以加技能不会把已有技能挤出提示词。模型命中任务后调用 `use_skill` 加载正文，需要细节时再用 `skill_read` 分页读取技能目录内的参考文件，也可用 `skill_search` 检索没被点名的技能。单次正文最多 8000 字符（短技能用 4000，长技能按 frontmatter 的 `max_instruction_chars`），超限时系统只注入章节大纲并提示用 `skill_read` 翻页；参考文件单次最多 500 行 / 4000 字符，单文件上限 1MB。
 - **来源**：`SKILLS_BUILTIN_DIR`（默认 `skills/builtin`）随仓库发布，`SKILLS_MARKET_DIR`（默认 `skills/market`）存放从能力市场导入并 vendor 进仓库的技能，`SKILLS_LOCAL_DIR`（默认 `skills/local`）用于团队自建。builtin 与 market 支持 `<模块>/<技能>` 两级目录，local 与插件技能保持扁平。
 - **内置模块**：共 21 个技能分 5 组——`office` 办公协作（`dingtalk-office`、`meeting-notes`、`office-docs`、`presentation-brief`、`work-report`）、`engineering` 研发工程（`code-reading`、`github-project-scan`、`incident-triage`、`project-docs`、`project-onboarding`、`repo-review`）、`data` 数据洞察（`attachment-analysis`、`data-analysis`、`data-insight`、`enterprise-lens`、`research-brief`）、`meta` 元能力（`handbook-maintainer`、`plugin-author`、`skill-author`）、`general` 通用兜底（`everyday-chat`、`link-reader`）。`other` 预留给外部杂项，自研技能不落 `other`。其中 `enterprise-lens` 规定回答公司内部业务与组织问题时的内部同事视角与取证顺序（术语 → 项目手册与钉钉知识库 → MCP/DWS 实时数据），禁止外部求职 / 商务 / 投资尽调口吻；`handbook-maintainer` 仅管理员可见。
+- **市场技能**：`skills/market/` 下 13 个技能，与内置技能共用同一套模块与 frontmatter 契约，但都带 `origin:qoder-market` 标签并在同级 `IMPORT.md` 记录来源（市场 id、发布者、版本、许可、安全审计结论、改造点与未导入内容），便于追溯与升级。分 4 组——`engineering` 研发工程（`analyze-prompt`、`analyze-code`、`bug-review`、`code-quality-analyzer`、`production-code-audit`、`frontend-dev`）、`testing` 质量测试（`systematic-debugging`、`automation-testing`、`auto-gen-testcase-from-req`、`test-browser`）、`data` 数据洞察（`analytics-data-analysis`、`database-optimizer`）、`other` 其他（`amap-lbs-skill`）。导入时统一把上游不可用的工具（外部 CLI、shell、付费接口）替换为本项目真实工具（`project_*`、`workspace_read_file`、`sandbox_analyze_and_aggregate`、`market_data_fetch`、`mcp__playwright__browser_*`、`mcp__amap__*`），并在正文首部写明「本项目适配说明」。两个 C 级技能默认 `visibility: admin`：`amap-lbs-skill` 需管理员在控制台启用 `amap` MCP 节点并配置 `AMAP_WEB_KEY`（高德开放平台 **Web 服务** 类型 Key），`test-browser` 需启用本地 `playwright` 节点且**不安装到 ECS 主机**。
 - **格式**：每个技能是一个目录，`SKILL.md` 以 YAML frontmatter 开头，字段包括 `name`、`description`、`version`、`when_to_use`、`tags`、`allowed_tools`、`risk`、`visibility`、`max_instruction_chars` 与可选的 `module`；正文按「适用场景 / 步骤 / 约束」组织，可附带 `references/` 等资源文件。模块归属以**目录名为准**，frontmatter 的 `module` 只在扁平目录下生效，两者冲突时取目录名并记 warning。模块名须匹配 `^[a-z][a-z0-9-]{1,31}$`，不能是 `builtin`/`market`/`local`/`plugin`，也不能与其下任一技能同名。技能 id 不含模块（仍是 `builtin:<name>`），所以调整模块划分不会丢数据库里的启用状态。
 - **管理**：控制台「技能 Skills」按模块折叠分组并支持模块 / 来源 / 启用状态筛选，分组头的 `已启用 N/M` 取服务端汇总（数据库里真实生效的启用数），不随当前筛选变化；可查看目录预览、校验草稿、启用 / 停用、在线编辑 `SKILL.md` 与资源文件，并查看近 7 天调用次数。预览会分别显示命中数、候选数与实际写进提示词的数量。保存后立即热更新，无需重启。
 - **边界**：技能正文只来自管理员维护的本地目录；聊天内容、工具返回、仓库文件都不会被当作指令注入。`EXTENSIONS_SKILLS_ENABLED=false` 可整体关闭。

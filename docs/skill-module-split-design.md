@@ -1,6 +1,6 @@
 # 技能模块拆分设计（Skill Module Split）
 
-状态：P2-a ~ P2-f 已实现并合入本地测试；C-1 ~ C-3 基础设施已实现并实机验证；P3（外部技能导入）待做。
+状态：P2-a ~ P2-f 已实现并合入本地测试；C-1 ~ C-3 基础设施已实现并实机验证；P3-A ~ P3-C 已导入 13 个市场技能（P3-D 量化研究因来源不明待决）。
 配套文档：[skill-market-import-matrix.md](./skill-market-import-matrix.md)（外部技能兼容矩阵与导入 runbook）。
 
 > 本文第 1、2 节描述的是**改造前**的现状，作为立项依据保留；第 3 节起是落地方案，与代码一致。行号会随重构漂移，以符号名为准。
@@ -95,7 +95,7 @@ module 命名规则：`^[a-z][a-z0-9-]{1,31}$`（`SKILL_MODULE_PATTERN`）。保
 
 ### 3.4 路由（`src/skills/SkillRouter.ts`）
 
-- `MODULE_ALIASES` 给已落地的 5 个 builtin 模块登记中文别名（office/engineering/data/meta/general），query 命中别名给该模块下**所有**技能加 `MODULE_ALIAS_BONUS = 2`。
+- `MODULE_ALIASES` 给已落地的 5 个 builtin 模块登记中文别名（office/engineering/data/meta/general），query 命中别名给该模块下**所有**技能加 `MODULE_ALIAS_BONUS = 2`。导入市场技能后又补了 `testing`/`finance`/`other` 三个别名。
 - **一个模块只加一次分**，否则"数据分析"同时命中"数据"和"分析"会把整组顶到最前。
 - **tags 的现有关键词打分逻辑不动**，module 是新增的独立信号，避免回归；`projectId` 命中 tags 加分的既有行为保留。
 - 未登记别名的模块（如导入后的 `finance`）不参与加分——**导入市场技能时必须按同样格式补上新模块的别名**，否则新模块只能靠单个技能的 tags 被搜到。
@@ -171,6 +171,19 @@ module 命名规则：`^[a-z][a-z0-9-]{1,31}$`（`SKILL_MODULE_PATTERN`）。保
 全量验收：`pnpm typecheck` 通过，`pnpm test` **127 文件 / 1033 用例全绿**，`cd web-console && npx tsc --noEmit` 通过。
 
 P2 全部完成后才进 P3（外部技能导入），因为导入依赖 `market` 根和 module 字段。
+
+### P3 阶段
+
+| 阶段 | 内容 | 验收 | 状态 |
+| --- | --- | --- | --- |
+| P3-A | 导入 A 级市场技能（8 个） | `analyze-prompt`、`analyze-code`、`bug-review`、`code-quality-analyzer`、`production-code-audit`、`systematic-debugging`、`database-optimizer`、`auto-gen-testcase-from-req` 落到 `skills/market/engineering|data|testing/`；全部零 loadError | 已完成 |
+| P3-B | 导入 B 级市场技能（3 个） | `frontend-dev`、`automation-testing`、`analytics-data-analysis`；正文已按本项目无 shell、无依赖安装的事实改写 | 已完成 |
+| P3-C | 导入 C 级市场技能（2 个） | `amap-lbs-skill`（改走 `mcp__amap__*`）、`test-browser`（改走 `mcp__playwright__browser_*`）；两者 `visibility: admin` | 已完成 |
+| P3-D | 导入量化研究技能 | 包内无 license、无上游来源地址，来源不明，**暂不导入** | 待决（见矩阵文档第 5 节第 6 条） |
+
+导入由一次性工具 `scripts/import-market-skill.ts` 完成：内容以脚本里的 CURATION 表为唯一真相，改内容改表再重跑，不改生成结果。转换规则（frontmatter 重写、`allowed_tools` 映射、正文替换、章节拆分）见 [skill-market-import-matrix.md](./skill-market-import-matrix.md) 第 6 节。
+
+实测：扫描 `skills/builtin` + `skills/market` 共 **34 个技能、0 个 loadError、0 条警告**；模块分布 builtin 5 个 + market 4 个（engineering 6 / testing 4 / data 2 / other 1）。新模块 `testing` / `finance` / `other` 已补进 `MODULE_ALIASES`。
 
 `db:push` 的一个已知副作用：它会顺带 drop/recreate 由 `pnpm db:extend` 单独建的 `project_chunks_embedding_idx`（hnsw）与 `project_chunks_trgm_idx`（gin）。本次已核对两个索引重建后定义一致、14818 行 `project_chunks` 全部保留。**部署到 ECS 时 `db:push` 之后必须补跑 `db:extend`。**
 
