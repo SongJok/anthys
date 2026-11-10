@@ -10,5 +10,7 @@ coverage/
 tmp/
 *newcorp*.json
 .workspace/
+# Playwright MCP 默认落盘目录；实际运行时指向 .workspace/playwright-mcp
+.playwright-mcp/
 .state/
 .idea/

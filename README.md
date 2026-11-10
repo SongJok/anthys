@@ -417,9 +417,11 @@ pnpm run db:seed      # 可选：预写入默认人设与模型配置，已有�
 | `DWS_PROFILE_ROOT` | `.state/dws-profiles` | 每员工独立 DWS home 根目录（0700，按 profile 隔离配置），已在 `.gitignore` 中忽略 |
 | `DWS_CORP_ID` | 空 | 设备码授权的目标企业 corpId；配置后登录显式指向该组织，并拒绝绑定其他组织账号 |
 | `SANDBOX_ENABLED` | `true` | 是否启用隔离沙盒工具 |
+| `MARKET_DATA_ENABLED` | `true` | 是否启用受控行情取数工具 `market_data_fetch` |
 | `MCP_SERVERS_CONFIG` | `config/mcp-servers.json` | 首次启动时的 MCP 节点定义 |
 | `ENTERPRISE_MCP_ENDPOINT` | 空 | 示例企业 MCP 的地址，供配置文件中 `${...}` 引用 |
 | `ENTERPRISE_MCP_TOKEN` | 空 | 示例企业 MCP 的访问令牌，供配置文件中 `${...}` 引用 |
+| `AMAP_WEB_KEY` | 空 | 高德开放平台 **Web 服务** 类型 Key，供 `amap` 节点引用；填入后重启并在控制台启用节点 |
 
 ### 构建与启动
 
@@ -910,6 +912,7 @@ ReAct 循环内置看门狗（`src/watchdog/RunWatchdog.ts`），只观察不执
 | 公网链接 | `web_fetch` 打开群聊或单聊中的公开网页链接，提取标题、描述与正文并生成引用；拒绝本机与内网地址，跟随跳转时重新校验，短时缓存与调用配额 |
 | 工作区文件 | `workspace_read_file` 读取消息附件或工作区内的文本文件（CSV/JSON/Markdown 等），带路径校验、二进制识别与字符截断 |
 | 隔离沙盒 | `sandbox_analyze_and_aggregate` 对工作区文件、消息附件或工具返回的大批量数据做脚本化统计与聚合，支持嵌套附件路径 |
+| 行情取数 | `market_data_fetch` 从固定白名单行情源取 A 股 / 港股 / 美股快照与复权日线，数据量大时落盘交由沙盒计算 |
 | 产物回传 | `deliver_artifact` 把工作区白名单目录内的文件上传为钉钉文件消息 |
 | 术语 | `glossary_lookup` 查询企业术语的规范说法、别名、示例与易误解点 |
 | 群工作区 | `group_workspace_view` / `group_goal_create` / `group_goal_update` / `group_task_create` / `group_task_update` / `group_digest` 维护本群定位、目标与任务；`group_memory_*` 管理全群共享记忆，`group_member_memory_*` 管理发言人在本群的专属记忆；`group_report_*` 管理群目标定期播报，`group_schedule_list` / `group_schedule_manage` 管理群定时提醒与群定时 AI 任务（均仅群聊） |
@@ -958,6 +961,28 @@ ReAct 循环内置看门狗（`src/watchdog/RunWatchdog.ts`），只观察不执
 - 一键连通性测试会新建连接并拉取该节点暴露的全部工具 Schema，可直接在控制台浏览。
 - 超大工具结果不会原样塞进上下文，会截断为预览并落盘，供沙盒进一步分析。
 - 支持按群、按角色的工具访问策略：可限制某群只能使用哪些节点、哪些工具。
+- 放在 URL query 里的密钥（`key` / `ak` / `token` 等，如高德）在控制台、API 响应与审计日志中同样显示为掩码；纯 `${VAR}` 占位符保留原文，便于看出该补哪个环境变量。
+
+**高德地图**
+
+`config/mcp-servers.json` 预置了官方远程节点 `amap`（`https://mcp.amap.com/mcp?key=${AMAP_WEB_KEY}`，Streamable HTTP），默认 `enabled: false`。启用步骤：
+
+1. 在[高德开放平台](https://console.amap.com/)创建 **Web 服务** 类型的 Key（不是 Web 端 JS API Key，类型选错会报权限错误）。
+2. 在 `.env` 填入 `AMAP_WEB_KEY=...` 并重启进程（环境变量只在启动时读取）。
+3. 到控制台「企业 MCP」把 `高德地图` 节点启用，一键连通性测试应能列出 `maps_text_search`、`maps_geo`、`maps_weather`、`maps_direction_*` 等工具，工具名以 `mcp__amap__` 前缀暴露。
+
+未配置 Key 时节点保持离线并提示 `${AMAP_WEB_KEY}` 未解析，不会带着假 Key 发起请求。
+
+**浏览器自动化（仅本地）**
+
+`config/mcp-servers.json` 预置了 `playwright` 节点（stdio，`npx -y @playwright/mcp@0.0.85`），默认 `enabled: false`。它用于在本地开发时做真实页面操作与回归验证，**ECS 上不安装、不启用**。
+
+- 首次使用前安装浏览器内核：`npx playwright install chromium`。
+- 固定 `--headless --isolated`：无头运行，浏览器配置只留在内存，不写用户目录。
+- `--output-dir .workspace/playwright-mcp`：截图与快照落在已忽略的工作区目录，不污染仓库。
+- `--blocked-origins http://127.0.0.1:8787;http://localhost:8787`：拦截对管理控制台的访问，避免浏览器自动化改管理配置。这是护栏而不是权限边界，仍应通过「企业 MCP」的工具访问策略限制可用群组。
+- 暴露 25 个 `mcp__playwright__browser_*` 工具，其中 `browser_run_code_unsafe` 会在页面上下文执行任意 JS，建议只对管理员开放。
+- 本地实测：`example.com` 导航成功（标题 `Example Domain`），`127.0.0.1:8787` 返回 `ERR_BLOCKED_BY_CLIENT`。
 
 #### 钉钉 DWS
 
@@ -1033,6 +1058,18 @@ ReAct 循环内置看门狗（`src/watchdog/RunWatchdog.ts`），只观察不执
 - 其他语言在无网络、只读文件系统、内存受限的 Docker 容器中执行，需要运行机器已安装 Docker。
 - 输入来自上一步工具结果，输出结构化统计与结论，避免把原始数据全部喂给模型。
 
+#### 受控行情取数
+
+`market_data_fetch` 是机器人访问公开行情的唯一出口，沙盒本身始终无网络：
+
+- 只允许两类代码：`600519.SH` / `000001.SZ`（A 股）、`00700.HK`（港股）、`AAPL.US`（美股）；市场后缀必填，缺失或格式不符直接报错。
+- 只访问两个固定白名单主机：东方财富（实时快照）与腾讯（复权日线）。地址由代码拼装，调用方无法传入任意 URL；复用 `web_fetch` 的 DNS 固定、私网拦截与跳转复校。
+- `kind=quote` 取实时快照（价格、昨收、涨跌幅、成交量额、总市值），`kind=daily` 取日线（`qfq` 前复权 / `none` 不复权），单次最多 30 个代码、500 根日线。
+- 结果超过 6000 字符自动落盘到工作区，返回 `datasetKey` 与 `datasetPath`；后续计算用 `sandbox_analyze_and_aggregate` 的 `datasetKeys` 读回，不靠摘要臆测。
+- 开关：`MARKET_DATA_ENABLED=false` 关闭整个工具源（默认开启）。
+
+实测：`600519.SH` / `000001.SZ` / `00700.HK` / `AAPL.US` 四个市场均能取到报价；500 根日线落盘后由沙盒算出 MA20 全过程无网络请求。
+
 ### 需求准入与拒接
 
 机器人只接单轮可在 15 分钟内完成、且不超过 12 万 Token 的需求；判断为过重时明确拒接而不是硬扛：
@@ -1086,7 +1123,7 @@ ReAct 循环内置看门狗（`src/watchdog/RunWatchdog.ts`），只观察不执
 - 首次打开会提示填写 **管理 API Token**，对应服务端 `ADMIN_API_TOKEN`，保存在浏览器本地。
 - 管理员身份来自 `.env` 的 `DINGTALK_ADMIN`（与 `ADMIN_STAFF_IDS` 合并），也可以在控制台「系统设置」的管理员白名单里改，保存即生效。
 - 所有改动保存后立即生效，无需重启；页面会显示热更新结果。
-- AppSecret、模型 API Key 与 MCP 请求头不会回传明文。读取时显示掩码，**留空或保持掩码即表示不修改**；填写新值才会覆盖。
+- AppSecret、模型 API Key、MCP 请求头与 URL query 中的密钥（`key` / `ak` / `token` 等）不会回传明文。读取时显示掩码，**留空或保持掩码即表示不修改**；填写新值才会覆盖。审计日志里的节点快照同样脱敏。
 - 生产环境请通过反向代理限制控制台访问来源，并设置强随机 `ADMIN_API_TOKEN`。
 
 ---

@@ -334,6 +334,7 @@ async function createHarness(workspaceRoot: string): Promise<Harness> {
     enableBuiltin: false,
     enableDws: false,
     enableSandbox: false,
+    enableMarketData: false,
     workspace: { hostDir: workspaceRoot, sandboxDir: '/workspace' },
   });
 

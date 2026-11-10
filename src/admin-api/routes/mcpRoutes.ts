@@ -9,6 +9,7 @@ import type {
 } from '../../types/admin-and-console.js';
 import {
   MCP_SECRET_MASK,
+  maskEndpointSecrets,
   maskMcpServers as maskServers,
   restoreMaskedMcpEnv as restoreMaskedEnv,
 } from '../../config/mcpSecrets.js';
@@ -144,7 +145,8 @@ function serverSnapshot(servers: readonly EnterpriseMcpServerConfig[]) {
     name: item.name,
     domain: item.domain,
     transport: item.transport,
-    endpointOrCommand: item.endpointOrCommand,
+    // 审计日志也会落到控制台，endpoint 里的 ?key= 不能原样留存
+    endpointOrCommand: maskEndpointSecrets(item.endpointOrCommand),
     enabled: item.enabled,
   }));
 }

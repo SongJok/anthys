@@ -322,6 +322,7 @@ describe('ToolRegistry 阶段二联调', () => {
       'mcp',
       'dws',
       'sandbox',
+      'market-data',
     ]);
     expect(registry.pool?.listEnabledServers().map((server) => server.id)).toEqual(
       ['prod_log', 'git_code'],
@@ -428,6 +429,7 @@ describe('ToolRegistry 公网搜索工具', () => {
       enableBuiltin: false,
       enableDws: false,
       enableSandbox: false,
+      enableMarketData: false,
       webSearchProvider: new WebSearchToolProvider({
         client,
         enabled: () => true,
@@ -449,6 +451,7 @@ describe('ToolRegistry 公网搜索工具', () => {
       enableBuiltin: false,
       enableDws: false,
       enableSandbox: false,
+      enableMarketData: false,
       webSearchProvider: new WebSearchToolProvider({
         client,
         enabled: () => false,
@@ -458,6 +461,49 @@ describe('ToolRegistry 公网搜索工具', () => {
       await disabled.close();
     });
     await expect(disabled.assembleTools(makeContext())).resolves.toEqual([]);
+  });
+});
+
+describe('ToolRegistry 受控行情取数工具', () => {
+  it('默认挂载 market_data_fetch，可用开关或环境变量关闭', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'tool-registry-market-'));
+    cleanup.push(async () => {
+      await rm(root, { recursive: true, force: true });
+    });
+    const workspace = { hostDir: join(root, 'workspace'), sandboxDir: '/workspace' };
+
+    const on = await ToolRegistry.create({
+      mcpServers: [],
+      workspace,
+      enableBuiltin: false,
+      enableDws: false,
+      enableSandbox: false,
+    });
+    cleanup.push(async () => {
+      await on.close();
+    });
+    expect(on.providers.map((provider) => provider.providerName)).toContain(
+      'market-data',
+    );
+    expect(
+      (await on.assembleTools(makeContext())).map((tool) => tool.name),
+    ).toEqual(['market_data_fetch']);
+
+    const off = await ToolRegistry.create({
+      mcpServers: [],
+      workspace,
+      enableBuiltin: false,
+      enableDws: false,
+      enableSandbox: false,
+      env: { MARKET_DATA_ENABLED: 'false' },
+    });
+    cleanup.push(async () => {
+      await off.close();
+    });
+    expect(off.providers.map((provider) => provider.providerName)).not.toContain(
+      'market-data',
+    );
+    await expect(off.assembleTools(makeContext())).resolves.toEqual([]);
   });
 });
 

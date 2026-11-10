@@ -11,6 +11,36 @@
       },
       "timeoutMs": 480000,
       "maxResultChars": 16000
+    },
+    {
+      "id": "amap",
+      "name": "高德地图",
+      "domain": "general",
+      "transport": "streamable-http",
+      "endpointOrCommand": "https://mcp.amap.com/mcp?key=${AMAP_WEB_KEY}",
+      "timeoutMs": 30000,
+      "maxResultChars": 16000,
+      "enabled": false
+    },
+    {
+      "id": "playwright",
+      "name": "浏览器自动化（仅本地）",
+      "domain": "code",
+      "transport": "stdio",
+      "endpointOrCommand": "npx",
+      "args": [
+        "-y",
+        "@playwright/mcp@0.0.85",
+        "--headless",
+        "--isolated",
+        "--output-dir",
+        ".workspace/playwright-mcp",
+        "--blocked-origins",
+        "http://127.0.0.1:8787;http://localhost:8787"
+      ],
+      "timeoutMs": 60000,
+      "maxResultChars": 16000,
+      "enabled": false
     }
   ]
 }

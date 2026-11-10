@@ -19,6 +19,7 @@ import {
   type IsolatedSandboxOptions,
 } from '../tools/sandbox/IsolatedSandbox.js';
 import { SandboxToolProvider } from '../tools/sandbox/SandboxToolProvider.js';
+import { MarketDataToolProvider } from '../tools/market/MarketDataToolProvider.js';
 import {
   McpClientPool,
   type McpClientPoolOptions,
@@ -56,6 +57,8 @@ export interface ToolRegistryOptions {
   enableBuiltin?: boolean;
   enableDws?: boolean;
   enableSandbox?: boolean;
+  /** 受控行情取数工具；默认开启，可用 MARKET_DATA_ENABLED=0 关闭 */
+  enableMarketData?: boolean;
   dwsRunner?: DwsCliRunner;
   /** 每员工独立 DWS 身份（同意 + 设备码登录 + 独立 home）；缺省时不校验身份 */
   dwsIdentity?: DwsIdentityService;
@@ -334,6 +337,14 @@ export class ToolRegistry {
             ? { sandboxOptions: options.sandboxOptions }
             : {}),
           workspace,
+        }),
+      );
+    }
+    if (options.enableMarketData ?? envFlag(env, 'MARKET_DATA_ENABLED', true)) {
+      providers.push(
+        new MarketDataToolProvider({
+          workspace,
+          logger: options.logger,
         }),
       );
     }

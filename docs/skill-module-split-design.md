@@ -1,6 +1,6 @@
 # 技能模块拆分设计（Skill Module Split）
 
-状态：P2-a ~ P2-f 已实现并合入本地测试；P3（外部技能导入）待做。
+状态：P2-a ~ P2-f 已实现并合入本地测试；C-1 ~ C-3 基础设施已实现并实机验证；P3（外部技能导入）待做。
 配套文档：[skill-market-import-matrix.md](./skill-market-import-matrix.md)（外部技能兼容矩阵与导入 runbook）。
 
 > 本文第 1、2 节描述的是**改造前**的现状，作为立项依据保留；第 3 节起是落地方案，与代码一致。行号会随重构漂移，以符号名为准。
@@ -174,7 +174,25 @@ P2 全部完成后才进 P3（外部技能导入），因为导入依赖 `market
 
 `db:push` 的一个已知副作用：它会顺带 drop/recreate 由 `pnpm db:extend` 单独建的 `project_chunks_embedding_idx`（hnsw）与 `project_chunks_trgm_idx`（gin）。本次已核对两个索引重建后定义一致、14818 行 `project_chunks` 全部保留。**部署到 ECS 时 `db:push` 之后必须补跑 `db:extend`。**
 
-## 6. 风险与取舍
+## 6. C 类基础设施（外部技能导入的前置依赖）
+
+P3 要导入的技能里有三类必须先有基础设施，否则装进去也跑不起来。三项都已实现并实机验证。
+
+| 编号 | 内容 | 落地方式 | 验收 |
+| --- | --- | --- | --- |
+| C-1 | 高德地图官方远程 MCP | `config/mcp-servers.json` 预置 `amap` 节点（`https://mcp.amap.com/mcp?key=${AMAP_WEB_KEY}`，streamable-http），默认 `enabled: false`；`.env` 只放 Key | 控制台显示「停用」而非假「已生效」；Key 缺失时不带假 Key 发起请求；**实机**：API/审计日志中 query 里的密钥被掩码、`${VAR}` 占位符保留原文、提交掩码回写不会覆盖真实密钥 |
+| C-2 | 受控行情取数 + 沙箱数据注入 | 新增 `src/tools/market/MarketDataToolProvider.ts`，工具 `market_data_fetch`；只允许两个固定白名单行情主机，地址由代码拼装 | **实机**：`600519.SH`/`000001.SZ`/`00700.HK`/`AAPL.US` 四个市场均取到报价；500 根日线自动落盘并由 `sandbox_analyze_and_aggregate` 用 `datasetKeys` 读回算出 MA20，全程沙盒无网络 |
+| C-3 | 浏览器测试 MCP（仅本地） | `config/mcp-servers.json` 预置 `playwright` 节点（stdio，`npx -y @playwright/mcp@0.0.85`），默认 `enabled: false` | **实机**：25 个 `mcp__playwright__browser_*` 工具；`example.com` 导航成功；`127.0.0.1:8787` 被 `--blocked-origins` 拦成 `ERR_BLOCKED_BY_CLIENT`；**ECS 上不安装、不启用** |
+
+三条护栏（不可放宽）：
+
+- **沙盒始终 `--network none`**。行情出网只能走 `market_data_fetch` 这一个带白名单的出口，数据再通过 `datasetKeys` 注入沙盒；不允许给沙盒开网。
+- **密钥只在 `.env`**。MCP 节点一律用 `${VAR}` 引用；节点地址里以 query 形式携带的密钥（`key` / `ak` / `token` 等）在控制台、API 响应与审计日志中一律掩码，纯占位符保留原文以便定位缺失变量。
+- **控制台区分默认配置与真实生效状态**。`amap` / `playwright` 因为缺 Key 或仅限本地，默认停用，控制台如实显示「停用」，不显示成「已生效」。
+
+C-2 的开关是 `MARKET_DATA_ENABLED`（默认开启），关掉后整个工具源不挂载。
+
+## 7. 风险与取舍
 
 - **两级扫描是本次唯一的破坏性改动**。用 `modules` 开关把影响关在 builtin/market 两个根，local 和 plugin 根行为不变，出问题可以只关掉开关回退。
 - **module 不进技能 id**，所以后续调整模块划分不会丢启用状态；代价是控制台改模块归属需要真的移动目录（builtin/market 不可在控制台编辑，只能改仓库）。这是刻意的：外部技能的归属应该由仓库决定，不由运行时决定。
