@@ -178,6 +178,9 @@ pnpm run db:seed      # 可选：预写入默认人设与模型配置，已有�
 | `PERSONA_SPEAKING_STYLE` | 见示例 | 语气与表达风格 |
 | `ORG_NAME` | `北京陶乐科技有限公司` | 机器人所属组织名，注入系统提示的组织身份段 |
 | `BOT_ADMIN_NAME` | `Joony` | 开发者 / 管理员称呼，员工遇到问题时被引导联系此人 |
+| `DEFAULT_LOCATION_ADDRESS` | `北京市石景山区鲁谷大街瑞达大厦` | 机器人部署地，注入系统提示的默认位置段 |
+| `DEFAULT_LOCATION_CITY` | `北京市` | 默认位置所属城市 |
+| `DEFAULT_LOCATION_LONGITUDE` / `DEFAULT_LOCATION_LATITUDE` | `116.245261` / `39.903114` | 默认位置坐标（GCJ-02），用户问「附近/周边」且未指明地点时作为中心点 |
 
 `LLM_ADMIN_*` 与 `LLM_PROACTIVE_*` 使用与 `LLM_*` 相同的后缀。任一角色的 `BASE_URL` / `API_KEY` / `MODEL` 缺失时回退默认角色，默认角色不可用时回退 `LLM_PROACTIVE_*`，启动日志会写出回退原因。供应商方言影响请求格式：DeepSeek 发送 `thinking` 与 `reasoning_effort`，Kimi 省略 `temperature` 并使用 `max_completion_tokens`，GLM-5.3 系列强制思考、只能通过 `reasoning_effort` 调节强度（`off` 会降级为 `low`），工具循环会把 `reasoning_content` 原样回传。
 
@@ -773,6 +776,14 @@ ReAct 循环内置看门狗（`src/watchdog/RunWatchdog.ts`），只观察不执
 - 严禁外部求职尽调（值不值得去、加班待遇）、外部商务合作评估、外部投资尽调或第三方旁观分析师口吻；引用公司介绍里的静态规模数据时会说明是基线口径而非实时经营报表。
 - 遇到回答有误、权限不足、工具失败、授权失效、知识库过期等问题，机器人在做完自己能做的处理后，会引导员工联系管理员并说明需要反馈的现象、时间与所在会话；不会冒充管理员，也不替管理员承诺修复时间。
 - 外部通用问题照常回答，不强加公司视角。配套的 `enterprise-lens` 技能进一步规定取证顺序与回答框架。
+
+### 默认位置
+
+系统提示里固定写明机器人部署地，用户问「附近 / 周边 / 就近」而没指明地点时以它为坐标中心：
+
+- `DEFAULT_LOCATION_ADDRESS`（默认 `北京市石景山区鲁谷大街瑞达大厦`）、`DEFAULT_LOCATION_CITY`（默认 `北京市`）、`DEFAULT_LOCATION_LONGITUDE` / `DEFAULT_LOCATION_LATITUDE`（默认 `116.245261` / `39.903114`，GCJ-02 坐标系）。
+- 坐标由高德 `mcp__amap__maps_geo` 地理编码得到；用户明确说了别的地点时以用户说的为准。
+- `amap-lbs-skill` 的周边搜索同样使用这组默认坐标作为中心点。
 
 ### 群工作区与按群模型路由
 

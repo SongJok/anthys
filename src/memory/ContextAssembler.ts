@@ -5,6 +5,10 @@ import {
   resolveOrgIdentity,
 } from '../persona/OrgIdentity.js';
 import {
+  buildDefaultLocationPrompt,
+  resolveDefaultLocation,
+} from '../persona/DefaultLocation.js';
+import {
   formatShanghaiMessageStamp,
   shanghaiPromptClock,
 } from '../time/shanghaiTime.js';
@@ -63,6 +67,8 @@ export function buildSystemPrompt(
     SAFETY_GUARDRAILS,
     '',
     buildOrgIdentityPrompt(resolveOrgIdentity()),
+    '',
+    buildDefaultLocationPrompt(resolveDefaultLocation()),
     '',
     TOOL_GUIDANCE,
     '',

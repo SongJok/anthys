@@ -39,4 +39,14 @@ describe('OrgIdentity', () => {
     expect(prompt).toContain('Joony');
     expect(prompt).toContain('北京陶乐科技有限公司');
   });
+
+  it('系统提示携带默认位置', () => {
+    const prompt = buildSystemPrompt({
+      name: '小助手',
+      rolePrompt: 'r',
+      speakingStyle: 's',
+    });
+    expect(prompt).toContain('北京市石景山区鲁谷大街瑞达大厦');
+    expect(prompt).toContain('默认位置');
+  });
 });
