@@ -53,6 +53,8 @@ max_instruction_chars: 8000
 1. 在[高德开放平台](https://lbs.amap.com/api/webservice/create-project-and-key)创建 **Web 服务** 类型的 Key
 2. 把 Key 填进 `.env` 的 `AMAP_WEB_KEY` 并重启，然后在控制台启用 `amap` 节点
 
+该 Key 必须**关闭数字签名**：开启数字签名后 Web 服务请求必须带 `sig`，而高德 MCP 端点不支持 `sig`，调用会返回 `INVALID_USER_SIGNATURE`（10007）。MCP 握手成功不代表 Key 有效，只有真正调用工具才会暴露问题。
+
 节点未启用时，本技能直接告知用户"地图服务未启用"，不要编造查询结果。
 
 当用户想要搜索地址、地点、周边信息（如美食、酒店、景点等）、规划路线或可视化数据时，使用此 skill。
@@ -149,6 +151,12 @@ https://www.amap.com/search?query={关键词}
 
 ```
 🔑 地图查询需要高德 MCP 节点，当前未启用。请管理员在控制台启用 `amap` 节点（配置项 `AMAP_WEB_KEY`）。
+```
+
+**节点在线但工具调用报 `INVALID_USER_SIGNATURE` / `INVALID_USER_KEY` 时的回复模板：**
+
+```
+🔑 高德 Key 校验未通过（MCP 握手成功不代表 Key 有效）。请管理员确认 `AMAP_WEB_KEY` 是「Web 服务」类型的 Key，且在控制台关闭了「数字签名」。
 ```
 
 #### 第三步：调用地理编码 API 获取经纬度
