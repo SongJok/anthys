@@ -209,6 +209,20 @@ function isHallucinatedToolAction(content: string): boolean {
   if (/任务\s*ID[：:]\s*[`']?[0-9a-f]{8}-[0-9a-f]{4}-/iu.test(content)) {
     return true;
   }
+  if (
+    /(?:已|已经)(?:通知|提醒|艾特|@)(?:了)?(?:所有人|全员|全体成员)/u.test(
+      content,
+    )
+  ) {
+    return true;
+  }
+  if (
+    /(?:所有人|全员|全体成员)(?:的)?(?:通知|提醒)(?:已|已经)(?:发送|发出|触发)/u.test(
+      content,
+    )
+  ) {
+    return true;
+  }
   return false;
 }
 
@@ -516,7 +530,7 @@ export class ReActRunner implements AgentEngine {
             messages.push({
               role: 'system',
               content:
-                '[Harness 真实性拦截] 你刚才没有发起任何工具调用（tool_calls 为空），却直接输出了“操作需要确认”或伪造了任务创建/修改/取消结果与任务 ID。请立即真实调用对应的工具（如 personal_reminder_manage、group_schedule_manage 等），禁止不调工具直接编造结果。',
+                '[Harness 真实性拦截] 你刚才没有发起任何工具调用（tool_calls 为空），却直接输出了“操作需要确认”或伪造了任务创建/修改/取消、全员通知等结果与任务 ID。请立即真实调用对应的工具（如 personal_reminder_manage、group_schedule_manage、group_notify_all 等），禁止不调工具直接编造结果。',
             });
             continue;
           }

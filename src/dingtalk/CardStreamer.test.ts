@@ -114,6 +114,29 @@ describe('CardStreamer', () => {
     await streamer.start();
     expect(fake.created[0]?.spaceId).toBe('dtv1.card//IM_GROUP.cid-9');
     expect(fake.created[0]?.deliver.conversationType).toBe('2');
+    expect(fake.created[0]?.deliver.atAll).toBeUndefined();
+  });
+
+  it('atAll 选项透传到群卡片投放参数', async () => {
+    const fake = fakeApi();
+    const streamer = new CardStreamer({
+      api: fake.api,
+      message: inbound({
+        conversationType: '2',
+        conversationId: 'cid-9',
+        senderStaffId: 'scheduler',
+        cardDeliverUserId: '',
+      }),
+      cardTemplateId: 'tpl-1',
+      robotCode: 'robot-1',
+      atAll: true,
+    });
+    await streamer.start();
+    expect(fake.created[0]?.deliver).toMatchObject({
+      conversationType: '2',
+      conversationId: 'cid-9',
+      atAll: true,
+    });
   });
 
   it('群定时任务卡片仅投放到本群 IM_GROUP 且不绑定个人 userId，isStaffUserId 排除系统占位符', async () => {

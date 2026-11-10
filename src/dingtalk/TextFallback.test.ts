@@ -106,4 +106,53 @@ describe('sendTextFallback', () => {
     });
     expect(bodies[0]).not.toHaveProperty('at');
   });
+
+  it('isAtAll 时首片携带全员提醒字段', async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    await sendTextFallback({
+      webhook: 'https://example.com/hook',
+      text: '各位同事请注意',
+      isAtAll: true,
+      fetchImpl: (async (_url: string | URL | Request, init?: RequestInit) => {
+        bodies.push(JSON.parse(String(init?.body)));
+        return new Response('{}', { status: 200 });
+      }) as typeof fetch,
+    });
+    expect(bodies[0]).toMatchObject({
+      msgtype: 'markdown',
+      at: { isAtAll: true },
+    });
+  });
+
+  it('isAtAll 多分片只在首片触发全员提醒，避免重复广播', async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    const result = await sendTextFallback({
+      webhook: 'https://example.com/hook',
+      text: `${'甲'.repeat(10)}\n\n${'乙'.repeat(10)}`,
+      maxChars: 10,
+      isAtAll: true,
+      fetchImpl: (async (_url: string | URL | Request, init?: RequestInit) => {
+        bodies.push(JSON.parse(String(init?.body)));
+        return new Response('{}', { status: 200 });
+      }) as typeof fetch,
+    });
+    expect(result).toEqual({ ok: true, chunks: 2 });
+    expect(bodies[0]).toMatchObject({ at: { isAtAll: true } });
+    expect(bodies[1]).not.toHaveProperty('at');
+  });
+
+  it('isAtAll 优先于 atUserIds', async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    await sendTextFallback({
+      webhook: 'https://example.com/hook',
+      text: '通知',
+      isAtAll: true,
+      atUserIds: ['staff-1'],
+      fetchImpl: (async (_url: string | URL | Request, init?: RequestInit) => {
+        bodies.push(JSON.parse(String(init?.body)));
+        return new Response('{}', { status: 200 });
+      }) as typeof fetch,
+    });
+    expect(bodies[0]?.at).toEqual({ isAtAll: true });
+  });
 });

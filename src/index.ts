@@ -161,6 +161,7 @@ import { PersonSettingsToolProvider } from './tools/personal/PersonSettingsToolP
 import { PersonalMemoryToolProvider } from './tools/personal/PersonalMemoryToolProvider.js';
 import { PersonalMemoryService } from './personal/PersonalMemoryService.js';
 import { GroupReportService } from './groups/GroupReportService.js';
+import { GroupNotifyAllService } from './groups/GroupNotifyAllService.js';
 import { DwsGroupDirectorySource } from './groups/DwsGroupDirectorySource.js';
 import { DrizzleGlossaryStore } from './db/glossarySchema.js';
 import { GlossaryService } from './glossary/GlossaryService.js';
@@ -376,7 +377,7 @@ async function sendSessionWebhook(
   message: InboundMessage,
   text: string,
   logger: CardLogger,
-  options: { mention?: boolean } = {},
+  options: { mention?: boolean; isAtAll?: boolean } = {},
 ): Promise<void> {
   const webhook = message.rawPayload.sessionWebhook;
   if (typeof webhook !== 'string' || !webhook) {
@@ -393,6 +394,7 @@ async function sendSessionWebhook(
     webhook,
     text: `${at.text}${text}`,
     ...(at.atUserIds.length > 0 ? { atUserIds: at.atUserIds } : {}),
+    ...(options.isAtAll ? { isAtAll: true } : {}),
     logger,
   });
   if (result.ok) {
@@ -1798,8 +1800,50 @@ async function main(): Promise<void> {
       isAdmin: (staffId) => configCenter.isAdmin(staffId),
       buildDigest: (conversationId) => groupWorkspace.buildDigest(conversationId),
     });
+    const groupNotifyAllEnabled = envEnabled(
+      process.env.GROUP_NOTIFY_ALL_ENABLED,
+      false,
+    );
+    const groupNotifyAllCooldown = envSeconds(
+      process.env.GROUP_NOTIFY_ALL_COOLDOWN_SECONDS,
+      60,
+    );
+    const groupNotifyAllQuota = envCount(
+      process.env.GROUP_NOTIFY_ALL_DAILY_QUOTA,
+      10,
+    );
+    const groupNotifyAll = new GroupNotifyAllService({
+      isAdmin: (staffId) => configCenter.isAdmin(staffId),
+      enabled: groupNotifyAllEnabled,
+      cooldownSeconds: groupNotifyAllCooldown,
+      dailyQuota: groupNotifyAllQuota,
+      audit: async (record) => {
+        metrics.inc('group_notify_all_total', { result: record.result });
+        await configCenter.recordAudit({
+          adminStaffId: record.actorStaffId,
+          adminNick: record.actorNick,
+          actionType: 'GROUP_NOTIFY_ALL',
+          beforeSnapshot: {},
+          afterSnapshot: {
+            conversationId: record.conversationId,
+            text:
+              record.text.length > 500
+                ? `${record.text.slice(0, 500)}…`
+                : record.text,
+            result: record.result,
+            ...(record.channel ? { channel: record.channel } : {}),
+            ...(record.error ? { error: record.error } : {}),
+          },
+        });
+      },
+      logger: harnessLogger,
+    });
     const interactionProviders = [
-      new GroupWorkspaceToolProvider({ service: groupWorkspace, reports: groupReport }),
+      new GroupWorkspaceToolProvider({
+        service: groupWorkspace,
+        reports: groupReport,
+        notifyAll: groupNotifyAll,
+      }),
       new PersonSettingsToolProvider({ service: personSettings }),
       new PersonalMemoryToolProvider({ service: personalMemory }),
     ];
@@ -1809,6 +1853,14 @@ async function main(): Promise<void> {
         providers: interactionProviders.map((provider) => provider.providerName),
       },
       'group and person tool providers registered',
+    );
+    logger.info(
+      {
+        enabled: groupNotifyAllEnabled,
+        cooldownSeconds: groupNotifyAllCooldown,
+        dailyQuota: groupNotifyAllQuota,
+      },
+      'group notify all configured',
     );
     const repository = new DrizzleConversationRepository(dbHandle.db);
     const harness = new AgentHarness({
@@ -2112,7 +2164,7 @@ async function main(): Promise<void> {
 
     const createStreamer = (
       message: InboundMessage,
-      options: { mention?: string } = {},
+      options: { mention?: string; atAll?: boolean } = {},
     ): CardStreamer => {
       const dingtalk = configCenter.getDingTalkConfig();
       const layout = process.env.DINGTALK_CARD_LAYOUT?.trim();
@@ -2136,7 +2188,54 @@ async function main(): Promise<void> {
             }
           : {}),
         ...(options.mention ? { mention: options.mention } : {}),
+        ...(options.atAll ? { atAll: true } : {}),
       });
+    };
+
+    // 全员通知优先走卡片群投递（投放时触发原生 @所有人），失败回退原始消息 webhook
+    groupNotifyAll.deliver = async ({
+      conversationId,
+      text,
+      requesterMessageId,
+    }) => {
+      const message: InboundMessage = {
+        messageId: `group_notify_all_${randomUUID()}`,
+        conversationId,
+        conversationType: '2',
+        senderStaffId: 'scheduler',
+        senderNick: '全员通知',
+        cardDeliverUserId: '',
+        isAtBot: false,
+        text: '',
+        rawPayload: { source: 'group_notify_all' },
+        timestamp: Date.now(),
+      };
+      const streamer = createStreamer(message, { atAll: true });
+      await streamer.start();
+      if (streamer.isAvailable) {
+        for (const chunk of splitForDelivery(text)) {
+          streamer.handle({ type: 'answer_delta', content: chunk });
+        }
+        await streamer.finish();
+        return { channel: 'card' };
+      }
+      const original = requesterMessageId
+        ? runControl.messageById(requesterMessageId)
+        : null;
+      const webhook = original?.rawPayload.sessionWebhook;
+      if (typeof webhook !== 'string' || !webhook) {
+        throw new Error('卡片创建失败，且原始消息没有可用的 sessionWebhook');
+      }
+      const result = await sendTextFallback({
+        webhook,
+        text,
+        isAtAll: true,
+        logger: cardLogger,
+      });
+      if (!result.ok) {
+        throw new Error(result.error ?? '文本兜底发送失败');
+      }
+      return { channel: 'text' };
     };
 
     const emotionReplier = new EmotionReplier({

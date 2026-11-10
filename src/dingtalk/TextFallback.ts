@@ -43,6 +43,8 @@ export interface TextFallbackInput {
   title?: string;
   /** 需要真实 @ 的用户；markdown 正文里还需包含 @userId 才能被客户端识别 */
   atUserIds?: string[];
+  /** 原生 @所有人：仅首个分片携带 at.isAtAll，避免长文本分片重复触发全员提醒 */
+  isAtAll?: boolean;
   fetchImpl?: typeof fetch;
   logger?: TextFallbackLogger;
   maxRetries?: number;
@@ -89,9 +91,11 @@ export async function sendTextFallback(
           body: JSON.stringify({
             msgtype: 'markdown',
             markdown: { title, text: `${prefix}${chunk}` },
-            ...(atUserIds.length > 0
-              ? { at: { atUserIds, isAtAll: false } }
-              : {}),
+            ...(input.isAtAll && index === 0
+              ? { at: { isAtAll: true } }
+              : atUserIds.length > 0
+                ? { at: { atUserIds, isAtAll: false } }
+                : {}),
           }),
           signal: AbortSignal.timeout(input.timeoutMs ?? 5_000),
         });

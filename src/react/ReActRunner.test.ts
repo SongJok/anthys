@@ -988,3 +988,85 @@ describe('ReActRunner', () => {
     expect(events.at(-1)?.type).toBe('completed');
   });
 });
+
+describe('ReActRunner 全员通知真实性拦截', () => {
+  const notifyProvider: IToolProvider = {
+    providerName: 'group-workspace',
+    async getTools(): Promise<ToolDefinition[]> {
+      return [
+        {
+          name: 'group_notify_all',
+          description: '全员通知',
+          parametersJsonSchema: { type: 'object', properties: {} },
+          risk: 'write',
+          source: 'group-workspace',
+          execute: async () => '已向本群发送 @所有人 通知（AI 卡片通道）。',
+        },
+      ];
+    },
+  };
+
+  it('未调用工具却声称已通知所有人时拦截并要求真实调用', async () => {
+    const model = new ScriptedModel([
+      [
+        { contentDelta: '@所有人 已通知所有人：明天 9 点开会。' },
+        { finishReason: 'stop', usage: { totalTokens: 10 } },
+      ],
+      [
+        { contentDelta: '抱歉，我还没有发送全员通知。' },
+        { finishReason: 'stop', usage: { totalTokens: 8 } },
+      ],
+    ]);
+    const runner = new ReActRunner({
+      model,
+      toolProviders: [notifyProvider],
+      policy,
+    });
+    const events: AgentStreamEvent[] = [];
+    const result = await runner.run({
+      messages: [{ role: 'user', content: '通知所有人明天开会' }],
+      context: { ...makeContext(), conversationType: '2' },
+      emit: (event) => events.push(event),
+    });
+    expect(model.requests).toHaveLength(2);
+    const secondMessages = model.requests[1]?.messages ?? [];
+    expect(
+      secondMessages.some(
+        (message) =>
+          message.role === 'system' &&
+          message.content.includes('[Harness 真实性拦截]'),
+      ),
+    ).toBe(true);
+    expect(result.answer).toBe('抱歉，我还没有发送全员通知。');
+    expect(events.some((event) => event.type === 'answer_reset')).toBe(true);
+  });
+
+  it('真实调用工具后的成功回执不被拦截', async () => {
+    const model = new ScriptedModel([
+      toolTurn([
+        {
+          index: 0,
+          id: 'call_notify',
+          name: 'group_notify_all',
+          args: { text: '明天 9 点开会' },
+        },
+      ]),
+      [
+        { contentDelta: '已通知所有人：明天 9 点开会。' },
+        { finishReason: 'stop', usage: { totalTokens: 8 } },
+      ],
+    ]);
+    const runner = new ReActRunner({
+      model,
+      toolProviders: [notifyProvider],
+      policy,
+    });
+    const result = await runner.run({
+      messages: [{ role: 'user', content: '通知所有人明天开会' }],
+      context: { ...makeContext(), conversationType: '2' },
+      emit: () => {},
+    });
+    expect(model.requests).toHaveLength(2);
+    expect(result.answer).toBe('已通知所有人：明天 9 点开会。');
+  });
+});

@@ -197,6 +197,90 @@ describe('OpenApiCardApi', () => {
     ).toBeUndefined();
   });
 
+  it('delivers a group card with native at-all when atAll is set', async () => {
+    harness = await startHarness();
+    const api = singleApi(harness.endpoint);
+
+    await api.createAndDeliver({
+      cardTemplateId: 'tpl-1',
+      outTrackId: 'card_m4',
+      spaceId: 'dtv1.card//IM_GROUP.cid-4',
+      params: { content: '正在思考…' },
+      deliver: {
+        conversationType: '2',
+        robotCode: 'robot-9',
+        userId: 'staff-9',
+        conversationId: 'cid-4',
+        atAll: true,
+      },
+    });
+
+    const [request] = harness.requests;
+    expect(request.body).toMatchObject({
+      openSpaceId: 'dtv1.card//IM_GROUP.cid-4',
+      imGroupOpenDeliverModel: {
+        robotCode: 'robot-9',
+        atUserIds: { '@ALL': '@ALL' },
+      },
+    });
+    const deliverModel = request.body.imGroupOpenDeliverModel as Record<
+      string,
+      unknown
+    >;
+    expect(deliverModel.atUserIds).toEqual({ '@ALL': '@ALL' });
+  });
+
+  it('keeps at-all valid even when the deliver userId is an external encrypted id', async () => {
+    harness = await startHarness();
+    const api = singleApi(harness.endpoint);
+
+    await api.createAndDeliver({
+      cardTemplateId: 'tpl-1',
+      outTrackId: 'card_m5',
+      spaceId: 'dtv1.card//IM_GROUP.cid-5',
+      params: { content: '正在思考…' },
+      deliver: {
+        conversationType: '2',
+        robotCode: 'robot-9',
+        userId: '$:LWCP_v1:$4HmLodOH+bNXcmQ0cPrxiw==',
+        conversationId: 'cid-5',
+        atAll: true,
+      },
+    });
+
+    const [request] = harness.requests;
+    expect(request.body).not.toHaveProperty('userId');
+    expect(request.body).toMatchObject({
+      imGroupOpenDeliverModel: {
+        robotCode: 'robot-9',
+        atUserIds: { '@ALL': '@ALL' },
+      },
+    });
+  });
+
+  it('ignores atAll for single-chat delivery', async () => {
+    harness = await startHarness();
+    const api = singleApi(harness.endpoint);
+
+    await api.createAndDeliver({
+      cardTemplateId: 'tpl-1',
+      outTrackId: 'card_m6',
+      spaceId: 'dtv1.card//IM_ROBOT.staff-1',
+      params: { content: '正在思考…' },
+      deliver: {
+        conversationType: '1',
+        robotCode: 'robot-1',
+        userId: 'staff-1',
+        conversationId: 'cid-1',
+        atAll: true,
+      },
+    });
+
+    const [request] = harness.requests;
+    expect(request.body).not.toHaveProperty('imGroupOpenDeliverModel');
+    expect(JSON.stringify(request.body)).not.toContain('@ALL');
+  });
+
   it('sends streaming updates as a PUT with all block flags', async () => {
     harness = await startHarness();
     const api = singleApi(harness.endpoint, 'tok-2');

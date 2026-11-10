@@ -116,7 +116,8 @@ export type AdminActionType =
   | 'DELETE_GROUP_MODEL_ROUTE'
   | 'UPDATE_WHITELIST'
   | 'SYNC_WHITELIST'
-  | 'SYNC_GROUP_DIRECTORY';
+  | 'SYNC_GROUP_DIRECTORY'
+  | 'GROUP_NOTIFY_ALL';
 
 /** 2. 管理员单聊管控审计记录契约 */
 export interface AdminAuditLog {

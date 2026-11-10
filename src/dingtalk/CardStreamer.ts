@@ -43,6 +43,8 @@ export interface CardCreateInput {
     robotCode: string;
     userId: string;
     conversationId: string;
+    /** 群聊原生 @所有人：投放时触发全员提醒，仅群投递生效 */
+    atAll?: boolean;
   };
 }
 
@@ -139,6 +141,8 @@ export interface CardStreamerOptions {
   createRetries?: number;
   /** 正文前缀（群聊回复时用于 @ 提问人），只作用在 answer_section */
   mention?: string;
+  /** 群聊原生 @所有人（createAndDeliver 投放时触发全员提醒），默认 false */
+  atAll?: boolean;
   /** 限流：默认每秒 4 次、突发 8 次 */
   rateLimitPerSecond?: number;
   rateLimitBurst?: number;
@@ -268,6 +272,7 @@ export class CardStreamer {
   private readonly createRetries: number;
   private readonly limiter: TokenBucket;
   private readonly mention: string;
+  private readonly atAll: boolean;
 
   private reasoning = '';
   private answer = '';
@@ -300,6 +305,7 @@ export class CardStreamer {
     this.maxRetries = options.maxRetries ?? 2;
     this.createRetries = options.createRetries ?? 0;
     this.mention = options.mention ?? '';
+    this.atAll = options.atAll ?? false;
     this.limiter = new TokenBucket(
       options.rateLimitPerSecond ?? 4,
       options.rateLimitBurst ?? 8,
@@ -352,6 +358,7 @@ export class CardStreamer {
             robotCode: this.options.robotCode,
             userId: this.deliverUserId,
             conversationId: this.options.message.conversationId,
+            ...(this.atAll ? { atAll: true } : {}),
           },
         });
         this.available = true;
@@ -967,9 +974,12 @@ export class OpenApiCardApi implements CardApi {
         input.deliver.conversationType === '2'
           ? new this.sdk.CreateAndDeliverRequestImGroupOpenDeliverModel({
               robotCode: input.deliver.robotCode,
-              ...(staffUserId
-                ? { atUserIds: { [staffUserId]: staffUserId } }
-                : {}),
+              // 全员通知键值都必须是 "@ALL"；与单人 atUserIds 互斥
+              ...(input.deliver.atAll
+                ? { atUserIds: { '@ALL': '@ALL' } }
+                : staffUserId
+                  ? { atUserIds: { [staffUserId]: staffUserId } }
+                  : {}),
             })
           : undefined,
       imGroupOpenSpaceModel:

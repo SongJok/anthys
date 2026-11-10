@@ -11,6 +11,10 @@ import {
   type GroupWorkspaceMemoryNote,
 } from '../../groups/GroupWorkspaceService.js';
 import { GroupWorkspaceToolProvider } from './GroupWorkspaceToolProvider.js';
+import {
+  GroupNotifyAllService,
+  type GroupNotifyAllDeliver,
+} from '../../groups/GroupNotifyAllService.js';
 
 const NOW = 1_764_500_000_000;
 
@@ -404,5 +408,86 @@ describe('GroupWorkspaceToolProvider', () => {
     expect(digest).toContain('季度续约率 90%');
     expect(digest).toContain('进度 40%');
     expect(digest).toContain('任务 1/1');
+  });
+});
+
+describe('GroupWorkspaceToolProvider group_notify_all', () => {
+  function notifySetup(
+    options: {
+      enabled?: boolean;
+      admins?: string[];
+      deliver?: GroupNotifyAllDeliver;
+    } = {},
+  ) {
+    const base = setup();
+    const delivered: Array<Record<string, unknown>> = [];
+    const notifyAll = new GroupNotifyAllService({
+      isAdmin: (staffId) => (options.admins ?? ['staff-1']).includes(staffId),
+      enabled: options.enabled ?? true,
+      cooldownSeconds: 0,
+      now: () => NOW,
+    });
+    notifyAll.deliver =
+      options.deliver ??
+      (async (input) => {
+        delivered.push({ ...input });
+        return { channel: 'card' };
+      });
+    const provider = new GroupWorkspaceToolProvider({
+      service: base.service,
+      notifyAll,
+    });
+    return { ...base, provider, notifyAll, delivered };
+  }
+
+  it('仅群聊且开启时对管理员暴露全员通知工具', async () => {
+    const { provider } = notifySetup();
+    const tools = await toolsOf(provider, context());
+    expect(tools.has('group_notify_all')).toBe(true);
+    expect(
+      (await provider.getTools(context({ conversationType: '1' }))).some(
+        (tool) => tool.name === 'group_notify_all',
+      ),
+    ).toBe(false);
+  });
+
+  it('非管理员看不到全员通知工具', async () => {
+    const { provider } = notifySetup({ admins: ['staff-admin'] });
+    const tools = await toolsOf(provider, context({ senderStaffId: 'staff-9' }));
+    expect(tools.has('group_notify_all')).toBe(false);
+  });
+
+  it('功能关闭时不暴露全员通知工具', async () => {
+    const { provider } = notifySetup({ enabled: false });
+    const tools = await toolsOf(provider, context());
+    expect(tools.has('group_notify_all')).toBe(false);
+  });
+
+  it('执行时锁定当前群并透传发起人，成功回执真实', async () => {
+    const { provider, delivered } = notifySetup();
+    const tool = (await toolsOf(provider, context())).get('group_notify_all')!;
+    expect(tool.risk).toBe('write');
+    const reply = await tool.execute(
+      { text: '明天 9 点全员开会' },
+      context(),
+    );
+    expect(reply).toContain('已向本群发送 @所有人 通知');
+    expect(delivered).toHaveLength(1);
+    expect(delivered[0]).toMatchObject({
+      conversationId: 'cid-group-1',
+      text: '明天 9 点全员开会',
+    });
+  });
+
+  it('投递失败时不声称已通知所有人', async () => {
+    const { provider } = notifySetup({
+      deliver: async () => {
+        throw new Error('卡片创建失败');
+      },
+    });
+    const tool = (await toolsOf(provider, context())).get('group_notify_all')!;
+    const reply = await tool.execute({ text: '全员开会' }, context());
+    expect(reply).toContain('发送失败');
+    expect(reply).toContain('请勿声称已通知所有人');
   });
 });

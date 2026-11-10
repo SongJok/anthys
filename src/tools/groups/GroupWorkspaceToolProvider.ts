@@ -5,6 +5,7 @@ import type {
 } from '../../types/core.js';
 import type { GroupWorkspaceService } from '../../groups/GroupWorkspaceService.js';
 import type { GroupReportService } from '../../groups/GroupReportService.js';
+import type { GroupNotifyAllService } from '../../groups/GroupNotifyAllService.js';
 import { describeReportCron } from '../../groups/GroupReportService.js';
 import {
   parseReportSpec,
@@ -147,13 +148,16 @@ export class GroupWorkspaceToolProvider implements IToolProvider {
   public readonly providerName = 'group-workspace';
   private readonly service: GroupWorkspaceService;
   private readonly reports?: GroupReportService;
+  private readonly notifyAll?: GroupNotifyAllService;
 
   constructor(options: {
     service: GroupWorkspaceService;
     reports?: GroupReportService;
+    notifyAll?: GroupNotifyAllService;
   }) {
     this.service = options.service;
     this.reports = options.reports;
+    this.notifyAll = options.notifyAll;
   }
 
   public async getTools(ctx: ExecutionContext): Promise<ToolDefinition[]> {
@@ -836,6 +840,36 @@ export class GroupWorkspaceToolProvider implements IToolProvider {
                 }
                 return `不支持的 action：${action ?? ''}`;
               },
+            },
+          ]
+        : []),
+      ...(this.notifyAll && this.notifyAll.canUse(ctx.senderStaffId)
+        ? [
+            {
+              name: 'group_notify_all',
+              description:
+                '在当前群发起一次原生 @所有人 通知（会真正触发全员提醒，仅管理员可用，执行前需用户回复「确认」）。仅当用户明确要求“通知所有人/全员提醒”时使用，text 为通知正文。注意：在回答正文里写“@所有人”几个字不会触发任何提醒，必须调用本工具并以工具返回结果为准；工具返回失败时严禁声称已通知所有人。',
+              parametersJsonSchema: {
+                type: 'object',
+                properties: {
+                  text: {
+                    type: 'string',
+                    description: '全员通知正文，简洁完整，包含需要全员知晓的关键信息',
+                  },
+                },
+                required: ['text'],
+                additionalProperties: false,
+              },
+              risk: 'write' as const,
+              source: 'group-workspace',
+              execute: async (args: Record<string, unknown>) =>
+                this.notifyAll!.notify({
+                  conversationId,
+                  text: optionalString(args, 'text') ?? '',
+                  actorStaffId: ctx.senderStaffId,
+                  actorNick: ctx.senderNick,
+                  requesterMessageId: ctx.messageId,
+                }),
             },
           ]
         : []),
