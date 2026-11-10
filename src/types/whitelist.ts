@@ -1,4 +1,4 @@
-export type WhitelistStatus = 'pending' | 'approved' | 'rejected';
+export type WhitelistStatus = 'pending' | 'approved' | 'rejected' | 'left';
 
 export type WhitelistSource = 'directory' | 'dws' | 'auto' | 'manual';
 
@@ -23,6 +23,8 @@ export interface WhitelistStats {
   pending: number;
   approved: number;
   rejected: number;
+  /** 通讯录同步后确认已离职的员工 */
+  left: number;
   /** 最近一次通讯录同步时间（由 lastSeenAt 推导） */
   syncedAt: string | null;
 }
@@ -48,6 +50,10 @@ export interface WhitelistSyncResult {
   created: number;
   updated: number;
   unchanged: number;
+  /** 本次被标记为已离职的员工数 */
+  left: number;
+  /** 因通讯录数量异常而未做离职判定的员工数 */
+  skipped: number;
   warnings: string[];
   syncedAt: string;
 }
@@ -72,7 +78,16 @@ export interface WhitelistStore {
   upsertDirectory(
     users: DirectoryUser[],
     source: WhitelistSource,
-  ): Promise<{ created: number; updated: number; unchanged: number }>;
+    options: { markAbsent: boolean },
+  ): Promise<{
+    created: number;
+    updated: number;
+    unchanged: number;
+    left: number;
+    skipped: number;
+  }>;
+  /** 当前认定为在职的通讯录条目数，用于判断某个来源的覆盖是否完整 */
+  countTracked(): Promise<number>;
   registerPending(staffId: string, name: string): Promise<void>;
   setStatus(
     staffId: string,

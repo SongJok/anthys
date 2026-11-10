@@ -19,13 +19,18 @@ export interface WhitelistRouteDeps {
 }
 
 function isWhitelistStatus(value: string): value is WhitelistStatus {
-  return value === 'pending' || value === 'approved' || value === 'rejected';
+  return (
+    value === 'pending' ||
+    value === 'approved' ||
+    value === 'rejected' ||
+    value === 'left'
+  );
 }
 
 function readStatus(value: string | undefined): WhitelistStatus {
   if (!value || !isWhitelistStatus(value)) {
     throw new HTTPException(400, {
-      message: 'status 必须是 pending、approved 或 rejected',
+      message: 'status 必须是 pending、approved、rejected 或 left',
     });
   }
   return value;

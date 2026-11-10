@@ -20,13 +20,14 @@ class MemoryStore implements WhitelistStore {
     staffId: string,
     status: WhitelistStatus,
     name = staffId,
+    source: WhitelistSource = 'manual',
   ): void {
     this.rows.set(staffId, {
       staffId,
       name,
       deptPath: '',
       status,
-      source: 'manual',
+      source,
       openDingTalkId: null,
       note: '',
       approvedBy: status === 'pending' ? null : 'admin',
@@ -72,6 +73,7 @@ class MemoryStore implements WhitelistStore {
       pending: items.filter((item) => item.status === 'pending').length,
       approved: items.filter((item) => item.status === 'approved').length,
       rejected: items.filter((item) => item.status === 'rejected').length,
+      left: items.filter((item) => item.status === 'left').length,
       syncedAt:
         items
           .map((item) => item.lastSeenAt)
@@ -81,13 +83,29 @@ class MemoryStore implements WhitelistStore {
     };
   }
 
+  public async countTracked(): Promise<number> {
+    return [...this.rows.values()].filter(
+      (item) =>
+        (item.source === 'directory' || item.source === 'dws') &&
+        item.status !== 'left',
+    ).length;
+  }
+
   public async upsertDirectory(
     users: DirectoryUser[],
     source: WhitelistSource,
-  ): Promise<{ created: number; updated: number; unchanged: number }> {
+    options: { markAbsent: boolean },
+  ): Promise<{
+    created: number;
+    updated: number;
+    unchanged: number;
+    left: number;
+    skipped: number;
+  }> {
     let created = 0;
     let updated = 0;
     let unchanged = 0;
+    const synced = new Set(users.map((user) => user.staffId));
     for (const user of users) {
       const before = this.rows.get(user.staffId);
       if (!before) {
@@ -108,16 +126,38 @@ class MemoryStore implements WhitelistStore {
         });
         continue;
       }
-      if (before.name !== user.name || before.deptPath !== user.deptPath) {
+      if (before.status === 'left') {
         updated += 1;
-        before.name = user.name;
-        before.deptPath = user.deptPath;
+        before.status = 'pending';
+        before.approvedBy = null;
+        before.approvedAt = null;
+      } else if (before.name !== user.name || before.deptPath !== user.deptPath) {
+        updated += 1;
       } else {
         unchanged += 1;
       }
+      before.name = user.name;
+      before.deptPath = user.deptPath;
       before.lastSeenAt = new Date(NOW).toISOString();
     }
-    return { created, updated, unchanged };
+
+    const tracked = [...this.rows.values()].filter(
+      (item) =>
+        (item.source === 'directory' || item.source === 'dws') &&
+        item.status !== 'left',
+    );
+    const absent = tracked.filter((item) => !synced.has(item.staffId));
+    if (!options.markAbsent || synced.size < tracked.length * 0.5) {
+      return { created, updated, unchanged, left: 0, skipped: absent.length };
+    }
+    let left = 0;
+    for (const item of absent) {
+      item.status = 'left';
+      if (!item.note) item.note = '通讯录同步未找到该员工（疑似离职）';
+      item.updatedAt = new Date(NOW).toISOString();
+      left += 1;
+    }
+    return { created, updated, unchanged, left, skipped: 0 };
   }
 
   public async registerPending(staffId: string, name: string): Promise<void> {
@@ -322,5 +362,120 @@ describe('WhitelistService', () => {
     await expect(whitelist.sync()).rejects.toThrow(
       /通讯录同步失败.*A 失败.*B 失败/s,
     );
+  });
+
+  it('通讯录返回 0 人时按来源失败处理并回退到下一个来源', async () => {
+    const store = new MemoryStore();
+    const empty: DirectorySource = {
+      name: 'dingtalk-api',
+      fetchUsers: async () => [],
+    };
+    const dws: DirectorySource = {
+      name: 'dws',
+      fetchUsers: async () => [
+        { staffId: 'staff-1', name: '张三', deptPath: '技术部' },
+      ],
+    };
+    const whitelist = service(store, { sources: [empty, dws] });
+
+    const result = await whitelist.sync();
+    expect(result.source).toBe('dws');
+    expect(result.scanned).toBe(1);
+    expect(result.warnings.join()).toContain('未返回任何员工');
+  });
+
+  it('通讯录中消失的员工被标记为已离职并停止放行', async () => {
+    const store = new MemoryStore();
+    store.seed('staff-1', 'approved', '张三', 'dws');
+    store.seed('staff-2', 'approved', '李四', 'dws');
+    const dws: DirectorySource = {
+      name: 'dws',
+      fetchUsers: async () => [
+        { staffId: 'staff-1', name: '张三', deptPath: '技术部' },
+      ],
+    };
+    const whitelist = service(store, { sources: [dws] });
+
+    const result = await whitelist.sync();
+    expect(result.left).toBe(1);
+    expect(store.rows.get('staff-2')?.status).toBe('left');
+    await expect(whitelist.isStaffAllowed('staff-2')).resolves.toBe(false);
+    await expect(whitelist.isStaffAllowed('staff-1')).resolves.toBe(true);
+  });
+
+  it('离职员工重新出现在通讯录时回到待授权', async () => {
+    const store = new MemoryStore();
+    store.seed('staff-1', 'left', '张三', 'dws');
+    const dws: DirectorySource = {
+      name: 'dws',
+      fetchUsers: async () => [
+        { staffId: 'staff-1', name: '张三', deptPath: '技术部' },
+      ],
+    };
+    const whitelist = service(store, { sources: [dws] });
+
+    await whitelist.sync();
+    expect(store.rows.get('staff-1')?.status).toBe('pending');
+    await expect(whitelist.isStaffAllowed('staff-1')).resolves.toBe(false);
+  });
+
+  it('手动录入的条目不因通讯录缺失被标记为离职', async () => {
+    const store = new MemoryStore();
+    store.seed('staff-manual', 'approved', '手动录入');
+    const dws: DirectorySource = {
+      name: 'dws',
+      fetchUsers: async () => [
+        { staffId: 'staff-1', name: '张三', deptPath: '技术部' },
+      ],
+    };
+    const whitelist = service(store, { sources: [dws] });
+
+    await whitelist.sync();
+    expect(store.rows.get('staff-manual')?.status).toBe('approved');
+  });
+
+  it('通讯录人数骤降时不做离职判定并给出告警', async () => {
+    const store = new MemoryStore();
+    for (const id of ['s1', 's2', 's3', 's4']) {
+      store.seed(id, 'approved', id, 'dws');
+    }
+    const dws: DirectorySource = {
+      name: 'dws',
+      fetchUsers: async () => [{ staffId: 's1', name: 's1', deptPath: '技术部' }],
+    };
+    const whitelist = service(store, { sources: [dws] });
+
+    const result = await whitelist.sync();
+    expect(result.left).toBe(0);
+    expect(result.skipped).toBe(3);
+    expect(result.warnings.join()).toContain('离职状态未判定');
+    expect(store.rows.get('s2')?.status).toBe('approved');
+  });
+
+  it('应用通讯录只覆盖部分部门时回退到覆盖完整的来源', async () => {
+    const store = new MemoryStore();
+    for (const id of ['s1', 's2', 's3', 's4']) {
+      store.seed(id, 'approved', id, 'dws');
+    }
+    const partial: DirectorySource = {
+      name: 'dingtalk-api',
+      fetchUsers: async () => [{ staffId: 's1', name: 's1', deptPath: '技术部' }],
+    };
+    const full: DirectorySource = {
+      name: 'dws',
+      fetchUsers: async () =>
+        ['s1', 's2', 's3', 's4'].map((id) => ({
+          staffId: id,
+          name: id,
+          deptPath: '技术部',
+        })),
+    };
+    const whitelist = service(store, { sources: [partial, full] });
+
+    const result = await whitelist.sync();
+    expect(result.source).toBe('dws');
+    expect(result.scanned).toBe(4);
+    expect(result.warnings.join()).toContain('权限范围不足');
+    expect(store.rows.get('s4')?.status).toBe('approved');
   });
 });

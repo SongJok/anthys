@@ -33,6 +33,7 @@ function stats(): WhitelistStats {
     pending: 1,
     approved: 0,
     rejected: 0,
+    left: 0,
     syncedAt: NOW,
   };
 }
@@ -55,6 +56,8 @@ function setup() {
       created: 2,
       updated: 0,
       unchanged: 0,
+      left: 0,
+      skipped: 0,
       warnings: [],
       syncedAt: NOW,
     })),

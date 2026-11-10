@@ -1,6 +1,7 @@
 import { isStaffUserId } from '../dingtalk/userIds.js';
 import type {
   DirectorySource,
+  DirectoryUser,
   UserWhitelistAdminPort,
   WhitelistEntry,
   WhitelistPage,
@@ -191,38 +192,78 @@ export class WhitelistService implements UserWhitelistAdminPort {
 
   private async runSync(): Promise<WhitelistSyncResult> {
     const warnings: string[] = [];
+    const candidates: Array<{
+      source: DirectorySource;
+      users: DirectoryUser[];
+    }> = [];
+    const tracked = await this.store.countTracked();
     for (const source of this.directorySources) {
       try {
         const users = await source.fetchUsers();
-        const counts = await this.store.upsertDirectory(
-          users,
-          source.name === 'dingtalk-api' ? 'directory' : 'dws',
+        if (users.length === 0) {
+          throw new Error(
+            '通讯录未返回任何员工（应用通讯录权限范围可能未覆盖组织，或登录态异常）',
+          );
+        }
+        // 覆盖不到历史规模一半的快照说明该来源只能看到部分组织，不能用来判定离职
+        if (tracked === 0 || users.length >= tracked * 0.5) {
+          return await this.applySync(source, users, true, warnings);
+        }
+        candidates.push({ source, users });
+        warnings.push(
+          `${sourceLabel(source)}：仅覆盖 ${users.length} 人（历史 ${tracked} 人），疑似通讯录权限范围不足`,
         );
-        const result: WhitelistSyncResult = {
-          source: source.name,
-          scanned: users.length,
-          ...counts,
-          warnings,
-          syncedAt: new Date(this.now()).toISOString(),
-        };
-        this.logger?.info(
-          {
-            source: result.source,
-            scanned: result.scanned,
-            created: result.created,
-            updated: result.updated,
-            warnings: warnings.length,
-          },
-          'user whitelist directory synced',
-        );
-        return result;
       } catch (error) {
-        const message = `${source.name === 'dingtalk-api' ? '应用通讯录' : 'DWS 通讯录'}：${errorText(error)}`;
+        const message = `${sourceLabel(source)}：${errorText(error)}`;
         warnings.push(message);
         this.logger?.warn({ source: source.name }, `whitelist sync source failed：${message}`);
       }
     }
+    if (candidates.length > 0) {
+      const best = candidates.reduce((a, b) =>
+        b.users.length > a.users.length ? b : a,
+      );
+      return await this.applySync(best.source, best.users, false, warnings);
+    }
     throw new Error(`通讯录同步失败：${warnings.join('；')}`);
+  }
+
+  private async applySync(
+    source: DirectorySource,
+    users: DirectoryUser[],
+    markAbsent: boolean,
+    warnings: string[],
+  ): Promise<WhitelistSyncResult> {
+    const counts = await this.store.upsertDirectory(
+      users,
+      source.name === 'dingtalk-api' ? 'directory' : 'dws',
+      { markAbsent },
+    );
+    if (counts.skipped > 0) {
+      warnings.push(
+        `本次通讯录未覆盖全部在职员工，${counts.skipped} 名员工的离职状态未判定`,
+      );
+    }
+    const result: WhitelistSyncResult = {
+      source: source.name,
+      scanned: users.length,
+      ...counts,
+      warnings,
+      syncedAt: new Date(this.now()).toISOString(),
+    };
+    this.logger?.info(
+      {
+        source: result.source,
+        scanned: result.scanned,
+        created: result.created,
+        updated: result.updated,
+        left: result.left,
+        skipped: result.skipped,
+        warnings: warnings.length,
+      },
+      'user whitelist directory synced',
+    );
+    return result;
   }
 
   public async setStatus(
@@ -272,4 +313,8 @@ export class WhitelistService implements UserWhitelistAdminPort {
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function sourceLabel(source: DirectorySource): string {
+  return source.name === 'dingtalk-api' ? '应用通讯录' : 'DWS 通讯录';
 }

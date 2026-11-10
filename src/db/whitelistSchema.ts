@@ -150,12 +150,14 @@ export class DrizzleWhitelistStore implements WhitelistStore {
     const pending = byStatus.get('pending') ?? 0;
     const approved = byStatus.get('approved') ?? 0;
     const rejected = byStatus.get('rejected') ?? 0;
+    const left = byStatus.get('left') ?? 0;
     const syncedAt = latest[0]?.at;
     return {
-      total: pending + approved + rejected,
+      total: pending + approved + rejected + left,
       pending,
       approved,
       rejected,
+      left,
       syncedAt:
         syncedAt instanceof Date
           ? syncedAt.toISOString()
@@ -165,10 +167,30 @@ export class DrizzleWhitelistStore implements WhitelistStore {
     };
   }
 
+  public async countTracked(): Promise<number> {
+    const rows = await this.db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(userWhitelist)
+      .where(
+        and(
+          inArray(userWhitelist.source, ['directory', 'dws']),
+          sql`${userWhitelist.status} <> 'left'`,
+        ),
+      );
+    return Number(rows[0]?.count ?? 0);
+  }
+
   public async upsertDirectory(
     users: DirectoryUser[],
     source: WhitelistSource,
-  ): Promise<{ created: number; updated: number; unchanged: number }> {
+    options: { markAbsent: boolean },
+  ): Promise<{
+    created: number;
+    updated: number;
+    unchanged: number;
+    left: number;
+    skipped: number;
+  }> {
     const deduped = new Map<string, DirectoryUser>();
     for (const user of users) {
       const staffId = user.staffId.trim();
@@ -182,7 +204,7 @@ export class DrizzleWhitelistStore implements WhitelistStore {
       if (!existing.deptPath && user.deptPath) existing.deptPath = user.deptPath;
     }
     if (deduped.size === 0) {
-      return { created: 0, updated: 0, unchanged: 0 };
+      return { created: 0, updated: 0, unchanged: 0, left: 0, skipped: 0 };
     }
 
     const existingRows = await this.db
@@ -190,6 +212,8 @@ export class DrizzleWhitelistStore implements WhitelistStore {
         staffId: userWhitelist.staffId,
         name: userWhitelist.name,
         deptPath: userWhitelist.deptPath,
+        status: userWhitelist.status,
+        source: userWhitelist.source,
       })
       .from(userWhitelist);
     const existing = new Map(
@@ -230,12 +254,46 @@ export class DrizzleWhitelistStore implements WhitelistStore {
             name: sql`case when excluded.name <> '' then excluded.name else ${userWhitelist.name} end`,
             deptPath: sql`case when excluded.dept_path <> '' then excluded.dept_path else ${userWhitelist.deptPath} end`,
             source: sql`case when ${userWhitelist.source} = 'manual' then ${userWhitelist.source} else excluded.source end`,
+            // 重新出现在通讯录里说明恢复了在职身份，需要重新走审批
+            status: sql`case when ${userWhitelist.status} = 'left' then 'pending' else ${userWhitelist.status} end`,
             lastSeenAt: new Date(),
             updatedAt: new Date(),
           },
         });
     }
-    return { created, updated, unchanged };
+
+    const tracked = existingRows.filter(
+      (row) =>
+        (row.source === 'directory' || row.source === 'dws') &&
+        row.status !== 'left',
+    );
+    const absent = tracked.filter((row) => !deduped.has(row.staffId));
+    // 快照不完整或人数骤降时都不判定离职，避免把在职员工误标为离职
+    const suspicious = !options.markAbsent || deduped.size < tracked.length * 0.5;
+    if (suspicious) {
+      return { created, updated, unchanged, left: 0, skipped: absent.length };
+    }
+
+    let left = 0;
+    for (let index = 0; index < absent.length; index += chunkSize) {
+      const chunk = absent.slice(index, index + chunkSize);
+      const rows = await this.db
+        .update(userWhitelist)
+        .set({
+          status: 'left',
+          note: sql`case when ${userWhitelist.note} = '' then '通讯录同步未找到该员工（疑似离职）' else ${userWhitelist.note} end`,
+          updatedAt: new Date(),
+        })
+        .where(
+          inArray(
+            userWhitelist.staffId,
+            chunk.map((row) => row.staffId),
+          ),
+        )
+        .returning({ staffId: userWhitelist.staffId });
+      left += rows.length;
+    }
+    return { created, updated, unchanged, left, skipped: 0 };
   }
 
   public async registerPending(staffId: string, name: string): Promise<void> {

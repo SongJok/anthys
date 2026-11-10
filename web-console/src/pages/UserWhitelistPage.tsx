@@ -34,12 +34,14 @@ const STATUS_LABELS: Record<WhitelistStatus, string> = {
   pending: '待授权',
   approved: '已授权',
   rejected: '已拒绝',
+  left: '已离职',
 };
 
 const STATUS_COLORS: Record<WhitelistStatus, string> = {
   pending: 'orange',
   approved: 'green',
   rejected: 'red',
+  left: 'default',
 };
 
 const SOURCE_LABELS: Record<WhitelistSource, string> = {
@@ -56,6 +58,7 @@ const EMPTY_STATS: WhitelistStats = {
   pending: 0,
   approved: 0,
   rejected: 0,
+  left: 0,
   syncedAt: null,
 };
 
@@ -100,7 +103,7 @@ export default function UserWhitelistPage() {
     try {
       const { result } = await api.syncWhitelist();
       message.success(
-        `已从 ${result.source === 'dws' ? 'DWS 通讯录' : '钉钉通讯录'} 同步 ${result.scanned} 人：新增 ${result.created}、更新 ${result.updated}、无变化 ${result.unchanged}`,
+        `已从 ${result.source === 'dws' ? 'DWS 通讯录' : '钉钉通讯录'} 同步 ${result.scanned} 人：新增 ${result.created}、更新 ${result.updated}、无变化 ${result.unchanged}、标记离职 ${result.left}`,
       );
       if (result.warnings.length > 0) {
         message.warning(result.warnings.join('；'));
@@ -241,16 +244,16 @@ export default function UserWhitelistPage() {
       <Alert
         type="warning"
         showIcon
-        message="外部人员一律拒绝：非本组织员工（openDingTalkId 无法解析为 staffId）无论是否点击卡片都不会获得任何回复。未授权的内部员工消息不会写入记忆、不会触发旁听，也不会调用任何工具。管理员不受白名单限制。"
+        message="外部人员一律拒绝：非本组织员工（openDingTalkId 无法解析为 staffId）无论是否点击卡片都不会获得任何回复。未授权的内部员工消息不会写入记忆、不会触发旁听，也不会调用任何工具。管理员不受白名单限制。同步通讯录时，通讯录里已不存在的员工会被标记为「已离职」并停止放行，重新入职后自动回到待授权。"
       />
 
       <Row gutter={16}>
-        <Col span={5}>
+        <Col span={4}>
           <Card className="console-card">
             <Statistic title="通讯录总人数" value={stats.total} />
           </Card>
         </Col>
-        <Col span={5}>
+        <Col span={4}>
           <Card className="console-card">
             <Statistic
               title="待授权"
@@ -259,7 +262,7 @@ export default function UserWhitelistPage() {
             />
           </Card>
         </Col>
-        <Col span={5}>
+        <Col span={4}>
           <Card className="console-card">
             <Statistic
               title="已授权"
@@ -268,13 +271,18 @@ export default function UserWhitelistPage() {
             />
           </Card>
         </Col>
-        <Col span={5}>
+        <Col span={4}>
           <Card className="console-card">
             <Statistic
               title="已拒绝"
               value={stats.rejected}
               valueStyle={{ color: '#cf1322' }}
             />
+          </Card>
+        </Col>
+        <Col span={4}>
+          <Card className="console-card">
+            <Statistic title="已离职" value={stats.left} />
           </Card>
         </Col>
         <Col span={4}>
@@ -299,6 +307,7 @@ export default function UserWhitelistPage() {
                 { value: 'pending', label: '待授权' },
                 { value: 'approved', label: '已授权' },
                 { value: 'rejected', label: '已拒绝' },
+                { value: 'left', label: '已离职' },
                 { value: 'all', label: '全部' },
               ]}
               onChange={(value) => {

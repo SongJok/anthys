@@ -1037,7 +1037,7 @@ export interface PersonMemoryConsent {
   updatedAt: number;
 }
 
-export type WhitelistStatus = 'pending' | 'approved' | 'rejected';
+export type WhitelistStatus = 'pending' | 'approved' | 'rejected' | 'left';
 export type WhitelistSource = 'directory' | 'dws' | 'auto' | 'manual';
 
 export interface WhitelistEntry {
@@ -1060,6 +1060,7 @@ export interface WhitelistStats {
   pending: number;
   approved: number;
   rejected: number;
+  left: number;
   syncedAt: string | null;
 }
 
@@ -1077,6 +1078,8 @@ export interface WhitelistSyncResult {
   created: number;
   updated: number;
   unchanged: number;
+  left: number;
+  skipped: number;
   warnings: string[];
   syncedAt: string;
 }

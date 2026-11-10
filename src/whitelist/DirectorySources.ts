@@ -124,7 +124,7 @@ export class DingTalkContactDirectorySource implements DirectorySource {
     path: string,
     token: string,
     body: Record<string, unknown>,
-  ): Promise<Record<string, unknown>> {
+  ): Promise<Record<string, unknown> | unknown[]> {
     const response = await this.fetcher(
       `${OAPI_BASE}${path}?access_token=${encodeURIComponent(token)}`,
       {
@@ -137,7 +137,7 @@ export class DingTalkContactDirectorySource implements DirectorySource {
     const payload = (await response.json()) as {
       errcode?: number;
       errmsg?: string;
-      result?: Record<string, unknown>;
+      result?: Record<string, unknown> | unknown[];
     };
     const code = payload.errcode ?? -1;
     if (code !== 0) {
@@ -157,7 +157,8 @@ export class DingTalkContactDirectorySource implements DirectorySource {
     const result = await this.post('/topapi/v2/department/listsub', token, {
       id: deptId,
     });
-    const raw = result.dept_id_list;
+    // v2 接口直接返回部门数组，旧接口才是 { dept_id_list: [...] }
+    const raw = Array.isArray(result) ? result : result.dept_id_list;
     if (!Array.isArray(raw)) return [];
     const children: Array<{ id: number; name: string }> = [];
     for (const item of raw) {
@@ -188,7 +189,7 @@ export class DingTalkContactDirectorySource implements DirectorySource {
       const result = await this.post('/topapi/v2/department/get', token, {
         dept_id: deptId,
       });
-      return asText(result.name);
+      return Array.isArray(result) ? '' : asText(result.name);
     } catch (error) {
       this.logger?.warn(
         { deptId, error: error instanceof Error ? error.message : String(error) },
@@ -210,12 +211,15 @@ export class DingTalkContactDirectorySource implements DirectorySource {
         cursor,
         size: PAGE_SIZE,
       });
+      if (Array.isArray(result)) return users;
       const list = Array.isArray(result.list) ? result.list : [];
       for (const item of list) {
         if (!item || typeof item !== 'object') continue;
         const record = item as Record<string, unknown>;
         const staffId = asText(record.userid) || asText(record.user_id);
         if (!staffId) continue;
+        // active=false 表示该员工已离职或停用
+        if (record.active === false) continue;
         users.push({
           staffId,
           name: asText(record.name) || staffId,
