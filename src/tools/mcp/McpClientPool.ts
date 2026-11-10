@@ -10,7 +10,7 @@ import type {
   McpToolCallResult,
   McpToolDescriptor,
 } from '../../types/mcp-and-sandbox.js';
-import { expandServerEnvPlaceholders } from '../../config/envPlaceholder.js';
+import { expandServerEnvPlaceholders, listUnresolvedEnvNames } from '../../config/envPlaceholder.js';
 
 export interface McpPoolLogger {
   info?(obj: Record<string, unknown>, msg: string): void;
@@ -109,9 +109,24 @@ export function createDefaultMcpTransport(
   config: EnterpriseMcpServerConfig,
 ): Transport {
   const resolved = expandServerEnvPlaceholders(config);
-  if (resolved.endpointOrCommand.includes('${')) {
+  const unresolvedEndpoint = listUnresolvedEnvNames(resolved.endpointOrCommand);
+  if (unresolvedEndpoint.length > 0) {
     throw new Error(
-      `MCP Server "${config.id}" 的 endpointOrCommand 存在未配置的环境变量: ${resolved.endpointOrCommand}`,
+      `MCP Server "${config.id}" 的 endpointOrCommand 存在未配置的环境变量: ${unresolvedEndpoint.join(', ')}（请在 .env 中配置后重启进程）`,
+    );
+  }
+  const unresolvedHeaders = Object.entries(resolved.envOrHeaders ?? {}).filter(
+    ([, value]) => listUnresolvedEnvNames(value).length > 0,
+  );
+  if (unresolvedHeaders.length > 0) {
+    const detail = unresolvedHeaders
+      .map(
+        ([key, value]) =>
+          `${key} -> ${listUnresolvedEnvNames(value).join(', ')}`,
+      )
+      .join('; ');
+    throw new Error(
+      `MCP Server "${config.id}" 的 envOrHeaders 存在未配置的环境变量: ${detail}（请在 .env 中配置后重启进程）`,
     );
   }
   switch (resolved.transport) {

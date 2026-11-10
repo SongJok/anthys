@@ -426,6 +426,54 @@ describe('createDefaultMcpTransport', () => {
       ),
     ).toThrow(/未配置的环境变量/);
   });
+
+  it('错误信息点名缺失变量且不回显 endpoint 原文', () => {
+    delete process.env.MISSING_MCP_ENDPOINT;
+    let message = '';
+    try {
+      createDefaultMcpTransport(
+        config('http', {
+          transport: 'streamable-http',
+          endpointOrCommand:
+            'https://host/mcp?token=sk-real-secret&app=${MISSING_MCP_ENDPOINT}',
+        }),
+      );
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error);
+    }
+    expect(message).toContain('MISSING_MCP_ENDPOINT');
+    expect(message).not.toContain('sk-real-secret');
+    expect(message).not.toContain('https://host/mcp');
+  });
+
+  it('环境变量为空值时同样按未配置处理', () => {
+    process.env.EMPTY_MCP_ENDPOINT = '';
+    try {
+      expect(() =>
+        createDefaultMcpTransport(
+          config('http', {
+            transport: 'streamable-http',
+            endpointOrCommand: '${EMPTY_MCP_ENDPOINT}',
+          }),
+        ),
+      ).toThrow(/未配置的环境变量/);
+    } finally {
+      delete process.env.EMPTY_MCP_ENDPOINT;
+    }
+  });
+
+  it('envOrHeaders 存在未配置变量时报错并点名变量', () => {
+    delete process.env.MISSING_MCP_TOKEN;
+    expect(() =>
+      createDefaultMcpTransport(
+        config('http', {
+          transport: 'streamable-http',
+          endpointOrCommand: 'https://host/mcp',
+          envOrHeaders: { authorization: 'Bearer ${MISSING_MCP_TOKEN}' },
+        }),
+      ),
+    ).toThrow(/envOrHeaders 存在未配置的环境变量: authorization -> MISSING_MCP_TOKEN/);
+  });
 });
 
 describe('McpToolProvider', () => {

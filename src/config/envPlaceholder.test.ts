@@ -3,6 +3,7 @@ import type { EnterpriseMcpServerConfig } from '../types/mcp-and-sandbox.js';
 import {
   expandEnvPlaceholder,
   expandServerEnvPlaceholders,
+  listUnresolvedEnvNames,
 } from './envPlaceholder.js';
 
 function server(
@@ -27,6 +28,23 @@ describe('expandEnvPlaceholder', () => {
     expect(
       expandEnvPlaceholder('${A}/x/${B}', { A: 'https://mcp.example.com' }),
     ).toBe('https://mcp.example.com/x/${B}');
+  });
+
+  it('空值视为未配置，保留占位符', () => {
+    expect(expandEnvPlaceholder('${A}', { A: '' })).toBe('${A}');
+    expect(expandEnvPlaceholder('${A}', { A: '   ' })).toBe('${A}');
+  });
+});
+
+describe('listUnresolvedEnvNames', () => {
+  it('列出未解析的变量名并去重', () => {
+    expect(
+      listUnresolvedEnvNames('https://host/mcp?key=${KEY}&app=${APP}&key=${KEY}'),
+    ).toEqual(['KEY', 'APP']);
+  });
+
+  it('全部解析后返回空数组', () => {
+    expect(listUnresolvedEnvNames('https://host/mcp')).toEqual([]);
   });
 });
 

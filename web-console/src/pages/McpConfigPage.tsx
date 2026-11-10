@@ -266,6 +266,7 @@ export default function McpConfigPage() {
           showIcon
           style={{ marginBottom: 16 }}
           message="增删改查后自动热应用到 McpClientPool，无需重启进程；一键测试会实时连接并拉取该节点暴露的全部工具 Schema。"
+          description="「在线」只代表 MCP 握手成功，不保证密钥有效：密钥失效时握手同样成功，真正调用工具才会报 INVALID_USER_KEY / INVALID_USER_SIGNATURE。"
         />
         <Table<McpServerConfig>
           rowKey="id"
