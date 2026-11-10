@@ -27,6 +27,8 @@ export const skills = pgTable(
       .notNull()
       .default({ name: '', description: '' }),
     bodyHash: text('body_hash').notNull().default(''),
+    /** 模块只用于分组与路由，不参与技能身份，所以改名不会丢 enabled */
+    module: varchar('module', { length: 32 }).notNull().default('other'),
     enabled: boolean('enabled').notNull().default(true),
     visibility: varchar('visibility', { length: 16 }).notNull().default('public'),
     loadError: text('load_error').notNull().default(''),
@@ -40,6 +42,7 @@ export const skills = pgTable(
   (table) => [
     uniqueIndex('skills_name_source_idx').on(table.source, table.name),
     index('skills_enabled_idx').on(table.enabled, table.visibility),
+    index('skills_module_idx').on(table.module, table.enabled),
   ],
 );
 

@@ -25,6 +25,7 @@ async function writeSkill(
     body?: string;
     description?: string;
     nameField?: string;
+    moduleField?: string;
   } = {},
 ): Promise<void> {
   const dir = path.join(root, name);
@@ -33,7 +34,7 @@ async function writeSkill(
     path.join(dir, 'SKILL.md'),
     [
       '---',
-      `name: ${options.nameField ?? name}`,
+      `name: ${options.nameField ?? path.basename(name)}`,
       `description: ${options.description ?? '测试技能描述'}`,
       `version: ${options.version ?? '1.0.0'}`,
       'when_to_use: 当用户测试技能时',
@@ -44,6 +45,7 @@ async function writeSkill(
       'risk: read',
       'visibility: public',
       'max_instruction_chars: 4000',
+      ...(options.moduleField ? [`module: ${options.moduleField}`] : []),
       '---',
       '',
       options.body ?? '# 测试技能\n\n## 步骤\n1. 执行测试',
@@ -106,7 +108,9 @@ describe('skill front matter', () => {
 describe('SkillRegistry', () => {
   it('扫描内置技能，全部通过校验', async () => {
     const registry = new SkillRegistry({
-      roots: [{ source: 'builtin', dir: path.resolve('skills/builtin') }],
+      roots: [
+        { source: 'builtin', dir: path.resolve('skills/builtin'), modules: true },
+      ],
     });
     const definitions = await registry.scan();
     expect(definitions.map((item) => item.name).sort()).toEqual([
@@ -134,6 +138,53 @@ describe('SkillRegistry', () => {
     ]);
     expect(definitions.every((item) => !item.loadError)).toBe(true);
     expect(definitions.every((item) => item.body.length > 0)).toBe(true);
+  });
+
+  it('内置技能的模块划分与仓库目录一致', async () => {
+    const registry = new SkillRegistry({
+      roots: [
+        { source: 'builtin', dir: path.resolve('skills/builtin'), modules: true },
+      ],
+    });
+    const definitions = await registry.scan();
+    const byModule = new Map<string, string[]>();
+    for (const definition of definitions) {
+      const group = byModule.get(definition.module) ?? [];
+      group.push(definition.name);
+      byModule.set(definition.module, group);
+    }
+    expect(Object.fromEntries([...byModule].map(([k, v]) => [k, v.sort()]))).toEqual(
+      {
+        data: [
+          'attachment-analysis',
+          'data-analysis',
+          'data-insight',
+          'enterprise-lens',
+          'research-brief',
+        ],
+        engineering: [
+          'code-reading',
+          'github-project-scan',
+          'incident-triage',
+          'project-docs',
+          'project-onboarding',
+          'repo-review',
+        ],
+        general: ['everyday-chat', 'link-reader'],
+        meta: ['handbook-maintainer', 'plugin-author', 'skill-author'],
+        office: [
+          'dingtalk-office',
+          'meeting-notes',
+          'office-docs',
+          'presentation-brief',
+          'work-report',
+        ],
+      },
+    );
+    // 模块只是分组，不能改变技能身份
+    expect(definitions.every((item) => item.id === `builtin:${item.name}`)).toBe(
+      true,
+    );
   });
 
   it('同名技能跨来源时标记冲突而不是静默覆盖', async () => {
@@ -167,5 +218,111 @@ describe('SkillRegistry', () => {
     const bad = definitions.find((item) => item.name === 'bad');
     expect(bad?.loadError).toContain('front matter');
     expect(definitions.find((item) => item.name === 'good')?.loadError).toBeUndefined();
+  });
+
+  describe('模块目录', () => {
+    it('modules 开启时下探一层，模块名取目录名', async () => {
+      const root = await makeRoot();
+      await writeSkill(root, 'office/demo-a');
+      await writeSkill(root, 'engineering/demo-b');
+      const registry = new SkillRegistry({
+        roots: [{ source: 'market', dir: root, modules: true }],
+      });
+      const definitions = await registry.scan();
+      expect(definitions.map((item) => [item.name, item.module])).toEqual([
+        ['demo-b', 'engineering'],
+        ['demo-a', 'office'],
+      ]);
+      expect(definitions.every((item) => item.source === 'market')).toBe(true);
+      expect(definitions.every((item) => !item.loadError)).toBe(true);
+    });
+
+    it('modules 开启时仍接受根下的扁平技能，模块由 frontmatter 决定', async () => {
+      const root = await makeRoot();
+      await writeSkill(root, 'flat-with-module', { moduleField: 'finance' });
+      await writeSkill(root, 'flat-without-module');
+      const registry = new SkillRegistry({
+        roots: [{ source: 'builtin', dir: root, modules: true }],
+      });
+      const definitions = await registry.scan();
+      expect(
+        Object.fromEntries(definitions.map((item) => [item.name, item.module])),
+      ).toEqual({
+        'flat-with-module': 'finance',
+        'flat-without-module': 'other',
+      });
+    });
+
+    it('目录模块名与 frontmatter 冲突时以目录为准', async () => {
+      const root = await makeRoot();
+      const warnings: Array<Record<string, unknown>> = [];
+      await writeSkill(root, 'office/demo', { moduleField: 'engineering' });
+      const registry = new SkillRegistry({
+        roots: [{ source: 'builtin', dir: root, modules: true }],
+        logger: {
+          warn: (obj: Record<string, unknown>) => {
+            warnings.push(obj);
+          },
+        },
+      });
+      const definitions = await registry.scan();
+      expect(definitions).toHaveLength(1);
+      expect(definitions[0]?.module).toBe('office');
+      expect(warnings.some((item) => item.frontmatterModule === 'engineering')).toBe(
+        true,
+      );
+    });
+
+    it('非法或保留模块名整目录跳过，不产生 loadError', async () => {
+      const root = await makeRoot();
+      await writeSkill(root, '9x/demo');
+      await writeSkill(root, 'local/demo');
+      await writeSkill(root, 'office/ok');
+      const warnings: string[] = [];
+      const registry = new SkillRegistry({
+        roots: [{ source: 'builtin', dir: root, modules: true }],
+        logger: {
+          warn: (_obj: Record<string, unknown>, msg: string) => {
+            warnings.push(msg);
+          },
+        },
+      });
+      const definitions = await registry.scan();
+      expect(definitions.map((item) => item.name)).toEqual(['ok']);
+      expect(warnings).toHaveLength(2);
+    });
+
+    it('modules 未开启时不下探，local 保持扁平', async () => {
+      const root = await makeRoot();
+      await writeSkill(root, 'flat');
+      await writeSkill(root, 'office/nested');
+      const registry = new SkillRegistry({
+        roots: [{ source: 'local', dir: root }],
+      });
+      const definitions = await registry.scan();
+      expect(definitions.map((item) => [item.name, item.module])).toEqual([
+        ['flat', 'other'],
+      ]);
+    });
+
+    it('模块内的技能仍带出 references 资源', async () => {
+      const root = await makeRoot();
+      await writeSkill(root, 'office/demo');
+      await mkdir(path.join(root, 'office', 'demo', 'references'), {
+        recursive: true,
+      });
+      await writeFile(
+        path.join(root, 'office', 'demo', 'references', 'detail.md'),
+        '# 细节',
+        'utf8',
+      );
+      const registry = new SkillRegistry({
+        roots: [{ source: 'builtin', dir: root, modules: true }],
+      });
+      const definitions = await registry.scan();
+      expect(definitions[0]?.resources.map((item) => item.path)).toEqual([
+        'references/detail.md',
+      ]);
+    });
   });
 });

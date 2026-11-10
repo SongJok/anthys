@@ -131,9 +131,11 @@ export function createSkillRoutes(deps: SkillRouteDeps): Hono {
   app.get('/skills', async (c) => {
     const query = (c.req.query('query') ?? '').trim().toLowerCase();
     const source = c.req.query('source');
+    const module = c.req.query('module');
     const enabledRaw = c.req.query('enabled');
     const items = (await deps.skills.list()).filter((skill) => {
       if (source && skill.source !== source) return false;
+      if (module && skill.module !== module) return false;
       if (enabledRaw === 'true' && !skill.enabled) return false;
       if (enabledRaw === 'false' && skill.enabled) return false;
       if (!query) return true;
@@ -177,6 +179,12 @@ export function createSkillRoutes(deps: SkillRouteDeps): Hono {
       : 7;
     const usage = await deps.skills.usage(days);
     return c.json({ ok: true, days, usage });
+  });
+
+  /** 必须注册在 /skills/:id 之前，否则 modules 会被当成技能 ID */
+  app.get('/skills/modules', async (c) => {
+    const modules = await deps.skills.listModules();
+    return c.json({ ok: true, modules, total: modules.length });
   });
 
   app.post('/skills/preview', async (c) => {

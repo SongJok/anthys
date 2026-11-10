@@ -396,7 +396,7 @@ export interface GlossaryPromptPreview {
 /* 技能、插件与项目手册                                                */
 /* ------------------------------------------------------------------ */
 
-export type SkillSource = 'builtin' | 'local' | 'plugin';
+export type SkillSource = 'builtin' | 'market' | 'local' | 'plugin';
 export type SkillRisk = 'read' | 'write' | 'destructive';
 export type SkillVisibility = 'public' | 'admin';
 
@@ -416,6 +416,8 @@ export interface SkillDefinition {
   risk: SkillRisk;
   visibility: SkillVisibility;
   source: SkillSource;
+  /** 模块归属；builtin/market 由目录名决定，local/plugin 落 other */
+  module: string;
   pluginId?: string;
   dir: string;
   body: string;
@@ -429,6 +431,14 @@ export interface SkillDefinition {
 export interface SkillAdminView extends SkillDefinition {
   lastUsedAt: number | null;
   uses: number;
+}
+
+/** 分组头计数：total 是扫描到的数量，enabled 是数据库里真实生效的数量 */
+export interface SkillModuleSummary {
+  module: string;
+  total: number;
+  enabled: number;
+  sources: SkillSource[];
 }
 
 export interface SkillDraftInput {
@@ -459,6 +469,7 @@ export interface SkillValidationResult {
     risk?: SkillRisk;
     visibility?: SkillVisibility;
     max_instruction_chars?: number;
+    module?: string;
   };
 }
 
@@ -468,6 +479,7 @@ export interface SkillCatalogEntry {
   description: string;
   whenToUse: string;
   source: SkillSource;
+  module: string;
   score?: number;
 }
 
@@ -475,6 +487,8 @@ export interface SkillPreviewEntry {
   skill: SkillCatalogEntry;
   score: number;
   matched: boolean;
+  /** 名字是否真的出现在注入的提示词里；候选不等于已注入 */
+  injected: boolean;
 }
 
 export interface SkillPreviewResult {

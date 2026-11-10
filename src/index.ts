@@ -562,6 +562,10 @@ async function main(): Promise<void> {
       process.cwd(),
       process.env.SKILLS_LOCAL_DIR?.trim() || 'skills/local',
     );
+    const marketSkillsDir = resolve(
+      process.cwd(),
+      process.env.SKILLS_MARKET_DIR?.trim() || 'skills/market',
+    );
     const embeddingConfig = configCenter.getEmbeddingConfig();
     const embeddingDimensionsMismatch =
       Boolean(embeddingConfig?.enabled && embeddingConfig.apiKey) &&
@@ -646,7 +650,8 @@ async function main(): Promise<void> {
     skillService = new SkillService({
       roots: async () => {
         const roots: SkillScanRoot[] = [
-          { source: 'builtin', dir: builtinSkillsDir },
+          { source: 'builtin', dir: builtinSkillsDir, modules: true },
+          { source: 'market', dir: marketSkillsDir, modules: true },
           { source: 'local', dir: localSkillsDir },
         ];
         if (
@@ -666,6 +671,7 @@ async function main(): Promise<void> {
       },
       store: new DrizzleSkillStore(dbHandle.db),
       catalogLimit: extensionsConfig.skillCatalogLimit,
+      catalogMaxChars: extensionsConfig.skillCatalogMaxChars,
       logger: harnessLogger,
     });
     const skills = skillService;
@@ -696,7 +702,7 @@ async function main(): Promise<void> {
           sample: failed
             .slice(0, 5)
             .map((skill) => `${skill.id}: ${skill.loadError}`),
-          roots: [builtinSkillsDir, localSkillsDir],
+          roots: [builtinSkillsDir, marketSkillsDir, localSkillsDir],
         },
         'skill registry ready',
       );
@@ -839,6 +845,7 @@ async function main(): Promise<void> {
     };
     const skillAdminPort: SkillAdminPort = {
       list: () => skills.listAdmin(),
+      listModules: () => skills.listModules(),
       reload: () => skills.reload(),
       setEnabled: (id, enabled) => skills.setEnabled(id, enabled),
       preview: async (input) => skills.preview(input),

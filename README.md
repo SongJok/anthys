@@ -7,7 +7,7 @@
 - **克制的主动回复**：群内全量旁听，经三级漏斗判断后才对高优故障、技术求助作出回应。
 - **越用越懂团队**：工作记忆 + 情景摘要 + 语义画像三层记忆，跨会话保留上下文；语义记忆再按全局 / 群 / 群内成员 / 个人四种作用域隔离，企业术语库把内部黑话沉淀成可检索、可校验的固定模板。
 - **可扩展的知识层**：技能按目录渐进披露，声明式插件只声明技能与 MCP、不执行代码，项目手册把仓库事实沉淀成可发布的 12 章说明，并可接 GitHub 只读工具做跨仓对比。
-- **办公场景技能包**：内置 20 个技能，覆盖日常聊天、链接阅读、数据分析、日周月报、项目文档、钉钉办公、调研简报与内部同事视角等常见工作流。
+- **办公场景技能包**：内置 21 个技能，按办公协作、研发工程、数据洞察、元能力、通用兜底 5 个模块分组，覆盖日常聊天、链接阅读、数据分析、日周月报、项目文档、钉钉办公、调研简报与内部同事视角等常见工作流。
 - **会自己到点干活**：个人提醒与定时 AI 任务（每天 / 工作日 / 每周 / 每月）、工作简报、群目标播报与群定时任务，投递严格按个人与群隔离。
 - **不用记命令**：授权与写操作确认支持「同意授权」「允许写操作」「确认」「取消」等中文口令，与斜杠命令等价。
 - **双通道动态管控**：管理员既可以在钉钉单聊里用自然语言下达指令，也可以在 Web 控制台逐项配置，保存即生效。
@@ -269,10 +269,12 @@ pnpm run db:seed      # 可选：预写入默认人设与模型配置，已有�
 | `EXTENSIONS_PLUGINS_ENABLED` | `true` | 是否启用声明式插件的安装与运行时合并 |
 | `EXTENSIONS_PROJECTS_ENABLED` | `true` | 是否挂载项目工具、项目同步与项目手册 |
 | `EXTENSIONS_DEFAULT_PROJECT_ID` | 空 | 问题未点名项目时使用的默认项目；空则由模型选择或主动询问 |
-| `SKILL_CATALOG_LIMIT` | `20` | 注入系统提示的技能目录条数，范围 1–50 |
+| `SKILL_CATALOG_LIMIT` | `20` | 注入系统提示的技能明细条数上限，范围 1–50；模块摘要行不受它裁剪 |
+| `SKILL_CATALOG_MAX_CHARS` | `1600` | 「## 可用技能」段的字符总预算，范围 300–6000；明细最多占 60%，剩余全部给模块摘要 |
 | `PROJECT_BRIEF_MAX_CHARS` | `2000` | 注入系统提示的项目简报长度上限，范围 200–8000 |
-| `SKILLS_BUILTIN_DIR` | `skills/builtin` | 随仓库发布的内置技能目录 |
-| `SKILLS_LOCAL_DIR` | `skills/local` | 团队自建技能目录，支持在线编辑与热重载 |
+| `SKILLS_BUILTIN_DIR` | `skills/builtin` | 随仓库发布的内置技能目录，支持 `<模块>/<技能>` 两级结构 |
+| `SKILLS_MARKET_DIR` | `skills/market` | 从能力市场导入并 vendor 进仓库的技能目录，同样支持两级结构 |
+| `SKILLS_LOCAL_DIR` | `skills/local` | 团队自建技能目录，支持在线编辑与热重载，保持扁平不分模块 |
 | `PLUGIN_ALLOWED_COMMANDS` | 空（使用 `npx,uvx,node,python3,docker`） | 插件 stdio MCP 允许的裸命令，逗号分隔 |
 | `PLUGIN_ALLOW_MISSING_SECRETS` | `false` | 缺少必需密钥时是否允许先安装；允许时插件保持禁用 |
 | `PROJECT_ALLOWED_ROOTS` | 空（仅仓库根目录） | `local` 来源项目允许读取的根目录，逗号分隔 |
@@ -835,10 +837,11 @@ ReAct 循环内置看门狗（`src/watchdog/RunWatchdog.ts`），只观察不执
 
 技能是一段受控的操作步骤，用来教机器人"这类任务应该怎么做"，而不是把新的可执行代码带进进程。
 
-- **渐进披露**：系统提示只注入技能目录（名称、描述、适用场景，受 `SKILL_CATALOG_LIMIT` 限制）；模型命中任务后调用 `use_skill` 加载正文，需要细节时再用 `skill_read` 分页读取技能目录内的参考文件。单次正文最多 4000 字符，参考文件单次最多 500 行 / 4000 字符，单文件上限 1MB。
-- **来源**：`SKILLS_BUILTIN_DIR`（默认 `skills/builtin`）随仓库发布，`SKILLS_LOCAL_DIR`（默认 `skills/local`）用于团队自建。内置技能共 20 个，分两类：代码与项目类 `code-reading`、`repo-review`、`incident-triage`、`project-onboarding`、`github-project-scan`、`handbook-maintainer`；办公与通用类 `everyday-chat`、`link-reader`、`data-analysis`、`data-insight`、`work-report`、`meeting-notes`、`project-docs`、`office-docs`、`presentation-brief`、`dingtalk-office`、`research-brief`、`enterprise-lens`、`skill-author`、`plugin-author`。其中 `enterprise-lens` 规定回答公司内部业务与组织问题时的内部同事视角与取证顺序（术语 → 项目手册与钉钉知识库 → MCP/DWS 实时数据），禁止外部求职 / 商务 / 投资尽调口吻。
-- **格式**：每个技能是一个目录，`SKILL.md` 以 YAML frontmatter 开头，字段包括 `name`、`description`、`version`、`when_to_use`、`tags`、`allowed_tools`、`risk`、`visibility` 与 `max_instruction_chars`；正文按「适用场景 / 步骤 / 约束」组织，可附带 `references/` 等资源文件。
-- **管理**：控制台「技能 Skills」可查看目录预览、校验草稿、启用 / 停用、在线编辑 `SKILL.md` 与资源文件，并查看近 7 天调用次数。保存后立即热更新，无需重启。
+- **渐进披露**：系统提示只注入两级技能目录——每个模块一行摘要（模块名、真实技能数、按相关度点名的技能名），再对 router top-4 展开完整明细行；整段受 `SKILL_CATALOG_MAX_CHARS` 约束，明细用不完的预算回流给摘要，所以加技能不会把已有技能挤出提示词。模型命中任务后调用 `use_skill` 加载正文，需要细节时再用 `skill_read` 分页读取技能目录内的参考文件，也可用 `skill_search` 检索没被点名的技能。单次正文最多 4000 字符，参考文件单次最多 500 行 / 4000 字符，单文件上限 1MB。
+- **来源**：`SKILLS_BUILTIN_DIR`（默认 `skills/builtin`）随仓库发布，`SKILLS_MARKET_DIR`（默认 `skills/market`）存放从能力市场导入并 vendor 进仓库的技能，`SKILLS_LOCAL_DIR`（默认 `skills/local`）用于团队自建。builtin 与 market 支持 `<模块>/<技能>` 两级目录，local 与插件技能保持扁平。
+- **内置模块**：共 21 个技能分 5 组——`office` 办公协作（`dingtalk-office`、`meeting-notes`、`office-docs`、`presentation-brief`、`work-report`）、`engineering` 研发工程（`code-reading`、`github-project-scan`、`incident-triage`、`project-docs`、`project-onboarding`、`repo-review`）、`data` 数据洞察（`attachment-analysis`、`data-analysis`、`data-insight`、`enterprise-lens`、`research-brief`）、`meta` 元能力（`handbook-maintainer`、`plugin-author`、`skill-author`）、`general` 通用兜底（`everyday-chat`、`link-reader`）。`other` 预留给外部杂项，自研技能不落 `other`。其中 `enterprise-lens` 规定回答公司内部业务与组织问题时的内部同事视角与取证顺序（术语 → 项目手册与钉钉知识库 → MCP/DWS 实时数据），禁止外部求职 / 商务 / 投资尽调口吻；`handbook-maintainer` 仅管理员可见。
+- **格式**：每个技能是一个目录，`SKILL.md` 以 YAML frontmatter 开头，字段包括 `name`、`description`、`version`、`when_to_use`、`tags`、`allowed_tools`、`risk`、`visibility`、`max_instruction_chars` 与可选的 `module`；正文按「适用场景 / 步骤 / 约束」组织，可附带 `references/` 等资源文件。模块归属以**目录名为准**，frontmatter 的 `module` 只在扁平目录下生效，两者冲突时取目录名并记 warning。模块名须匹配 `^[a-z][a-z0-9-]{1,31}$`，不能是 `builtin`/`market`/`local`/`plugin`，也不能与其下任一技能同名。技能 id 不含模块（仍是 `builtin:<name>`），所以调整模块划分不会丢数据库里的启用状态。
+- **管理**：控制台「技能 Skills」按模块折叠分组并支持模块 / 来源 / 启用状态筛选，分组头的 `已启用 N/M` 取服务端汇总（数据库里真实生效的启用数），不随当前筛选变化；可查看目录预览、校验草稿、启用 / 停用、在线编辑 `SKILL.md` 与资源文件，并查看近 7 天调用次数。预览会分别显示命中数、候选数与实际写进提示词的数量。保存后立即热更新，无需重启。
 - **边界**：技能正文只来自管理员维护的本地目录；聊天内容、工具返回、仓库文件都不会被当作指令注入。`EXTENSIONS_SKILLS_ENABLED=false` 可整体关闭。
 
 #### 声明式插件
@@ -1073,7 +1076,7 @@ ReAct 循环内置看门狗（`src/watchdog/RunWatchdog.ts`），只观察不执
 | **记忆治理** | 按 `global` / `group` / `group_member` / `user` 作用域与类型 / 状态筛选语义记忆，调整群内共享、敏感级别、置信度与过期时间，停用或删除错误记忆 |
 | **ReAct 审计轨迹** | 按群过滤并分页查看每次回答的思维链、工具入参、耗时、沙盒输出与最终答案；定时任务等非员工触发的记录以「触发类型（关联员工）」展示归属 |
 | **术语知识库** | 按固定模板增删改查内部黑话，按名称 / 别名 / 时效性 / 敏感级别检索，查看注入命中统计、质量校验结果与系统提示预览 |
-| **技能 Skills** | 浏览技能目录与触发条件预览、校验草稿、启用 / 停用、在线编辑 `SKILL.md` 与资源文件，查看近 7 天调用次数 |
+| **技能 Skills** | 按模块折叠分组与筛选（模块 / 来源 / 启用状态），浏览技能目录与触发条件预览、校验草稿、启用 / 停用、在线编辑 `SKILL.md` 与资源文件，查看近 7 天调用次数 |
 | **声明式插件** | 校验并安装插件包，升级 / 回滚 / 启停 / 卸载，查看版本记录、缺失密钥与合并后的技能和 MCP 节点 |
 | **项目手册** | 登记与同步项目、浏览快照与混合检索结果、生成 / 发布项目手册，维护各章节人工条目 |
 | **数据治理** | 调整各表保留期、查看超期行数与附件占用、先 dry-run 再清理，以及按会话 / 员工级联删除 |
@@ -1159,7 +1162,8 @@ ReAct 循环内置看门狗（`src/watchdog/RunWatchdog.ts`），只观察不执
 | GET | `/glossary/:id` | 读取单条术语 |
 | POST | `/glossary` | 创建术语 |
 | PUT / DELETE | `/glossary/:id` | 更新 / 删除术语 |
-| GET / POST | `/skills` | 技能列表 / 新建本地技能 |
+| GET / POST | `/skills` | 技能列表（支持 `?module=`、`?source=`、`?enabled=`、`?query=` 叠加过滤）/ 新建本地技能 |
+| GET | `/skills/modules` | 模块分组汇总 `{ module, total, enabled, sources }`，`enabled` 取数据库真实生效值 |
 | POST | `/skills/validate`、`/skills/reload`、`/skills/preview` | 校验草稿 / 重新扫描 / 预览目录 |
 | GET | `/skills/usage` | 技能整体调用统计 |
 | GET / PUT / DELETE | `/skills/:id` | 查看 / 更新 / 删除技能 |

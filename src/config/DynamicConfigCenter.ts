@@ -655,6 +655,14 @@ export class DynamicConfigCenter
             ),
           }
         : {}),
+      ...(input.skillCatalogMaxChars !== undefined
+        ? {
+            skillCatalogMaxChars: Math.min(
+              6_000,
+              Math.max(300, Math.trunc(input.skillCatalogMaxChars)),
+            ),
+          }
+        : {}),
       ...(input.projectBriefMaxChars !== undefined
         ? {
             projectBriefMaxChars: Math.min(

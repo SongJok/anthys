@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   Button,
   Card,
+  Collapse,
   Drawer,
   Input,
   InputNumber,
@@ -27,6 +28,7 @@ import { formatShanghaiDateTime } from '../time';
 import type {
   SkillAdminView,
   SkillDraftInput,
+  SkillModuleSummary,
   SkillPreviewResult,
   SkillResourceInfo,
   SkillRisk,
@@ -37,15 +39,31 @@ import type {
 
 const SOURCE_LABEL: Record<SkillSource, string> = {
   builtin: '内置',
+  market: '市场',
   local: '本地',
   plugin: '插件',
 };
 
 const SOURCE_COLOR: Record<SkillSource, string> = {
   builtin: 'blue',
+  market: 'gold',
   local: 'green',
   plugin: 'purple',
 };
+
+/** 只给已经落地的模块起中文名；新导入的模块先用原始名，别造没对应的标签 */
+const MODULE_LABEL: Record<string, string> = {
+  office: '办公协作',
+  engineering: '研发工程',
+  data: '数据洞察',
+  meta: '元能力',
+  general: '通用兜底',
+  other: '其他',
+};
+
+function moduleLabel(module: string): string {
+  return MODULE_LABEL[module] ?? module;
+}
 
 const RISK_LABEL: Record<SkillRisk, string> = {
   read: '只读',
@@ -87,6 +105,8 @@ export default function SkillsPage() {
   const [loading, setLoading] = useState(false);
   const [query, setQuery] = useState('');
   const [sourceFilter, setSourceFilter] = useState<SkillSource | undefined>();
+  const [moduleFilter, setModuleFilter] = useState<string | undefined>();
+  const [modules, setModules] = useState<SkillModuleSummary[]>([]);
 
   const [editorOpen, setEditorOpen] = useState(false);
   const [editing, setEditing] = useState<SkillAdminView | null>(null);
@@ -106,21 +126,50 @@ export default function SkillsPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const { skills: items } = await api.skills({
-        ...(query.trim() ? { query: query.trim() } : {}),
-        ...(sourceFilter ? { source: sourceFilter } : {}),
-      });
+      const [{ skills: items }, { modules: groups }] = await Promise.all([
+        api.skills({
+          ...(query.trim() ? { query: query.trim() } : {}),
+          ...(sourceFilter ? { source: sourceFilter } : {}),
+          ...(moduleFilter ? { module: moduleFilter } : {}),
+        }),
+        api.skillModules(),
+      ]);
       setSkills(items);
+      setModules(groups);
     } catch (error) {
       message.error(error instanceof Error ? error.message : String(error));
     } finally {
       setLoading(false);
     }
-  }, [query, sourceFilter]);
+  }, [query, sourceFilter, moduleFilter]);
 
   useEffect(() => {
     void load();
   }, [load]);
+
+  const groups = useMemo(() => {
+    const byModule = new Map<string, SkillAdminView[]>();
+    for (const skill of skills) {
+      const items = byModule.get(skill.module) ?? [];
+      items.push(skill);
+      byModule.set(skill.module, items);
+    }
+    return [...byModule.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([module, items]) => ({ module, items }));
+  }, [skills]);
+
+  const summaryByModule = useMemo(
+    () => new Map(modules.map((item) => [item.module, item])),
+    [modules],
+  );
+
+  const [openModules, setOpenModules] = useState<string[]>([]);
+  // 只在模块集合变化时重置展开状态，否则每次启停技能都会把用户手动折叠的分组弹开
+  const moduleKeys = groups.map((group) => group.module).join(',');
+  useEffect(() => {
+    setOpenModules(moduleKeys ? moduleKeys.split(',') : []);
+  }, [moduleKeys]);
 
   const openCreate = () => {
     setEditing(null);
@@ -407,6 +456,17 @@ export default function SkillsPage() {
               label: SOURCE_LABEL[source],
             }))}
           />
+          <Select
+            allowClear
+            placeholder="模块"
+            value={moduleFilter}
+            onChange={setModuleFilter}
+            style={{ width: 240 }}
+            options={modules.map((item) => ({
+              value: item.module,
+              label: `${moduleLabel(item.module)} ${item.module}（已启用 ${item.enabled}/${item.total}）`,
+            }))}
+          />
           <Button icon={<ReloadOutlined />} onClick={() => void load()}>
             刷新
           </Button>
@@ -418,13 +478,61 @@ export default function SkillsPage() {
       </Card>
 
       <Card>
-        <Table
-          rowKey="id"
-          loading={loading}
-          columns={columns}
-          dataSource={skills}
-          pagination={{ pageSize: 20, showSizeChanger: false }}
-        />
+        {groups.length === 0 ? (
+          <Table
+            rowKey="id"
+            loading={loading}
+            columns={columns}
+            dataSource={[]}
+            pagination={false}
+          />
+        ) : (
+          <Collapse
+            activeKey={openModules}
+            onChange={(keys) =>
+              setOpenModules(
+                (Array.isArray(keys) ? keys : [keys]).map((key) => String(key)),
+              )
+            }
+            items={groups.map((group) => {
+              // 分组头计数取服务端汇总，不随当前筛选变化，避免把"筛出来的"当成"已启用的"
+              const summary = summaryByModule.get(group.module);
+              return {
+                key: group.module,
+                label: (
+                  <Space wrap size={4}>
+                    <Typography.Text strong>{moduleLabel(group.module)}</Typography.Text>
+                    <Typography.Text type="secondary">{group.module}</Typography.Text>
+                    <Tag
+                      color={
+                        summary && summary.enabled === summary.total
+                          ? 'green'
+                          : 'orange'
+                      }
+                    >
+                      已启用 {summary?.enabled ?? 0}/{summary?.total ?? 0}
+                    </Tag>
+                    {(summary?.sources ?? []).map((source) => (
+                      <Tag key={source} color={SOURCE_COLOR[source]}>
+                        {SOURCE_LABEL[source]}
+                      </Tag>
+                    ))}
+                  </Space>
+                ),
+                children: (
+                  <Table
+                    rowKey="id"
+                    size="small"
+                    loading={loading}
+                    columns={columns}
+                    dataSource={group.items}
+                    pagination={false}
+                  />
+                ),
+              };
+            })}
+          />
+        )}
       </Card>
 
       <Modal
@@ -642,8 +750,12 @@ export default function SkillsPage() {
               <Alert
                 type={preview.truncated ? 'warning' : 'info'}
                 showIcon
-                message={`命中 ${preview.entries.filter((entry) => entry.matched).length} 个，共 ${preview.entries.length} 个候选`}
-                description={preview.truncated ? '目录超出预算，已截断并提示 skill_search。' : undefined}
+                message={`命中 ${preview.entries.filter((entry) => entry.matched).length} 个，候选 ${preview.entries.length} 个，实际写进提示词 ${preview.entries.filter((entry) => entry.injected).length} 个`}
+                description={
+                  preview.truncated
+                    ? '有技能没被写进提示词：模块摘要或条数预算把它挤掉了，模型只能靠 skill_search 找到它。'
+                    : undefined
+                }
               />
               <Card size="small" title="注入系统提示词">
                 <pre style={{ whiteSpace: 'pre-wrap', margin: 0 }}>{preview.prompt || '（空）'}</pre>
@@ -655,6 +767,16 @@ export default function SkillsPage() {
                 dataSource={preview.entries}
                 columns={[
                   { title: '技能', dataIndex: ['skill', 'name'] },
+                  {
+                    title: '模块',
+                    dataIndex: ['skill', 'module'],
+                    width: 140,
+                    render: (module: string) => (
+                      <Typography.Text type="secondary">
+                        {moduleLabel(module)} {module}
+                      </Typography.Text>
+                    ),
+                  },
                   { title: '来源', dataIndex: ['skill', 'source'] },
                   { title: '得分', dataIndex: 'score', width: 80 },
                   {
@@ -662,6 +784,16 @@ export default function SkillsPage() {
                     dataIndex: 'matched',
                     width: 70,
                     render: (matched: boolean) => (matched ? '是' : '否'),
+                  },
+                  {
+                    title: '已注入',
+                    dataIndex: 'injected',
+                    width: 80,
+                    render: (injected: boolean) => (
+                      <Tag color={injected ? 'green' : 'default'}>
+                        {injected ? '是' : '否'}
+                      </Tag>
+                    ),
                   },
                 ]}
               />

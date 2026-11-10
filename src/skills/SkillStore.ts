@@ -17,6 +17,7 @@ export interface SkillState {
   pluginId?: string;
   path: string;
   bodyHash: string;
+  module: string;
   enabled: boolean;
   visibility: SkillVisibility;
   loadError: string;
@@ -49,6 +50,7 @@ function toFrontmatter(definition: SkillDefinition): SkillFrontmatter {
     risk: definition.risk,
     visibility: definition.visibility,
     max_instruction_chars: definition.maxInstructionChars,
+    module: definition.module,
   };
 }
 
@@ -64,6 +66,7 @@ export class DrizzleSkillStore implements SkillStore {
       ...(row.pluginId ? { pluginId: row.pluginId } : {}),
       path: row.path,
       bodyHash: row.bodyHash,
+      module: row.module,
       enabled: row.enabled,
       visibility: row.visibility as SkillVisibility,
       loadError: row.loadError,
@@ -85,6 +88,7 @@ export class DrizzleSkillStore implements SkillStore {
           path: definition.dir,
           frontmatter: toFrontmatter(definition),
           bodyHash: definition.bodyHash,
+          module: definition.module,
           enabled: definition.enabled,
           visibility: definition.visibility,
           loadError: definition.loadError ?? '',
@@ -100,6 +104,8 @@ export class DrizzleSkillStore implements SkillStore {
             path: definition.dir,
             frontmatter: toFrontmatter(definition),
             bodyHash: definition.bodyHash,
+            // 重新划分模块时必须覆盖，否则技能会停在旧分组里
+            module: definition.module,
             visibility: definition.visibility,
             loadError: definition.loadError ?? '',
             updatedAt: new Date(),

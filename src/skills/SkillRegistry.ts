@@ -10,6 +10,11 @@ import type {
   SkillSource,
   SkillVisibility,
 } from '../types/skills-plugins-projects.js';
+import {
+  DEFAULT_SKILL_MODULE,
+  RESERVED_SKILL_MODULES,
+  SKILL_MODULE_PATTERN,
+} from '../types/skills-plugins-projects.js';
 
 const SKILL_FILE = 'SKILL.md';
 const DEFAULT_MAX_FILE_BYTES = 64 * 1024;
@@ -30,6 +35,8 @@ export interface SkillScanRoot {
   pluginId?: string;
   /** 插件版本仅用于展示与审计 */
   pluginVersion?: string;
+  /** 开启后允许 root/<module>/<skill>/SKILL.md 两级结构，最多下探一层 */
+  modules?: boolean;
 }
 
 export interface SkillRegistryOptions {
@@ -262,6 +269,7 @@ export function validateFrontmatter(
     1_000,
     8_000,
   );
+  const moduleRaw = asString(raw.module);
   return {
     name,
     description,
@@ -272,6 +280,8 @@ export function validateFrontmatter(
     risk,
     visibility,
     max_instruction_chars: maxInstructionChars,
+    // 非法模块名直接忽略，不为一个展示字段让整个技能加载失败
+    ...(isModuleName(moduleRaw) ? { module: moduleRaw } : {}),
   };
 }
 
@@ -365,6 +375,32 @@ function fallbackNameFromDir(dir: string): string {
   return NAME_PATTERN.test(base) ? base : 'invalid-skill';
 }
 
+function isModuleName(value: string): boolean {
+  return (
+    SKILL_MODULE_PATTERN.test(value) && !RESERVED_SKILL_MODULES.includes(value)
+  );
+}
+
+/**
+ * 目录名是模块的唯一真相；frontmatter 的 module 只在扁平目录下生效。
+ * 两处冲突时以目录为准并告警，避免出现两个来源都能改的字段。
+ */
+function resolveModule(
+  dirModule: string | undefined,
+  frontmatterModule: string | undefined,
+  skillDir: string,
+  logger?: { warn(obj: Record<string, unknown>, msg: string): void },
+): string {
+  if (!dirModule) return frontmatterModule ?? DEFAULT_SKILL_MODULE;
+  if (frontmatterModule && frontmatterModule !== dirModule) {
+    logger?.warn(
+      { dir: skillDir, dirModule, frontmatterModule },
+      'skill frontmatter module conflicts with directory, using directory',
+    );
+  }
+  return dirModule;
+}
+
 export class SkillRegistry {
   private readonly cache = new Map<string, CacheEntry>();
   private readonly maxFileBytes: number;
@@ -387,10 +423,10 @@ export class SkillRegistry {
         continue;
       }
 
-      const skillDirs: string[] = [];
+      const candidates: Array<{ dir: string; module?: string }> = [];
       try {
         const direct = await resolveInside(rootReal, path.join(rootReal, SKILL_FILE));
-        if (direct) skillDirs.push(rootReal);
+        if (direct) candidates.push({ dir: rootReal });
       } catch {
         // ignore
       }
@@ -402,23 +438,65 @@ export class SkillRegistry {
       }
       for (const entry of entries) {
         if (!entry.isDirectory() || entry.name.startsWith('.')) continue;
-        skillDirs.push(path.join(rootReal, entry.name));
+        if (SKIPPED_DIRS.has(entry.name)) continue;
+        const childDir = path.join(rootReal, entry.name);
+        if (!root.modules) {
+          candidates.push({ dir: childDir });
+          continue;
+        }
+        // 子目录自带 SKILL.md 视为扁平技能，否则视为模块目录，最多下探一层
+        const flat = await resolveInside(
+          rootReal,
+          path.join(childDir, SKILL_FILE),
+        );
+        if (flat) {
+          candidates.push({ dir: childDir });
+          continue;
+        }
+        if (!isModuleName(entry.name)) {
+          this.options.logger?.warn(
+            { dir: childDir, root: rootReal },
+            'skip directory: not a skill and not a valid module name',
+          );
+          continue;
+        }
+        let moduleEntries: Dirent[] = [];
+        try {
+          moduleEntries = await readdir(childDir, { withFileTypes: true });
+        } catch {
+          continue;
+        }
+        for (const nested of moduleEntries) {
+          if (!nested.isDirectory() || nested.name.startsWith('.')) continue;
+          if (SKIPPED_DIRS.has(nested.name)) continue;
+          candidates.push({
+            dir: path.join(childDir, nested.name),
+            module: entry.name,
+          });
+        }
       }
 
-      for (const skillDir of skillDirs) {
-        const definition = await this.loadSkillDir(skillDir, rootReal, root);
+      for (const candidate of candidates) {
+        const definition = await this.loadSkillDir(
+          candidate.dir,
+          rootReal,
+          root,
+          candidate.module,
+        );
         if (definition) definitions.push(definition);
       }
     }
     this.markNameConflicts(definitions);
     const sourceOrder: Record<SkillSource, number> = {
       builtin: 0,
-      local: 1,
-      plugin: 2,
+      market: 1,
+      local: 2,
+      plugin: 3,
     };
     return definitions.sort(
       (a, b) =>
         sourceOrder[a.source] - sourceOrder[b.source] ||
+        a.module.localeCompare(b.module) ||
         a.name.localeCompare(b.name),
     );
   }
@@ -444,6 +522,7 @@ export class SkillRegistry {
     skillDir: string,
     rootReal: string,
     root: SkillScanRoot,
+    dirModule?: string,
   ): Promise<SkillDefinition | null> {
     const realDir = await resolveInside(rootReal, skillDir);
     if (!realDir) {
@@ -483,7 +562,7 @@ export class SkillRegistry {
       raw = await readFile(file, 'utf8');
     } catch (error) {
       return this.cacheAndReturn(cacheKey, fileInfo.mtimeMs, fileInfo.size, {
-        ...emptyDefinition(root, realDir, fallbackName),
+        ...emptyDefinition(root, realDir, fallbackName, dirModule),
         loadError:
           error instanceof Error ? error.message : 'SKILL.md 读取失败',
       });
@@ -507,6 +586,12 @@ export class SkillRegistry {
         risk: parsed.frontmatter.risk ?? 'read',
         visibility: parsed.frontmatter.visibility ?? 'public',
         source: root.source,
+        module: resolveModule(
+          dirModule,
+          parsed.frontmatter.module,
+          realDir,
+          this.options.logger,
+        ),
         ...(root.pluginId ? { pluginId: root.pluginId } : {}),
         dir: realDir,
         body: parsed.body,
@@ -517,7 +602,7 @@ export class SkillRegistry {
       };
     } catch (error) {
       definition = {
-        ...emptyDefinition(root, realDir, fallbackName),
+        ...emptyDefinition(root, realDir, fallbackName, dirModule),
         loadError:
           error instanceof Error ? error.message : '技能解析失败',
       };
@@ -545,6 +630,7 @@ function emptyDefinition(
   root: SkillScanRoot,
   dir: string,
   name: string,
+  dirModule?: string,
 ): SkillDefinition {
   const id =
     root.source === 'plugin'
@@ -561,6 +647,8 @@ function emptyDefinition(
     risk: 'read',
     visibility: 'public',
     source: root.source,
+    // 解析失败时读不到 frontmatter，模块只能取目录名
+    module: dirModule ?? DEFAULT_SKILL_MODULE,
     ...(root.pluginId ? { pluginId: root.pluginId } : {}),
     dir,
     body: '',

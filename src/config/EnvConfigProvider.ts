@@ -444,6 +444,13 @@ export class EnvConfigProvider implements IConfigProvider {
         50,
         Math.max(1, Math.trunc(parseNumber(this.env.SKILL_CATALOG_LIMIT, 20))),
       ),
+      skillCatalogMaxChars: Math.min(
+        6_000,
+        Math.max(
+          300,
+          Math.trunc(parseNumber(this.env.SKILL_CATALOG_MAX_CHARS, 1_600)),
+        ),
+      ),
       projectBriefMaxChars: Math.min(
         8_000,
         Math.max(

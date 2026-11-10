@@ -59,7 +59,13 @@ afterEach(async () => {
 describe('SkillToolProvider', () => {
   it('use_skill 通过 instructions 返回受信任正文', async () => {
     const service = new SkillService({
-      roots: [{ source: 'builtin', dir: path.resolve('skills/builtin') }],
+      roots: [
+        {
+          source: 'builtin',
+          dir: path.resolve('skills/builtin'),
+          modules: true,
+        },
+      ],
     });
     await service.init();
     const provider = new SkillToolProvider({
@@ -102,7 +108,13 @@ describe('SkillToolProvider', () => {
 
   it('skill_search 返回匹配技能但不泄露正文', async () => {
     const service = new SkillService({
-      roots: [{ source: 'builtin', dir: path.resolve('skills/builtin') }],
+      roots: [
+        {
+          source: 'builtin',
+          dir: path.resolve('skills/builtin'),
+          modules: true,
+        },
+      ],
     });
     await service.init();
     const provider = new SkillToolProvider({ service, isAdmin: () => false });
@@ -118,7 +130,13 @@ describe('SkillToolProvider', () => {
 
   it('skill_read 返回分段内容且不产生 instructions', async () => {
     const service = new SkillService({
-      roots: [{ source: 'builtin', dir: path.resolve('skills/builtin') }],
+      roots: [
+        {
+          source: 'builtin',
+          dir: path.resolve('skills/builtin'),
+          modules: true,
+        },
+      ],
     });
     await service.init();
     const provider = new SkillToolProvider({ service, isAdmin: () => false });
@@ -139,7 +157,13 @@ describe('SkillToolProvider', () => {
 
   it('普通用户加载 admin 技能会被拒绝', async () => {
     const service = new SkillService({
-      roots: [{ source: 'builtin', dir: path.resolve('skills/builtin') }],
+      roots: [
+        {
+          source: 'builtin',
+          dir: path.resolve('skills/builtin'),
+          modules: true,
+        },
+      ],
     });
     await service.init();
     const provider = new SkillToolProvider({ service, isAdmin: () => false });

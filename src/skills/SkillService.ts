@@ -14,6 +14,7 @@ import type {
   SkillContextInput,
   SkillDefinition,
   SkillLoadResult,
+  SkillModuleSummary,
   SkillPreviewEntry,
   SkillPreviewResult,
   SkillResourceReadRequest,
@@ -25,10 +26,19 @@ import type {
 } from '../types/skills-plugins-projects.js';
 
 const DEFAULT_CATALOG_LIMIT = 20;
-const OVERFLOW_CATALOG_LIMIT = 12;
-const DEFAULT_CATALOG_MAX_CHARS = 1_200;
+const DEFAULT_CATALOG_MAX_CHARS = 1_600;
 const DEFAULT_ENTRY_MAX_CHARS = 80;
+const DEFAULT_DETAIL_LIMIT = 4;
 const DEFAULT_INSTRUCTION_CAP = 4_000;
+/** 模块摘要至少占目录预算的这个比例；明细行用不完的额度会回流给摘要 */
+const MODULE_OVERVIEW_RATIO = 0.4;
+/** 单行摘要的硬上限与下限；实际取值按"预算 / 模块数"在两者之间自适应 */
+const MODULE_LINE_MAX_CHARS = 160;
+const MODULE_LINE_MIN_CHARS = 60;
+/** 摘要放不下时逐级减少每行技能名，优先保证每个模块都露面 */
+const MODULE_LINE_NAME_STEPS = [8, 5, 3, 2, 1] as const;
+const CATALOG_HINT =
+  '- 其余技能可用 skill_search 检索，或直接 use_skill 加载上面列出的技能名。';
 const MAX_RESOURCE_BYTES = 1024 * 1024;
 const RESOURCE_MAX_LINES = 500;
 const RESOURCE_MAX_CHARS = 4_000;
@@ -49,6 +59,7 @@ export interface SkillServiceOptions {
   catalogLimit?: number;
   catalogMaxChars?: number;
   catalogEntryMaxChars?: number;
+  catalogDetailLimit?: number;
   instructionCap?: number;
   logger?: SkillServiceLogger;
   now?: () => number;
@@ -145,6 +156,90 @@ function buildOutline(
   return lines.join('\n');
 }
 
+interface SkillModuleGroup {
+  module: string;
+  /** 模块内全部技能，用于给出真实规模 */
+  matches: SkillSearchMatch[];
+  /** 其中进入 catalogLimit 的部分，只有这些会被点名 */
+  eligible: SkillSearchMatch[];
+}
+
+/**
+ * router 已按分数排序，所以分组顺序 = 模块相关度，组内顺序 = 模块内优先级。
+ * 计数取模块真实规模，点名只点 eligible，避免"（4）"其实有 5 个。
+ */
+function groupByModule(
+  matches: SkillSearchMatch[],
+  eligible: Set<string>,
+): SkillModuleGroup[] {
+  const groups = new Map<string, SkillModuleGroup>();
+  for (const match of matches) {
+    let group = groups.get(match.module);
+    if (!group) {
+      group = { module: match.module, matches: [], eligible: [] };
+      groups.set(match.module, group);
+    }
+    group.matches.push(match);
+    if (eligible.has(match.id)) group.eligible.push(match);
+  }
+  return [...groups.values()].filter((group) => group.eligible.length > 0);
+}
+
+/** 只按整名截断：切一半的技能名会被模型直接拿去 use_skill，然后报“技能不存在” */
+function moduleLine(
+  group: SkillModuleGroup,
+  nameLimit: number,
+  cap: number,
+): { line: string; shown: SkillSearchMatch[] } {
+  const head = `- ${group.module}（${group.matches.length}）：`;
+  const shown: SkillSearchMatch[] = [];
+  let length = head.length;
+  for (const match of group.eligible) {
+    const extra = match.name.length + (shown.length > 0 ? 2 : 0);
+    if (shown.length >= nameLimit || length + extra > cap) break;
+    shown.push(match);
+    length += extra;
+  }
+  if (shown.length === 0) {
+    return { line: clip(head.slice(0, -1), cap), shown };
+  }
+  const hidden = group.matches.length - shown.length;
+  return {
+    line: `${head}${shown.map((item) => item.name).join(', ')}${hidden > 0 ? ` …+${hidden}` : ''}`,
+    shown,
+  };
+}
+
+function pickModuleLines(
+  groups: SkillModuleGroup[],
+  budget: number,
+): {
+  rendered: Array<{ line: string; shown: SkillSearchMatch[] }>;
+  complete: boolean;
+} {
+  const fallback = MODULE_LINE_NAME_STEPS[MODULE_LINE_NAME_STEPS.length - 1]!;
+  // 模块少时给每行更多宽度，模块多时收窄，但不会窄到放不下模块名
+  const cap = Math.max(
+    MODULE_LINE_MIN_CHARS,
+    Math.min(MODULE_LINE_MAX_CHARS, Math.floor(budget / Math.max(1, groups.length))),
+  );
+  for (const nameLimit of MODULE_LINE_NAME_STEPS) {
+    const candidates = groups.map((group) => moduleLine(group, nameLimit, cap));
+    const cost = candidates.reduce((sum, item) => sum + item.line.length + 1, 0);
+    if (cost <= budget) return { rendered: candidates, complete: true };
+  }
+  // 每行只留一个名字仍然放不下，才按预算丢掉排在后面的模块
+  const rendered: Array<{ line: string; shown: SkillSearchMatch[] }> = [];
+  let used = 0;
+  for (const group of groups) {
+    const item = moduleLine(group, fallback, cap);
+    if (used + item.line.length + 1 > budget) break;
+    used += item.line.length + 1;
+    rendered.push(item);
+  }
+  return { rendered, complete: rendered.length === groups.length };
+}
+
 export class SkillService {
   private readonly router: SkillRouter;
   private readonly store?: SkillStore;
@@ -153,6 +248,7 @@ export class SkillService {
   private readonly catalogLimit: number;
   private readonly catalogMaxChars: number;
   private readonly catalogEntryMaxChars: number;
+  private readonly catalogDetailLimit: number;
   private readonly instructionCap: number;
 
   private definitions: SkillDefinition[] = [];
@@ -177,6 +273,10 @@ export class SkillService {
     this.catalogEntryMaxChars = Math.min(
       120,
       Math.max(40, Math.trunc(options.catalogEntryMaxChars ?? DEFAULT_ENTRY_MAX_CHARS)),
+    );
+    this.catalogDetailLimit = Math.min(
+      this.catalogLimit,
+      Math.max(1, Math.trunc(options.catalogDetailLimit ?? DEFAULT_DETAIL_LIMIT)),
     );
     this.instructionCap = Math.min(
       8_000,
@@ -266,6 +366,29 @@ export class SkillService {
     });
   }
 
+  /** 控制台分组头；enabled 已在 reload() 里合并过数据库状态，所以是真实生效值 */
+  public async listModules(): Promise<SkillModuleSummary[]> {
+    const groups = new Map<string, SkillModuleSummary>();
+    for (const definition of this.definitions) {
+      let summary = groups.get(definition.module);
+      if (!summary) {
+        summary = {
+          module: definition.module,
+          total: 0,
+          enabled: 0,
+          sources: [],
+        };
+        groups.set(definition.module, summary);
+      }
+      summary.total += 1;
+      if (definition.enabled) summary.enabled += 1;
+      if (!summary.sources.includes(definition.source)) {
+        summary.sources.push(definition.source);
+      }
+    }
+    return [...groups.values()].sort((a, b) => a.module.localeCompare(b.module));
+  }
+
   public async setEnabled(
     id: string,
     enabled: boolean,
@@ -290,35 +413,64 @@ export class SkillService {
       this.catalogLimit,
       Math.max(1, Math.trunc(input.limit ?? this.catalogLimit)),
     );
-    const target = ranked.length > limit ? Math.min(OVERFLOW_CATALOG_LIMIT, limit) : ranked.length;
-    const selected = ranked.slice(0, target);
-    const entries: SkillCatalogEntry[] = [];
-    const lines = [
+    const selected = ranked.slice(0, limit);
+
+    const header = [
       '## 可用技能',
       '当任务匹配时，先调用 use_skill 加载完整步骤；不要凭名称猜测内容。',
     ];
-    let budget = this.catalogMaxChars;
-    for (const match of selected) {
-      const entry = toCatalogEntry(match);
-      const line = clip(
-        `- ${entry.name}：${entry.description}。适用：${entry.whenToUse}`,
-        this.catalogEntryMaxChars,
-      );
-      if (budget - line.length - 1 < 0) break;
-      budget -= line.length + 1;
-      lines.push(line);
-      entries.push(entry);
+    let remaining = this.catalogMaxChars;
+    for (const line of header) remaining -= line.length + 1;
+    remaining = Math.max(0, remaining);
+    // 兜底提示几乎总要出现，先扣掉，避免它把摘要挤掉一行
+    const hintReserve = ranked.length > 0 ? CATALOG_HINT.length + 1 : 0;
+    remaining = Math.max(0, remaining - hintReserve);
+    // 明细最多占 60%；它用不完的额度全部让给模块摘要
+    const detailBudgetMax = Math.floor(remaining * (1 - MODULE_OVERVIEW_RATIO));
+
+    const named = new Set<string>();
+    const detailLines: string[] = [];
+    let detailUsed = 0;
+    const heading = '### 本次可能相关';
+    // +2 = 标题前的空行
+    if (selected.length > 0 && detailBudgetMax >= heading.length + 2) {
+      detailUsed += heading.length + 2;
+      detailLines.push('', heading);
+      for (const match of selected.slice(0, this.catalogDetailLimit)) {
+        const line = clip(
+          `- ${match.name}：${match.description}。适用：${match.whenToUse}`,
+          this.catalogEntryMaxChars,
+        );
+        if (detailUsed + line.length + 1 > detailBudgetMax) break;
+        detailUsed += line.length + 1;
+        detailLines.push(line);
+        named.add(match.id);
+      }
     }
-    const omitted = ranked.length - entries.length;
-    if (omitted > 0) {
-      const hint = `- 还有其他 ${omitted} 个技能，可调用 skill_search 查找。`;
-      if (budget >= hint.length) lines.push(hint);
-    }
+
+    // 一级：模块摘要。技能再多每个模块也只占一行，这是"加技能不降低可发现性"的关键
+    const overview = pickModuleLines(
+      groupByModule(
+        ranked,
+        new Set(selected.map((match) => match.id)),
+      ),
+      remaining - detailUsed,
+    );
+    const overviewLines = overview.rendered.map((item) => {
+      for (const match of item.shown) named.add(match.id);
+      return item.line;
+    });
+
+    const entries = selected
+      .filter((match) => named.has(match.id))
+      .map(toCatalogEntry);
+    const lines = [...header, ...overviewLines, ...detailLines];
+    if (entries.length < ranked.length && hintReserve > 0) lines.push(CATALOG_HINT);
     return {
       prompt: entries.length > 0 ? lines.join('\n') : '',
       entries,
       total: ranked.length,
-      truncated: omitted > 0,
+      truncated: !overview.complete || entries.length < ranked.length,
     };
   }
 
@@ -452,12 +604,14 @@ export class SkillService {
       now: this.now(),
     });
     const catalog = this.buildCatalog(input);
+    const injected = new Set(catalog.entries.map((entry) => entry.id));
     const entries: SkillPreviewEntry[] = ranked
       .slice(0, Math.max(20, catalog.entries.length))
       .map((match) => ({
         skill: toCatalogEntry(match),
         score: match.score,
         matched: !!(input.query ?? '').trim() && match.score > 0,
+        injected: injected.has(match.id),
       }));
     return {
       prompt: catalog.prompt,

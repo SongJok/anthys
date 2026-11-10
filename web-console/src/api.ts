@@ -65,6 +65,7 @@ import type {
   SemanticMemoryStatus,
   SkillAdminView,
   SkillDraftInput,
+  SkillModuleSummary,
   SkillPreviewResult,
   SkillResourceReadResult,
   SkillResourceInfo,
@@ -563,16 +564,26 @@ export const api = {
       method: 'DELETE',
     }),
 
-  skills: (params: { query?: string; source?: string; enabled?: boolean } = {}) => {
+  skills: (
+    params: {
+      query?: string;
+      source?: string;
+      module?: string;
+      enabled?: boolean;
+    } = {},
+  ) => {
     const search = new URLSearchParams();
     if (params.query) search.set('query', params.query);
     if (params.source) search.set('source', params.source);
+    if (params.module) search.set('module', params.module);
     if (params.enabled !== undefined) search.set('enabled', String(params.enabled));
     const suffix = search.toString();
     return request<{ skills: SkillAdminView[]; total: number }>(
       `/skills${suffix ? `?${suffix}` : ''}`,
     );
   },
+  skillModules: () =>
+    request<{ modules: SkillModuleSummary[]; total: number }>('/skills/modules'),
   skill: (id: string) =>
     request<{ skill: SkillAdminView }>(`/skills/${encodeURIComponent(id)}`),
   createSkill: (body: SkillDraftInput) =>

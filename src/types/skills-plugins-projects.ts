@@ -7,7 +7,7 @@
  * - 项目快照不可变，所有索引数据都归属某个 snapshot。
  */
 
-export type SkillSource = 'builtin' | 'local' | 'plugin';
+export type SkillSource = 'builtin' | 'market' | 'local' | 'plugin';
 export type SkillVisibility = 'public' | 'admin';
 export type SkillRisk = 'read' | 'write' | 'destructive';
 
@@ -21,6 +21,8 @@ export interface SkillFrontmatter {
   risk?: SkillRisk;
   visibility?: SkillVisibility;
   max_instruction_chars?: number;
+  /** 目录名已经是模块真相时，这里只作声明；两者冲突以目录名为准 */
+  module?: string;
 }
 
 export interface SkillResourceInfo {
@@ -30,7 +32,7 @@ export interface SkillResourceInfo {
 }
 
 export interface SkillDefinition {
-  /** builtin:name | local:name | plugin:pluginId:name */
+  /** builtin:name | market:name | local:name | plugin:pluginId:name */
   id: string;
   name: string;
   description: string;
@@ -41,6 +43,8 @@ export interface SkillDefinition {
   risk: SkillRisk;
   visibility: SkillVisibility;
   source: SkillSource;
+  /** 模块归属；不进 id，所以调整模块划分不会丢启用状态 */
+  module: string;
   pluginId?: string;
   dir: string;
   /** 已解析的 Markdown 正文 */
@@ -59,6 +63,7 @@ export interface SkillCatalogEntry {
   description: string;
   whenToUse: string;
   source: SkillSource;
+  module: string;
   score?: number;
 }
 
@@ -140,6 +145,8 @@ export interface SkillPreviewEntry {
   skill: SkillCatalogEntry;
   score: number;
   matched: boolean;
+  /** 名字是否真的出现在注入的提示词里；候选不等于已注入 */
+  injected: boolean;
 }
 
 export interface SkillPreviewResult {
@@ -153,8 +160,17 @@ export interface SkillAdminView extends SkillDefinition {
   uses: number;
 }
 
+/** 控制台分组头；计数按数据库里真实的 enabled 算，不是扫描总数 */
+export interface SkillModuleSummary {
+  module: string;
+  total: number;
+  enabled: number;
+  sources: SkillSource[];
+}
+
 export interface SkillAdminPort {
   list(): Promise<SkillAdminView[]>;
+  listModules(): Promise<SkillModuleSummary[]>;
   reload(): Promise<{ loaded: number; errors: string[] }>;
   setEnabled(id: string, enabled: boolean): Promise<SkillDefinition>;
   preview(input: SkillContextInput): Promise<SkillPreviewResult>;
@@ -996,6 +1012,8 @@ export interface ExtensionsConfig {
   projectsEnabled: boolean;
   defaultProjectId: string;
   skillCatalogLimit: number;
+  /** 注入系统提示的"## 可用技能"段总字符预算；模块摘要占 40%，明细占 60% */
+  skillCatalogMaxChars: number;
   projectBriefMaxChars: number;
 }
 
@@ -1005,14 +1023,29 @@ export const DEFAULT_EXTENSIONS_CONFIG: ExtensionsConfig = {
   projectsEnabled: true,
   defaultProjectId: '',
   skillCatalogLimit: 20,
+  skillCatalogMaxChars: 1_600,
   projectBriefMaxChars: 2_000,
 };
 
 export const SKILL_ID_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/u;
 export const PLUGIN_ID_PATTERN = /^[a-z0-9][a-z0-9_-]{1,63}$/u;
 export const PROJECT_ID_PATTERN = /^[a-z0-9][a-z0-9_-]{1,63}$/u;
+export const SKILL_MODULE_PATTERN = /^[a-z][a-z0-9-]{1,31}$/u;
+/** 与 SkillSource 同名的模块名会与 source 语义混淆，禁止使用 */
+export const RESERVED_SKILL_MODULES: readonly string[] = [
+  'builtin',
+  'market',
+  'local',
+  'plugin',
+];
+export const DEFAULT_SKILL_MODULE = 'other';
 
-const SKILL_SOURCES: readonly SkillSource[] = ['builtin', 'local', 'plugin'];
+const SKILL_SOURCES: readonly SkillSource[] = [
+  'builtin',
+  'market',
+  'local',
+  'plugin',
+];
 const SKILL_VISIBILITIES: readonly SkillVisibility[] = ['public', 'admin'];
 const SKILL_RISKS: readonly SkillRisk[] = ['read', 'write', 'destructive'];
 const PROJECT_VISIBILITIES: readonly ProjectVisibility[] = [
@@ -1038,6 +1071,14 @@ const HANDBOOK_SECTIONS: readonly HandbookSectionKey[] = [
 
 export function isSkillSource(value: unknown): value is SkillSource {
   return SKILL_SOURCES.includes(value as SkillSource);
+}
+
+export function isSkillModule(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    SKILL_MODULE_PATTERN.test(value) &&
+    !RESERVED_SKILL_MODULES.includes(value)
+  );
 }
 
 export function isSkillVisibility(value: unknown): value is SkillVisibility {
