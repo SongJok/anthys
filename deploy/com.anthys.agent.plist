@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  本机（macOS）开机/登录自启配置，与 deploy/dingtalk-agent.service（ECS 上的 systemd）等价。
+
+  安装：
+    cp deploy/com.anthys.agent.plist ~/Library/LaunchAgents/
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.anthys.agent.plist
+
+  查看 / 停止：
+    launchctl list | grep com.anthys.agent
+    launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.anthys.agent.plist
+
+  注意：
+  - LaunchAgent 在用户登录后启动；macOS 要做到「未登录也开机即跑」需要 LaunchDaemon（root 身份），
+    但 DWS 登录态、.env 与 .state 都在用户目录下，用 root 跑会失效，所以这里用 LaunchAgent。
+  - PATH 必须把 node@24 放在最前：Homebrew 默认 node 25 无法加载 isolated-vm 原生模块；
+    /opt/homebrew/bin 则是 dws CLI 的位置，漏掉会导致群旁听 spawn dws ENOENT。
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.anthys.agent</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/opt/homebrew/bin/pnpm</string>
+    <string>start</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/tuwan/work/code/aider/anthys</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/opt/node@24/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>HOME</key>
+    <string>/Users/tuwan</string>
+    <key>TZ</key>
+    <string>Asia/Shanghai</string>
+    <key>NODE_ENV</key>
+    <string>production</string>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>30</integer>
+
+  <key>StandardOutPath</key>
+  <string>/Users/tuwan/work/code/aider/anthys/tmp/anthys-start.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/tuwan/work/code/aider/anthys/tmp/anthys-start.log</string>
+</dict>
+</plist>
