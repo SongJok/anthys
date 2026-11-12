@@ -16,6 +16,7 @@ export default defineConfig({
     './src/db/clusterSchema.ts',
     './src/db/governanceSchema.ts',
     './src/db/glossarySchema.ts',
+    './src/db/glossaryCandidateSchema.ts',
     './src/db/skillSchema.ts',
     './src/db/pluginSchema.ts',
     './src/db/projectSchema.ts',

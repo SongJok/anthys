@@ -392,6 +392,37 @@ export interface GlossaryPromptPreview {
   terms: GlossaryTerm[];
 }
 
+export type GlossaryCandidateStatus = 'pending' | 'approved' | 'rejected';
+
+/** 黑话候选：技能归纳的术语草稿，需管理员通过后才入库 */
+export interface GlossaryCandidate {
+  id: string;
+  status: GlossaryCandidateStatus;
+  standardName: string;
+  aliases: string[];
+  definition: string;
+  usageScenarios: string;
+  examples: string[];
+  misconceptions: string;
+  department: string;
+  timeliness: GlossaryTimeliness;
+  sensitivity: GlossarySensitivity;
+  docLinks: string[];
+  injectToPrompt: boolean;
+  promptPriority: number;
+  sourceConversationId: string;
+  evidence: string;
+  submittedBy: string;
+  reviewedBy: string;
+  reviewedAt: number | null;
+  reviewNote: string;
+  glossaryTermId: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export type GlossaryCandidateStats = Record<GlossaryCandidateStatus, number>;
+
 /* ------------------------------------------------------------------ */
 /* 技能、插件与项目手册                                                */
 /* ------------------------------------------------------------------ */

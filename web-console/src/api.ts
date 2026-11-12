@@ -6,6 +6,9 @@ import type {
   DeletionResult,
   DingTalkConfig,
   GlossaryPromptPreview,
+  GlossaryCandidate,
+  GlossaryCandidateStats,
+  GlossaryCandidateStatus,
   GlossarySensitivity,
   GlossaryStats,
   GlossaryTerm,
@@ -563,6 +566,37 @@ export const api = {
     request<{ removed: boolean }>(`/glossary/${encodeURIComponent(id)}`, {
       method: 'DELETE',
     }),
+
+  glossaryCandidates: (params: {
+    status?: GlossaryCandidateStatus;
+    limit?: number;
+  } = {}) => {
+    const search = new URLSearchParams();
+    if (params.status) search.set('status', params.status);
+    if (params.limit !== undefined) search.set('limit', String(params.limit));
+    const suffix = search.toString();
+    return request<{ candidates: GlossaryCandidate[] }>(
+      `/glossary-candidates${suffix ? `?${suffix}` : ''}`,
+    );
+  },
+  glossaryCandidateStats: () =>
+    request<{ stats: GlossaryCandidateStats }>('/glossary-candidates/stats'),
+  approveGlossaryCandidate: (id: string, reviewNote?: string) =>
+    request<{ candidate: GlossaryCandidate; term: GlossaryTerm }>(
+      `/glossary-candidates/${encodeURIComponent(id)}/approve`,
+      {
+        method: 'POST',
+        body: JSON.stringify(reviewNote !== undefined ? { reviewNote } : {}),
+      },
+    ),
+  rejectGlossaryCandidate: (id: string, reviewNote?: string) =>
+    request<{ candidate: GlossaryCandidate }>(
+      `/glossary-candidates/${encodeURIComponent(id)}/reject`,
+      {
+        method: 'POST',
+        body: JSON.stringify(reviewNote !== undefined ? { reviewNote } : {}),
+      },
+    ),
 
   skills: (
     params: {

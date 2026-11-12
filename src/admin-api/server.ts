@@ -28,6 +28,10 @@ import type {
 import { createConfigRoutes } from './routes/configRoutes.js';
 import { createMcpRoutes } from './routes/mcpRoutes.js';
 import { createGlossaryRoutes } from './routes/glossaryRoutes.js';
+import {
+  createGlossaryCandidateRoutes,
+  type GlossaryCandidateAdminPort,
+} from './routes/glossaryCandidateRoutes.js';
 import { createSkillRoutes } from './routes/skillRoutes.js';
 import { createPluginRoutes } from './routes/pluginRoutes.js';
 import { createProjectRoutes } from './routes/projectRoutes.js';
@@ -111,6 +115,8 @@ export interface AdminApiOptions {
   governance?: DataGovernancePort;
   /** 术语知识库管理 */
   glossary?: GlossaryAdminPort;
+  /** 黑话候选审批：通过后才写入术语知识库 */
+  glossaryCandidates?: GlossaryCandidateAdminPort;
   /** 技能管理：列表、启停、预览与资源读取 */
   skills?: SkillAdminPort;
   /** 本地技能文件编辑（创建 / 更新 / 删除 / 资源写入） */
@@ -238,6 +244,15 @@ export function createAdminApp(options: AdminApiOptions): Hono {
       '/',
       createGlossaryRoutes({
         glossary: options.glossary,
+        configCenter: options.configCenter,
+      }),
+    );
+  }
+  if (options.glossaryCandidates) {
+    admin.route(
+      '/',
+      createGlossaryCandidateRoutes({
+        candidates: options.glossaryCandidates,
         configCenter: options.configCenter,
       }),
     );

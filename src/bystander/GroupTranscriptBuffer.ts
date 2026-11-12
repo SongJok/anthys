@@ -11,6 +11,8 @@ export interface GroupTranscriptBufferOptions {
   maxConversations?: number;
   /** 缓冲变化回调，用于多实例共享状态持久化 */
   onChange?: (conversationId: string) => void;
+  /** 新发言入池回调（去重后只在首次写入触发），用于持久化归档 */
+  onAppend?: (entry: TranscriptEntry) => void;
 }
 
 export interface GroupTranscriptSnapshot {
@@ -65,6 +67,7 @@ export class GroupTranscriptBuffer {
   private readonly defaultWindowSize: number;
   private readonly maxConversations: number;
   private readonly onChange?: (conversationId: string) => void;
+  private readonly onAppend?: (entry: TranscriptEntry) => void;
 
   constructor(options: GroupTranscriptBufferOptions = {}) {
     this.defaultWindowSize = Math.max(
@@ -73,6 +76,7 @@ export class GroupTranscriptBuffer {
     );
     this.maxConversations = Math.max(1, options.maxConversations ?? 500);
     this.onChange = options.onChange;
+    this.onAppend = options.onAppend;
   }
 
   public configure(conversationId: string, windowSize: number): void {
@@ -112,6 +116,7 @@ export class GroupTranscriptBuffer {
     this.entries.set(entry.conversationId, list);
     this.evictIfNeeded(entry.conversationId);
     this.onChange?.(entry.conversationId);
+    this.onAppend?.({ ...entry });
     return true;
   }
 

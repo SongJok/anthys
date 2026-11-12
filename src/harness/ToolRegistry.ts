@@ -77,6 +77,8 @@ export interface ToolRegistryOptions {
   adminProvider?: IToolProvider;
   /** 术语知识库查询工具 */
   glossaryProvider?: IToolProvider;
+  /** 公司黑话工具：群发言归档读取 + 黑话候选提交（需管理员审批入库） */
+  jargonProvider?: IToolProvider;
   /** 技能检索与加载工具 */
   skillProvider?: IToolProvider;
   /** 项目手册与代码检索工具 */
@@ -354,6 +356,9 @@ export class ToolRegistry {
     }
     if (options.glossaryProvider) {
       providers.push(options.glossaryProvider);
+    }
+    if (options.jargonProvider) {
+      providers.push(options.jargonProvider);
     }
     if (options.skillProvider) {
       providers.push(options.skillProvider);

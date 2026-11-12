@@ -116,6 +116,7 @@ describe('SkillRegistry', () => {
     expect(definitions.map((item) => item.name).sort()).toEqual([
       'attachment-analysis',
       'code-reading',
+      'company-jargon',
       'data-analysis',
       'data-insight',
       'dingtalk-office',
@@ -170,7 +171,7 @@ describe('SkillRegistry', () => {
           'project-onboarding',
           'repo-review',
         ],
-        general: ['everyday-chat', 'link-reader'],
+        general: ['company-jargon', 'everyday-chat', 'link-reader'],
         meta: ['handbook-maintainer', 'plugin-author', 'skill-author'],
         office: [
           'dingtalk-office',

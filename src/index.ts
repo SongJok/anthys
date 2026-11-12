@@ -114,6 +114,7 @@ import { createGithubAdminPort } from './github/GithubAdminPort.js';
 import { GithubToolProvider } from './tools/github/GithubToolProvider.js';
 import type { SkillScanRoot } from './skills/SkillRegistry.js';
 import { GroupTranscriptBuffer } from './bystander/GroupTranscriptBuffer.js';
+import { GroupTranscriptArchive } from './bystander/GroupTranscriptArchive.js';
 import { CooldownLimiter } from './bystander/CooldownLimiter.js';
 import { DwsGroupMessageListener } from './bystander/DwsGroupMessageListener.js';
 import { BystanderPolicyProvider } from './bystander/BystanderPolicyProvider.js';
@@ -166,6 +167,9 @@ import { DwsGroupDirectorySource } from './groups/DwsGroupDirectorySource.js';
 import { DrizzleGlossaryStore } from './db/glossarySchema.js';
 import { GlossaryService } from './glossary/GlossaryService.js';
 import { GlossaryToolProvider } from './tools/glossary/GlossaryToolProvider.js';
+import { JargonToolProvider } from './tools/glossary/JargonToolProvider.js';
+import { DrizzleGlossaryCandidateStore } from './db/glossaryCandidateSchema.js';
+import { GlossaryCandidateService } from './glossary/GlossaryCandidateService.js';
 import { WebSearchClient } from './tools/web/WebSearchClient.js';
 import { WebSearchToolProvider } from './tools/web/WebSearchToolProvider.js';
 import { WebFetchClient } from './tools/web/WebFetchClient.js';
@@ -1016,6 +1020,11 @@ async function main(): Promise<void> {
         ...(request.risk ? { risk: request.risk } : {}),
         ...(request.source ? { source: request.source } : {}),
       });
+      // 黑话候选只进待审批队列，真正的入库闸门是管理员后台审批，
+      // 因此不走聊天 /confirm，避免批量归纳时第一条写操作就中断本轮
+      if (request.toolName === 'glossary_candidate_submit') {
+        return { approved: true };
+      }
       if (
         !context.proactive &&
         risk === 'write' &&
@@ -1133,6 +1142,28 @@ async function main(): Promise<void> {
       promptLimit: envCount(process.env.GLOSSARY_PROMPT_LIMIT, 80),
       retrievalLimit: envCount(process.env.GLOSSARY_RETRIEVAL_LIMIT, 4),
     });
+
+    const glossaryCandidates = new GlossaryCandidateService({
+      store: new DrizzleGlossaryCandidateStore(dbHandle.db),
+      glossary,
+    });
+
+    const groupTranscriptArchive = new GroupTranscriptArchive({
+      dir: process.env.GROUP_TRANSCRIPT_DIR?.trim()
+        ? resolve(process.env.GROUP_TRANSCRIPT_DIR.trim())
+        : resolve(stateRoot, 'group-transcripts'),
+      logger: harnessLogger,
+    });
+    const transcriptArchiveEnabled = envEnabled(
+      process.env.GROUP_TRANSCRIPT_ARCHIVE_ENABLED,
+      true,
+    );
+    if (transcriptArchiveEnabled) {
+      logger.info(
+        { dir: groupTranscriptArchive.root },
+        'group transcript archive enabled',
+      );
+    }
 
     const webSearchConfig = configCenter.getWebSearchConfig?.();
     const webSearchProvider =
@@ -1288,6 +1319,13 @@ async function main(): Promise<void> {
       adminProvider,
       glossaryProvider: new GlossaryToolProvider({
         service: glossary,
+        logger: harnessLogger,
+      }),
+      jargonProvider: new JargonToolProvider({
+        archive: groupTranscriptArchive,
+        candidates: glossaryCandidates,
+        isAdmin: (staffId) => configCenter.isAdmin(staffId),
+        enabled: () => transcriptArchiveEnabled,
         logger: harnessLogger,
       }),
       skillProvider: new SkillToolProvider({
@@ -1685,6 +1723,21 @@ async function main(): Promise<void> {
     const transcriptBuffer = new GroupTranscriptBuffer({
       defaultWindowSize: bystanderConfig.slidingWindowSize,
       ...(sharedState ? { onChange: scheduleSharedPersist } : {}),
+      ...(transcriptArchiveEnabled
+        ? {
+            onAppend: (entry) => {
+              void groupTranscriptArchive.append(entry).catch((error) => {
+                harnessLogger.warn(
+                  {
+                    conversationId: entry.conversationId,
+                    error: errorText(error),
+                  },
+                  'failed to archive group transcript',
+                );
+              });
+            },
+          }
+        : {}),
     });
     if (sharedState) {
       clusterSync = new ClusterStateSync({
@@ -4265,6 +4318,7 @@ async function main(): Promise<void> {
       groups: groupDirectory,
       listeningGroups: () => bystanderListener?.allowedConversations ?? [],
       glossary,
+      glossaryCandidates,
       skills: skillAdminPort,
       skillFiles: skillFilePort,
       plugins: pluginAdminPort,

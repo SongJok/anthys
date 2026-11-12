@@ -24,6 +24,9 @@ import { PlusOutlined, ReloadOutlined, SafetyOutlined } from '@ant-design/icons'
 import { api } from '../api';
 import { formatShanghaiDateTime } from '../time';
 import type {
+  GlossaryCandidate,
+  GlossaryCandidateStats,
+  GlossaryCandidateStatus,
   GlossarySensitivity,
   GlossaryStats,
   GlossaryTerm,
@@ -66,6 +69,27 @@ const SENSITIVITY_COLOR: Record<GlossarySensitivity, string> = {
   team: 'gold',
   sensitive: 'red',
 };
+
+const CANDIDATE_STATUS_LABEL: Record<GlossaryCandidateStatus, string> = {
+  pending: '待审批',
+  approved: '已通过',
+  rejected: '已驳回',
+};
+
+const CANDIDATE_STATUS_COLOR: Record<GlossaryCandidateStatus, string> = {
+  pending: 'gold',
+  approved: 'green',
+  rejected: 'default',
+};
+
+const CANDIDATE_STATUS_OPTIONS: Array<{
+  value: GlossaryCandidateStatus;
+  label: string;
+}> = [
+  { value: 'pending', label: '待审批' },
+  { value: 'approved', label: '已通过' },
+  { value: 'rejected', label: '已驳回' },
+];
 
 interface TermForm {
   standardName: string;
@@ -121,6 +145,34 @@ function formatCard(term: GlossaryTerm): string {
   ].join('\n');
 }
 
+/** 候选展开详情：术语模板 + 来源证据 + 审批信息 */
+function formatCandidateCard(candidate: GlossaryCandidate): string {
+  return [
+    `【标准名称】${candidate.standardName}`,
+    `【常见别名/缩写】${candidate.aliases.join('、') || '无'}`,
+    `【定义】${candidate.definition || '无'}`,
+    `【使用场景】${candidate.usageScenarios || '无'}`,
+    `【示例句子】${
+      candidate.examples.length > 0
+        ? candidate.examples.map((item, index) => `${index + 1}. ${item}`).join('；')
+        : '无'
+    }`,
+    `【不要误解为】${candidate.misconceptions || '无'}`,
+    `【所属部门/项目】${candidate.department || '未标注'}`,
+    `【时效性】${TIMELINESS_LABEL[candidate.timeliness]}`,
+    `【敏感级别】${SENSITIVITY_LABEL[candidate.sensitivity]}`,
+    `【来源群】${candidate.sourceConversationId || '跨群综合'}`,
+    `【支撑证据】${candidate.evidence || '无'}`,
+    `【提交者】${candidate.submittedBy}`,
+    `【提交时间】${formatTime(candidate.createdAt)}`,
+    candidate.status === 'pending'
+      ? '【审批状态】待审批（通过后才会进入术语知识库）'
+      : `【审批状态】${CANDIDATE_STATUS_LABEL[candidate.status]} · ${candidate.reviewedBy}${
+          candidate.reviewedAt ? ` · ${formatTime(candidate.reviewedAt)}` : ''
+        }${candidate.reviewNote ? ` · 备注：${candidate.reviewNote}` : ''}`,
+  ].join('\n');
+}
+
 export default function GlossaryPage() {
   const [terms, setTerms] = useState<GlossaryTerm[]>([]);
   const [total, setTotal] = useState(0);
@@ -137,6 +189,20 @@ export default function GlossaryPage() {
     null,
   );
   const [validating, setValidating] = useState(false);
+
+  const [candidates, setCandidates] = useState<GlossaryCandidate[]>([]);
+  const [candidateStats, setCandidateStats] =
+    useState<GlossaryCandidateStats | null>(null);
+  const [candidateStatus, setCandidateStatus] =
+    useState<GlossaryCandidateStatus>('pending');
+  const [candidateLoading, setCandidateLoading] = useState(false);
+  const [review, setReview] = useState<{
+    open: boolean;
+    action: 'approve' | 'reject';
+    candidate?: GlossaryCandidate;
+  }>({ open: false, action: 'approve' });
+  const [reviewForm] = Form.useForm<{ reviewNote: string }>();
+  const [reviewing, setReviewing] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -165,6 +231,56 @@ export default function GlossaryPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  const loadCandidates = useCallback(async () => {
+    setCandidateLoading(true);
+    try {
+      const [list, statsResult] = await Promise.all([
+        api.glossaryCandidates({ status: candidateStatus, limit: 200 }),
+        api.glossaryCandidateStats(),
+      ]);
+      setCandidates(list.candidates);
+      setCandidateStats(statsResult.stats);
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setCandidateLoading(false);
+    }
+  }, [candidateStatus]);
+
+  useEffect(() => {
+    void loadCandidates();
+  }, [loadCandidates]);
+
+  const openReview = (action: 'approve' | 'reject', candidate: GlossaryCandidate) => {
+    setReview({ open: true, action, candidate });
+    reviewForm.setFieldsValue({ reviewNote: '' });
+  };
+
+  const submitReview = async (values: { reviewNote: string }) => {
+    const target = review.candidate;
+    if (!target) return;
+    const note = values.reviewNote?.trim() ?? '';
+    setReviewing(true);
+    try {
+      if (review.action === 'approve') {
+        const result = await api.approveGlossaryCandidate(
+          target.id,
+          ...(note ? [note] : []),
+        );
+        message.success(`「${result.candidate.standardName}」已通过并进入术语知识库`);
+      } else {
+        await api.rejectGlossaryCandidate(target.id, ...(note ? [note] : []));
+        message.success(`已驳回「${target.standardName}」，不会入库`);
+      }
+      setReview({ open: false, action: review.action });
+      await Promise.all([loadCandidates(), load()]);
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setReviewing(false);
+    }
+  };
 
   const openCreate = () => {
     setModal({ open: true });
@@ -511,6 +627,198 @@ export default function GlossaryPage() {
           ]}
         />
       </Card>
+
+      <Card
+        title="黑话候选审批"
+        className="console-card"
+        extra={
+          <Space>
+            <Tag color="gold">待审批 {candidateStats?.pending ?? 0}</Tag>
+            <Tag color="green">已通过 {candidateStats?.approved ?? 0}</Tag>
+            <Tag>已驳回 {candidateStats?.rejected ?? 0}</Tag>
+            <Button
+              icon={<ReloadOutlined />}
+              onClick={() => void loadCandidates()}
+              loading={candidateLoading}
+            >
+              刷新
+            </Button>
+          </Space>
+        }
+      >
+        <Alert
+          type="warning"
+          showIcon
+          style={{ marginBottom: 16 }}
+          message="候选由机器人从群发言归档归纳生成，尚未进入术语知识库。只有点击「通过」后才会正式入库并参与检索与提示注入；「驳回」则不入库。请核对定义与群内证据后再决定。"
+        />
+
+        <Space wrap style={{ marginBottom: 16 }}>
+          <Select
+            style={{ width: 150 }}
+            value={candidateStatus}
+            options={CANDIDATE_STATUS_OPTIONS}
+            onChange={(value) => setCandidateStatus(value)}
+          />
+          <Typography.Text type="secondary">
+            共 {candidates.length} 条
+          </Typography.Text>
+        </Space>
+
+        <Table<GlossaryCandidate>
+          rowKey="id"
+          size="small"
+          loading={candidateLoading}
+          dataSource={candidates}
+          pagination={{ pageSize: 10, showSizeChanger: false }}
+          expandable={{
+            expandedRowRender: (candidate) => (
+              <pre
+                style={{
+                  background: '#fffbe6',
+                  padding: 12,
+                  margin: 0,
+                  whiteSpace: 'pre-wrap',
+                  fontSize: 12,
+                }}
+              >
+                {formatCandidateCard(candidate)}
+              </pre>
+            ),
+          }}
+          columns={[
+            {
+              title: '标准名称 / 别名',
+              key: 'name',
+              width: 200,
+              render: (_, row) => (
+                <Space direction="vertical" size={0}>
+                  <Typography.Text strong>{row.standardName}</Typography.Text>
+                  {row.aliases.length > 0 && (
+                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                      {row.aliases.join('、')}
+                    </Typography.Text>
+                  )}
+                </Space>
+              ),
+            },
+            {
+              title: '定义',
+              dataIndex: 'definition',
+              ellipsis: true,
+            },
+            {
+              title: '来源 / 提交者',
+              key: 'source',
+              width: 180,
+              render: (_, row) => (
+                <Space direction="vertical" size={0}>
+                  <Typography.Text style={{ fontSize: 12 }}>
+                    {row.sourceConversationId || '跨群综合'}
+                  </Typography.Text>
+                  <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                    {row.submittedBy}
+                  </Typography.Text>
+                </Space>
+              ),
+            },
+            {
+              title: '状态',
+              dataIndex: 'status',
+              width: 90,
+              render: (value: GlossaryCandidateStatus) => (
+                <Tag color={CANDIDATE_STATUS_COLOR[value]}>
+                  {CANDIDATE_STATUS_LABEL[value]}
+                </Tag>
+              ),
+            },
+            {
+              title: '提交时间',
+              dataIndex: 'createdAt',
+              width: 170,
+              render: (value: number) => formatTime(value),
+            },
+            {
+              title: '操作',
+              key: 'actions',
+              width: 150,
+              render: (_, row) =>
+                row.status === 'pending' ? (
+                  <Space size={4}>
+                    <Button
+                      size="small"
+                      type="primary"
+                      onClick={() => openReview('approve', row)}
+                    >
+                      通过
+                    </Button>
+                    <Button
+                      size="small"
+                      danger
+                      onClick={() => openReview('reject', row)}
+                    >
+                      驳回
+                    </Button>
+                  </Space>
+                ) : (
+                  <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                    {row.reviewedBy || '—'}
+                  </Typography.Text>
+                ),
+            },
+          ]}
+        />
+      </Card>
+
+      <Modal
+        title={
+          review.action === 'approve'
+            ? `通过候选：${review.candidate?.standardName ?? ''}`
+            : `驳回候选：${review.candidate?.standardName ?? ''}`
+        }
+        open={review.open}
+        onCancel={() => setReview({ open: false, action: review.action })}
+        onOk={() => void reviewForm.submit()}
+        okText={review.action === 'approve' ? '确认通过并入库' : '确认驳回'}
+        okButtonProps={{
+          danger: review.action === 'reject',
+          loading: reviewing,
+        }}
+        width={640}
+      >
+        <Alert
+          type={review.action === 'approve' ? 'info' : 'warning'}
+          showIcon
+          style={{ marginBottom: 16 }}
+          message={
+            review.action === 'approve'
+              ? '通过后该候选会立即写入术语知识库，参与检索与系统提示注入。'
+              : '驳回后该候选不会进入术语知识库，机器人仍可能再次提交同名候选。'
+          }
+        />
+        {review.candidate && (
+          <Descriptions size="small" column={1} style={{ marginBottom: 16 }}>
+            <Descriptions.Item label="定义">
+              {review.candidate.definition}
+            </Descriptions.Item>
+            <Descriptions.Item label="证据">
+              {review.candidate.evidence || '无'}
+            </Descriptions.Item>
+          </Descriptions>
+        )}
+        <Form form={reviewForm} layout="vertical" onFinish={submitReview}>
+          <Form.Item label="审批备注（可选）" name="reviewNote">
+            <Input.TextArea
+              rows={2}
+              placeholder={
+                review.action === 'approve'
+                  ? '例如：定义准确，证据充分'
+                  : '例如：一次性梗，含义不稳定'
+              }
+            />
+          </Form.Item>
+        </Form>
+      </Modal>
 
       <Modal
         title={modal.editing ? `编辑术语：${modal.editing.standardName}` : '新增术语'}
