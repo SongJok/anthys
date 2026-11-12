@@ -1,5 +1,6 @@
 import type { InboundMessage } from '../types/core.js';
 import { WORKER_NAMES, isWorkerName } from '../types/workers.js';
+import { detectStopIntent } from './StopIntent.js';
 
 export interface CommandRuntime {
   isAdmin(staffId: string): boolean;
@@ -79,7 +80,7 @@ const HELP_TEXT = [
   '可用指令：',
   '- `/help` 查看帮助',
   '- `/status` 查看机器人与模型状态',
-  '- `/stop` 停止当前回答并清空排队中的问题',
+  '- `/stop` 停止当前回答并清空排队中的问题（也可直接说「停止 / 暂停 / 关闭」）',
   '- `/retry` 重试上一条问题',
   '- `/reset` 清空本会话上下文',
   '- `/trace` 查看最近一次执行轨迹摘要',
@@ -180,7 +181,13 @@ export class CommandRouter {
   constructor(private readonly runtime: CommandRuntime) {}
 
   public async tryHandle(message: InboundMessage): Promise<boolean> {
-    const command = parseCommand(message.text);
+    // 自然语言「停止/暂停/关闭」与 /stop 等价：立即中止当前回答并清空排队，
+    // 不再把停止指令本身排到进行中的任务后面。parseCommand 优先，保留「取消」等既有别名语义。
+    const command =
+      parseCommand(message.text) ??
+      (detectStopIntent(message.text)
+        ? { name: 'stop', args: [], raw: message.text.trim() }
+        : null);
     if (!command) return false;
     const { runtime } = this;
 

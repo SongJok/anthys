@@ -198,6 +198,30 @@ describe('CommandRouter', () => {
     expect(queued.replies[0]).toContain('2 条排队');
   });
 
+  it('自然语言「停止/暂停/关闭」立即中止当前回答，不排队', async () => {
+    for (const text of ['停止', '暂停一下', '关闭当前任务', '别跑了', '停止当前任务']) {
+      const { router, replies, calls } = runtime();
+      const handled = await router.tryHandle(message({ text }));
+      expect(handled, `应拦截: ${text}`).toBe(true);
+      expect(calls.stop, `应调用 stopRun: ${text}`).toEqual(['cid-1']);
+      expect(replies[0]).toContain('已停止');
+    }
+  });
+
+  it('「取消」仍走待确认操作取消，普通问题不被拦截', async () => {
+    const cancel = runtime();
+    await cancel.router.tryHandle(message({ text: '取消' }));
+    expect(cancel.calls.stop).toEqual([]);
+    expect(cancel.replies[0]).toContain('已取消待确认的操作');
+
+    const question = runtime();
+    const handled = await question.router.tryHandle(
+      message({ text: '如何停止一个进程' }),
+    );
+    expect(handled).toBe(false);
+    expect(question.calls.stop).toEqual([]);
+  });
+
   it('/reset 与 /retry 调用运行时', async () => {
     const { router, replies, calls } = runtime();
     await router.tryHandle(message({ text: '/reset' }));
