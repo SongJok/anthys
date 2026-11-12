@@ -530,6 +530,36 @@ describe('CardStreamer', () => {
     ).toContain('current_time');
   });
 
+  it('v2 引用区块同样受参考来源上限约束', async () => {
+    const fake = fakeApi();
+    const streamer = new CardStreamer({
+      api: fake.api,
+      message: inbound(),
+      cardTemplateId: 'tpl-2',
+      robotCode: 'robot-1',
+      layout: 'v2',
+    });
+    await streamer.start();
+
+    streamer.handle({
+      type: 'citation',
+      citations: Array.from({ length: 7 }, (_, i) => ({
+        index: i + 1,
+        title: `来源${i + 1}`,
+        url: `https://example.com/${i + 1}`,
+      })),
+    });
+    await vi.advanceTimersByTimeAsync(250);
+    await settle();
+
+    const section = fake.updates.find(
+      (update) => update.key === 'citations_section',
+    )?.content ?? '';
+    expect(section).toContain('5. [来源5](https://example.com/5)');
+    expect(section).not.toContain('来源6');
+    expect(section).not.toContain('来源7');
+  });
+
   describe('ai 布局（单 content 流式字段）', () => {
     it('只初始化 content 字段作为思考占位', async () => {
       const fake = fakeApi();
@@ -660,6 +690,99 @@ describe('CardStreamer', () => {
       expect(content.indexOf('按手册执行')).toBeLessThan(
         content.indexOf('参考来源：'),
       );
+    });
+
+    it('参考来源默认最多展示 5 个', async () => {
+      const fake = fakeApi();
+      const streamer = new CardStreamer({
+        api: fake.api,
+        message: inbound(),
+        cardTemplateId: 'tpl-ai',
+        robotCode: 'robot-1',
+        layout: 'ai',
+      });
+      await streamer.start();
+
+      streamer.handle({
+        type: 'citation',
+        citations: Array.from({ length: 7 }, (_, i) => ({
+          index: i + 1,
+          title: `来源${i + 1}`,
+          url: `https://example.com/${i + 1}`,
+        })),
+      });
+      streamer.handle({ type: 'answer_delta', content: '答案' });
+      await vi.advanceTimersByTimeAsync(250);
+      await settle();
+
+      const content = fake.updates.at(-1)?.content ?? '';
+      expect(content).toContain('参考来源：');
+      expect(content).toContain('5. [来源5](https://example.com/5)');
+      expect(content).not.toContain('来源6');
+      expect(content).not.toContain('来源7');
+    });
+
+    it('深度研究委派后参考来源最多展示 8 个', async () => {
+      const fake = fakeApi();
+      const streamer = new CardStreamer({
+        api: fake.api,
+        message: inbound(),
+        cardTemplateId: 'tpl-ai',
+        robotCode: 'robot-1',
+        layout: 'ai',
+      });
+      await streamer.start();
+
+      streamer.handle({
+        type: 'tool_start',
+        toolName: 'delegate_research',
+        args: { task: '调研竞品' },
+      });
+      streamer.handle({
+        type: 'citation',
+        citations: Array.from({ length: 10 }, (_, i) => ({
+          index: i + 1,
+          title: `来源${i + 1}`,
+          url: `https://example.com/${i + 1}`,
+        })),
+      });
+      streamer.handle({ type: 'answer_delta', content: '答案' });
+      await vi.advanceTimersByTimeAsync(250);
+      await settle();
+
+      const content = fake.updates.at(-1)?.content ?? '';
+      expect(content).toContain('8. [来源8](https://example.com/8)');
+      expect(content).not.toContain('来源9');
+      expect(content).not.toContain('来源10');
+    });
+
+    it('maxCitations 选项可调整参考来源上限', async () => {
+      const fake = fakeApi();
+      const streamer = new CardStreamer({
+        api: fake.api,
+        message: inbound(),
+        cardTemplateId: 'tpl-ai',
+        robotCode: 'robot-1',
+        layout: 'ai',
+        maxCitations: 2,
+      });
+      await streamer.start();
+
+      streamer.handle({
+        type: 'citation',
+        citations: Array.from({ length: 4 }, (_, i) => ({
+          index: i + 1,
+          title: `来源${i + 1}`,
+          url: `https://example.com/${i + 1}`,
+        })),
+      });
+      streamer.handle({ type: 'answer_delta', content: '答案' });
+      await vi.advanceTimersByTimeAsync(250);
+      await settle();
+
+      const content = fake.updates.at(-1)?.content ?? '';
+      expect(content).toContain('2. [来源2](https://example.com/2)');
+      expect(content).not.toContain('来源3');
     });
 
     it('正文写入 content 并带上群聊提及前缀', async () => {

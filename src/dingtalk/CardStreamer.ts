@@ -146,7 +146,16 @@ export interface CardStreamerOptions {
   /** 限流：默认每秒 4 次、突发 8 次 */
   rateLimitPerSecond?: number;
   rateLimitBurst?: number;
+  /** 参考来源默认展示上限，默认 5；深度研究（delegate_research）会自动放宽到 8 */
+  maxCitations?: number;
 }
+
+/** 普通问答参考来源展示上限 */
+const DEFAULT_CITATION_CAP = 5;
+/** 深度研究任务参考来源展示上限 */
+const DEEP_RESEARCH_CITATION_CAP = 8;
+/** 触发深度研究上限的工具名（A5 子代理委派） */
+const DEEP_RESEARCH_TOOL = 'delegate_research';
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -281,6 +290,7 @@ export class CardStreamer {
   private readonly toolLines: string[] = [];
   private planItems: PlanItem[] = [];
   private citations: StreamCitation[] = [];
+  private citationCap: number;
   private readonly activeTools = new Map<string, number>();
   private dirtyThinking = false;
   private dirtyAnswer = false;
@@ -306,6 +316,7 @@ export class CardStreamer {
     this.createRetries = options.createRetries ?? 0;
     this.mention = options.mention ?? '';
     this.atAll = options.atAll ?? false;
+    this.citationCap = Math.max(1, options.maxCitations ?? DEFAULT_CITATION_CAP);
     this.limiter = new TokenBucket(
       options.rateLimitPerSecond ?? 4,
       options.rateLimitBurst ?? 8,
@@ -447,6 +458,10 @@ export class CardStreamer {
         const line = `- 调用工具 \`${event.toolName}\`，参数 \`${safeJson(event.args)}\``;
         this.toolLines.push(line);
         this.activeTools.set(event.toolName, (this.activeTools.get(event.toolName) ?? 0) + 1);
+        // 深度研究委派放宽参考来源上限（普通问答 5 个，深度研究 8 个）
+        if (event.toolName === DEEP_RESEARCH_TOOL) {
+          this.citationCap = Math.max(this.citationCap, DEEP_RESEARCH_CITATION_CAP);
+        }
         this.status = `正在调用工具 ${event.toolName}`;
         this.dirtyThinking = this.layout !== 'v2';
         this.dirtyTools = this.layout === 'v2';
@@ -626,12 +641,14 @@ export class CardStreamer {
 
   private citationsText(): string {
     if (this.citations.length === 0) return '';
+    // 只展示上限内的来源并重新编号 1..N；完整来源仍保留在 trace 中供审计
     return this.citations
-      .map((citation) => {
+      .slice(0, this.citationCap)
+      .map((citation, index) => {
         const title = citation.url
           ? `[${citation.title}](${citation.url})`
           : citation.title;
-        return `${citation.index}. ${title}${citation.source ? ` · ${citation.source}` : ''}`;
+        return `${index + 1}. ${title}${citation.source ? ` · ${citation.source}` : ''}`;
       })
       .join('\n');
   }
