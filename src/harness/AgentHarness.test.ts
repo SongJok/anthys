@@ -177,6 +177,27 @@ describe('AgentHarness', () => {
     expect(rows).toHaveLength(0);
   });
 
+  it('群聊定时任务未 @ 机器人时仍执行引擎并写库（proactive 系统发起）', async () => {
+    const calls: { messages: unknown[] }[] = [];
+    const { harness, rows } = createHarness(scriptedEngine(calls));
+    const events: AgentStreamEvent[] = [];
+    const result = await harness.handleMessage(
+      inbound({
+        conversationType: '2',
+        isAtBot: false,
+        senderStaffId: 'scheduler',
+        senderNick: '定时任务',
+        text: '播报今天的群摘要',
+      }),
+      { emit: (event) => events.push(event), proactive: true },
+    );
+
+    expect(result?.answer).toBe('现在是十点。');
+    expect(calls).toHaveLength(1);
+    expect(rows).toHaveLength(2);
+    expect(events.some((event) => event.type === 'answer_delta')).toBe(true);
+  });
+
   it('单聊完整执行并持久化用户与助手消息', async () => {
     const calls: { messages: unknown[] }[] = [];
     const { harness, rows, conversations } = createHarness(

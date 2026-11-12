@@ -216,7 +216,12 @@ export class AgentHarness {
     if (message.conversationType === '2') {
       this.options.bystander?.buffer.append(toTranscriptEntry(message));
     }
-    if (message.conversationType === '2' && !message.isAtBot) {
+    // 非 @ 群消息走旁听漏斗；系统发起的主动播报（定时任务）不是成员消息，直接放行
+    if (
+      message.conversationType === '2' &&
+      !message.isAtBot &&
+      !handle.proactive
+    ) {
       return null;
     }
     const text = message.text.trim();
