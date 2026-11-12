@@ -68,7 +68,7 @@ function fakeCandidates() {
         department: input.department ?? '',
         timeliness: input.timeliness ?? 'long_term',
         sensitivity: input.sensitivity ?? 'team',
-        docLinks: [],
+        docLinks: input.docLinks ?? [],
         injectToPrompt: true,
         promptPriority: 0,
         sourceConversationId: input.sourceConversationId ?? '',
@@ -183,6 +183,41 @@ describe('JargonToolProvider', () => {
     expect(submitted[0]?.submittedBy).toBe('staff-1');
     expect(text).toContain('待审批');
     expect(text).toContain('管理员');
+  });
+
+  it('提交候选透传完整黑话格式字段（含关联文档链接）', async () => {
+    const { archive } = fakeArchive();
+    const { port, submitted } = fakeCandidates();
+    const provider = new JargonToolProvider({ archive, candidates: port });
+    const submit = await tool(provider, 'glossary_candidate_submit');
+    await submit.execute(
+      {
+        standardName: '拉齐',
+        aliases: ['对齐'],
+        definition: '把相关人的认知同步到同一水平',
+        usageScenarios: '开会前后',
+        examples: ['这个方案先拉齐一下'],
+        misconceptions: '不是简单通知',
+        department: '交易中台',
+        timeliness: 'long_term',
+        sensitivity: 'team',
+        docLinks: ['https://example.com/doc'],
+        evidence: '群内多次出现',
+      },
+      ctx(),
+    );
+    expect(submitted[0]).toMatchObject({
+      standardName: '拉齐',
+      aliases: ['对齐'],
+      definition: '把相关人的认知同步到同一水平',
+      usageScenarios: '开会前后',
+      examples: ['这个方案先拉齐一下'],
+      misconceptions: '不是简单通知',
+      department: '交易中台',
+      timeliness: 'long_term',
+      sensitivity: 'team',
+      docLinks: ['https://example.com/doc'],
+    });
   });
 
   it('提交缺少必填字段时拒绝', async () => {

@@ -208,6 +208,11 @@ export class JargonToolProvider implements IToolProvider {
             enum: ['public', 'team', 'sensitive'],
             description: '敏感级别，默认 team',
           },
+          docLinks: {
+            type: 'array',
+            items: { type: 'string' },
+            description: '关联文档链接（如有）',
+          },
           evidence: {
             type: 'string',
             description: '支撑证据：群内原话摘录与归纳理由',
@@ -261,6 +266,9 @@ export class JargonToolProvider implements IToolProvider {
           ...(timelinessRaw !== undefined ? { timeliness: timelinessRaw } : {}),
           ...(sensitivityRaw !== undefined
             ? { sensitivity: sensitivityRaw }
+            : {}),
+          ...(readStringArray(args.docLinks)
+            ? { docLinks: readStringArray(args.docLinks) }
             : {}),
           ...(readString(args.evidence)
             ? { evidence: readString(args.evidence) }

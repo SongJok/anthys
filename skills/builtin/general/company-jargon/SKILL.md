@@ -33,6 +33,33 @@ max_instruction_chars: 4000
 - 管理员可传 `conversationId` 读取其他群，或传 `listGroups: true` 列出所有已归档的群。
 - 非管理员只能读取当前群；归档为空时如实说明“机器人需在群内且开启归档后才会收集”，不要凭空编造黑话。
 
+## 生成格式
+
+每条黑话必须按以下固定格式整理，字段与术语知识库卡片完全一致；管理员在后台「通过」后即按此格式直接入库：
+
+```
+标准名称：
+常见别名/缩写：
+定义：
+使用场景：
+示例句子：
+不要误解为：
+所属部门/项目：
+时效性：长期/项目期/已废弃
+敏感级别：公开/团队内/敏感
+关联文档链接：
+最后更新时间：
+```
+
+调用 `glossary_candidate_submit` 时按此映射填参：
+
+- 标准名称 → `standardName`（必填）；定义 → `definition`（必填）；常见别名/缩写 → `aliases`。
+- 使用场景 → `usageScenarios`；示例句子 → `examples`（群内真实原话）；不要误解为 → `misconceptions`。
+- 所属部门/项目 → `department`；关联文档链接 → `docLinks`。
+- 时效性 → `timeliness`：长期=`long_term`、项目期=`project`、已废弃=`retired`（默认长期）。
+- 敏感级别 → `sensitivity`：公开=`public`、团队内=`team`、敏感=`sensitive`（默认团队内）。
+- 最后更新时间由系统入库时自动生成，无需填写；另附 `evidence`（群内原话摘录 + 归纳理由）供管理员审核。
+
 ## 步骤
 
 1. 明确范围：默认当前群；管理员指定了其他群就按指定群读取。
@@ -43,7 +70,7 @@ max_instruction_chars: 4000
    - 含义与字面不同或团队内有特定指代（如系统代号、流程简称、内部梗）；
    - 含义相对稳定，能从原话中推断出明确定义。
    排除：一次性玩笑、临时梗、个人隐私、薪酬绩效等敏感话题、无法从证据推断含义的词。
-5. 为每个候选整理字段：`standardName`（标准名）、`definition`（准确定义）、`aliases`（别名/缩写）、`usageScenarios`（典型场景）、`examples`（群内真实原话）、`misconceptions`（易误解点）、`department`（所属部门/项目）、`timeliness`（long_term / project / retired）、`sensitivity`（public / team / sensitive）、`evidence`（原话摘录 + 归纳理由）。定义与例句必须来自真实发言，不得虚构。
+5. 按「生成格式」的固定模板逐条整理候选，填全各字段；定义与例句必须来自真实发言，不得虚构，并附 `evidence`（原话摘录 + 归纳理由）。
 6. 逐个调用 `glossary_candidate_submit` 提交候选；一次任务可以提交多个，无需等待用户逐条确认。
 7. 汇报结果：列出已提交的候选名称与编号，明确说明“状态：待审批，尚未进入术语知识库，需管理员在控制台「术语知识库 → 黑话候选审批」点击通过后才会正式入库”。
 

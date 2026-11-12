@@ -145,32 +145,36 @@ function formatCard(term: GlossaryTerm): string {
   ].join('\n');
 }
 
-/** 候选展开详情：术语模板 + 来源证据 + 审批信息 */
+/** 候选展开详情：术语字段与生成/入库固定格式一致，另附来源与审批信息供审核 */
 function formatCandidateCard(candidate: GlossaryCandidate): string {
-  return [
-    `【标准名称】${candidate.standardName}`,
-    `【常见别名/缩写】${candidate.aliases.join('、') || '无'}`,
-    `【定义】${candidate.definition || '无'}`,
-    `【使用场景】${candidate.usageScenarios || '无'}`,
-    `【示例句子】${
+  const termCard = [
+    `标准名称：${candidate.standardName}`,
+    `常见别名/缩写：${candidate.aliases.join('、') || '无'}`,
+    `定义：${candidate.definition || '无'}`,
+    `使用场景：${candidate.usageScenarios || '无'}`,
+    `示例句子：${
       candidate.examples.length > 0
         ? candidate.examples.map((item, index) => `${index + 1}. ${item}`).join('；')
         : '无'
     }`,
-    `【不要误解为】${candidate.misconceptions || '无'}`,
-    `【所属部门/项目】${candidate.department || '未标注'}`,
-    `【时效性】${TIMELINESS_LABEL[candidate.timeliness]}`,
-    `【敏感级别】${SENSITIVITY_LABEL[candidate.sensitivity]}`,
-    `【来源群】${candidate.sourceConversationId || '跨群综合'}`,
-    `【支撑证据】${candidate.evidence || '无'}`,
-    `【提交者】${candidate.submittedBy}`,
-    `【提交时间】${formatTime(candidate.createdAt)}`,
+    `不要误解为：${candidate.misconceptions || '无'}`,
+    `所属部门/项目：${candidate.department || '未标注'}`,
+    `时效性：${TIMELINESS_LABEL[candidate.timeliness]}`,
+    `敏感级别：${SENSITIVITY_LABEL[candidate.sensitivity]}`,
+    `关联文档链接：${candidate.docLinks.join(' ') || '无'}`,
+    `最后更新时间：${formatTime(candidate.updatedAt)}`,
+  ].join('\n');
+  const reviewInfo = [
+    `来源群：${candidate.sourceConversationId || '跨群综合'}`,
+    `支撑证据：${candidate.evidence || '无'}`,
+    `提交者：${candidate.submittedBy} · ${formatTime(candidate.createdAt)}`,
     candidate.status === 'pending'
-      ? '【审批状态】待审批（通过后才会进入术语知识库）'
-      : `【审批状态】${CANDIDATE_STATUS_LABEL[candidate.status]} · ${candidate.reviewedBy}${
+      ? '审批状态：待审批（通过后才会进入术语知识库）'
+      : `审批状态：${CANDIDATE_STATUS_LABEL[candidate.status]} · ${candidate.reviewedBy}${
           candidate.reviewedAt ? ` · ${formatTime(candidate.reviewedAt)}` : ''
         }${candidate.reviewNote ? ` · 备注：${candidate.reviewNote}` : ''}`,
   ].join('\n');
+  return `${termCard}\n\n—— 审核信息 ——\n${reviewInfo}`;
 }
 
 export default function GlossaryPage() {
