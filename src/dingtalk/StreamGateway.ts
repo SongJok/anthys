@@ -214,6 +214,9 @@ export class StreamGateway {
       );
       return;
     }
+    // DWS 旁听去重拿的是业务 msgId，与回调 header messageId 不同；
+    // 不登记业务 ID 会让 hasSeen 永假，@ 消息被旁听引擎二次回复
+    if (message.messageId !== messageId) this.remember(message.messageId);
     if (this.options.whitelist) {
       let allowed = false;
       try {

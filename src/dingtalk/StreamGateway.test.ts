@@ -170,6 +170,26 @@ describe('StreamGateway', () => {
     });
   });
 
+  it('hasSeen 覆盖业务 msgId，供 DWS 旁听去重', async () => {
+    const client = new FakeClient();
+    const handler = vi.fn(async (_message: InboundMessage) => undefined);
+    const gateway = new StreamGateway({ client, handler });
+
+    await gateway.dispatch(
+      payload({
+        msgId: 'msg-business-1',
+        conversationType: '2',
+        isInAtList: true,
+        text: { content: '@小钉 你好' },
+      }),
+      'header-1',
+    );
+
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(gateway.hasSeen('header-1')).toBe(true);
+    expect(gateway.hasSeen('msg-business-1')).toBe(true);
+  });
+
   it('群聊只有 @ 没有正文的消息仍交给主处理链路', async () => {
     const client = new FakeClient();
     const handler = vi.fn(async (_message: InboundMessage) => undefined);
