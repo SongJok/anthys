@@ -383,6 +383,24 @@ export interface ScheduledTaskStore {
   markRun(id: string, lastRunAtMs: number, nextRunAtMs: number | null): Promise<void>;
 }
 
+/**
+ * 系统级周期循环（只读展示）：由 env/内置默认驱动的基础设施定时器，
+ * 不是用户创建的定时任务，管理端仅展示其周期与运行状态，不可在此启停。
+ */
+export interface SystemLoopStatus {
+  id: string;
+  name: string;
+  purpose: string;
+  intervalSeconds: number | null;
+  intervalLabel: string;
+  /** 周期来源：env 变量名或内置默认说明 */
+  source: string;
+  running: boolean;
+  /** 是否仅集群主实例运行 */
+  leaderGated: boolean;
+  notes?: string;
+}
+
 /** 用户对回答的显式反馈（/feedback 指令） */
 export interface UserFeedbackRecord {
   id: string;

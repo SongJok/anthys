@@ -249,6 +249,7 @@ import type {
   ScheduledTask,
   ScheduledTaskInput,
   ScheduledTaskUpdate,
+  SystemLoopStatus,
 } from './types/admin-and-console.js';
 import type { BystanderEvaluationResult } from './types/bystander-and-memory.js';
 import type { AgentJob } from './types/jobs.js';
@@ -3688,14 +3689,19 @@ async function main(): Promise<void> {
       list: () => scheduledStore.list(),
       create: async (input: ScheduledTaskInput): Promise<ScheduledTask> => {
         if (!input.conversationId?.trim()) throw new Error('缺少 conversationId');
-        if (!input.prompt?.trim()) throw new Error('缺少 prompt');
+        const kind = input.kind ?? 'prompt';
+        const prompt = input.prompt?.trim() ?? '';
+        if (!prompt && (kind === 'prompt' || kind === 'reminder')) {
+          throw new Error('缺少 prompt');
+        }
         const schedule = normalizeSchedule(input);
         const task = await scheduledStore.create(
           {
             conversationId: input.conversationId.trim(),
             conversationType: input.conversationType === '1' ? '1' : '2',
+            kind,
             title: input.title?.trim() || '定时播报',
-            prompt: input.prompt.trim(),
+            prompt,
             ...schedule,
             createdBy: input.createdBy?.trim() || 'admin-api',
           },
@@ -3716,9 +3722,6 @@ async function main(): Promise<void> {
       ): Promise<ScheduledTask> => {
         const current = (await scheduledStore.list()).find((item) => item.id === id);
         if (!current) throw new Error(`未找到定时任务: ${id}`);
-        if (current.kind !== 'prompt') {
-          throw new Error('个人提醒与定时报告请由本人在单聊中管理（管理端仅支持删除）');
-        }
         const schedule = normalizeSchedule(input, current);
         const task = await scheduledStore.update(
           id,
@@ -3755,15 +3758,125 @@ async function main(): Promise<void> {
       runNow: async (id: string): Promise<void> => {
         const current = (await scheduledStore.list()).find((item) => item.id === id);
         if (!current) throw new Error(`未找到定时任务: ${id}`);
-        if (current.kind !== 'prompt') {
-          throw new Error('个人提醒与定时报告不支持由管理端立即执行');
-        }
         await executeScheduledTask(current);
         await scheduledStore.markRun(
           id,
           Date.now(),
           computeNextRun(current, Date.now()),
         );
+      },
+      systemLoops: (): SystemLoopStatus[] => {
+        const leaderActive = !clusterEnabled || Boolean(leadership?.isLeader());
+        const label = (seconds: number): string => {
+          if (seconds % 86_400 === 0) return `${seconds / 86_400} 天`;
+          if (seconds % 3_600 === 0) return `${seconds / 3_600} 小时`;
+          if (seconds % 60 === 0) return `${seconds / 60} 分钟`;
+          return `${seconds} 秒`;
+        };
+        const loop = (
+          id: string,
+          name: string,
+          purpose: string,
+          intervalSeconds: number,
+          source: string,
+          running: boolean,
+          leaderGated: boolean,
+          notes?: string,
+        ): SystemLoopStatus => ({
+          id,
+          name,
+          purpose,
+          intervalSeconds,
+          intervalLabel: label(intervalSeconds),
+          source,
+          running,
+          leaderGated,
+          ...(notes ? { notes } : {}),
+        });
+        const loops: SystemLoopStatus[] = [
+          loop(
+            'scheduled-task-scheduler',
+            '定时任务调度',
+            '轮询到期的定时任务并执行（提醒 / 报告 / 群播报 / 定时 prompt）',
+            15,
+            '内置默认 15 秒（ScheduledTaskScheduler）',
+            leaderActive,
+            true,
+          ),
+          loop(
+            'job-runner',
+            '后台任务执行',
+            '轮询后台长任务队列并按租约执行',
+            envSeconds(process.env.JOB_RUNNER_INTERVAL_SECONDS, 5),
+            'JOB_RUNNER_INTERVAL_SECONDS',
+            leaderActive,
+            true,
+          ),
+          loop(
+            'project-auto-sync',
+            '项目知识库自动同步',
+            '按各项目 autoSyncMinutes 周期同步知识库',
+            Math.max(60, envSeconds(process.env.PROJECT_SYNC_INTERVAL_SECONDS, 900)),
+            'PROJECT_SYNC_INTERVAL_SECONDS',
+            Boolean(projectSyncTimer),
+            true,
+            '每个项目的同步周期可在「项目」页单独配置',
+          ),
+          loop(
+            'data-retention',
+            '数据保留清理',
+            '按保留期清理过期轨迹 / 消息等数据',
+            envSeconds(process.env.DATA_CLEANUP_INTERVAL_SECONDS, 86_400),
+            'DATA_CLEANUP_INTERVAL_SECONDS',
+            true,
+            true,
+            '保留策略可在「数据治理」页配置；清理仅主实例执行',
+          ),
+          loop(
+            'bystander-listen-refresh',
+            '旁听订阅刷新',
+            '刷新群旁听长连接订阅的群列表',
+            envSeconds(process.env.BYSTANDER_LISTEN_REFRESH_SECONDS, 60),
+            'BYSTANDER_LISTEN_REFRESH_SECONDS',
+            Boolean(bystanderListenTimer),
+            true,
+          ),
+          loop(
+            'dws-write-task-poller',
+            'DWS 写操作授权轮询',
+            '轮询等待本人 DWS 授权的写操作任务，授权通过后自动续跑',
+            5,
+            '内置默认 5 秒（DwsWriteTaskService）',
+            true,
+            false,
+            '所有实例运行，靠 CAS 抢锁去重',
+          ),
+        ];
+        if (clusterEnabled) {
+          loops.push(
+            loop(
+              'cluster-config-poll',
+              '集群共享配置轮询',
+              '周期拉取共享配置中心变更',
+              envSeconds(process.env.CLUSTER_CONFIG_POLL_SECONDS, 30),
+              'CLUSTER_CONFIG_POLL_SECONDS',
+              true,
+              false,
+              '仅集群模式',
+            ),
+            loop(
+              'cluster-leadership',
+              'Stream 主锁心跳',
+              '主锁心跳与竞选，决定哪个实例接管 Stream',
+              envSeconds(process.env.CLUSTER_HEARTBEAT_SECONDS, 10),
+              'CLUSTER_HEARTBEAT_SECONDS',
+              true,
+              false,
+              '仅集群模式',
+            ),
+          );
+        }
+        return loops;
       },
     };
 

@@ -468,6 +468,18 @@ async function createTestContext(staticDir?: string): Promise<TestContext> {
     runNow: async (id: string): Promise<void> => {
       ranTasks.push(id);
     },
+    systemLoops: () => [
+      {
+        id: 'scheduled-task-scheduler',
+        name: '定时任务调度',
+        purpose: '轮询到期的定时任务并执行',
+        intervalSeconds: 15,
+        intervalLabel: '15 秒',
+        source: '内置默认 15 秒',
+        running: true,
+        leaderGated: true,
+      },
+    ],
   };
   const status = (): McpServerStatusView[] =>
     center.getMcpServers().map((server) => ({
@@ -1075,6 +1087,23 @@ describe('在线对话与可观测性接口', () => {
       { method: 'DELETE', headers: headers() },
     );
     expect((await body(removed)).removed).toBe(true);
+  });
+
+  it('系统级周期循环只读接口需要鉴权并返回循环列表', async () => {
+    const denied = await ctx.app.request(
+      '/api/v1/admin/scheduled-tasks/system-loops',
+    );
+    expect(denied.status).toBe(401);
+
+    const res = await ctx.app.request(
+      '/api/v1/admin/scheduled-tasks/system-loops',
+      { headers: headers() },
+    );
+    expect(res.status).toBe(200);
+    const payload = await body(res);
+    expect(payload.loops).toHaveLength(1);
+    expect(payload.loops[0].id).toBe('scheduled-task-scheduler');
+    expect(payload.loops[0].leaderGated).toBe(true);
   });
 
   it('用量汇总接口返回按员工与按群聚合', async () => {

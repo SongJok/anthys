@@ -1114,3 +1114,61 @@ export interface WhitelistSyncResult {
   warnings: string[];
   syncedAt: string;
 }
+
+export type ScheduledTaskKind =
+  | 'prompt'
+  | 'reminder'
+  | 'daily_report'
+  | 'weekly_report'
+  | 'monthly_report'
+  | 'group_report';
+
+export interface ScheduledTask {
+  id: string;
+  conversationId: string;
+  conversationType: '1' | '2';
+  kind: ScheduledTaskKind;
+  title: string;
+  prompt: string;
+  intervalSeconds: number | null;
+  cron: string | null;
+  enabled: boolean;
+  lastRunAt: string | null;
+  nextRunAt: string | null;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ScheduledTaskInput {
+  conversationId: string;
+  conversationType: '1' | '2';
+  kind?: ScheduledTaskKind;
+  title: string;
+  prompt: string;
+  intervalSeconds?: number | null;
+  cron?: string | null;
+  enabled?: boolean;
+  createdBy?: string;
+}
+
+export interface ScheduledTaskUpdate {
+  title?: string;
+  prompt?: string;
+  intervalSeconds?: number | null;
+  cron?: string | null;
+  enabled?: boolean;
+}
+
+/** 系统级周期循环（只读展示，由 env/内置默认驱动，非用户定时任务） */
+export interface SystemLoopStatus {
+  id: string;
+  name: string;
+  purpose: string;
+  intervalSeconds: number | null;
+  intervalLabel: string;
+  source: string;
+  running: boolean;
+  leaderGated: boolean;
+  notes?: string;
+}

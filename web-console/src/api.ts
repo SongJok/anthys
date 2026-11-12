@@ -60,6 +60,10 @@ import type {
   ProjectSyncJob,
   RetentionPolicy,
   RetentionStats,
+  ScheduledTask,
+  ScheduledTaskInput,
+  ScheduledTaskUpdate,
+  SystemLoopStatus,
   SemanticMemory,
   SemanticMemoryKind,
   SemanticMemoryPage,
@@ -134,6 +138,30 @@ export const api = {
   dashboard: () => request<DashboardPayload>('/dashboard'),
   usage: (days = 1) =>
     request<{ summary: UsageSummary }>(`/usage?days=${days}`),
+
+  scheduledTasks: () => request<{ tasks: ScheduledTask[] }>('/scheduled-tasks'),
+  createScheduledTask: (input: ScheduledTaskInput) =>
+    request<{ task: ScheduledTask }>('/scheduled-tasks', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  updateScheduledTask: (id: string, input: ScheduledTaskUpdate) =>
+    request<{ task: ScheduledTask }>(
+      `/scheduled-tasks/${encodeURIComponent(id)}`,
+      { method: 'PUT', body: JSON.stringify(input) },
+    ),
+  deleteScheduledTask: (id: string) =>
+    request<{ removed: boolean }>(
+      `/scheduled-tasks/${encodeURIComponent(id)}`,
+      { method: 'DELETE' },
+    ),
+  runScheduledTask: (id: string) =>
+    request<{ ok: boolean }>(
+      `/scheduled-tasks/${encodeURIComponent(id)}/run`,
+      { method: 'POST' },
+    ),
+  systemLoops: () =>
+    request<{ loops: SystemLoopStatus[] }>('/scheduled-tasks/system-loops'),
 
   dingtalk: () =>
     request<{ config: DingTalkConfig; stream: StreamStatus | null }>(

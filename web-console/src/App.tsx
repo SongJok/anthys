@@ -15,6 +15,7 @@ import {
   BookOutlined,
   BranchesOutlined,
   BulbOutlined,
+  ClockCircleOutlined,
   DashboardOutlined,
   DatabaseOutlined,
   FlagOutlined,
@@ -42,6 +43,7 @@ import GlossaryPage from './pages/GlossaryPage';
 import SkillsPage from './pages/SkillsPage';
 import PluginsPage from './pages/PluginsPage';
 import ProjectsPage from './pages/ProjectsPage';
+import ScheduledTasksPage from './pages/ScheduledTasksPage';
 import PersonaLayersPage from './pages/PersonaLayersPage';
 import MemoryGovernancePage from './pages/MemoryGovernancePage';
 
@@ -63,6 +65,7 @@ const MENU = [
   { key: 'skills', icon: <BulbOutlined />, label: '技能 Skills' },
   { key: 'plugins', icon: <AppstoreOutlined />, label: '声明式插件' },
   { key: 'projects', icon: <BookOutlined />, label: '项目手册' },
+  { key: 'schedules', icon: <ClockCircleOutlined />, label: '定时任务' },
   { key: 'governance', icon: <DatabaseOutlined />, label: '数据治理' },
 ];
 
@@ -82,6 +85,7 @@ const PAGE_TITLES: Record<string, string> = {
   skills: '技能管理与目录预览',
   plugins: '声明式插件管理',
   projects: '项目手册与代码理解',
+  schedules: '定时任务与系统周期循环',
   governance: '数据治理与脱敏',
 };
 
@@ -144,6 +148,7 @@ export default function App() {
           {active === 'skills' && <SkillsPage />}
           {active === 'plugins' && <PluginsPage />}
           {active === 'projects' && <ProjectsPage />}
+          {active === 'schedules' && <ScheduledTasksPage />}
           {active === 'governance' && <DataGovernancePage />}
         </Content>
       </Layout>

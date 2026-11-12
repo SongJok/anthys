@@ -11,6 +11,7 @@ import type {
   ScheduledTask,
   ScheduledTaskInput,
   ScheduledTaskUpdate,
+  SystemLoopStatus,
   UsageSummary,
   McpServerStatusView,
   McpServerTestResult,
@@ -110,6 +111,8 @@ export interface AdminApiOptions {
     update(id: string, input: ScheduledTaskUpdate): Promise<ScheduledTask>;
     remove(id: string): Promise<boolean>;
     runNow?(id: string): Promise<void>;
+    /** 系统级周期循环只读状态（非用户定时任务） */
+    systemLoops?(): SystemLoopStatus[] | Promise<SystemLoopStatus[]>;
   };
   /** 数据治理：保留期、清理与级联删除 */
   governance?: DataGovernancePort;
@@ -384,12 +387,21 @@ export function createAdminApp(options: AdminApiOptions): Hono {
     return c.json({ ok: true, tasks: await options.scheduledTasks.list() });
   });
 
+  admin.get('/scheduled-tasks/system-loops', async (c) => {
+    if (!options.scheduledTasks?.systemLoops) {
+      return c.json({ ok: true, loops: [] });
+    }
+    return c.json({ ok: true, loops: await options.scheduledTasks.systemLoops() });
+  });
+
   admin.post('/scheduled-tasks', async (c) => {
     if (!options.scheduledTasks) {
       return c.json({ ok: false, error: '定时任务未启用' }, 503);
     }
     const input = (await c.req.json().catch(() => ({}))) as ScheduledTaskInput;
-    if (!input.conversationId?.trim() || !input.prompt?.trim()) {
+    const kind = input.kind ?? 'prompt';
+    const needsPrompt = kind === 'prompt' || kind === 'reminder';
+    if (!input.conversationId?.trim() || (needsPrompt && !input.prompt?.trim())) {
       return c.json({ ok: false, error: '缺少 conversationId 或 prompt' }, 400);
     }
     try {
