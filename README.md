@@ -160,7 +160,7 @@ pnpm run db:seed      # 可选：预写入默认人设与模型配置，已有�
 | --- | --- | --- |
 | `LLM_MODEL_SOURCE` | `env` | `env`：按角色读取 `.env`；`database`：兼容旧版，允许控制台保存的模型覆盖 |
 | `DEEPSEEK_API_KEY` | 空 | DeepSeek 密钥，默认角色通过 `${DEEPSEEK_API_KEY}` 引用 |
-| `KIMI_API_KEY` | 空 | Kimi / Moonshot 密钥，管理员角色通过 `${KIMI_API_KEY}` 引用 |
+| `KIMI_API_KEY` | 空 | Kimi / Moonshot 密钥（暂不使用，保留以便切回管理员角色） |
 | `GLM_API_KEY` | 空 | 智谱密钥，主动回复角色、视觉与联网搜索共用 |
 | `LLM_PROVIDER` | `openai-compatible` | 默认角色协议 |
 | `LLM_BASE_URL` | `https://api.deepseek.com/v1` | 默认角色接口地址 |
@@ -170,7 +170,7 @@ pnpm run db:seed      # 可选：预写入默认人设与模型配置，已有�
 | `LLM_THINKING` | `high` | 思维链强度：`off` / `auto` / `low` / `high` / `max` |
 | `LLM_MAX_TOKENS` | `8192` | 默认角色单次输出上限；留空用供应商默认 |
 | `LLM_DIALECT` | 空 | `openai` / `deepseek` / `moonshot` / `zhipu`；留空按 Base URL 推断 |
-| `LLM_ADMIN_*` | 见 `.env.example` | 管理员单聊与子代理：默认 Kimi `kimi-k3.1-pro` |
+| `LLM_ADMIN_*` | 见 `.env.example` | 管理员单聊与子代理：默认 DeepSeek `deepseek-flash`（暂不使用 Kimi，复用 `${DEEPSEEK_API_KEY}`，`THINKING=max`） |
 | `LLM_PROACTIVE_*` | 见 `.env.example` | 旁听分类、主动回复、规划器与记忆摘要：默认 GLM `glm-5.3-flash`，`LLM_PROACTIVE_THINKING=low` 降低延迟 |
 | `LLM_ENABLE_NATIVE_REASONING` | `true` | 旧变量；仅在未设置 `LLM_THINKING` 时生效 |
 | `PERSONA_NAME` | `小钉` | 机器人名称 |
