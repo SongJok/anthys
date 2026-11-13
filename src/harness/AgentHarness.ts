@@ -87,6 +87,8 @@ export interface AgentHarnessOptions {
   identity?: PersonIdentityResolver;
   policy: DynamicLoopPolicy;
   windowMessages: number;
+  /** 单聊历史窗口上限，缺省 10；群聊沿用 windowMessages */
+  singleWindowMessages?: number;
   now?: () => number;
   logger?: HarnessLogger;
   memory?: HierarchicalMemoryManager;
@@ -251,7 +253,7 @@ export class AgentHarness {
 
     const history = await repository.recentMessages(
       conversation.id,
-      this.options.windowMessages,
+      this.historyWindow(message.conversationType),
     );
     const memoryContext = await this.buildMemoryContext({
       message,
@@ -271,6 +273,7 @@ export class AgentHarness {
     const messages = assembler.build({
       persona,
       history,
+      windowMessages: this.historyWindow(message.conversationType),
       userText: text,
       now: this.now,
       memoryContext,
@@ -401,7 +404,7 @@ export class AgentHarness {
 
     const history = await repository.recentMessages(
       conversation.id,
-      this.options.windowMessages,
+      this.historyWindow(message.conversationType),
     );
     const memoryContext = await this.buildMemoryContext({
       message,
@@ -429,6 +432,7 @@ export class AgentHarness {
     const messages = assembler.build({
       persona,
       history,
+      windowMessages: this.historyWindow(message.conversationType),
       userText: proactiveInstruction,
       now: this.now,
       memoryContext,
@@ -662,7 +666,7 @@ export class AgentHarness {
 
     const history = await repository.recentMessages(
       conversation.id,
-      this.options.windowMessages,
+      this.historyWindow(message.conversationType),
     );
     const memoryContext = await this.buildMemoryContext({
       message,
@@ -694,6 +698,7 @@ export class AgentHarness {
     const messages = assembler.build({
       persona,
       history,
+      windowMessages: this.historyWindow(message.conversationType),
       userText: jobInstruction,
       now: this.now,
       memoryContext,
@@ -1005,6 +1010,13 @@ export class AgentHarness {
       );
       return undefined;
     }
+  }
+
+  /** 群聊沿用 windowMessages（默认 20），单聊用 singleWindowMessages（默认 10） */
+  private historyWindow(conversationType: '1' | '2'): number {
+    return conversationType === '2'
+      ? this.options.windowMessages
+      : (this.options.singleWindowMessages ?? 10);
   }
 
   private async buildExtensionPrompt(

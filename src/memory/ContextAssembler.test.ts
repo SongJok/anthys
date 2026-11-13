@@ -195,4 +195,45 @@ describe('ContextAssembler', () => {
     expect(messages[1]?.content).not.toContain('操作需要确认：机器人准备调用工具');
     expect(messages[1]?.content).toContain('真实发起对应的 tool_calls');
   });
+
+  it('按会话类型覆盖历史窗口：单聊最多近 10 条', () => {
+    const assembler = new ContextAssembler({ windowMessages: 20, now: fixedNow });
+    const history = Array.from({ length: 15 }, (_, i) =>
+      historyMessage(`m${i}`, i % 2 === 0 ? 'user' : 'assistant', `消息${i}`),
+    );
+    const messages = assembler.build({
+      persona,
+      history,
+      userText: '新问题',
+      windowMessages: 10,
+    });
+    const conversational = messages.filter((m) => m.role !== 'system');
+    expect(conversational).toHaveLength(11);
+    expect(conversational[0]?.content).toContain('消息5');
+  });
+
+  it('窗口覆盖可大于构造默认值：群聊最多近 20 条', () => {
+    const assembler = new ContextAssembler({ windowMessages: 10, now: fixedNow });
+    const history = Array.from({ length: 25 }, (_, i) =>
+      historyMessage(`m${i}`, 'user', `消息${i}`),
+    );
+    const messages = assembler.build({
+      persona,
+      history,
+      userText: '新问题',
+      windowMessages: 20,
+    });
+    const conversational = messages.filter((m) => m.role !== 'system');
+    expect(conversational).toHaveLength(21);
+    expect(conversational[0]?.content).toContain('消息5');
+  });
+
+  it('注入新闻多源交叉核实与上下文反驳引导', () => {
+    const assembler = new ContextAssembler({ windowMessages: 20, now: fixedNow });
+    const system =
+      assembler.build({ persona, history: [], userText: '新闻' })[0]?.content ?? '';
+    expect(system).toContain('多角度获取');
+    expect(system).toContain('交叉比对多个独立来源');
+    expect(system).toContain('增加反驳或纠正观点');
+  });
 });

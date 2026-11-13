@@ -112,6 +112,7 @@ function fakeDefaults(
     }),
     getMemoryConfig: () => ({
       windowMessages: 20,
+      singleWindowMessages: 10,
       compressionThresholdTokens: 12_000,
       compressionRatio: 0.6,
       semanticLimit: 6,

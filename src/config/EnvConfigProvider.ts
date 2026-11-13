@@ -280,6 +280,10 @@ export class EnvConfigProvider implements IConfigProvider {
         1,
         parseNumber(this.env.MEMORY_WINDOW_MESSAGES, 20),
       ),
+      singleWindowMessages: Math.max(
+        1,
+        parseNumber(this.env.MEMORY_SINGLE_WINDOW_MESSAGES, 10),
+      ),
       compressionThresholdTokens: Math.max(
         1,
         parseNumber(this.env.MEMORY_COMPRESSION_THRESHOLD_TOKENS, 12_000),

@@ -165,6 +165,55 @@ function scriptedEngine(calls: { messages: unknown[] }[]): AgentEngine {
 }
 
 describe('AgentHarness', () => {
+  it('单聊历史窗口最多 10 条、群聊最多 20 条', async () => {
+    const limits: number[] = [];
+    const repository: ConversationRepository = {
+      async ensureConversation(input) {
+        return {
+          id: 'conv-x',
+          conversationKey: input.conversationKey,
+          conversationType: input.conversationType,
+          createdAt: 0,
+        };
+      },
+      async appendMessage() {
+        return 'm';
+      },
+      async recentMessages(_conversationId, limit) {
+        limits.push(limit);
+        return [];
+      },
+      async clearMessages() {
+        return 0;
+      },
+    };
+    const calls: { messages: unknown[] }[] = [];
+    const harness = new AgentHarness({
+      engine: scriptedEngine(calls),
+      repository,
+      assembler: new ContextAssembler({ windowMessages: 20, now: () => 0 }),
+      persona,
+      policy: {
+        maxWallTimeMs: 5_000,
+        maxTotalTokens: 1_000,
+        maxConsecutiveSameTool: 2,
+        convergenceCheck: true,
+      },
+      windowMessages: 20,
+      now: () => 1_000,
+    });
+
+    await harness.handleMessage(inbound({ conversationType: '1' }), {
+      emit: () => undefined,
+    });
+    await harness.handleMessage(
+      inbound({ conversationType: '2', isAtBot: true }),
+      { emit: () => undefined },
+    );
+
+    expect(limits).toEqual([10, 20]);
+  });
+
   it('群聊未 @ 机器人时直接忽略且不写库', async () => {
     const calls: { messages: unknown[] }[] = [];
     const { harness, rows } = createHarness(scriptedEngine(calls));

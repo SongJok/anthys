@@ -1937,6 +1937,7 @@ async function main(): Promise<void> {
       identity: personIdentity,
       policy: configCenter.getLoopPolicy(),
       windowMessages: memoryConfig.windowMessages,
+      singleWindowMessages: memoryConfig.singleWindowMessages,
       logger: harnessLogger,
       memory: hierarchicalMemory,
       glossary,
