@@ -125,6 +125,7 @@ describe('DwsGroupMessageListener', () => {
     shouldIgnore?: (messageId: string) => boolean;
     ignoreSenders?: string[];
     isSenderAllowed?: (message: InboundMessage) => Promise<boolean> | boolean;
+    onTranscript?: (message: InboundMessage) => void;
     logger?: typeof noopLogger;
   } = {}) {
     const children: FakeChild[] = [];
@@ -135,6 +136,7 @@ describe('DwsGroupMessageListener', () => {
       shouldIgnore: options.shouldIgnore,
       ignoreSenders: options.ignoreSenders,
       isSenderAllowed: options.isSenderAllowed,
+      onTranscript: options.onTranscript,
       settleMs: 0,
       sleep: async () => undefined,
       spawn: () => {
@@ -195,6 +197,28 @@ describe('DwsGroupMessageListener', () => {
 
     await vi.waitFor(() => expect(received).toHaveLength(1));
     expect(received[0]?.messageId).toBe('msg-1');
+  });
+
+  it('非订阅群发言仍归档，但不进入主动回复漏斗', async () => {
+    const archived: InboundMessage[] = [];
+    const { listener, children, received } = setup({
+      allowed: ['cid-1'],
+      onTranscript: (message) => {
+        archived.push(message);
+      },
+    });
+    listener.start();
+    const child = children[0]!;
+
+    child.stdout.write(line(FLAT_MESSAGE));
+    child.stdout.write(
+      line({ ...FLAT_MESSAGE, message_id: 'msg-other', conversation_id: 'cid-9' }),
+    );
+
+    await vi.waitFor(() => expect(received).toHaveLength(1));
+    expect(received[0]?.messageId).toBe('msg-1');
+    expect(archived.map((message) => message.messageId)).toEqual(['msg-other']);
+    expect(archived[0]?.conversationId).toBe('cid-9');
   });
 
   it('白名单拒绝的群消息不交给旁听链路', async () => {

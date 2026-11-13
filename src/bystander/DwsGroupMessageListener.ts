@@ -43,8 +43,10 @@ export type DwsGroupSpawn = (
 export interface DwsGroupMessageListenerOptions {
   /** 收到群消息后交给旁听链路，调用方负责落缓冲与三级漏斗 */
   onMessage: (message: InboundMessage) => Promise<void> | void;
+  /** 非订阅群发言的归档回调：只落盘归档供群记忆/黑话读取，不进入主动回复漏斗 */
+  onTranscript?: (message: InboundMessage) => void;
   binary?: string;
-  /** 需要旁听的群（openConversationId）；为空时所有消息只做解析后丢弃 */
+  /** 需要旁听主动回复的群（openConversationId）；不在其中的群只归档、不回复 */
   allowedConversations?: Iterable<string>;
   /** 已被 StreamGateway 处理过的 @ 消息直接跳过 */
   shouldIgnore?: (messageId: string) => boolean;
@@ -474,12 +476,14 @@ export class DwsGroupMessageListener {
       return;
     }
     if (!this.allowed.has(fields.conversationId)) {
+      // 非订阅群仍归档发言（供群记忆/黑话离线读取），但不进入主动回复漏斗
+      this.options.onTranscript?.(toInboundMessage(fields));
       // 每个群只提示一次，既证明事件流已连通，也方便排查漏配的群
       if (!this.reportedUnlistened.has(fields.conversationId)) {
         this.reportedUnlistened.add(fields.conversationId);
         this.logger?.info(
           { conversationId: fields.conversationId },
-          'dws group message ignored, add the conversationId to BYSTANDER_LISTEN_GROUPS to listen',
+          'dws group message archived without proactive reply, add the conversationId to BYSTANDER_LISTEN_GROUPS to enable replies',
         );
       }
       return;

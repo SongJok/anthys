@@ -113,7 +113,7 @@ import { GithubClient } from './github/GithubClient.js';
 import { createGithubAdminPort } from './github/GithubAdminPort.js';
 import { GithubToolProvider } from './tools/github/GithubToolProvider.js';
 import type { SkillScanRoot } from './skills/SkillRegistry.js';
-import { GroupTranscriptBuffer } from './bystander/GroupTranscriptBuffer.js';
+import { GroupTranscriptBuffer, toTranscriptEntry } from './bystander/GroupTranscriptBuffer.js';
 import { GroupTranscriptArchive } from './bystander/GroupTranscriptArchive.js';
 import { CooldownLimiter } from './bystander/CooldownLimiter.js';
 import { DwsGroupMessageListener } from './bystander/DwsGroupMessageListener.js';
@@ -4086,6 +4086,23 @@ async function main(): Promise<void> {
       const listener = new DwsGroupMessageListener({
         binary: process.env.DWS_BINARY?.trim() || 'dws',
         onMessage: handleBystanderMessage,
+        ...(transcriptArchiveEnabled
+          ? {
+              onTranscript: (message: InboundMessage) => {
+                void groupTranscriptArchive
+                  .append(toTranscriptEntry(message))
+                  .catch((error) => {
+                    harnessLogger.warn(
+                      {
+                        conversationId: message.conversationId,
+                        error: errorText(error),
+                      },
+                      'failed to archive non-subscribed group transcript',
+                    );
+                  });
+              },
+            }
+          : {}),
         shouldIgnore: (messageId) => gateway?.hasSeen(messageId) === true,
         isSenderAllowed: (message) =>
           whitelist.isOpenIdAllowed(
