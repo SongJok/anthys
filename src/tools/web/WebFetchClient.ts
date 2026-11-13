@@ -9,14 +9,15 @@ import {
   createInflate,
 } from 'node:zlib';
 
-const DEFAULT_TIMEOUT_MS = 12_000;
+const DEFAULT_TIMEOUT_MS = 20_000;
 const DEFAULT_MAX_BYTES = 2 * 1024 * 1024;
 const DEFAULT_MAX_REDIRECTS = 3;
 const MAX_URL_CHARS = 2_000;
 const MAX_TITLE_CHARS = 300;
 const MAX_DESCRIPTION_CHARS = 600;
+// 官方源（SEC、企业新闻站）会拒绝或挂起自我标识的爬虫 UA，浏览器 UA 才能读到正文
 const USER_AGENT =
-  'Mozilla/5.0 (compatible; AnthysBot/0.1; +https://github.com/SongJok/anthys)';
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 const HTML_CONTENT_TYPES = new Set([
   'text/html',

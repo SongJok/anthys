@@ -174,6 +174,20 @@ describe('WebSearchToolProvider', () => {
     });
   });
 
+  it('空结果不缓存，重试可随索引更新拿到新覆盖', async () => {
+    let now = 1_000_000;
+    const search = vi.fn(async () => [] as WebSearchResult[]);
+    const tool = await toolOf(
+      makeProvider(search, { now: () => now, cacheTtlSeconds: 60 }),
+    );
+
+    await tool.executeStructured!({ query: '突发新闻' }, context());
+    now += 5_000;
+    await tool.executeStructured!({ query: '突发新闻' }, context());
+
+    expect(search).toHaveBeenCalledTimes(2);
+  });
+
   it('缓存过期后重新请求', async () => {
     let now = 1_000_000;
     const search = vi.fn(async () => [SAMPLE]);

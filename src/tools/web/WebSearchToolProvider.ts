@@ -167,7 +167,7 @@ function formatOutput(
 
 function emptyOutput(): ToolExecutionOutput {
   return {
-    text: '未检索到公开网页结果。请基于已有信息回答，并明确说明该结论未经过联网核实，不要编造来源。',
+    text: '未检索到公开网页结果。若问题涉及新闻、人事任免、行情、版本等时效性事实，"没搜到"不等于"维持旧状态"：不要凭训练记忆断言旧结论，应换关键词或时间范围重试、或用 web_fetch 直连官方来源核实；仍无法核实时如实说明"暂未检索到最新公开信息、无法确认"，不要编造来源。',
     summary: '联网搜索无结果',
     citations: [],
   };
@@ -367,7 +367,8 @@ export class WebSearchToolProvider implements IToolProvider {
       this.options.metrics?.inc('web_search_requests_total', {
         result: results.length === 0 ? 'empty' : 'success',
       });
-      this.writeCache(cacheKey, results);
+      // 突发新闻索引滞后时空结果会随时间变化，缓存空结果会让重试一直拿不到新覆盖
+      if (results.length > 0) this.writeCache(cacheKey, results);
       return results;
     } catch (error) {
       this.options.metrics?.inc('web_search_requests_total', {

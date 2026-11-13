@@ -1216,7 +1216,7 @@ async function main(): Promise<void> {
     const webFetchProvider = webFetchEnabled
       ? new WebFetchToolProvider({
           client: new WebFetchClient({
-            timeoutMs: envSeconds(process.env.WEB_FETCH_TIMEOUT_MS, 12),
+            timeoutMs: envSeconds(process.env.WEB_FETCH_TIMEOUT_MS, 20),
             maxBytes: envMegabytes(process.env.WEB_FETCH_MAX_MB, 2),
             ...(webFetchDnsServers.length > 0
               ? { dnsServers: webFetchDnsServers }
@@ -1239,7 +1239,7 @@ async function main(): Promise<void> {
     logger.info(
       {
         enabled: webFetchEnabled,
-        timeoutMs: envSeconds(process.env.WEB_FETCH_TIMEOUT_MS, 12) * 1_000,
+        timeoutMs: envSeconds(process.env.WEB_FETCH_TIMEOUT_MS, 20) * 1_000,
         maxBytes: envMegabytes(process.env.WEB_FETCH_MAX_MB, 2),
         cacheTtlSeconds: envCount(process.env.WEB_FETCH_CACHE_TTL_SECONDS, 600),
         maxCallsPerHour: envCount(
