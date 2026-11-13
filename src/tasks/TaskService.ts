@@ -7,12 +7,14 @@ import type {
   AgentTaskStatus,
   AgentTaskStore,
   AgentTaskSubscription,
+  ExternalTaskLinkRef,
 } from '../types/tasks.js';
 import { AGENT_TASK_LINK_KINDS } from '../types/tasks.js';
 import { formatShanghaiDateTime } from '../time/shanghaiTime.js';
 
 const TASK_TITLE_LIMIT = 60;
 const TASK_SUMMARY_LIMIT = 2_000;
+const MAX_EXTERNAL_EVENTS = 20;
 
 const TASK_STATUS_LABELS: Record<AgentTaskStatus, string> = {
   active: '进行中',
@@ -32,6 +34,25 @@ const LINK_KIND_LABELS: Record<AgentTaskLinkKind, string> = {
   other: '其他',
 };
 
+export interface ExternalTaskEvent {
+  source: string;
+  eventType: string;
+  deliveryId?: string;
+  summary: string;
+  refs: ExternalTaskLinkRef[];
+  payload?: Record<string, unknown>;
+}
+
+export interface ExternalTaskMatch {
+  task: AgentTask;
+  subscribers: AgentTaskSubscription[];
+}
+
+export interface RouteExternalEventResult {
+  matchedTasks: ExternalTaskMatch[];
+  notificationsSent: number;
+}
+
 export interface TaskServiceOptions {
   store: AgentTaskStore;
   enqueue: (
@@ -40,6 +61,10 @@ export interface TaskServiceOptions {
     taskId: string,
   ) => Promise<AgentJob>;
   isAdmin: (staffId: string) => boolean;
+  onExternalEvent?: (
+    event: ExternalTaskEvent,
+    match: ExternalTaskMatch,
+  ) => Promise<void> | void;
   now?: () => number;
 }
 
@@ -91,12 +116,14 @@ export class TaskService {
   private readonly store: AgentTaskStore;
   private readonly enqueue: TaskServiceOptions['enqueue'];
   private readonly isAdmin: (staffId: string) => boolean;
+  private readonly onExternalEvent: TaskServiceOptions['onExternalEvent'];
   private readonly now: () => number;
 
   constructor(options: TaskServiceOptions) {
     this.store = options.store;
     this.enqueue = options.enqueue;
     this.isAdmin = options.isAdmin;
+    this.onExternalEvent = options.onExternalEvent;
     this.now = options.now ?? Date.now;
   }
 
@@ -219,6 +246,75 @@ export class TaskService {
         ? summary.trim().slice(0, TASK_SUMMARY_LIMIT)
         : null;
     return this.store.update(taskId, { status, summary: clipped });
+  }
+
+  /** 将外部系统事件（如 GitHub PR/Issue Webhook）按关联链接路由至活跃任务线程并通知订阅者 */
+  public async routeExternalEvent(
+    event: ExternalTaskEvent,
+  ): Promise<RouteExternalEventResult> {
+    if (!this.store.findActiveByLinks) {
+      return { matchedTasks: [], notificationsSent: 0 };
+    }
+    const candidates = await this.store.findActiveByLinks(event.refs);
+    if (candidates.length === 0) {
+      return { matchedTasks: [], notificationsSent: 0 };
+    }
+
+    const matchedTasks: ExternalTaskMatch[] = [];
+    let notificationsSent = 0;
+    const timestamp = this.now();
+    const noteLine = `[${event.source}:${event.eventType}] ${event.summary}`.trim();
+
+    for (const task of candidates) {
+      if (task.status !== 'active') continue;
+      const existingEvents = Array.isArray(task.metadata.externalEvents)
+        ? (task.metadata.externalEvents as Array<Record<string, unknown>>)
+        : [];
+      if (
+        event.deliveryId &&
+        existingEvents.some((item) => item?.deliveryId === event.deliveryId)
+      ) {
+        continue;
+      }
+
+      const nextEvents = [
+        ...existingEvents,
+        {
+          source: event.source,
+          eventType: event.eventType,
+          ...(event.deliveryId ? { deliveryId: event.deliveryId } : {}),
+          summary: event.summary,
+          receivedAt: timestamp,
+          ...(event.payload ? { payload: event.payload } : {}),
+        },
+      ].slice(-MAX_EXTERNAL_EVENTS);
+
+      const nextSummary = [task.summary?.trim(), noteLine]
+        .filter((part): part is string => Boolean(part))
+        .join('\n')
+        .slice(-TASK_SUMMARY_LIMIT);
+
+      const updated =
+        (await this.store.update(task.id, {
+          summary: nextSummary,
+          metadata: {
+            ...task.metadata,
+            externalEvents: nextEvents,
+            lastExternalEventAt: timestamp,
+          },
+        })) ?? task;
+
+      const subscribers = await this.store.listSubscribers(task.id);
+      const match: ExternalTaskMatch = { task: updated, subscribers };
+      matchedTasks.push(match);
+
+      if (this.onExternalEvent) {
+        await this.onExternalEvent(event, match);
+        notificationsSent += subscribers.length > 0 ? subscribers.length : 1;
+      }
+    }
+
+    return { matchedTasks, notificationsSent };
   }
 
   public async subscribers(taskId: string): Promise<AgentTaskSubscription[]> {

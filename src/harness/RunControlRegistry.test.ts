@@ -119,4 +119,25 @@ describe('RunControlRegistry', () => {
     expect(registry.activeCount()).toBe(0);
     expect(registry.pendingCount()).toBe(0);
   });
+
+  it('supports pushSteering and consumes queued instructions once', async () => {
+    const registry = new RunControlRegistry();
+    expect(registry.pushSteering('cid-1', 'no active run')).toBe(false);
+
+    const run = registry.begin(message({ conversationId: 'cid-1' }));
+    await run.started;
+
+    expect(registry.pushSteering('cid-1', '请改用表格输出')).toBe(true);
+    expect(registry.pushSteering('cid-1', '只看近 7 天')).toBe(true);
+    expect(registry.consumeSteering('cid-1')).toEqual([
+      '请改用表格输出',
+      '只看近 7 天',
+    ]);
+    expect(registry.consumeSteering('cid-1')).toEqual([]);
+
+    // stop cleans up remaining steering queue
+    registry.pushSteering('cid-1', 'pending note');
+    registry.stop('cid-1');
+    expect(registry.consumeSteering('cid-1')).toEqual([]);
+  });
 });

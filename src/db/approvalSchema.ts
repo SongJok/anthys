@@ -1,4 +1,4 @@
-import { eq, gt, lt } from 'drizzle-orm';
+import { and, eq, gt, lt } from 'drizzle-orm';
 import { index, jsonb, pgTable, text, timestamp, uuid, varchar } from 'drizzle-orm/pg-core';
 import type { Database } from './client.js';
 import type {
@@ -6,12 +6,12 @@ import type {
   PendingToolAction,
 } from '../harness/ToolApprovalGate.js';
 
-/** 待确认写操作：每个会话最多一条，重启后仍可继续 /confirm */
+/** 待确认写操作：支持按会话并发保留多条（按 action id 主键存储），重启后仍可继续 /confirm */
 export const pendingActions = pgTable(
   'pending_actions',
   {
     id: uuid('id').primaryKey(),
-    conversationId: text('conversation_id').notNull().unique(),
+    conversationId: text('conversation_id').notNull(),
     toolName: text('tool_name').notNull(),
     args: jsonb('args')
       .$type<Record<string, unknown>>()
@@ -24,7 +24,10 @@ export const pendingActions = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
   },
-  (table) => [index('pending_actions_expires_idx').on(table.expiresAt)],
+  (table) => [
+    index('pending_actions_conv_idx').on(table.conversationId),
+    index('pending_actions_expires_idx').on(table.expiresAt),
+  ],
 );
 
 function toAction(row: typeof pendingActions.$inferSelect): PendingToolAction {
@@ -68,9 +71,9 @@ export class DrizzlePendingActionPersistence
         expiresAt: new Date(action.expiresAt),
       })
       .onConflictDoUpdate({
-        target: pendingActions.conversationId,
+        target: pendingActions.id,
         set: {
-          id: action.id,
+          conversationId: action.conversationId,
           toolName: action.toolName,
           args: action.args,
           risk: action.risk,
@@ -81,7 +84,21 @@ export class DrizzlePendingActionPersistence
       });
   }
 
-  public async remove(conversationId: string): Promise<void> {
+  public async remove(
+    conversationId: string,
+    actionId?: string,
+  ): Promise<void> {
+    if (actionId) {
+      await this.db
+        .delete(pendingActions)
+        .where(
+          and(
+            eq(pendingActions.conversationId, conversationId),
+            eq(pendingActions.id, actionId),
+          ),
+        );
+      return;
+    }
     await this.db
       .delete(pendingActions)
       .where(eq(pendingActions.conversationId, conversationId));

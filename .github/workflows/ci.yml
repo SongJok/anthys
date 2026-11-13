@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main, optimize_dingtalk]
+  pull_request:
+    branches: [main]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            web-console/pnpm-lock.yaml
+
+      - name: Install backend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install web-console dependencies
+        run: pnpm -C web-console install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Run backend tests
+        run: pnpm test
+
+      - name: Run web-console tests
+        run: pnpm -C web-console test
+
+      - name: Build web-console and server
+        run: pnpm build

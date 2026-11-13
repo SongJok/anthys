@@ -1,3 +1,5 @@
+import type { AgentStreamEvent } from '../types/core.js';
+
 /** 轻量 Prometheus 文本指标：计数器 + 仪表盘，不引入额外依赖 */
 
 type Labels = Record<string, string>;
@@ -52,5 +54,39 @@ export class MetricsRegistry {
     }
     if (extra?.trim()) lines.push(extra.trim());
     return `${lines.join('\n')}\n`;
+  }
+}
+
+/** 统一记录主运行、规划器、子代理及 Prompt Caching 指标，避免各入口重复埋点 */
+export function recordStreamEventMetrics(
+  metrics: MetricsRegistry,
+  event: AgentStreamEvent,
+): void {
+  metrics.inc('agent_events_total', { type: event.type });
+  if (event.type === 'tool_start') {
+    metrics.inc('agent_tool_calls_total');
+    return;
+  }
+  if (event.type === 'plan' && event.initial) {
+    metrics.inc('agent_planner_runs_total');
+    return;
+  }
+  if (event.type === 'tool_end' && event.traces?.length) {
+    for (const trace of event.traces) {
+      if (trace.kind === 'subagent') {
+        metrics.inc('agent_subagent_calls_total', { name: trace.name });
+      }
+    }
+    return;
+  }
+  if (event.type === 'error') {
+    metrics.inc('agent_errors_total');
+    return;
+  }
+  if (event.type === 'completed') {
+    metrics.inc('agent_tokens_total', undefined, event.usage.totalTokens);
+    if ((event.usage.cachedTokens ?? 0) > 0) {
+      metrics.inc('agent_cached_tokens_total', undefined, event.usage.cachedTokens!);
+    }
   }
 }

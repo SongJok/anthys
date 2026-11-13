@@ -35,6 +35,7 @@ export interface CleanupResult {
   startedAt: number;
   finishedAt: number;
   deleted: Record<RetentionKind, number>;
+  transcriptArchives?: number;
 }
 
 export interface DeletionResult {
@@ -86,10 +87,18 @@ export interface DataRetentionLogger {
   warn(obj: Record<string, unknown>, msg: string): void;
 }
 
+export interface TranscriptArchivePruner {
+  pruneOlderThan(
+    cutoffMs: number,
+    options?: { dryRun?: boolean },
+  ): Promise<number>;
+}
+
 export interface DataRetentionOptions {
   store: RetentionStore;
   policy: RetentionPolicy;
   attachmentsDir?: string;
+  transcriptArchive?: TranscriptArchivePruner;
   logger?: DataRetentionLogger;
   now?: () => number;
   /** 单次清理每张表的最大删除行数，默认 5000 */
@@ -189,6 +198,7 @@ export class DataRetentionService implements DataGovernancePort {
   private policy: RetentionPolicy;
   private readonly store: RetentionStore;
   private readonly attachmentsDir?: string;
+  private readonly transcriptArchive?: TranscriptArchivePruner;
   private readonly logger?: DataRetentionLogger;
   private readonly now: () => number;
   private readonly batchSize: number;
@@ -200,6 +210,7 @@ export class DataRetentionService implements DataGovernancePort {
     this.policy = normalizeRetentionPolicy(options.policy);
     this.store = options.store;
     this.attachmentsDir = options.attachmentsDir;
+    this.transcriptArchive = options.transcriptArchive;
     this.logger = options.logger;
     this.now = options.now ?? Date.now;
     this.batchSize = Math.max(1, options.batchSize ?? 5_000);
@@ -271,7 +282,6 @@ export class DataRetentionService implements DataGovernancePort {
         : await this.store.purge(kind, cutoff, this.batchSize);
     }
     if (this.attachmentsDir) {
-      const cutoff = startedAt - this.policy.attachmentsHours * 3_600_000;
       const attachment = await this.scanAttachments();
       const expired = attachment.expiredDirs;
       deleted.attachments = expired.length;
@@ -281,14 +291,22 @@ export class DataRetentionService implements DataGovernancePort {
         }
       }
     }
+    const transcriptArchives = this.transcriptArchive
+      ? await this.transcriptArchive.pruneOlderThan(cutoffs.messages, { dryRun })
+      : undefined;
     const result: CleanupResult = {
       dryRun,
       startedAt,
       finishedAt: this.now(),
       deleted,
+      ...(transcriptArchives !== undefined ? { transcriptArchives } : {}),
     };
     this.logger?.info(
-      { dryRun, deleted: result.deleted },
+      {
+        dryRun,
+        deleted: result.deleted,
+        ...(transcriptArchives !== undefined ? { transcriptArchives } : {}),
+      },
       'data retention cleanup finished',
     );
     return result;

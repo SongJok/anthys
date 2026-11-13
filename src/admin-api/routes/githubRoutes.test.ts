@@ -1,3 +1,4 @@
+import { createHmac } from 'node:crypto';
 import { Hono } from 'hono';
 import { describe, expect, it, vi } from 'vitest';
 import type { DynamicConfigCenter } from '../../config/DynamicConfigCenter.js';
@@ -5,7 +6,10 @@ import type {
   GithubAdminStatus,
   GithubConnectionTestResult,
 } from '../../types/skills-plugins-projects.js';
-import { createGithubRoutes } from './githubRoutes.js';
+import {
+  createGithubRoutes,
+  createGithubWebhookRoutes,
+} from './githubRoutes.js';
 
 const NOW = new Date('2026-11-01T10:00:00Z').getTime();
 
@@ -126,5 +130,108 @@ describe('GitHub 管理接口', () => {
     });
     expect(response.status).toBe(400);
     expect(github.test).not.toHaveBeenCalled();
+  });
+});
+
+describe('GitHub Webhook 验签与事件路由', () => {
+  const SECRET = 'whsec_test_secret_123';
+
+  function sign(body: string, secret = SECRET): string {
+    return (
+      'sha256=' + createHmac('sha256', secret).update(body, 'utf8').digest('hex')
+    );
+  }
+
+  it('未配置 secret 时 fail-closed 返回 503', async () => {
+    const prev = process.env.GITHUB_WEBHOOK_SECRET;
+    delete process.env.GITHUB_WEBHOOK_SECRET;
+    try {
+      const app = new Hono().route(
+        '/api/v1/webhooks',
+        createGithubWebhookRoutes({ secret: '' }),
+      );
+      const res = await app.request('/api/v1/webhooks/github', {
+        method: 'POST',
+        body: '{}',
+      });
+      expect(res.status).toBe(503);
+    } finally {
+      if (prev !== undefined) process.env.GITHUB_WEBHOOK_SECRET = prev;
+    }
+  });
+
+  it('签名缺失或篡改时返回 401', async () => {
+    const onEvent = vi.fn();
+    const app = new Hono().route(
+      '/api/v1/webhooks',
+      createGithubWebhookRoutes({ secret: SECRET, onEvent }),
+    );
+    const body = JSON.stringify({ action: 'opened' });
+    const badRes = await app.request('/api/v1/webhooks/github', {
+      method: 'POST',
+      headers: {
+        'x-github-event': 'pull_request',
+        'x-hub-signature-256': sign(body, 'wrong-secret'),
+      },
+      body,
+    });
+    expect(badRes.status).toBe(401);
+    expect(onEvent).not.toHaveBeenCalled();
+  });
+
+  it('验签通过后提取 PR 引用并路由至 onEvent', async () => {
+    const onEvent = vi.fn(async () => ({
+      matchedTasks: [{ task: { id: 'task-1' } as never, subscribers: [] }],
+      notificationsSent: 1,
+    }));
+    const app = new Hono().route(
+      '/api/v1/webhooks',
+      createGithubWebhookRoutes({ secret: SECRET, onEvent }),
+    );
+    const body = JSON.stringify({
+      action: 'opened',
+      repository: { full_name: 'SongJok/anthys', html_url: 'https://github.com/SongJok/anthys' },
+      pull_request: {
+        number: 88,
+        title: 'Optimize DingTalk runtime',
+        html_url: 'https://github.com/SongJok/anthys/pull/88',
+      },
+      sender: { login: 'octocat' },
+    });
+
+    const res = await app.request('/api/v1/webhooks/github', {
+      method: 'POST',
+      headers: {
+        'x-github-event': 'pull_request',
+        'x-github-delivery': 'deliv-88',
+        'x-hub-signature-256': sign(body),
+      },
+      body,
+    });
+
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as {
+      ok: boolean;
+      event: string;
+      matchedTaskIds: string[];
+      notificationsSent: number;
+    };
+    expect(json).toMatchObject({
+      ok: true,
+      event: 'pull_request.opened',
+      matchedTaskIds: ['task-1'],
+      notificationsSent: 1,
+    });
+    expect(onEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        source: 'github',
+        eventType: 'pull_request.opened',
+        deliveryId: 'deliv-88',
+        refs: [
+          { kind: 'url', ref: 'https://github.com/SongJok/anthys/pull/88' },
+          { kind: 'issue', ref: 'SongJok/anthys#88' },
+        ],
+      }),
+    );
   });
 });

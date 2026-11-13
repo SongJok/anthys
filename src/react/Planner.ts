@@ -5,9 +5,19 @@ import type {
   ToolDefinition,
 } from '../types/core.js';
 
+export interface PlannerUsage {
+  totalTokens: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  cachedTokens?: number;
+  durationMs?: number;
+}
+
 export interface PlannerInput {
   messages: ChatMessage[];
   tools: ToolDefinition[];
+  signal?: AbortSignal;
+  onUsage?: (usage: PlannerUsage) => void;
 }
 
 export type Planner = (input: PlannerInput) => Promise<PlanItem[] | null>;
@@ -76,18 +86,48 @@ export function parsePlanSteps(raw: string, maxSteps = 7): string[] {
 async function collectCompletion(
   model: ChatModel,
   messages: ChatMessage[],
-): Promise<string> {
+  signal?: AbortSignal,
+): Promise<{ text: string; usage: PlannerUsage }> {
+  const startedAt = Date.now();
   let text = '';
-  for await (const chunk of model.streamChat({
-    messages,
-    tools: [],
-    temperature: 0,
-    toolChoice: 'none',
-    enableNativeReasoning: false,
-  })) {
+  let totalTokens = 0;
+  let inputTokens = 0;
+  let outputTokens = 0;
+  let cachedTokens = 0;
+  for await (const chunk of model.streamChat(
+    {
+      messages,
+      tools: [],
+      temperature: 0,
+      toolChoice: 'none',
+      enableNativeReasoning: false,
+    },
+    signal,
+  )) {
     if (chunk.contentDelta) text += chunk.contentDelta;
+    if (chunk.usage?.totalTokens !== undefined) {
+      totalTokens = chunk.usage.totalTokens;
+    }
+    if (chunk.usage?.inputTokens !== undefined) {
+      inputTokens = chunk.usage.inputTokens;
+    }
+    if (chunk.usage?.outputTokens !== undefined) {
+      outputTokens = chunk.usage.outputTokens;
+    }
+    if (chunk.usage?.cachedTokens !== undefined) {
+      cachedTokens = chunk.usage.cachedTokens;
+    }
   }
-  return text;
+  return {
+    text,
+    usage: {
+      totalTokens,
+      ...(inputTokens > 0 ? { inputTokens } : {}),
+      ...(outputTokens > 0 ? { outputTokens } : {}),
+      ...(cachedTokens > 0 ? { cachedTokens } : {}),
+      durationMs: Date.now() - startedAt,
+    },
+  };
 }
 
 /**
@@ -103,21 +143,29 @@ export function createPlanner(options: PlannerOptions): Planner | undefined {
     typeof options.model === 'function' ? options.model() : options.model;
 
   return async (input) => {
+    if (input.signal?.aborted) return null;
     const question = lastUserContent(input.messages);
     if (question.length < minQuestionChars && input.tools.length < minTools) {
       return null;
     }
     try {
-      const raw = await collectCompletion(resolveModel(), [
-        { role: 'system', content: PLANNER_SYSTEM_PROMPT },
-        {
-          role: 'user',
-          content: [
-            `可用工具：${input.tools.map((tool) => tool.name).join(', ') || '无'}`,
-            `用户问题：${question}`,
-          ].join('\n'),
-        },
-      ]);
+      const { text: raw, usage } = await collectCompletion(
+        resolveModel(),
+        [
+          { role: 'system', content: PLANNER_SYSTEM_PROMPT },
+          {
+            role: 'user',
+            content: [
+              `可用工具：${input.tools.map((tool) => tool.name).join(', ') || '无'}`,
+              `用户问题：${question}`,
+            ].join('\n'),
+          },
+        ],
+        input.signal,
+      );
+      if (usage.totalTokens > 0) {
+        input.onUsage?.(usage);
+      }
       const steps = parsePlanSteps(raw, maxSteps);
       if (steps.length < 2) return null;
       return steps.map((text, index): PlanItem => ({
@@ -126,12 +174,14 @@ export function createPlanner(options: PlannerOptions): Planner | undefined {
         status: 'pending',
       }));
     } catch (error) {
-      options.logger?.warn(
-        {
-          error: error instanceof Error ? error.message : String(error),
-        },
-        'planner failed, continuing without plan',
-      );
+      if (!input.signal?.aborted) {
+        options.logger?.warn(
+          {
+            error: error instanceof Error ? error.message : String(error),
+          },
+          'planner failed, continuing without plan',
+        );
+      }
       return null;
     }
   };

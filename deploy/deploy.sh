@@ -26,7 +26,7 @@ $SUDO -u "$APP_USER" git -C "$APP_PATH" checkout "$BRANCH"
 $SUDO -u "$APP_USER" git -C "$APP_PATH" pull --ff-only origin "$BRANCH"
 
 log "安装依赖"
-# 不能加 --prod：启动脚本用的 tsx 在 devDependencies 里
+# db:push / db:extend / build 需要 drizzle-kit、tsx、typescript 等 devDependencies
 $SUDO -u "$APP_USER" pnpm -C "$APP_PATH" install --frozen-lockfile
 $SUDO -u "$APP_USER" pnpm -C "$APP_PATH/web-console" install --frozen-lockfile
 
@@ -34,13 +34,13 @@ log "准备运行时目录"
 $SUDO -u "$APP_USER" mkdir -p "$APP_PATH/.workspace" "$APP_PATH/.state/dws-profiles"
 $SUDO chmod 700 "$APP_PATH/.state/dws-profiles"
 
-log "构建（控制台静态资源 + 服务端）"
+log "构建（控制台静态资源 + 服务端 dist/index.js）"
 $SUDO -u "$APP_USER" pnpm -C "$APP_PATH" build
 
 if [ "$SKIP_DB_PUSH" != "1" ]; then
   log "同步数据库表结构"
   $SUDO -u "$APP_USER" pnpm -C "$APP_PATH" run db:push
-  log "补齐项目索引（tsvector / pg_trgm / HNSW）"
+  log "补齐扩展索引与约束迁移（pgvector HNSW / pg_trgm / tsvector / pending_actions）"
   $SUDO -u "$APP_USER" pnpm -C "$APP_PATH" run db:extend
 fi
 

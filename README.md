@@ -232,6 +232,8 @@ pnpm run db:seed      # 可选：预写入默认人设与模型配置，已有�
 | `LOOP_MAX_PARALLEL_TOOLS` | `4` | 同一轮内工具调用的最大并发数 |
 | `LOOP_CONVERGENCE_CHECK` | `true` | 是否启用信息收敛自检 |
 | `TOOL_TIMEOUT_SECONDS` | `300` | 单次工具调用（含 MCP）的最长等待；实际还受 `config/mcp-servers.json` 的 `timeoutMs`（默认 480 秒）约束 |
+| `ASYNC_REACT_ENABLED` | `false` | 高耗时同步对话超出阈值后是否自动转入后台异步 Job 执行 |
+| `ASYNC_REACT_THRESHOLD_SECONDS` | `25` | `ASYNC_REACT_ENABLED=true` 时触发异步接管的耗时阈值（秒） |
 
 **记忆**
 
@@ -260,6 +262,7 @@ pnpm run db:seed      # 可选：预写入默认人设与模型配置，已有�
 | --- | --- | --- |
 | `GLOSSARY_PROMPT_ENABLED` | `true` | 是否把高频术语注入系统提示词 |
 | `GLOSSARY_PROMPT_LIMIT` | `80` | 系统提示注入条数上限，最大 100 |
+| `GLOSSARY_PROMPT_CHAR_BUDGET` | `4000` | 注入系统提示的术语段落字符预算，超出时优先保留高频与当前提问高相关术语 |
 | `GLOSSARY_RETRIEVAL_LIMIT` | `4` | 每次提问检索的术语卡条数上限，最大 10 |
 
 术语内容全部在控制台「术语知识库」页面维护；启用 `EMBEDDING_ENABLED` 后，术语检索会在关键词未命中时回退 pgvector 相似度召回，历史术语的向量会在启动后台补齐。
@@ -293,6 +296,7 @@ pnpm run db:seed      # 可选：预写入默认人设与模型配置，已有�
 | `GITHUB_API_BASE` | `https://api.github.com` | 必须是 HTTPS，且主机在默认白名单或 `GITHUB_ALLOWED_HOSTS` 内 |
 | `GITHUB_ALLOWED_HOSTS` | 空 | 额外允许的 GitHub Enterprise API 主机名，逗号分隔 |
 | `GITHUB_CACHE_TTL_SECONDS` | `300` | ETag / 304 缓存秒数，`0` 关闭，最大 300 |
+| `GITHUB_WEBHOOK_SECRET` | 空 | `/api/v1/webhooks/github` 的 HMAC-SHA256 验签密钥，未配置则关闭接口 |
 
 技能、插件与项目的完整命令、清单字段和失败模式见 [开发文档](docs/skills-plugins-project-handbook-design.md)。
 
@@ -377,6 +381,8 @@ pnpm run db:seed      # 可选：预写入默认人设与模型配置，已有�
 | `SUBAGENT_ENABLED` | `false` | 是否向模型暴露 `delegate_research`，派发只读子代理做专题检索 |
 | `SUBAGENT_TIMEOUT_SECONDS` | `90` | 单个子代理的墙钟上限（秒） |
 | `SUBAGENT_MAX_TOKENS` | `20000` | 单个子代理的 Token 预算 |
+| `WORKER_ROUTER_TOOL_ENABLED` | `true` | 是否向主代理暴露多 Worker 路由工具 `dispatch_worker` |
+| `SCHEDULED_TASK_MAX_CONCURRENCY` | `3` | 定时任务调度器的最大并发执行数 |
 
 规划器只产出步骤文本并注入系统提示，不额外占用工具调用；计划进度会在卡片轨迹中实时更新。子代理只能使用只读工具，拥有独立预算与超时，且不会触发写操作确认流程。
 
@@ -411,7 +417,9 @@ pnpm run db:seed      # 可选：预写入默认人设与模型配置，已有�
 
 | 变量 | 默认值 | 说明 |
 | --- | --- | --- |
-| `ADMIN_API_TOKEN` | 空 | 管理 API 的 Bearer Token；为空时不做校验 |
+| `ADMIN_API_TOKEN` | 空 | 管理 API 完全权限 Token；支持 Bearer 头与 `/api/v1/auth/session` HMAC HttpOnly Cookie 会话 |
+| `ADMIN_VIEWER_TOKEN` | 空 | 只读访客 Token；仅允许 GET/HEAD/OPTIONS 与 `/metrics`，写操作返回 `403` |
+| `ADMIN_TRUST_ACTOR_HEADER` | `false` | 是否采信请求头 `X-Admin-Staff-Id` 作为审计操作人，仅受信反代场景开启 |
 | `ADMIN_PORT` | `8787` | 管理 API 与控制台端口 |
 | `ADMIN_STAFF_IDS` | 空 | 允许使用管理指令的钉钉 StaffId（逗号分隔），与 `DINGTALK_ADMIN` 合并去重 |
 | `DINGTALK_ADMIN` | 空 | 机器人管理员的 StaffId，与 `ADMIN_STAFF_IDS` 等价；也可在控制台「系统设置」的管理员白名单中调整 |
@@ -429,11 +437,16 @@ pnpm run db:seed      # 可选：预写入默认人设与模型配置，已有�
 ### 构建与启动
 
 ```bash
-pnpm build     # 构建控制台静态资源，并编译服务端到 dist
-pnpm start     # 通过 tsx 直接运行 src/index.ts
+pnpm build               # 构建控制台静态资源，并编译服务端到 dist/index.js
+pnpm start               # 直接使用 Node 运行编译产物 dist/index.js（生产推荐）
+pnpm start:dev           # 开发期通过 tsx 直接运行 src/index.ts
+pnpm typecheck           # TypeScript 类型检查
+pnpm lint                # 前后端类型检查 + 静态安全规范检查
+pnpm test                # 运行后端单元测试
+pnpm -C web-console test # 运行管理控制台单元测试
 ```
 
-> 启动脚本依赖 `tsx`，安装依赖时请保留 devDependencies（不要使用 `--prod`）。
+> 生产运行 `pnpm start` 不再依赖 `tsx` 热编译启动；首次拉取或升级后请执行 `pnpm build` 生成 `dist/index.js` 与 `web-console/dist`。
 
 启动后：
 

@@ -16,6 +16,7 @@ import { canReadProjectContent } from './ProjectRegistry.js';
 const DEFAULT_LIMIT = 8;
 const MAX_LIMIT = 20;
 const MAX_SNIPPET_CHARS = 800;
+export const RRF_K = 60;
 
 export interface ProjectSearchServiceLogger {
   warn(obj: Record<string, unknown>, message: string): void;
@@ -141,12 +142,13 @@ export class ProjectSearchService {
     const pathLike = input.pathGlob
       ? pathGlobToLike(input.pathGlob)
       : undefined;
-    const kindFilter = this.kindsOf(input.kind ?? 'all');
+    const kind = input.kind ?? 'all';
+    const kindFilter = this.kindsOf(kind);
     const symbolHits =
-      input.kind === 'all' || input.kind === 'symbol'
+      kind === 'all' || kind === 'symbol'
         ? await this.symbolHits(input, query, pathLike, limit, warnings)
         : [];
-    if (input.kind === 'symbol') {
+    if (kind === 'symbol') {
       const deduped = this.dedupe(symbolHits.map((hit) => ({ hit, candidate: null })));
       return {
         projectId: input.project.id,
@@ -201,28 +203,51 @@ export class ProjectSearchService {
 
     const tokens = queryTokens(query);
     const candidates = Array.from(merged.values());
-    const maxFts = Math.max(0, ...candidates.map((candidate) => candidate.ftsScore));
-    const hasVector = candidates.some((candidate) => candidate.vectorScore > 0);
     const weightedTokens = this.weightTokens(tokens, candidates);
-    for (const candidate of candidates) {
-      const ftsNorm = maxFts > 0 ? candidate.ftsScore / maxFts : 0;
-      const trigramNorm = Math.min(1, candidate.trigramScore);
-      const contentCoverage = this.tokenBoost(candidate.content, weightedTokens);
-      const substring = candidate.content.toLowerCase().includes(query.toLowerCase());
-      let keywordScore =
-        0.5 * ftsNorm + 0.3 * trigramNorm + 0.2 * contentCoverage;
-      if (substring) keywordScore = Math.max(keywordScore, 0.8);
-      const pathBoost = this.tokenBoost(candidate.path, weightedTokens);
-      const symbolBoost = this.tokenBoost(candidate.symbol, weightedTokens);
-      if (pathBoost > 0) candidate.matchedBy.add('path');
-      const score = hasVector
-        ? 0.45 * Math.max(0, candidate.vectorScore) +
-          0.35 * keywordScore +
-          0.1 * pathBoost +
-          0.1 * symbolBoost
-        : 0.7 * keywordScore + 0.15 * pathBoost + 0.15 * symbolBoost;
-      candidate.score = score;
-    }
+    const lowerQuery = query.toLowerCase();
+
+    const ftsRanked = candidates
+      .filter((candidate) => candidate.ftsScore > 0)
+      .sort(
+        (a, b) => b.ftsScore - a.ftsScore || a.id.localeCompare(b.id),
+      );
+    this.applyRrfRank(ftsRanked, 1);
+
+    const trigramRanked = candidates
+      .filter((candidate) => candidate.trigramScore > 0)
+      .sort(
+        (a, b) => b.trigramScore - a.trigramScore || a.id.localeCompare(b.id),
+      );
+    this.applyRrfRank(trigramRanked, 0.9);
+
+    const vectorRanked = candidates
+      .filter((candidate) => candidate.vectorScore > 0)
+      .sort(
+        (a, b) => b.vectorScore - a.vectorScore || a.id.localeCompare(b.id),
+      );
+    this.applyRrfRank(vectorRanked, 1.2);
+
+    const structuralRanked = candidates
+      .map((candidate) => {
+        const contentCoverage = this.tokenBoost(candidate.content, weightedTokens);
+        const substring = candidate.content.toLowerCase().includes(lowerQuery);
+        const pathBoost = this.tokenBoost(candidate.path, weightedTokens);
+        const symbolBoost = this.tokenBoost(candidate.symbol, weightedTokens);
+        if (pathBoost > 0) candidate.matchedBy.add('path');
+        const strength =
+          (substring ? 1.5 : 0) +
+          contentCoverage * 0.6 +
+          pathBoost * 0.9 +
+          symbolBoost * 1.1;
+        return { candidate, strength };
+      })
+      .filter((item) => item.strength > 0)
+      .sort(
+        (a, b) =>
+          b.strength - a.strength || a.candidate.id.localeCompare(b.candidate.id),
+      )
+      .map((item) => item.candidate);
+    this.applyRrfRank(structuralRanked, 0.8);
 
     const sorted = candidates.sort((left, right) => {
       return (
@@ -304,7 +329,8 @@ export class ProjectSearchService {
     if (symbols.length === 0) return [];
     const documents = new Map<string, { text: string; language: string }>();
     const hits: ProjectSearchHit[] = [];
-    for (const symbol of symbols) {
+    for (let index = 0; index < symbols.length; index += 1) {
+      const symbol = symbols[index]!;
       let document = documents.get(symbol.path);
       if (document === undefined) {
         const row = await this.store.getDocument(input.snapshot.id, symbol.path);
@@ -322,12 +348,19 @@ export class ProjectSearchService {
         endLine: symbol.endLine,
         symbol: symbol.name,
         language: document.language,
-        score: 0.9,
+        // Align symbol hit scores onto the same RRF scale so multi-channel chunk hits outrank single-signal symbol matches
+        score: 1.1 / (RRF_K + index + 1),
         content: snippetOf(content, query),
         match: 'symbol',
       });
     }
     return hits;
+  }
+
+  private applyRrfRank(candidates: MergedCandidate[], weight: number): void {
+    for (let index = 0; index < candidates.length; index += 1) {
+      candidates[index]!.score += weight / (RRF_K + index + 1);
+    }
   }
 
   private kindsOf(kind: 'all' | 'code' | 'doc' | 'symbol'): string[] | undefined {

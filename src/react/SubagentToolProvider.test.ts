@@ -177,4 +177,48 @@ describe('SubagentToolProvider', () => {
     expect(output.text).toContain('Error');
     expect(model.requests).toHaveLength(0);
   });
+
+  it('向外传播 AbortSignal，避免重复扫描工具提供方，并返回 token usage', async () => {
+    let getToolsCount = 0;
+    const singleProvider: IToolProvider = {
+      providerName: 'counted',
+      async getTools() {
+        getToolsCount += 1;
+        return [
+          {
+            name: 'read_item',
+            description: '只读测试',
+            risk: 'read',
+            parametersJsonSchema: { type: 'object', properties: {} },
+            execute: async () => 'done',
+          },
+        ];
+      },
+    };
+    const model = new ScriptedModel([
+      [
+        { contentDelta: '研究结论' },
+        { finishReason: 'stop', usage: { totalTokens: 33, inputTokens: 20, outputTokens: 13 } },
+      ],
+    ]);
+    const subagent = new SubagentToolProvider({
+      model,
+      providers: () => [singleProvider],
+      policy,
+    });
+    const [tool] = await subagent.getTools(context());
+    getToolsCount = 0;
+    const out = await tool!.executeStructured!({ task: '统计调用' }, context());
+    expect(getToolsCount).toBe(1);
+    expect(out.usage?.totalTokens).toBe(33);
+    expect(out.traces?.[0]?.kind).toBe('subagent');
+
+    const controller = new AbortController();
+    controller.abort();
+    const abortedOut = await tool!.executeStructured!(
+      { task: '被取消的任务' },
+      { ...context(), signal: controller.signal },
+    );
+    expect(abortedOut.text).toContain('已停止生成');
+  });
 });

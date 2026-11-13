@@ -25,7 +25,9 @@ export function isToolAllowedForScope(
   scope: WorkerToolScope,
 ): boolean {
   if (tool.name.startsWith('admin_')) return false;
-  if (tool.name === 'delegate_research') return false;
+  if (tool.name === 'delegate_research' || tool.name === 'dispatch_worker') {
+    return false;
+  }
   if (scope.allow && !scope.allow.some((p) => matchesToolPattern(p, tool.name))) {
     return false;
   }

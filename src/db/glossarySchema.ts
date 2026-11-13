@@ -79,6 +79,10 @@ export const glossaryTerms = pgTable(
       table.injectToPrompt,
       table.promptPriority,
     ),
+    index('glossary_terms_embedding_idx').using(
+      'hnsw',
+      sql`${table.embedding} vector_cosine_ops`,
+    ),
   ],
 );
 

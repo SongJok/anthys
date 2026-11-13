@@ -17,11 +17,13 @@
     ]
   },
   "scripts": {
-    "start": "tsx src/index.ts",
+    "start": "node dist/index.js",
+    "start:dev": "tsx src/index.ts",
     "dev": "tsx watch src/index.ts",
-    "build": "pnpm -C web-console build && tsc",
-    "build:server": "tsc",
+    "build": "pnpm -C web-console build && pnpm run build:server",
+    "build:server": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
+    "lint": "pnpm run typecheck && pnpm -C web-console exec tsc --noEmit && tsx scripts/lint.ts",
     "db:push": "drizzle-kit push",
     "db:extend": "tsx src/db/extend.ts",
     "db:generate": "drizzle-kit generate",

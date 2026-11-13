@@ -54,15 +54,24 @@ export class OpenAiVisionDescriber implements VisionDescriber {
     this.maxBytes = options.maxBytes ?? 8 * 1024 * 1024;
   }
 
-  public async describe(attachment: StoredAttachment): Promise<string | null> {
+  public async describe(
+    attachment: StoredAttachment,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<string | null> {
     if (attachment.type !== 'image') return null;
+    if (options.signal?.aborted) return null;
     try {
       const bytes = await readFile(attachment.localPath);
+      if (options.signal?.aborted) return null;
       if (bytes.byteLength > this.maxBytes) {
         throw new Error(`图片超过 ${Math.round(this.maxBytes / 1024 / 1024)}MB 上限`);
       }
       const mime = attachment.mimeType ?? 'image/png';
       const dataUrl = `data:${mime};base64,${bytes.toString('base64')}`;
+      const timeoutSignal = AbortSignal.timeout(this.timeoutMs);
+      const signal = options.signal
+        ? AbortSignal.any([timeoutSignal, options.signal])
+        : timeoutSignal;
       const response = await this.fetchImpl(this.endpoint, {
         method: 'POST',
         headers: {
@@ -83,7 +92,7 @@ export class OpenAiVisionDescriber implements VisionDescriber {
             },
           ],
         }),
-        signal: AbortSignal.timeout(this.timeoutMs),
+        signal,
       });
       if (!response.ok) {
         throw new Error(`视觉接口返回 HTTP ${response.status}`);

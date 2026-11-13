@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { DynamicLoopGuard, type LoopStepResult } from '../harness/DynamicLoopGuard.js';
 import { formatRuntimeRefusal } from '../harness/RequestAdmission.js';
+import { isReadOnlyTool } from '../tools/toolRisk.js';
 import type {
   AgentEngine,
   AgentStreamEvent,
@@ -101,12 +102,15 @@ export interface ReActRunnerOptions {
   };
   /** 每次看门狗介入时回调，用于指标与审计 */
   onWatchdog?: (decision: WatchdogDecision) => void;
+  /** 每轮推理前消费进行中会话的实时引导指令（active steering） */
+  consumeSteering?: (context: ExecutionContext) => string[];
 }
 
 interface TurnResult {
   turnId: string;
   content: string;
   reasoning: string;
+  reasoningSignature?: string;
   toolCalls: ChatToolCall[];
   finishReason: string | null;
   tokens: number;
@@ -131,6 +135,8 @@ interface ToolExecutionResult {
   datasetKey?: string;
   citations?: StreamCitation[];
   instructions?: ToolInstruction[];
+  usage?: ToolExecutionOutput['usage'];
+  traces?: ToolExecutionOutput['traces'];
 }
 
 function truncate(text: string, limit: number): string {
@@ -349,6 +355,8 @@ export class ReActRunner implements AgentEngine {
     let skipFinalTurn = false;
     let stopped = false;
     let toolsDisabled = false;
+    let executedMutatingTool = false;
+    let hallucinationRetries = 0;
     let watchdogOutcome: WatchdogOutcome | undefined;
     const citations: StreamCitation[] = [];
     const citationKeys = new Set<string>();
@@ -412,14 +420,30 @@ export class ReActRunner implements AgentEngine {
       let planItems: PlanItem[] | null = null;
       let planCursor = 0;
       if (this.options.planner) {
+        const planStartedAt = this.now();
+        let planUsageTokens = 0;
         try {
           const planned = await this.options.planner({
             messages: input.messages,
             tools,
+            signal: runController.signal,
+            onUsage: (planUsage) => {
+              planUsageTokens += planUsage.totalTokens;
+              totalTokens += planUsage.totalTokens;
+              inputTokens += planUsage.inputTokens ?? 0;
+              outputTokens += planUsage.outputTokens ?? 0;
+              cachedTokens += planUsage.cachedTokens ?? 0;
+            },
           });
           if (planned && planned.length > 0) {
             planItems = planned;
-            emit({ type: 'plan', items: planned });
+            emit({
+              type: 'plan',
+              items: planned,
+              initial: true,
+              durationMs: this.now() - planStartedAt,
+              ...(planUsageTokens > 0 ? { tokens: planUsageTokens } : {}),
+            });
             pushSystemOnce(messages, renderPlanPrompt(planned));
           }
         } catch {
@@ -459,6 +483,16 @@ export class ReActRunner implements AgentEngine {
         ) {
           stopForWatchdog();
           break;
+        }
+
+        const steeringNotes = this.options.consumeSteering?.(context) ?? [];
+        for (const note of steeringNotes) {
+          const trimmed = note.trim();
+          if (!trimmed) continue;
+          messages.push({
+            role: 'system',
+            content: `[用户实时引导] ${trimmed}`,
+          });
         }
 
         steps += 1;
@@ -511,12 +545,14 @@ export class ReActRunner implements AgentEngine {
             break;
           }
           if (
-            steps === 1 &&
+            !executedMutatingTool &&
+            hallucinationRetries < 2 &&
             !toolsDisabled &&
             toolSchemas.length > 0 &&
-            maxIterations > 1 &&
+            maxIterations > steps &&
             isHallucinatedToolAction(turn.content)
           ) {
+            hallucinationRetries += 1;
             answer = '';
             emit({
               type: 'answer_reset',
@@ -550,8 +586,23 @@ export class ReActRunner implements AgentEngine {
           content: turn.content,
           toolCalls: turn.toolCalls,
           ...(turn.reasoning ? { reasoning: turn.reasoning } : {}),
+          ...(turn.reasoningSignature
+            ? { reasoningSignature: turn.reasoningSignature }
+            : {}),
         });
         for (const execution of executions) {
+          if (execution.usage) {
+            totalTokens += execution.usage.totalTokens;
+            inputTokens += execution.usage.inputTokens ?? 0;
+            outputTokens += execution.usage.outputTokens ?? 0;
+            cachedTokens += execution.usage.cachedTokens ?? 0;
+          }
+          if (!execution.isError && !execution.denied) {
+            const executedTool = toolMap.get(execution.name);
+            if (executedTool && !isReadOnlyTool(executedTool)) {
+              executedMutatingTool = true;
+            }
+          }
           if (execution.citations?.length) addCitations(execution.citations);
           messages.push({
             role: 'tool',
@@ -561,10 +612,13 @@ export class ReActRunner implements AgentEngine {
           });
         }
 
-        const denied = executions.find((execution) => execution.denied);
-        if (denied) {
-          answer += denied.content;
-          emit({ type: 'answer_delta', content: denied.content });
+        const denied = executions.filter((execution) => execution.denied);
+        if (denied.length > 0) {
+          const combinedDenied = [...new Set(denied.map((item) => item.content))].join(
+            '\n\n',
+          );
+          answer += combinedDenied;
+          emit({ type: 'answer_delta', content: combinedDenied });
           skipFinalTurn = true;
           break;
         }
@@ -855,10 +909,62 @@ export class ReActRunner implements AgentEngine {
       });
     }
 
+    const approvalDecisions = new Map<string, ToolApprovalDecision>();
+    if (this.options.approval) {
+      let blockedInBatch = false;
+      for (const item of prepared) {
+        if (item.parseError) continue;
+        const tool = toolMap.get(item.call.function.name);
+        if (!tool) continue;
+        const mutating = !isReadOnlyTool(tool) || tool.name.startsWith('admin_');
+        if (
+          blockedInBatch &&
+          tool.risk !== 'read' &&
+          (tool.risk !== undefined || mutating)
+        ) {
+          approvalDecisions.set(item.stepId, {
+            approved: false,
+            reason: '同轮前序写操作正在等待确认，后续写操作已暂停等待处理。',
+          });
+          continue;
+        }
+        let decision: ToolApprovalDecision;
+        try {
+          decision = await this.options.approval(
+            {
+              toolName: tool.name,
+              args: item.args,
+              ...(tool.risk ? { risk: tool.risk } : {}),
+              ...(tool.source ? { source: tool.source } : {}),
+              conversationId: context.conversationId,
+              senderStaffId: context.senderStaffId,
+            },
+            context,
+          );
+        } catch (error) {
+          decision = {
+            approved: false,
+            reason: `工具审批流程异常，已阻止执行：${error instanceof Error ? error.message : String(error)}`,
+          };
+        }
+        approvalDecisions.set(item.stepId, decision);
+        if (!decision.approved) {
+          blockedInBatch = true;
+        }
+      }
+    }
+
     const results = await mapWithConcurrency(
       prepared,
       maxParallelTools,
-      (item) => this.executeTool(item, toolMap, context, emit, turnId),
+      (item) =>
+        this.executeTool(
+          item,
+          toolMap,
+          context,
+          emit,
+          approvalDecisions.get(item.stepId),
+        ),
     );
 
     for (const result of results) {
@@ -872,6 +978,7 @@ export class ReActRunner implements AgentEngine {
         durationMs: result.durationMs,
         truncated: result.truncated,
         datasetKey: result.datasetKey,
+        ...(result.traces?.length ? { traces: result.traces } : {}),
       });
     }
     return results;
@@ -887,7 +994,7 @@ export class ReActRunner implements AgentEngine {
     toolMap: Map<string, ToolDefinition>,
     context: ExecutionContext,
     emit: (event: AgentStreamEvent) => void,
-    turnId: string,
+    preApprovedDecision?: ToolApprovalDecision,
   ): Promise<ToolExecutionResult> {
     const { call, stepId } = item;
     const startedAt = this.now();
@@ -916,24 +1023,26 @@ export class ReActRunner implements AgentEngine {
     }
 
     if (this.options.approval) {
-      let decision: ToolApprovalDecision;
-      try {
-        decision = await this.options.approval(
-          {
-            toolName: tool.name,
-            args: item.args,
-            ...(tool.risk ? { risk: tool.risk } : {}),
-            ...(tool.source ? { source: tool.source } : {}),
-            conversationId: context.conversationId,
-            senderStaffId: context.senderStaffId,
-          },
-          context,
-        );
-      } catch (error) {
-        decision = {
-          approved: false,
-          reason: `工具审批流程异常，已阻止执行：${error instanceof Error ? error.message : String(error)}`,
-        };
+      let decision = preApprovedDecision;
+      if (!decision) {
+        try {
+          decision = await this.options.approval(
+            {
+              toolName: tool.name,
+              args: item.args,
+              ...(tool.risk ? { risk: tool.risk } : {}),
+              ...(tool.source ? { source: tool.source } : {}),
+              conversationId: context.conversationId,
+              senderStaffId: context.senderStaffId,
+            },
+            context,
+          );
+        } catch (error) {
+          decision = {
+            approved: false,
+            reason: `工具审批流程异常，已阻止执行：${error instanceof Error ? error.message : String(error)}`,
+          };
+        }
       }
       if (!decision.approved) {
         const content =
@@ -1030,6 +1139,8 @@ export class ReActRunner implements AgentEngine {
         ...(output.instructions?.length
           ? { instructions: output.instructions }
           : {}),
+        ...(output.usage ? { usage: output.usage } : {}),
+        ...(output.traces?.length ? { traces: output.traces } : {}),
       });
     } catch (error) {
       execution.catch(() => undefined);
@@ -1102,6 +1213,7 @@ export class ReActRunner implements AgentEngine {
     >();
     let content = '';
     let reasoning = '';
+    let reasoningSignature = '';
     let tokens = 0;
     let inputTokens = 0;
     let outputTokens = 0;
@@ -1150,6 +1262,9 @@ export class ReActRunner implements AgentEngine {
             content: chunk.reasoningDelta,
             turnId,
           });
+        }
+        if (chunk.reasoningSignatureDelta) {
+          reasoningSignature += chunk.reasoningSignatureDelta;
         }
         if (chunk.contentDelta) {
           content += chunk.contentDelta;
@@ -1234,6 +1349,7 @@ export class ReActRunner implements AgentEngine {
       turnId,
       content,
       reasoning,
+      ...(reasoningSignature ? { reasoningSignature } : {}),
       toolCalls,
       finishReason,
       tokens,
@@ -1272,7 +1388,12 @@ function toToolSchema(tool: ToolDefinition): ToolSchema {
 }
 
 function pushSystemOnce(messages: ChatMessage[], text: string): void {
-  const last = messages[messages.length - 1];
-  if (last && last.role === 'system' && last.content === text) return;
+  if (
+    messages.some(
+      (message) => message.role === 'system' && message.content === text,
+    )
+  ) {
+    return;
+  }
   messages.push({ role: 'system', content: text });
 }

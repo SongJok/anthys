@@ -93,6 +93,11 @@ export interface AddAgentTaskLinkInput {
   metadata?: Record<string, unknown>;
 }
 
+export interface ExternalTaskLinkRef {
+  kind?: AgentTaskLinkKind;
+  ref: string;
+}
+
 export interface AgentTaskStore {
   create(input: CreateAgentTaskInput): Promise<AgentTask>;
   get(id: string): Promise<AgentTask | null>;
@@ -100,6 +105,8 @@ export interface AgentTaskStore {
   update(id: string, patch: UpdateAgentTaskInput): Promise<AgentTask | null>;
   addLink(input: AddAgentTaskLinkInput): Promise<AgentTaskLink>;
   listLinks(taskId: string): Promise<AgentTaskLink[]>;
+  /** 按外部引用反查活跃（非 closed）或处于 active 状态的任务线程 */
+  findActiveByLinks?(refs: ExternalTaskLinkRef[]): Promise<AgentTask[]>;
   subscribe(input: {
     taskId: string;
     staffId: string;

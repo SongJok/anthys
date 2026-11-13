@@ -566,4 +566,69 @@ describe('AnthropicChatModel', () => {
       'overloaded',
     );
   });
+
+  it('preserves thinking signatures, keeps mid-stream system chronological, and avoids silent {} on invalid tool args', async () => {
+    const converted = toAnthropicMessages([
+      { role: 'system', content: '主系统提示词' },
+      { role: 'user', content: '开始查询' },
+      {
+        role: 'assistant',
+        content: '',
+        reasoning: '需要先查状态',
+        reasoningSignature: 'sig_abc123',
+        toolCalls: [
+          {
+            id: 'toolu_1',
+            type: 'function',
+            function: { name: 'check_status', arguments: '{bad json' },
+          },
+        ],
+      },
+      { role: 'tool', toolCallId: 'toolu_1', content: 'ok' },
+      { role: 'system', content: '[已加载技能：demo]' },
+    ]);
+
+    expect(converted.system).toBe('主系统提示词');
+    expect(converted.messages).toHaveLength(3);
+    expect(converted.messages[1]).toEqual({
+      role: 'assistant',
+      content: [
+        { type: 'thinking', thinking: '需要先查状态', signature: 'sig_abc123' },
+        {
+          type: 'tool_use',
+          id: 'toolu_1',
+          name: 'check_status',
+          input: expect.objectContaining({
+            __rawArguments: '{bad json',
+            __parseError: expect.stringContaining('解析失败'),
+          }),
+        },
+      ],
+    });
+    expect(converted.messages[2]).toEqual({
+      role: 'user',
+      content: [
+        { type: 'tool_result', tool_use_id: 'toolu_1', content: 'ok' },
+        {
+          type: 'text',
+          text: '<system-reminder>\n[已加载技能：demo]\n</system-reminder>',
+        },
+      ],
+    });
+
+    const body = sseBody([
+      '{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"abc"}}',
+      '{"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"sig_xyz"}}',
+      '{"type":"message_stop"}',
+    ]);
+    const fetchImpl = vi.fn(async () => new Response(body, { status: 200 }));
+    const model = new AnthropicChatModel({
+      baseUrl: 'https://api.anthropic.test',
+      apiKey: 'sk-ant-test',
+      model: 'claude-sonnet-4',
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    const chunks = await collect(model.streamChat(makeRequest()));
+    expect(chunks.some((c) => c.reasoningSignatureDelta === 'sig_xyz')).toBe(true);
+  });
 });

@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { Hono } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 import { serve } from '@hono/node-server';
@@ -26,7 +26,11 @@ import type {
   SkillAdminPort,
   SkillFileAdminPort,
 } from '../types/skills-plugins-projects.js';
-import { createConfigRoutes } from './routes/configRoutes.js';
+import {
+  bindAdminRequestSecurityContext,
+  createConfigRoutes,
+  readJsonBody,
+} from './routes/configRoutes.js';
 import { createMcpRoutes } from './routes/mcpRoutes.js';
 import { createGlossaryRoutes } from './routes/glossaryRoutes.js';
 import {
@@ -36,7 +40,11 @@ import {
 import { createSkillRoutes } from './routes/skillRoutes.js';
 import { createPluginRoutes } from './routes/pluginRoutes.js';
 import { createProjectRoutes } from './routes/projectRoutes.js';
-import { createGithubRoutes } from './routes/githubRoutes.js';
+import {
+  createGithubRoutes,
+  createGithubWebhookRoutes,
+  type GithubWebhookDeps,
+} from './routes/githubRoutes.js';
 import { createPersonaRoutes } from './routes/personaRoutes.js';
 import { createMemoryRoutes } from './routes/memoryRoutes.js';
 import { createGroupRoutes } from './routes/groupRoutes.js';
@@ -87,6 +95,12 @@ export interface AdminApiOptions {
   };
   /** Bearer Token；留空则开放访问（仅限本地开发） */
   authToken?: string;
+  /** 只读控制台访问 Token（ADMIN_VIEWER_TOKEN）：仅放行 GET/HEAD/OPTIONS，写操作返回 403 */
+  viewerToken?: string;
+  /** 是否采信客户端传入的 X-Admin-Staff-Id（仅受信反向代理场景可设为 true，默认 false） */
+  trustActorHeader?: boolean;
+  /** HttpOnly 登录 Cookie 会话有效期（毫秒），默认 24 小时 */
+  sessionTtlMs?: number;
   /** web-console 生产构建目录，存在时由后端静态托管 */
   staticDir?: string;
   logger?: AdminApiLogger;
@@ -144,6 +158,8 @@ export interface AdminApiOptions {
   personSettings?: PersonSettingsAdminPort;
   /** 员工白名单：目录同步与授权审批 */
   whitelist?: UserWhitelistAdminPort;
+  /** GitHub Webhook 签名校验与任务路由回调 */
+  githubWebhook?: Pick<GithubWebhookDeps, 'secret' | 'onEvent'>;
 }
 
 export interface AdminServerOptions extends AdminApiOptions {
@@ -151,34 +167,142 @@ export interface AdminServerOptions extends AdminApiOptions {
   hostname?: string;
 }
 
-/** 组装管理后台 Hono 应用（REST API + SPA 静态托管） */
+const ADMIN_SESSION_COOKIE = 'anthys_admin_session';
+const DEFAULT_SESSION_TTL_MS = 24 * 60 * 60 * 1000;
+
+type AdminRole = 'admin' | 'viewer';
+
 function safeEqual(input: string, expected: string): boolean {
   const left = Buffer.from(input);
   const right = Buffer.from(expected);
   return left.length === right.length && timingSafeEqual(left, right);
 }
 
-function isAuthorized(
-  authorization: string | undefined,
-  queryToken: string | undefined,
-  token: string,
-): boolean {
-  if (!token) return true;
-  const bearer = authorization?.startsWith('Bearer ')
-    ? authorization.slice(7)
-    : '';
-  if (bearer && safeEqual(bearer, token)) return true;
-  return Boolean(queryToken) && safeEqual(queryToken ?? '', token);
+function isReadOnlyMethod(method: string): boolean {
+  const upper = method.toUpperCase();
+  return upper === 'GET' || upper === 'HEAD' || upper === 'OPTIONS';
 }
 
+function extractCookieValue(
+  cookieHeader: string | undefined,
+  name: string,
+): string | undefined {
+  if (!cookieHeader) return undefined;
+  for (const part of cookieHeader.split(';')) {
+    const trimmed = part.trim();
+    const eqIndex = trimmed.indexOf('=');
+    if (eqIndex <= 0) continue;
+    const key = trimmed.slice(0, eqIndex).trim();
+    if (key !== name) continue;
+    try {
+      return decodeURIComponent(trimmed.slice(eqIndex + 1).trim());
+    } catch {
+      return undefined;
+    }
+  }
+  return undefined;
+}
+
+function signSessionCookie(
+  role: AdminRole,
+  expiresAtMs: number,
+  key: Buffer,
+): string {
+  const payload = `${role}.${expiresAtMs}`;
+  const sig = createHmac('sha256', key).update(payload).digest('hex');
+  return `${payload}.${sig}`;
+}
+
+function verifySessionCookie(
+  value: string | undefined,
+  key: Buffer,
+  nowMs: number,
+): AdminRole | null {
+  if (!value) return null;
+  const parts = value.split('.');
+  if (parts.length !== 3) return null;
+  const [role, expiresRaw, sig] = parts;
+  if (role !== 'admin' && role !== 'viewer') return null;
+  if (!expiresRaw || !sig) return null;
+  const expiresAtMs = Number(expiresRaw);
+  if (!Number.isFinite(expiresAtMs) || nowMs >= expiresAtMs) return null;
+  const expectedSig = createHmac('sha256', key)
+    .update(`${role}.${expiresRaw}`)
+    .digest('hex');
+  return safeEqual(sig, expectedSig) ? role : null;
+}
+
+function buildSessionCookieHeader(
+  value: string,
+  maxAgeSeconds: number,
+  secure: boolean,
+): string {
+  const parts = [
+    `${ADMIN_SESSION_COOKIE}=${encodeURIComponent(value)}`,
+    'Path=/',
+    'HttpOnly',
+    'SameSite=Lax',
+    `Max-Age=${Math.max(0, Math.floor(maxAgeSeconds))}`,
+  ];
+  if (secure) parts.push('Secure');
+  return parts.join('; ');
+}
+
+function isHttpsRequest(
+  forwardedProto: string | undefined,
+  url: string,
+): boolean {
+  return (
+    forwardedProto?.split(',')[0]?.trim().toLowerCase() === 'https' ||
+    url.startsWith('https://')
+  );
+}
+
+/** 组装管理后台 Hono 应用（REST API + SPA 静态托管） */
 export function createAdminApp(options: AdminApiOptions): Hono {
   const logger = options.logger;
+  const now = options.now ?? Date.now;
   const app = new Hono();
   const token = (options.authToken ?? process.env.ADMIN_API_TOKEN ?? '').trim();
-  const tickets = new OneTimeTicketStore(
-    options.ticketTtlMs ?? 60_000,
-    options.now ?? Date.now,
-  );
+  const viewerToken = (
+    options.viewerToken ??
+    process.env.ADMIN_VIEWER_TOKEN ??
+    ''
+  ).trim();
+  const authEnabled = Boolean(token || viewerToken);
+  const trustActorHeader =
+    options.trustActorHeader ?? process.env.ADMIN_TRUST_ACTOR_HEADER === 'true';
+  const sessionTtlMs = options.sessionTtlMs ?? DEFAULT_SESSION_TTL_MS;
+  const sessionKey = createHash('sha256')
+    .update(`anthys-admin-session-v1:${token}:${viewerToken}`)
+    .digest();
+
+  const resolveTokenRole = (candidate: string): AdminRole | null => {
+    const trimmed = candidate.trim();
+    if (!trimmed) return null;
+    if (token && safeEqual(trimmed, token)) return 'admin';
+    if (viewerToken && safeEqual(trimmed, viewerToken)) return 'viewer';
+    return null;
+  };
+
+  const authenticateRequest = (c: {
+    req: { header: (name: string) => string | undefined };
+  }): AdminRole | null => {
+    if (!authEnabled) return 'admin';
+    const authorization = c.req.header('authorization');
+    const bearer = authorization?.startsWith('Bearer ')
+      ? authorization.slice(7)
+      : '';
+    const bearerRole = resolveTokenRole(bearer);
+    if (bearerRole) return bearerRole;
+    const cookieVal = extractCookieValue(
+      c.req.header('cookie'),
+      ADMIN_SESSION_COOKIE,
+    );
+    return verifySessionCookie(cookieVal, sessionKey, now());
+  };
+
+  const tickets = new OneTimeTicketStore(options.ticketTtlMs ?? 60_000, now);
   const chatDeps: ChatStreamDeps = {
     tickets,
     ...(options.chatStream ? { chatStream: options.chatStream } : {}),
@@ -187,23 +311,30 @@ export function createAdminApp(options: AdminApiOptions): Hono {
   };
 
   const admin = new Hono();
-  if (token) {
-    admin.use('*', async (c, next) => {
-      const header = c.req.header('authorization');
-      const queryToken = c.req.query('token');
-      if (!isAuthorized(header, queryToken, token)) {
-        throw new HTTPException(401, {
-          message: '未授权：ADMIN_API_TOKEN 校验失败',
-        });
-      }
-      await next();
-    });
-  } else {
+  if (!authEnabled) {
     logger?.warn(
       {},
-      'ADMIN_API_TOKEN 未配置，管理 API 处于开放状态，请仅在受控网络中使用',
+      'ADMIN_API_TOKEN 与 ADMIN_VIEWER_TOKEN 均未配置，管理 API 处于开放状态，请仅在受控网络中使用',
     );
   }
+  admin.use('*', async (c, next) => {
+    const role = authenticateRequest(c);
+    if (!role) {
+      throw new HTTPException(401, {
+        message: '未授权：ADMIN_API_TOKEN 校验失败',
+      });
+    }
+    bindAdminRequestSecurityContext(c.req.raw, {
+      trustActorHeader,
+      role,
+    });
+    if (role === 'viewer' && !isReadOnlyMethod(c.req.method)) {
+      throw new HTTPException(403, {
+        message: '只读凭证（ADMIN_VIEWER_TOKEN）禁止执行修改操作',
+      });
+    }
+    await next();
+  });
 
   admin.route(
     '/',
@@ -482,14 +613,65 @@ export function createAdminApp(options: AdminApiOptions): Hono {
     }
   });
 
+  app.get('/api/v1/auth/session', (c) => {
+    const role = authenticateRequest(c);
+    return c.json({
+      ok: true,
+      authRequired: authEnabled,
+      authenticated: Boolean(role),
+      role,
+    });
+  });
+
+  app.post('/api/v1/auth/session', async (c) => {
+    if (!authEnabled) {
+      return c.json({
+        ok: true,
+        authRequired: false,
+        authenticated: true,
+        role: 'admin' satisfies AdminRole,
+      });
+    }
+    const body: Record<string, unknown> = await readJsonBody(c).catch(() => ({}));
+    const bodyToken = typeof body.token === 'string' ? body.token : '';
+    const authHeader = c.req.header('authorization');
+    const bearer = authHeader?.startsWith('Bearer ')
+      ? authHeader.slice(7)
+      : '';
+    const role = resolveTokenRole(bodyToken || bearer);
+    if (!role) {
+      return c.json({ ok: false, error: '未授权：Token 无效' }, 401);
+    }
+    const expiresAtMs = now() + sessionTtlMs;
+    const cookieVal = signSessionCookie(role, expiresAtMs, sessionKey);
+    const secure = isHttpsRequest(
+      c.req.header('x-forwarded-proto'),
+      c.req.url,
+    );
+    c.header(
+      'set-cookie',
+      buildSessionCookieHeader(cookieVal, sessionTtlMs / 1000, secure),
+    );
+    return c.json({
+      ok: true,
+      authRequired: true,
+      authenticated: true,
+      role,
+      expiresAt: new Date(expiresAtMs).toISOString(),
+    });
+  });
+
+  app.delete('/api/v1/auth/session', (c) => {
+    const secure = isHttpsRequest(
+      c.req.header('x-forwarded-proto'),
+      c.req.url,
+    );
+    c.header('set-cookie', buildSessionCookieHeader('', 0, secure));
+    return c.json({ ok: true, authenticated: false, role: null });
+  });
+
   app.get('/metrics', (c) => {
-    if (
-      !isAuthorized(
-        c.req.header('authorization'),
-        c.req.query('token'),
-        token,
-      )
-    ) {
+    if (!authenticateRequest(c)) {
       return c.json({ ok: false, error: '未授权' }, 401);
     }
     if (!options.metrics) {
@@ -503,6 +685,20 @@ export function createAdminApp(options: AdminApiOptions): Hono {
   });
 
   app.get('/api/v1/chat/stream', (c) => handleChatStream(c, chatDeps));
+
+  app.route(
+    '/api/v1/webhooks',
+    createGithubWebhookRoutes({
+      ...(options.githubWebhook?.secret !== undefined
+        ? { secret: options.githubWebhook.secret }
+        : {}),
+      ...(options.githubWebhook?.onEvent
+        ? { onEvent: options.githubWebhook.onEvent }
+        : {}),
+      ...(options.metrics ? { metrics: options.metrics } : {}),
+      ...(logger ? { logger } : {}),
+    }),
+  );
 
   app.route('/api/v1/admin', admin);
   app.all('/api/*', (c) =>

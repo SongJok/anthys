@@ -256,6 +256,7 @@ function setup() {
       applyServers: async () => undefined,
     },
     authToken: TOKEN,
+    trustActorHeader: true,
     personas,
     identities,
     memories,

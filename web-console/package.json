@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "../node_modules/.bin/vitest run --config vitest.config.ts"
   },
   "dependencies": {
     "@ant-design/icons": "^5.5.1",

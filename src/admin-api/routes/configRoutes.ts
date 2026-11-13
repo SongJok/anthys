@@ -141,9 +141,34 @@ export async function recordWebAudit(
   }
 }
 
+export interface AdminRequestSecurityContext {
+  trustActorHeader: boolean;
+  role: 'admin' | 'viewer';
+}
+
+const REQUEST_SECURITY_CONTEXT = new WeakMap<
+  object,
+  AdminRequestSecurityContext
+>();
+
+/** 由最外层 Admin middleware 绑定当前请求的安全上下文，避免反代头在子路由中被伪造 */
+export function bindAdminRequestSecurityContext(
+  rawRequest: object | undefined,
+  context: AdminRequestSecurityContext,
+): void {
+  if (!rawRequest) return;
+  REQUEST_SECURITY_CONTEXT.set(rawRequest, context);
+}
+
 export function webActor(c: {
-  req: { header: (name: string) => string | undefined };
+  req: { header: (name: string) => string | undefined; raw?: object };
 }): string {
+  const sec = c.req.raw
+    ? REQUEST_SECURITY_CONTEXT.get(c.req.raw)
+    : undefined;
+  if (sec && !sec.trustActorHeader) {
+    return sec.role === 'viewer' ? 'web-viewer' : 'web-console';
+  }
   const id = c.req.header('x-admin-staff-id')?.trim();
   return id && id.length > 0 ? id : 'web-console';
 }
@@ -157,8 +182,7 @@ function isSecretMask(input: string | undefined, current: string): boolean {
 export function createConfigRoutes(deps: ConfigRouteDeps): Hono {
   const app = new Hono();
   const now = deps.now ?? Date.now;
-  const actor = (c: { req: { header: (name: string) => string | undefined } }) =>
-    c.req.header('x-admin-staff-id');
+  const actor = (c: Parameters<typeof webActor>[0]) => webActor(c);
 
   app.get('/config/dingtalk', (c) =>
     c.json({

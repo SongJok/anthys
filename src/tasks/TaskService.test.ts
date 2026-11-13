@@ -8,10 +8,16 @@ import type {
   AgentTaskStore,
   AgentTaskSubscription,
   CreateAgentTaskInput,
+  ExternalTaskLinkRef,
   ListAgentTasksInput,
   UpdateAgentTaskInput,
 } from '../types/tasks.js';
-import { TaskService, taskIdFromJob } from './TaskService.js';
+import {
+  TaskService,
+  taskIdFromJob,
+  type ExternalTaskEvent,
+  type ExternalTaskMatch,
+} from './TaskService.js';
 
 class MemoryTaskStore implements AgentTaskStore {
   public readonly tasks = new Map<string, AgentTask>();
@@ -103,6 +109,31 @@ class MemoryTaskStore implements AgentTaskStore {
 
   public async listLinks(taskId: string): Promise<AgentTaskLink[]> {
     return this.links.filter((link) => link.taskId === taskId);
+  }
+
+  public async findActiveByLinks(
+    refs: ExternalTaskLinkRef[],
+  ): Promise<AgentTask[]> {
+    const normalized = refs
+      .map((item) => ({ kind: item.kind, ref: item.ref.trim() }))
+      .filter((item) => item.ref.length > 0);
+    if (normalized.length === 0) return [];
+    const matchedIds = new Set<string>();
+    for (const link of this.links) {
+      if (
+        normalized.some(
+          (candidate) =>
+            candidate.ref === link.ref &&
+            (!candidate.kind || candidate.kind === link.kind),
+        )
+      ) {
+        matchedIds.add(link.taskId);
+      }
+    }
+    return [...matchedIds]
+      .map((id) => this.tasks.get(id))
+      .filter((task): task is AgentTask => Boolean(task && task.status === 'active'))
+      .sort((a, b) => b.updatedAt - a.updatedAt);
   }
 
   public async subscribe(input: {
@@ -355,5 +386,77 @@ describe('TaskService', () => {
     );
     expect(closed).toMatchObject({ status: 'closed' });
     expect(closed?.summary).toBe('共整理 12 条反馈，重点是登录失败。');
+  });
+
+  it('routes external events to matching active tasks with dedup and ignores closed tasks', async () => {
+    const store = new MemoryTaskStore();
+    const delivered: Array<{ event: ExternalTaskEvent; match: ExternalTaskMatch }> = [];
+    const service = new TaskService({
+      store,
+      enqueue: async (msg, prompt, taskId) => ({
+        ...job(taskId),
+        conversationId: msg.conversationId,
+        prompt,
+      }),
+      isAdmin: (id) => id === 'admin-1',
+      onExternalEvent: async (event, match) => {
+        delivered.push({ event, match });
+      },
+      now: () => 5_000,
+    });
+
+    await service.handleCommand(message(), ['new', '跟踪发布 PR #42']);
+    await service.handleCommand(message(), [
+      'link',
+      'task-0001',
+      'url',
+      'https://github.com/SongJok/anthys/pull/42',
+      'PR 42',
+    ]);
+    await service.handleCommand(message(), [
+      'link',
+      'task-0001',
+      'issue',
+      'SongJok/anthys#42',
+    ]);
+
+    const res1 = await service.routeExternalEvent({
+      source: 'github',
+      eventType: 'pull_request.opened',
+      deliveryId: 'deliv-1',
+      summary: 'PR #42 opened by Alice',
+      refs: [
+        { kind: 'url', ref: 'https://github.com/SongJok/anthys/pull/42' },
+        { kind: 'issue', ref: 'SongJok/anthys#42' },
+      ],
+    });
+    expect(res1.matchedTasks).toHaveLength(1);
+    expect(res1.notificationsSent).toBe(1);
+    expect(delivered).toHaveLength(1);
+    expect(res1.matchedTasks[0]?.task.summary).toContain(
+      '[github:pull_request.opened] PR #42 opened by Alice',
+    );
+
+    // 同一 deliveryId 幂等跳过
+    const dup = await service.routeExternalEvent({
+      source: 'github',
+      eventType: 'pull_request.opened',
+      deliveryId: 'deliv-1',
+      summary: 'PR #42 opened by Alice',
+      refs: [{ kind: 'issue', ref: 'SongJok/anthys#42' }],
+    });
+    expect(dup.matchedTasks).toHaveLength(0);
+    expect(delivered).toHaveLength(1);
+
+    // 关闭任务后不再接收路由
+    await service.handleCommand(message(), ['close', 'task-0001']);
+    const afterClose = await service.routeExternalEvent({
+      source: 'github',
+      eventType: 'pull_request.closed',
+      deliveryId: 'deliv-2',
+      summary: 'PR #42 merged',
+      refs: [{ kind: 'issue', ref: 'SongJok/anthys#42' }],
+    });
+    expect(afterClose.matchedTasks).toHaveLength(0);
   });
 });

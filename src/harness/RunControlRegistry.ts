@@ -34,6 +34,7 @@ function conversationKeyFor(message: InboundMessage): string {
  */
 export class RunControlRegistry {
   private readonly queues = new Map<string, QueuedRun[]>();
+  private readonly steeringQueues = new Map<string, string[]>();
   private readonly lastMessages = new Map<string, InboundMessage>();
   private readonly messagesById = new Map<string, InboundMessage>();
   private readonly lastMessageLimit: number;
@@ -77,6 +78,25 @@ export class RunControlRegistry {
 
   public stop(conversationId: string): number {
     return this.abortAll(conversationId, 'user');
+  }
+
+  /** 向进行中的会话追加一条动态引导指令，ReActRunner 在下一轮思考前注入 */
+  public pushSteering(conversationId: string, instruction: string): boolean {
+    const text = instruction.trim();
+    if (!text || !this.isBusy(conversationId)) return false;
+    const queue = this.steeringQueues.get(conversationId) ?? [];
+    queue.push(text.slice(0, 1_000));
+    if (queue.length > 8) queue.shift();
+    this.steeringQueues.set(conversationId, queue);
+    return true;
+  }
+
+  /** 读取并清空该会话待消费的动态引导指令 */
+  public consumeSteering(conversationId: string): string[] {
+    const queue = this.steeringQueues.get(conversationId);
+    if (!queue || queue.length === 0) return [];
+    this.steeringQueues.delete(conversationId);
+    return queue;
   }
 
   public stopAll(): number {
@@ -173,6 +193,7 @@ export class RunControlRegistry {
     conversationId: string,
     reason: RunStopReason,
   ): number {
+    this.steeringQueues.delete(conversationId);
     const queue = this.queues.get(conversationId);
     if (!queue) return 0;
     this.queues.delete(conversationId);

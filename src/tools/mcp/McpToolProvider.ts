@@ -205,10 +205,8 @@ export class McpToolProvider implements IToolProvider {
     return {
       name: descriptor.namespacedName,
       description:
-        `[MCP ${descriptor.serverName} · ${descriptor.domain}] ${descriptor.description}\n` +
-        `未标记错误的返回就是工具的真实输出；即使内容很短或看起来与问题无关，也可能就是查询结果，请如实采用，不要判定调用失败或重复调用。\n` +
-        `单次结果超过 ${descriptor.maxResultChars} 字符时，系统会自动转存到沙盒工作区并返回样本预览与 Schema；` +
-        `此时请调用 sandbox_analyze_and_aggregate，通过 datasets['data_*.json'] 读取完整数据做聚合。`,
+        `[MCP ${descriptor.serverName} · ${descriptor.domain}] ${descriptor.description}` +
+        `（超 ${descriptor.maxResultChars} 字自动转存沙盒 datasets）`,
       parametersJsonSchema: descriptor.inputSchema,
       execute: async (args, ctx) => {
         const stepId = this.nextStepId(ctx);
@@ -276,10 +274,7 @@ export class McpToolProvider implements IToolProvider {
       sample: sampleTruncated ? sampleJson : preview.sample,
       sampleTruncated,
       previewCount: preview.previewCount,
-      hint:
-        `完整结果已写入 ${datasetPath}。请调用 sandbox_analyze_and_aggregate（language=javascript），` +
-        `脚本中可直接使用全局变量 datasets，例如 datasets['${datasetKey}']；` +
-        `也可使用 loadDataset('${datasetKey}')。不要在回答中臆测未看到的数据。`,
+      hint: `已转存 ${datasetPath}；请调用 sandbox_analyze_and_aggregate 读取 datasets['${datasetKey}'] 分析，勿臆测未读数据。`,
     });
   }
 }

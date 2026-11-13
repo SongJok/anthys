@@ -114,11 +114,24 @@ export class AttachmentStore {
     this.endpoint = options.downloadEndpoint ?? DOWNLOAD_ENDPOINT;
   }
 
-  public async store(message: InboundMessage): Promise<AttachmentStoreResult> {
+  public async store(
+    message: InboundMessage,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<AttachmentStoreResult> {
     const stored: StoredAttachment[] = [];
     const failed: AttachmentFailure[] = [];
     const attachments = message.attachments ?? [];
     if (attachments.length === 0) return { stored, failed };
+    if (options.signal?.aborted) {
+      return {
+        stored,
+        failed: attachments.map((attachment) => ({
+          type: attachment.type,
+          ...(attachment.fileName ? { fileName: attachment.fileName } : {}),
+          error: '已取消下载',
+        })),
+      };
+    }
 
     const dir = join(
       this.options.rootDir,
@@ -127,8 +140,16 @@ export class AttachmentStore {
     await mkdir(dir, { recursive: true });
 
     for (const [index, attachment] of attachments.entries()) {
+      if (options.signal?.aborted) {
+        failed.push({
+          type: attachment.type,
+          ...(attachment.fileName ? { fileName: attachment.fileName } : {}),
+          error: '已取消下载',
+        });
+        continue;
+      }
       try {
-        const file = await this.download(attachment);
+        const file = await this.download(attachment, options.signal);
         if (file.size > this.maxBytes) {
           throw new Error(
             `附件超过 ${Math.round(this.maxBytes / 1024 / 1024)}MB 上限`,
@@ -174,7 +195,10 @@ export class AttachmentStore {
     return { stored, failed };
   }
 
-  private async download(attachment: InboundAttachment): Promise<{
+  private async download(
+    attachment: InboundAttachment,
+    externalSignal?: AbortSignal,
+  ): Promise<{
     bytes: Uint8Array;
     size: number;
     fileName?: string;
@@ -185,6 +209,10 @@ export class AttachmentStore {
       typeof this.options.robotCode === 'function'
         ? this.options.robotCode()
         : this.options.robotCode;
+    const reqSignal = (timeoutMs: number) =>
+      externalSignal
+        ? AbortSignal.any([AbortSignal.timeout(timeoutMs), externalSignal])
+        : AbortSignal.timeout(timeoutMs);
     const response = await this.fetchImpl(this.endpoint, {
       method: 'POST',
       headers: {
@@ -195,7 +223,7 @@ export class AttachmentStore {
         downloadCode: attachment.downloadCode,
         robotCode,
       }),
-      signal: AbortSignal.timeout(this.timeoutMs),
+      signal: reqSignal(this.timeoutMs),
     });
     if (!response.ok) {
       throw new Error(`下载码换取失败: HTTP ${response.status}`);
@@ -210,7 +238,7 @@ export class AttachmentStore {
 
     const fileResponse = await this.fetchImpl(downloadUrl, {
       method: 'GET',
-      signal: AbortSignal.timeout(this.timeoutMs),
+      signal: reqSignal(this.timeoutMs),
     });
     if (!fileResponse.ok) {
       throw new Error(`附件下载失败: HTTP ${fileResponse.status}`);

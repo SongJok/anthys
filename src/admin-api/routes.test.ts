@@ -48,7 +48,7 @@ import {
 } from '../types/glossary.js';
 import { createAdminApp } from './server.js';
 import { MCP_SECRET_MASK } from './routes/mcpRoutes.js';
-import { MetricsRegistry } from './metrics.js';
+import { MetricsRegistry, recordStreamEventMetrics } from './metrics.js';
 
 const TOKEN = 'test-token';
 const NOW = new Date('2026-10-30T10:00:00Z').getTime();
@@ -1307,5 +1307,300 @@ describe('术语知识库管理接口', () => {
       proactive: true,
     });
     expect(trace.senderNick).toBe('定时任务（Joony）');
+  });
+});
+
+describe('安全加固：RBAC、HttpOnly Cookie 会话与反代头校验', () => {
+  const buildHardenedApp = async (extra?: {
+    viewerToken?: string;
+    trustActorHeader?: boolean;
+    now?: () => number;
+    sessionTtlMs?: number;
+  }) => {
+    const auditStore = new MemoryAuditStore();
+    const center = new Center({
+      defaults: fakeDefaults(),
+      store: new MemoryConfigStore(),
+      groupPolicies: new MemoryGroupPolicyStore(),
+      auditStore,
+      initialMcpServers: [LOG_SERVER],
+      initialAdminStaffIds: ['admin-001'],
+      initialDwsCliEnabled: true,
+      initialWebSearchEnabled: true,
+      now: () => NOW,
+    });
+    await center.init();
+    const metrics = new MetricsRegistry();
+    const app = createAdminApp({
+      configCenter: center,
+      traces: new FakeTraces(),
+      groups: new FakeGroups(),
+      mcp: {
+        status: () => [],
+        applyServers: async () => undefined,
+      },
+      authToken: TOKEN,
+      ...(extra?.viewerToken ? { viewerToken: extra.viewerToken } : {}),
+      ...(extra?.trustActorHeader !== undefined
+        ? { trustActorHeader: extra.trustActorHeader }
+        : {}),
+      ...(extra?.now ? { now: extra.now } : {}),
+      ...(extra?.sessionTtlMs ? { sessionTtlMs: extra.sessionTtlMs } : {}),
+      metrics,
+    });
+    return { app, auditStore, metrics };
+  };
+
+  it('禁止 REST 与 /metrics 接受 ?token= 查询参数鉴权', async () => {
+    const adminRes = await ctx.app.request(
+      `/api/v1/admin/config/llm?token=${TOKEN}`,
+    );
+    expect(adminRes.status).toBe(401);
+
+    const metricsRes = await ctx.app.request(`/metrics?token=${TOKEN}`);
+    expect(metricsRes.status).toBe(401);
+  });
+
+  it('ADMIN_VIEWER_TOKEN 只允许只读 GET，写入操作返回 403', async () => {
+    const { app } = await buildHardenedApp({ viewerToken: 'viewer-readonly' });
+    const readRes = await app.request('/api/v1/admin/config/llm', {
+      headers: { authorization: 'Bearer viewer-readonly' },
+    });
+    expect(readRes.status).toBe(200);
+
+    const metricsRes = await app.request('/metrics', {
+      headers: { authorization: 'Bearer viewer-readonly' },
+    });
+    expect(metricsRes.status).toBe(200);
+
+    const writeRes = await app.request('/api/v1/admin/config/llm', {
+      method: 'PUT',
+      headers: {
+        authorization: 'Bearer viewer-readonly',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ temperature: 0.2 }),
+    });
+    expect(writeRes.status).toBe(403);
+  });
+
+  it('支持 HMAC HttpOnly Cookie 会话登录/校验/失效/登出并拒绝篡改 Cookie', async () => {
+    let clock = NOW;
+    const { app } = await buildHardenedApp({
+      viewerToken: 'viewer-token',
+      now: () => clock,
+      sessionTtlMs: 60_000,
+    });
+
+    const initialStatus = await body(await app.request('/api/v1/auth/session'));
+    expect(initialStatus).toMatchObject({
+      ok: true,
+      authRequired: true,
+      authenticated: false,
+      role: null,
+    });
+
+    const badLogin = await app.request('/api/v1/auth/session', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ token: 'wrong' }),
+    });
+    expect(badLogin.status).toBe(401);
+
+    const adminLogin = await app.request('/api/v1/auth/session', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ token: TOKEN }),
+    });
+    expect(adminLogin.status).toBe(200);
+    const setCookie = adminLogin.headers.get('set-cookie') ?? '';
+    expect(setCookie).toContain('anthys_admin_session=');
+    expect(setCookie).toContain('HttpOnly');
+    expect(setCookie).toContain('SameSite=Lax');
+
+    const cookiePair = setCookie.split(';')[0]!;
+    const authedGet = await app.request('/api/v1/admin/config/llm', {
+      headers: { cookie: cookiePair },
+    });
+    expect(authedGet.status).toBe(200);
+
+    const authedMetrics = await app.request('/metrics', {
+      headers: { cookie: cookiePair },
+    });
+    expect(authedMetrics.status).toBe(200);
+
+    const viewerLogin = await app.request('/api/v1/auth/session', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ token: 'viewer-token' }),
+    });
+    const viewerCookie = (viewerLogin.headers.get('set-cookie') ?? '').split(';')[0]!;
+    const viewerPut = await app.request('/api/v1/admin/config/llm', {
+      method: 'PUT',
+      headers: {
+        cookie: viewerCookie,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ temperature: 0.1 }),
+    });
+    expect(viewerPut.status).toBe(403);
+
+    const tampered = `${cookiePair.slice(0, -4)}0000`;
+    expect(
+      (
+        await app.request('/api/v1/admin/config/llm', {
+          headers: { cookie: tampered },
+        })
+      ).status,
+    ).toBe(401);
+
+    clock += 120_000;
+    expect(
+      (
+        await app.request('/api/v1/admin/config/llm', {
+          headers: { cookie: cookiePair },
+        })
+      ).status,
+    ).toBe(401);
+
+    const logout = await app.request('/api/v1/auth/session', {
+      method: 'DELETE',
+    });
+    expect(logout.status).toBe(200);
+    expect(logout.headers.get('set-cookie')).toContain('Max-Age=0');
+  });
+
+  it('默认忽略伪造的 x-admin-staff-id，仅 trustActorHeader=true 时采信', async () => {
+    const untrusted = await buildHardenedApp();
+    const res1 = await untrusted.app.request('/api/v1/admin/config/dingtalk', {
+      method: 'PUT',
+      headers: {
+        authorization: `Bearer ${TOKEN}`,
+        'content-type': 'application/json',
+        'x-admin-staff-id': 'spoofed-staff',
+      },
+      body: JSON.stringify({ webSearchEnabled: false }),
+    });
+    expect(res1.status).toBe(200);
+    expect(untrusted.auditStore.entries[0]?.adminStaffId).toBe('web-console');
+
+    const trusted = await buildHardenedApp({ trustActorHeader: true });
+    const res2 = await trusted.app.request('/api/v1/admin/config/dingtalk', {
+      method: 'PUT',
+      headers: {
+        authorization: `Bearer ${TOKEN}`,
+        'content-type': 'application/json',
+        'x-admin-staff-id': 'trusted-staff',
+      },
+      body: JSON.stringify({ webSearchEnabled: false }),
+    });
+    expect(res2.status).toBe(200);
+    expect(trusted.auditStore.entries[0]?.adminStaffId).toBe('trusted-staff');
+  });
+});
+
+describe('可观测性增强：规划器/子代理轨迹与缓存命中指标', () => {
+  it('TraceCollector 与 recordStreamEventMetrics 正确记录子代理、规划器与 cachedTokens', () => {
+    let clock = NOW;
+    const collector = new TraceCollector(() => clock);
+    const metrics = new MetricsRegistry();
+
+    const events = [
+      {
+        type: 'plan' as const,
+        items: [
+          { id: 's1', text: '检索日志', status: 'running' as const },
+          { id: 's2', text: '总结输出', status: 'pending' as const },
+        ],
+        initial: true,
+        durationMs: 320,
+        tokens: 88,
+      },
+      {
+        type: 'tool_start' as const,
+        toolName: 'delegate_research',
+        args: { task: '调查近期超时原因' },
+      },
+      {
+        type: 'tool_end' as const,
+        toolName: 'delegate_research',
+        summary: '已收集 3 条错误',
+        isError: false,
+        durationMs: 450,
+        traces: [
+          {
+            kind: 'subagent' as const,
+            name: 'delegate_research',
+            steps: 2,
+            tokens: 180,
+            durationMs: 440,
+          },
+        ],
+      },
+      {
+        type: 'completed' as const,
+        usage: {
+          totalTokens: 500,
+          steps: 2,
+          durationMs: 900,
+          cachedTokens: 64,
+        },
+      },
+    ];
+
+    for (const ev of events) {
+      collector.handle(ev);
+      recordStreamEventMetrics(metrics, ev);
+      clock += 100;
+    }
+
+    const record = collector.build({
+      message: {
+        messageId: 'm-obs-1',
+        conversationId: 'cid-1',
+        conversationType: '1',
+        senderStaffId: 'u-1',
+        senderNick: '张三',
+        isAtBot: true,
+        text: '分析超时原因',
+        rawPayload: {},
+        timestamp: NOW,
+      },
+      result: {
+        answer: '分析完成',
+        reasoning: '',
+        usage: { totalTokens: 500, steps: 2, durationMs: 900 },
+      },
+      proactive: false,
+    });
+
+    expect(record.steps[0]).toMatchObject({
+      type: 'plan',
+      durationMs: 320,
+      subTraces: [
+        { kind: 'planner', name: 'planner', steps: 2, tokens: 88, durationMs: 320 },
+      ],
+    });
+    expect(record.steps[1]).toMatchObject({
+      type: 'subagent',
+      toolName: 'delegate_research',
+      durationMs: 450,
+      subTraces: [
+        {
+          kind: 'subagent',
+          name: 'delegate_research',
+          steps: 2,
+          tokens: 180,
+          durationMs: 440,
+        },
+      ],
+    });
+
+    expect(metrics.get('agent_planner_runs_total')).toBe(1);
+    expect(
+      metrics.get('agent_subagent_calls_total', { name: 'delegate_research' }),
+    ).toBe(1);
+    expect(metrics.get('agent_cached_tokens_total')).toBe(64);
+    expect(metrics.get('agent_tokens_total')).toBe(500);
   });
 });

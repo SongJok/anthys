@@ -103,6 +103,10 @@ export const semanticMemories = pgTable(
       table.content,
     ),
     index('semantic_memories_subject_idx').on(table.scope, table.subjectKey),
+    index('semantic_memories_embedding_idx').using(
+      'hnsw',
+      sql`${table.embedding} vector_cosine_ops`,
+    ),
   ],
 );
 

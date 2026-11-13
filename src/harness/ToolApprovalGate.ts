@@ -27,7 +27,12 @@ export interface PendingToolAction {
 export interface PendingActionPersistence {
   load(nowMs: number): Promise<PendingToolAction[]>;
   save(action: PendingToolAction): Promise<void>;
-  remove(conversationId: string): Promise<void>;
+  remove(conversationId: string, actionId?: string): Promise<void>;
+}
+
+export interface PendingActionQuery {
+  staffId?: string;
+  actionIdPrefix?: string;
 }
 
 export interface PendingActionStoreOptions {
@@ -36,6 +41,10 @@ export interface PendingActionStoreOptions {
   now?: () => number;
   /** 最多保留的会话数，超出时淘汰最旧记录 */
   limit?: number;
+  /** 是否允许同会话并发保留多条待确认写操作（默认 false 保持单条覆盖语义） */
+  multiPending?: boolean;
+  /** 开启 multiPending 时单会话最多保留条数，默认 8 */
+  maxPendingPerConversation?: number;
   /** 持久化后端；重启后未过期的待确认操作可以恢复 */
   persistence?: PendingActionPersistence;
   logger?: {
@@ -43,12 +52,14 @@ export interface PendingActionStoreOptions {
   };
 }
 
-/** 每个会话只保留一个待确认写操作，新请求覆盖旧请求 */
+/** 待确认写操作暂存区：支持单条覆盖或同会话多用户/多动作并发隔离 */
 export class PendingActionStore {
-  private readonly actions = new Map<string, PendingToolAction>();
+  private readonly actions = new Map<string, PendingToolAction[]>();
   private readonly ttlMs: number;
   private readonly now: () => number;
   private readonly limit: number;
+  private readonly multiPending: boolean;
+  private readonly maxPendingPerConversation: number;
   private readonly persistence?: PendingActionPersistence;
   private readonly logger?: PendingActionStoreOptions['logger'];
 
@@ -56,6 +67,11 @@ export class PendingActionStore {
     this.ttlMs = options.ttlMs ?? 5 * 60_000;
     this.now = options.now ?? Date.now;
     this.limit = options.limit ?? 500;
+    this.multiPending = options.multiPending ?? false;
+    this.maxPendingPerConversation = Math.max(
+      1,
+      options.maxPendingPerConversation ?? 8,
+    );
     this.persistence = options.persistence;
     this.logger = options.logger;
   }
@@ -67,9 +83,8 @@ export class PendingActionStore {
     try {
       const now = this.now();
       for (const action of await persistence.load(now)) {
-        if (action.expiresAt > now) {
-          this.actions.set(action.conversationId, action);
-        }
+        if (action.expiresAt <= now) continue;
+        this.insertIntoQueue(action);
       }
       this.trim();
     } catch (error) {
@@ -78,6 +93,41 @@ export class PendingActionStore {
         'failed to hydrate pending tool actions',
       );
     }
+  }
+
+  private insertIntoQueue(action: PendingToolAction): void {
+    if (!this.multiPending) {
+      this.actions.set(action.conversationId, [action]);
+      return;
+    }
+    const existing = this.actions.get(action.conversationId) ?? [];
+    const filtered = existing.filter((item) => item.id !== action.id);
+    filtered.push(action);
+    while (filtered.length > this.maxPendingPerConversation) {
+      const evicted = filtered.shift();
+      if (evicted) this.persistRemove(action.conversationId, evicted.id);
+    }
+    this.actions.set(action.conversationId, filtered);
+  }
+
+  private findIndex(
+    queue: PendingToolAction[],
+    query?: PendingActionQuery,
+  ): number {
+    if (queue.length === 0) return -1;
+    const prefix = query?.actionIdPrefix?.trim().toLowerCase();
+    if (prefix) {
+      for (let i = queue.length - 1; i >= 0; i -= 1) {
+        if (queue[i]?.id.toLowerCase().startsWith(prefix)) return i;
+      }
+      return -1;
+    }
+    if (query?.staffId) {
+      for (let i = queue.length - 1; i >= 0; i -= 1) {
+        if (queue[i]?.requestedBy.staffId === query.staffId) return i;
+      }
+    }
+    return queue.length - 1;
   }
 
   private persistSave(action: PendingToolAction): void {
@@ -92,8 +142,8 @@ export class PendingActionStore {
     });
   }
 
-  private persistRemove(conversationId: string): void {
-    void this.persistence?.remove(conversationId).catch((error) => {
+  private persistRemove(conversationId: string, actionId?: string): void {
+    void this.persistence?.remove(conversationId, actionId).catch((error) => {
       this.logger?.warn(
         {
           conversationId,
@@ -123,36 +173,71 @@ export class PendingActionStore {
       createdAt,
       expiresAt: createdAt + this.ttlMs,
     };
-    this.actions.set(input.conversationId, action);
+    this.insertIntoQueue(action);
     this.trim();
     this.persistSave(action);
     return action;
   }
 
-  public peek(conversationId: string): PendingToolAction | null {
+  public peek(
+    conversationId: string,
+    query?: PendingActionQuery,
+  ): PendingToolAction | null {
     this.prune();
-    return this.actions.get(conversationId) ?? null;
+    const queue = this.actions.get(conversationId);
+    if (!queue || queue.length === 0) return null;
+    const idx = this.findIndex(queue, query);
+    return idx >= 0 ? (queue[idx] ?? null) : null;
   }
 
-  public take(conversationId: string): PendingToolAction | null {
+  public peekAll(conversationId: string): PendingToolAction[] {
     this.prune();
-    const action = this.actions.get(conversationId);
+    return [...(this.actions.get(conversationId) ?? [])];
+  }
+
+  public take(
+    conversationId: string,
+    query?: PendingActionQuery,
+  ): PendingToolAction | null {
+    this.prune();
+    const queue = this.actions.get(conversationId);
+    if (!queue || queue.length === 0) return null;
+    const idx = this.findIndex(queue, query);
+    if (idx < 0) return null;
+    const [action] = queue.splice(idx, 1);
     if (!action) return null;
-    this.actions.delete(conversationId);
-    this.persistRemove(conversationId);
+    if (queue.length === 0) this.actions.delete(conversationId);
+    this.persistRemove(conversationId, action.id);
     return action;
   }
 
-  public cancel(conversationId: string): boolean {
+  public cancel(
+    conversationId: string,
+    query?: PendingActionQuery,
+  ): boolean {
     this.prune();
-    const removed = this.actions.delete(conversationId);
-    if (removed) this.persistRemove(conversationId);
-    return removed;
+    const queue = this.actions.get(conversationId);
+    if (!queue || queue.length === 0) return false;
+    if (query?.actionIdPrefix || query?.staffId) {
+      const idx = this.findIndex(queue, query);
+      if (idx < 0) return false;
+      const [removed] = queue.splice(idx, 1);
+      if (queue.length === 0) this.actions.delete(conversationId);
+      if (removed) this.persistRemove(conversationId, removed.id);
+      return Boolean(removed);
+    }
+    this.actions.delete(conversationId);
+    this.persistRemove(conversationId);
+    return true;
   }
 
   public get size(): number {
     this.prune();
-    return this.actions.size;
+    let count = 0;
+    for (const queue of this.actions.values()) {
+      count += queue.length;
+    }
+    return count;
   }
 
   public get ttlSeconds(): number {
@@ -161,8 +246,13 @@ export class PendingActionStore {
 
   private prune(): void {
     const now = this.now();
-    for (const [key, action] of this.actions) {
-      if (action.expiresAt <= now) this.actions.delete(key);
+    for (const [key, queue] of this.actions) {
+      const alive = queue.filter((action) => action.expiresAt > now);
+      if (alive.length === 0) {
+        this.actions.delete(key);
+      } else if (alive.length !== queue.length) {
+        this.actions.set(key, alive);
+      }
     }
   }
 
@@ -216,10 +306,11 @@ export function formatApprovalPrompt(
   ttlSeconds: number,
 ): string {
   const label = action.risk === 'destructive' ? '高危写操作' : '写操作';
+  const shortId = action.id.slice(0, 8);
   return [
-    `操作需要确认：机器人准备调用工具 \`${action.toolName}\`（${label}）。`,
+    `操作需要确认：机器人准备调用工具 \`${action.toolName}\`（${label}，编号 \`${shortId}\`）。`,
     `参数：${formatArgs(action.args)}`,
-    `回复「确认」执行，或「取消」放弃；${ttlSeconds} 秒内有效。`,
+    `回复「确认」或 \`/confirm ${shortId}\` 执行，或「取消」放弃；${ttlSeconds} 秒内有效。`,
   ].join('\n');
 }
 

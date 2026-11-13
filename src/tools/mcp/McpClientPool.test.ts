@@ -503,6 +503,8 @@ describe('McpToolProvider', () => {
     );
     expect(shortTool).toBeDefined();
     expect(dumpTool).toBeDefined();
+    expect(shortTool!.description).not.toContain('未标记错误的返回就是工具的真实输出');
+    expect(shortTool!.description).toContain('自动转存沙盒');
 
     const short = await shortTool!.execute({ service: 'order' }, ctx);
     expect(short).toContain('PAY_TIMEOUT');

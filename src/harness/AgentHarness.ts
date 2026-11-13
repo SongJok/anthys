@@ -141,6 +141,8 @@ export interface HandleMessageOptions {
   proactive?: boolean;
   /** 工具需要用户干预时向会话追加提醒（如重新授权） */
   notify?: (text: string) => Promise<void> | void;
+  /** 控制台等场景附带的临时系统提示词覆盖 */
+  systemPromptOverride?: string;
 }
 
 export interface ProactiveHandleOptions {
@@ -251,10 +253,18 @@ export class AgentHarness {
       },
     });
 
-    const history = await repository.recentMessages(
+    const rawHistory = await repository.recentMessages(
       conversation.id,
       this.historyWindow(message.conversationType),
     );
+    // 重试同一条失败消息（同 messageId 且尚未形成配对助手回复）时，避免在输入上下文中重复拼接该条用户发言
+    const trailing = rawHistory[rawHistory.length - 1];
+    const isDuplicateTrailingRetry =
+      trailing?.role === 'user' &&
+      trailing.metadata?.messageId === message.messageId;
+    const history = isDuplicateTrailingRetry
+      ? rawHistory.slice(0, -1)
+      : rawHistory;
     const memoryContext = await this.buildMemoryContext({
       message,
       dbConversationId: conversation.id,
@@ -264,12 +274,20 @@ export class AgentHarness {
       audience: message.conversationType === '2' ? 'group' : 'single',
       excludeMessageId: message.messageId,
     });
-    const extraSystemPrompt = await this.buildExtraSystemPrompt(
+    const baseExtraPrompt = await this.buildExtraSystemPrompt(
       message,
       text,
       handle.proactive ?? false,
       personKey,
     );
+    const extraSystemPrompt = [
+      baseExtraPrompt,
+      handle.systemPromptOverride?.trim()
+        ? `【控制台会话附加设定】\n${handle.systemPromptOverride.trim()}`
+        : undefined,
+    ]
+      .filter((section): section is string => Boolean(section))
+      .join('\n\n') || undefined;
     const messages = assembler.build({
       persona,
       history,
@@ -282,36 +300,51 @@ export class AgentHarness {
       userSpeaker: message.senderNick,
     });
 
-    await repository.appendMessage({
-      conversationId: conversation.id,
-      role: 'user',
-      content: text,
-      metadata: {
-        messageId: message.messageId,
-        senderStaffId: message.senderStaffId,
-        senderNick: message.senderNick,
-        conversationType: message.conversationType,
-      },
-    });
+    if (!isDuplicateTrailingRetry) {
+      await repository.appendMessage({
+        conversationId: conversation.id,
+        role: 'user',
+        content: text,
+        metadata: {
+          messageId: message.messageId,
+          senderStaffId: message.senderStaffId,
+          senderNick: message.senderNick,
+          conversationType: message.conversationType,
+        },
+      });
+    }
 
     const startedAt = this.now();
-    const result = await engine.run({
-      messages,
-      context: {
-        conversationId: message.conversationId,
-        messageId: message.messageId,
-        senderStaffId: message.senderStaffId,
-        senderNick: message.senderNick,
-        conversationType: message.conversationType,
-        personKey,
-        deadlineAt: startedAt + policy.maxWallTimeMs,
-        now: this.now,
-        proactive: handle.proactive ?? false,
-        ...(handle.notify ? { notify: handle.notify } : {}),
-      },
-      emit: handle.emit,
-      signal: handle.signal,
-    });
+    let result: RunResult;
+    try {
+      result = await engine.run({
+        messages,
+        context: {
+          conversationId: message.conversationId,
+          messageId: message.messageId,
+          senderStaffId: message.senderStaffId,
+          senderNick: message.senderNick,
+          conversationType: message.conversationType,
+          personKey,
+          deadlineAt: startedAt + policy.maxWallTimeMs,
+          now: this.now,
+          proactive: handle.proactive ?? false,
+          ...(handle.notify ? { notify: handle.notify } : {}),
+        },
+        emit: handle.emit,
+        signal: handle.signal,
+      });
+    } catch (error) {
+      this.options.logger?.warn?.(
+        {
+          conversationKey: conversation.conversationKey,
+          messageId: message.messageId,
+          error: error instanceof Error ? error.message : String(error),
+        },
+        'agent turn failed before assistant response',
+      );
+      throw error;
+    }
     await this.recordUsage(message, result, handle.proactive ?? false);
 
     await repository.appendMessage({

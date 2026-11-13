@@ -1069,4 +1069,174 @@ describe('ReActRunner 全员通知真实性拦截', () => {
     expect(model.requests).toHaveLength(2);
     expect(result.answer).toBe('已通知所有人：明天 9 点开会。');
   });
+
+  it('CONVERGENCE_NUDGE 在多轮工具运行中仅注入一次，避免破坏前缀缓存', async () => {
+    const model = new ScriptedModel([
+      toolTurn([{ index: 0, id: 'c1', name: 'current_time', args: {} }]),
+      toolTurn([{ index: 0, id: 'c2', name: 'system_status', args: {} }]),
+      [
+        { contentDelta: '已完成。' },
+        { finishReason: 'stop', usage: { totalTokens: 5 } },
+      ],
+    ]);
+    const provider: IToolProvider = {
+      providerName: 'multi',
+      async getTools() {
+        return [
+          {
+            name: 'current_time',
+            description: 'time',
+            risk: 'read',
+            parametersJsonSchema: { type: 'object', properties: {} },
+            execute: async () => '12:00',
+          },
+          {
+            name: 'system_status',
+            description: 'status',
+            risk: 'read',
+            parametersJsonSchema: { type: 'object', properties: {} },
+            execute: async () => 'ok',
+          },
+        ];
+      },
+    };
+    const runner = new ReActRunner({
+      model,
+      toolProviders: [provider],
+      policy: { ...policy, convergenceCheck: true },
+    });
+    const result = await runner.run({
+      messages: [{ role: 'user', content: '查时间和状态' }],
+      context: makeContext(),
+      emit: () => {},
+    });
+    expect(result.answer).toBe('已完成。');
+    const finalMessages = model.requests[2]?.messages ?? [];
+    const nudgeCount = finalMessages.filter(
+      (m) =>
+        m.role === 'system' &&
+        m.content.includes('[Harness 信息收敛自检]'),
+    ).length;
+    expect(nudgeCount).toBe(1);
+  });
+
+  it('在只读工具之后的多步中若假装写操作成功仍会触发真实性拦截', async () => {
+    const model = new ScriptedModel([
+      toolTurn([{ index: 0, id: 'c1', name: 'read_info', args: {} }]),
+      [
+        { contentDelta: '定时任务已创建成功，任务 ID: 12345678-1234-1234-1234-1234567890ab' },
+        { finishReason: 'stop', usage: { totalTokens: 5 } },
+      ],
+      [
+        { contentDelta: '我还没有实际调用写入工具。' },
+        { finishReason: 'stop', usage: { totalTokens: 5 } },
+      ],
+    ]);
+    const provider: IToolProvider = {
+      providerName: 'p',
+      async getTools() {
+        return [
+          {
+            name: 'read_info',
+            description: 'read',
+            risk: 'read',
+            parametersJsonSchema: { type: 'object', properties: {} },
+            execute: async () => 'info',
+          },
+          {
+            name: 'group_schedule_manage',
+            description: 'schedule',
+            risk: 'write',
+            parametersJsonSchema: { type: 'object', properties: {} },
+            execute: async () => 'ok',
+          },
+        ];
+      },
+    };
+    const runner = new ReActRunner({
+      model,
+      toolProviders: [provider],
+      policy,
+    });
+    const result = await runner.run({
+      messages: [{ role: 'user', content: '帮我查完创建一个定时任务' }],
+      context: makeContext(),
+      emit: () => {},
+    });
+    expect(model.requests).toHaveLength(3);
+    expect(result.answer).toBe('我还没有实际调用写入工具。');
+  });
+
+  it('汇总 Planner 与子代理 Token 消耗，且同轮并行写工具序列化审批', async () => {
+    const approvals: string[] = [];
+    let executedWrites = 0;
+    const provider: IToolProvider = {
+      providerName: 'mix',
+      async getTools() {
+        return [
+          {
+            name: 'delegate_mock',
+            description: 'sub',
+            risk: 'read',
+            parametersJsonSchema: { type: 'object', properties: {} },
+            execute: async () => 'sub result',
+            executeStructured: async () => ({
+              text: 'sub result',
+              usage: { totalTokens: 40, inputTokens: 30, outputTokens: 10 },
+            }),
+          },
+          {
+            name: 'write_a',
+            description: 'wa',
+            risk: 'write',
+            parametersJsonSchema: { type: 'object', properties: {} },
+            execute: async () => {
+              executedWrites += 1;
+              return 'a';
+            },
+          },
+          {
+            name: 'write_b',
+            description: 'wb',
+            risk: 'write',
+            parametersJsonSchema: { type: 'object', properties: {} },
+            execute: async () => {
+              executedWrites += 1;
+              return 'b';
+            },
+          },
+        ];
+      },
+    };
+    const model = new ScriptedModel([
+      toolTurn([{ index: 0, id: 'c1', name: 'delegate_mock', args: {} }]),
+      toolTurn([
+        { index: 0, id: 'c2', name: 'write_a', args: {} },
+        { index: 1, id: 'c3', name: 'write_b', args: {} },
+      ]),
+    ]);
+    const runner = new ReActRunner({
+      model,
+      toolProviders: [provider],
+      policy,
+      planner: async (input) => {
+        input.onUsage?.({ totalTokens: 15, inputTokens: 10, outputTokens: 5 });
+        return [{ id: 's1', text: 'step1', status: 'pending' }];
+      },
+      approval: async (req) => {
+        if (req.risk === 'read') return { approved: true };
+        approvals.push(req.toolName);
+        return { approved: false, reason: `待确认 ${req.toolName}` };
+      },
+    });
+    const result = await runner.run({
+      messages: [{ role: 'user', content: '执行研究并写入' }],
+      context: makeContext(),
+      emit: () => {},
+    });
+    expect(executedWrites).toBe(0);
+    expect(approvals).toEqual(['write_a']);
+    expect(result.answer).toContain('待确认 write_a');
+    expect(result.usage.totalTokens).toBeGreaterThanOrEqual(55);
+  });
 });

@@ -156,8 +156,7 @@ export { MCP_SECRET_MASK };
 /** 企业 MCP 管理路由：增删改查、连通性测试与工具级访问策略 */
 export function createMcpRoutes(deps: McpRouteDeps): Hono {
   const app = new Hono();
-  const actor = (c: { req: { header: (name: string) => string | undefined } }) =>
-    c.req.header('x-admin-staff-id');
+  const actor = (c: Parameters<typeof webActor>[0]) => webActor(c);
 
   app.get('/mcp-servers', (c) =>
     c.json({

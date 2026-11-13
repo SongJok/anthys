@@ -46,6 +46,8 @@ export interface GlossaryServiceOptions {
   promptLimit?: number;
   /** 按问检索条数，默认 4，最大 10 */
   retrievalLimit?: number;
+  /** 常驻术语注入系统提示词的字符上限，默认 4000 */
+  promptCharBudget?: number;
   /** 术语缓存时间，默认 30 秒 */
   cacheTtlMs?: number;
   /** 项目期术语多久未更新提示需要复核，默认 180 天 */
@@ -56,6 +58,9 @@ export interface GlossaryServiceOptions {
 
 const DEFAULT_PROMPT_LIMIT = 80;
 const MAX_PROMPT_LIMIT = 100;
+const DEFAULT_PROMPT_CHAR_BUDGET = 4_000;
+const MIN_PROMPT_CHAR_BUDGET = 200;
+const MAX_PROMPT_CHAR_BUDGET = 20_000;
 const DEFAULT_RETRIEVAL_LIMIT = 4;
 const MAX_RETRIEVAL_LIMIT = 10;
 const DEFAULT_CACHE_TTL_MS = 30_000;
@@ -112,6 +117,7 @@ export class GlossaryService
   private readonly now: () => number;
   private readonly promptEnabled: boolean;
   private readonly promptLimit: number;
+  private readonly promptCharBudget: number;
   private readonly retrievalLimit: number;
   private readonly cacheTtlMs: number;
   private readonly staleProjectDays: number;
@@ -130,6 +136,11 @@ export class GlossaryService
       Math.trunc(options.promptLimit ?? DEFAULT_PROMPT_LIMIT),
       1,
       MAX_PROMPT_LIMIT,
+    );
+    this.promptCharBudget = clamp(
+      Math.trunc(options.promptCharBudget ?? DEFAULT_PROMPT_CHAR_BUDGET),
+      MIN_PROMPT_CHAR_BUDGET,
+      MAX_PROMPT_CHAR_BUDGET,
     );
     this.retrievalLimit = clamp(
       Math.trunc(options.retrievalLimit ?? DEFAULT_RETRIEVAL_LIMIT),
@@ -284,13 +295,14 @@ export class GlossaryService
 
   public async previewPrompt(limit?: number): Promise<GlossaryPromptPreview> {
     const terms = await this.loadTerms();
-    const injected = this.selectInjectable(
+    const candidates = this.selectInjectable(
       terms,
       clamp(Math.trunc(limit ?? this.promptLimit), 1, MAX_PROMPT_LIMIT),
     );
+    const rendered = this.renderPromptSectionWithBudget(candidates, [], true);
     return {
-      terms: injected,
-      prompt: this.renderPromptSection(injected, [], true),
+      terms: rendered.injectedUsed,
+      prompt: rendered.prompt,
     };
   }
 
@@ -305,7 +317,8 @@ export class GlossaryService
       return { prompt: '', injected: [], retrieved: [] };
     }
 
-    const injected = this.promptEnabled
+    const query = input.query?.trim() ?? '';
+    const injectedCandidates = this.promptEnabled
       ? this.selectInjectable(
           terms,
           clamp(
@@ -313,9 +326,9 @@ export class GlossaryService
             1,
             MAX_PROMPT_LIMIT,
           ),
+          query,
         )
       : [];
-    const query = input.query?.trim() ?? '';
     const retrieved = query
       ? await this.retrieveFrom(
           terms,
@@ -329,15 +342,20 @@ export class GlossaryService
         )
       : [];
 
-    const injectedIds = new Set(injected.map((term) => term.id));
+    const rendered = this.renderPromptSectionWithBudget(
+      injectedCandidates,
+      retrieved,
+      true,
+    );
+    const injectedIds = new Set(rendered.injectedUsed.map((term) => term.id));
     const uniqueRetrieved = retrieved.filter(
       (term) => !injectedIds.has(term.id),
     );
-    const prompt =
-      injected.length + uniqueRetrieved.length > 0
-        ? this.renderPromptSection(injected, uniqueRetrieved, true)
-        : '';
-    return { prompt, injected, retrieved: uniqueRetrieved };
+    return {
+      prompt: rendered.prompt,
+      injected: rendered.injectedUsed,
+      retrieved: uniqueRetrieved,
+    };
   }
 
   public async lookup(
@@ -602,16 +620,24 @@ export class GlossaryService
   private selectInjectable(
     terms: GlossaryTerm[],
     limit: number,
+    query = '',
   ): GlossaryTerm[] {
+    const normalized = query.trim().toLowerCase();
     return terms
       .filter((term) => this.isInjectable(term))
-      .sort(
-        (left, right) =>
+      .sort((left, right) => {
+        if (normalized) {
+          const leftMatch = this.matchesQuery(left, normalized) ? 1 : 0;
+          const rightMatch = this.matchesQuery(right, normalized) ? 1 : 0;
+          if (rightMatch !== leftMatch) return rightMatch - leftMatch;
+        }
+        return (
           right.promptPriority - left.promptPriority ||
           right.hitCount - left.hitCount ||
           right.lastUpdatedAt - left.lastUpdatedAt ||
-          left.standardName.localeCompare(right.standardName, 'zh-CN'),
-      )
+          left.standardName.localeCompare(right.standardName, 'zh-CN')
+        );
+      })
       .slice(0, limit);
   }
 
@@ -748,29 +774,56 @@ export class GlossaryService
     });
   }
 
-  private renderPromptSection(
+  private renderPromptSectionWithBudget(
     injected: GlossaryTerm[],
     retrieved: GlossaryTerm[],
     includeRules: boolean,
-  ): string {
-    if (injected.length === 0 && retrieved.length === 0) return '';
-    const lines = ['## 企业术语知识库（内部黑话速查）'];
+  ): { prompt: string; injectedUsed: GlossaryTerm[] } {
+    if (injected.length === 0 && retrieved.length === 0) {
+      return { prompt: '', injectedUsed: [] };
+    }
+    const headerLines = ['## 企业术语知识库（内部黑话速查）'];
     if (includeRules) {
-      lines.push('使用规则：', ...PROMPT_RULES.map((rule) => `- ${rule}`));
+      headerLines.push('使用规则：', ...PROMPT_RULES.map((rule) => `- ${rule}`));
     }
+
+    const injectedUsed: GlossaryTerm[] = [];
+    const injectedLines: string[] = [];
     if (injected.length > 0) {
-      lines.push(
-        '【常驻术语（系统提示注入）】',
-        ...injected.map((term) => this.formatCompact(term)),
-      );
+      injectedLines.push('【常驻术语（系统提示注入）】');
+      let charCount =
+        headerLines.join('\n').length + injectedLines[0]!.length + 1;
+      for (const term of injected) {
+        const line = this.formatCompact(term);
+        if (
+          injectedUsed.length > 0 &&
+          charCount + 1 + line.length > this.promptCharBudget
+        ) {
+          break;
+        }
+        injectedUsed.push(term);
+        injectedLines.push(line);
+        charCount += 1 + line.length;
+      }
+      if (injectedUsed.length < injected.length) {
+        injectedLines.push(
+          `（仅展示预算内前 ${injectedUsed.length}/${injected.length} 条高频术语，其余可用 glossary_lookup 按需查询）`,
+        );
+      }
     }
-    if (retrieved.length > 0) {
+
+    const injectedIds = new Set(injectedUsed.map((term) => term.id));
+    const uniqueRetrieved = retrieved.filter(
+      (term) => !injectedIds.has(term.id),
+    );
+    const lines = [...headerLines, ...injectedLines];
+    if (uniqueRetrieved.length > 0) {
       lines.push(
         '【本次提问命中术语】',
-        ...retrieved.map((term) => this.formatCard(term)),
+        ...uniqueRetrieved.map((term) => this.formatCard(term)),
       );
     }
-    return lines.join('\n');
+    return { prompt: lines.join('\n'), injectedUsed };
   }
 
   private formatCompact(term: GlossaryTerm): string {
@@ -778,18 +831,19 @@ export class GlossaryService
     if (term.aliases.length > 0) {
       parts.push(`（别名：${term.aliases.join('、')}）`);
     }
-    parts.push(`：${singleLine(term.definition) || '（待补充定义）'}`);
+    parts.push(`：${singleLine(term.definition, 120) || '（待补充定义）'}`);
     if (term.usageScenarios.trim()) {
-      parts.push(`；场景：${singleLine(term.usageScenarios, 100)}`);
+      parts.push(`；场景：${singleLine(term.usageScenarios, 80)}`);
     }
     if (term.misconceptions.trim()) {
-      parts.push(`；勿误解为：${singleLine(term.misconceptions, 100)}`);
+      parts.push(`；勿误解为：${singleLine(term.misconceptions, 80)}`);
     }
-    parts.push(
-      `；部门/项目：${term.department || '未标注'}；时效：${
-        GLOSSARY_TIMELINESS_LABELS[term.timeliness]
-      }`,
-    );
+    if (term.department.trim()) {
+      parts.push(`；部门：${term.department.trim()}`);
+    }
+    if (term.timeliness !== 'long_term') {
+      parts.push(`；时效：${GLOSSARY_TIMELINESS_LABELS[term.timeliness]}`);
+    }
     return parts.join('');
   }
 

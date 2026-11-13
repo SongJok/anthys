@@ -216,4 +216,31 @@ describe('formatApprovalPrompt', () => {
     expect(prompt).toContain('「取消」');
     expect(prompt.length).toBeLessThan(900);
   });
+
+  it('开启 multiPending 后同会话多用户待确认操作互不覆盖并按 staffId / actionIdPrefix 精确提取', () => {
+    const store = new PendingActionStore({ multiPending: true });
+    const a1 = store.put({
+      conversationId: 'group-1',
+      toolName: 'create_ticket',
+      args: { title: 'A 的工单' },
+      risk: 'write',
+      requestedBy: { staffId: 'staff-a' },
+    });
+    const a2 = store.put({
+      conversationId: 'group-1',
+      toolName: 'send_mail',
+      args: { to: 'b@example.com' },
+      risk: 'write',
+      requestedBy: { staffId: 'staff-b' },
+    });
+    expect(store.peekAll('group-1')).toHaveLength(2);
+    expect(store.take('group-1', { staffId: 'staff-a' })?.id).toBe(a1.id);
+    expect(store.peek('group-1', { actionIdPrefix: a2.id.slice(0, 6) })?.id).toBe(
+      a2.id,
+    );
+    expect(store.take('group-1', { actionIdPrefix: a2.id.slice(0, 6) })?.id).toBe(
+      a2.id,
+    );
+    expect(store.size).toBe(0);
+  });
 });

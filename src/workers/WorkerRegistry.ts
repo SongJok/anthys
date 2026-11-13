@@ -164,11 +164,24 @@ function buildProfile(
 /** 内置三类 Worker 画像；预算与工具名单可由 WORKER_<NAME>_* 环境变量覆盖 */
 export class WorkerRegistry {
   private readonly profiles = new Map<WorkerName, WorkerProfile>();
+  private readonly env: Record<string, string | undefined>;
 
   constructor(options: WorkerRegistryOptions) {
-    const env = options.env ?? {};
+    this.env = { ...(options.env ?? {}) };
     for (const name of WORKER_NAMES) {
-      this.profiles.set(name, buildProfile(name, options.basePolicy, env));
+      this.profiles.set(name, buildProfile(name, options.basePolicy, this.env));
+    }
+  }
+
+  /** 基于新主循环策略重新派生全量 Worker 画像 */
+  public withBasePolicy(basePolicy: DynamicLoopPolicy): WorkerRegistry {
+    return new WorkerRegistry({ basePolicy, env: this.env });
+  }
+
+  /** 原地更新主循环策略并重建全量 Worker 画像 */
+  public updateBasePolicy(basePolicy: DynamicLoopPolicy): void {
+    for (const name of WORKER_NAMES) {
+      this.profiles.set(name, buildProfile(name, basePolicy, this.env));
     }
   }
 

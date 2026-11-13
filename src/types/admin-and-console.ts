@@ -167,7 +167,16 @@ export type ReActTraceStepType =
   | 'citation'
   | 'tool'
   | 'sandbox'
+  | 'subagent'
   | 'answer';
+
+export interface ReActSubTraceSpan {
+  kind: 'subagent' | 'planner';
+  name: string;
+  steps: number;
+  tokens: number;
+  durationMs: number;
+}
 
 export interface ReActTraceStep {
   index: number;
@@ -178,6 +187,7 @@ export interface ReActTraceStep {
   output?: string;
   durationMs?: number;
   isError?: boolean;
+  subTraces?: ReActSubTraceSpan[];
 }
 
 export interface ReActTraceRecord {

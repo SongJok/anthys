@@ -22,6 +22,7 @@ const STEP_LABEL: Record<ReActTraceStep['type'], string> = {
   citation: '引用来源',
   tool: 'MCP 工具调用',
   sandbox: '沙盒执行',
+  subagent: '子代理协作',
   answer: '最终回答',
 };
 
@@ -32,10 +33,11 @@ const STEP_COLOR: Record<ReActTraceStep['type'], string> = {
   citation: 'magenta',
   tool: 'blue',
   sandbox: 'purple',
+  subagent: 'volcano',
   answer: 'green',
 };
 
-function renderStep(step: ReActTraceStep) {
+export function renderStep(step: ReActTraceStep) {
   return (
     <Space direction="vertical" size={4} style={{ width: '100%' }}>
       <Space size={8}>
@@ -60,6 +62,15 @@ function renderStep(step: ReActTraceStep) {
         <Typography.Paragraph ellipsis={{ rows: 4, expandable: true }}>
           {step.output}
         </Typography.Paragraph>
+      )}
+      {step.subTraces && step.subTraces.length > 0 && (
+        <Space size={6} wrap>
+          {step.subTraces.map((span, idx) => (
+            <Tag key={`${span.name}-${idx}`} color="geekblue">
+              {span.kind}:{span.name} ({span.steps}步 / {span.tokens}t / {span.durationMs}ms)
+            </Tag>
+          ))}
+        </Space>
       )}
     </Space>
   );
@@ -182,7 +193,12 @@ export default function TracesPage() {
             key: 'tools',
             width: 100,
             render: (_, row) =>
-              row.steps.filter((step) => step.type === 'tool' || step.type === 'sandbox').length,
+              row.steps.filter(
+                (step) =>
+                  step.type === 'tool' ||
+                  step.type === 'sandbox' ||
+                  step.type === 'subagent',
+              ).length,
           },
           { title: 'Token', dataIndex: 'totalTokens', width: 90 },
           { title: '耗时(ms)', dataIndex: 'durationMs', width: 100 },

@@ -140,7 +140,13 @@ export type AgentStreamEvent =
       final?: boolean;
     }
   | { type: 'answer_reset'; narration: string; turnId?: string }
-  | { type: 'plan'; items: PlanItem[] }
+  | {
+      type: 'plan';
+      items: PlanItem[];
+      initial?: boolean;
+      durationMs?: number;
+      tokens?: number;
+    }
   | { type: 'citation'; citations: StreamCitation[] }
   | { type: 'status'; message: string }
   | {
@@ -167,6 +173,7 @@ export type AgentStreamEvent =
       durationMs?: number;
       truncated?: boolean;
       datasetKey?: string;
+      traces?: ToolExecutionOutput['traces'];
     }
   | {
       type: 'completed';
@@ -240,6 +247,23 @@ export interface ToolExecutionOutput {
   summary?: string;
   /** 仅受信任的 Provider 可以返回；ReActRunner 按来源白名单校验后注入 */
   instructions?: ToolInstruction[];
+  /** 复合工具 / 子代理汇总的内部 Token 用量，用于合并到主运行总用量 */
+  usage?: {
+    totalTokens: number;
+    inputTokens?: number;
+    outputTokens?: number;
+    cachedTokens?: number;
+    steps?: number;
+    durationMs?: number;
+  };
+  /** 子代理或规划器耗时与步骤追踪，便于可观测性埋点 */
+  traces?: Array<{
+    kind: 'subagent' | 'planner';
+    name: string;
+    steps: number;
+    tokens: number;
+    durationMs: number;
+  }>;
 }
 
 /** 写操作确认：调用方在工具执行前决定是否放行 */
@@ -308,8 +332,10 @@ export interface ChatMessage {
   toolCalls?: ChatToolCall[];
   toolCallId?: string;
   toolName?: string;
-  /** 供应商要求多轮工具调用回传的思维链（DeepSeek / Kimi） */
+  /** 供应商要求多轮工具调用回传的思维链（DeepSeek / Kimi / Anthropic） */
   reasoning?: string;
+  /** Anthropic Extended Thinking 块签名，多轮工具调用原样回传需要 */
+  reasoningSignature?: string;
 }
 
 /**
@@ -317,6 +343,7 @@ export interface ChatMessage {
  */
 export interface ChatStreamChunk {
   reasoningDelta?: string;
+  reasoningSignatureDelta?: string;
   contentDelta?: string;
   toolCallDelta?: {
     index: number;

@@ -195,15 +195,32 @@ export interface ChatTurnUsage {
   stopped?: boolean;
 }
 
+export interface ReActSubTraceSpan {
+  kind: 'subagent' | 'planner';
+  name: string;
+  steps: number;
+  tokens: number;
+  durationMs: number;
+}
+
 export interface ReActTraceStep {
   index: number;
-  type: 'reasoning' | 'narration' | 'plan' | 'citation' | 'tool' | 'sandbox' | 'answer';
+  type:
+    | 'reasoning'
+    | 'narration'
+    | 'plan'
+    | 'citation'
+    | 'tool'
+    | 'sandbox'
+    | 'subagent'
+    | 'answer';
   content?: string;
   toolName?: string;
   arguments?: Record<string, unknown>;
   durationMs?: number;
   output?: string;
   isError?: boolean;
+  subTraces?: ReActSubTraceSpan[];
 }
 
 export interface ReActTrace {

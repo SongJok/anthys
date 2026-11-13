@@ -47,6 +47,7 @@ export class OneTimeTicketStore {
 export interface ConsoleChatInput {
   question: string;
   systemPrompt?: string;
+  conversationId?: string;
   signal?: AbortSignal;
 }
 
@@ -82,6 +83,7 @@ export async function handleChatStream(
     return c.json({ ok: false, error: '缺少 question 参数' }, 400);
   }
   const systemPrompt = c.req.query('systemPrompt')?.trim() || undefined;
+  const conversationId = c.req.query('conversationId')?.trim() || undefined;
 
   deps.metrics?.inc('console_chat_total');
   return streamSSE(c, async (stream) => {
@@ -107,7 +109,15 @@ export async function handleChatStream(
     };
 
     try {
-      await handler({ question, systemPrompt, signal: controller.signal }, emit);
+      await handler(
+        {
+          question,
+          ...(systemPrompt ? { systemPrompt } : {}),
+          ...(conversationId ? { conversationId } : {}),
+          signal: controller.signal,
+        },
+        emit,
+      );
       write('done', { type: 'done' });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);

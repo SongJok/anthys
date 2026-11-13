@@ -20,6 +20,7 @@ import type {
   AgentTaskStore,
   AgentTaskSubscription,
   CreateAgentTaskInput,
+  ExternalTaskLinkRef,
   ListAgentTasksInput,
   UpdateAgentTaskInput,
 } from '../types/tasks.js';
@@ -87,6 +88,7 @@ export const agentTaskLinks = pgTable(
       table.ref,
     ),
     index('agent_task_links_task_idx').on(table.taskId),
+    index('agent_task_links_ref_idx').on(table.ref),
   ],
 );
 
@@ -276,6 +278,45 @@ export class DrizzleAgentTaskStore implements AgentTaskStore {
       .where(eq(agentTaskLinks.taskId, taskId))
       .orderBy(asc(agentTaskLinks.createdAt));
     return rows.map(toLink);
+  }
+
+  public async findActiveByLinks(
+    refs: ExternalTaskLinkRef[],
+  ): Promise<AgentTask[]> {
+    const normalized = refs
+      .map((item) => ({ kind: item.kind, ref: item.ref.trim() }))
+      .filter((item) => item.ref.length > 0);
+    if (normalized.length === 0) return [];
+    const uniqueRefs = [...new Set(normalized.map((item) => item.ref))];
+    const rows = await this.db
+      .select({
+        task: agentTasks,
+        linkKind: agentTaskLinks.kind,
+        linkRef: agentTaskLinks.ref,
+      })
+      .from(agentTaskLinks)
+      .innerJoin(agentTasks, eq(agentTaskLinks.taskId, agentTasks.id))
+      .where(
+        and(
+          inArray(agentTaskLinks.ref, uniqueRefs),
+          eq(agentTasks.status, 'active'),
+        ),
+      )
+      .orderBy(desc(agentTasks.updatedAt));
+
+    const byTaskId = new Map<string, AgentTask>();
+    for (const row of rows) {
+      const matched = normalized.some(
+        (candidate) =>
+          candidate.ref === row.linkRef &&
+          (!candidate.kind || candidate.kind === row.linkKind),
+      );
+      if (!matched) continue;
+      if (!byTaskId.has(row.task.id)) {
+        byTaskId.set(row.task.id, toTask(row.task));
+      }
+    }
+    return [...byTaskId.values()];
   }
 
   public async subscribe(input: {

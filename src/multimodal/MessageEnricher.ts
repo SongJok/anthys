@@ -13,11 +13,23 @@ export interface MessageEnricherLogger {
 }
 
 export interface MessageEnricherDeps {
-  store: { store(message: InboundMessage): Promise<AttachmentStoreResult> };
-  vision?: VisionDescriber;
+  store: {
+    store(
+      message: InboundMessage,
+      options?: { signal?: AbortSignal },
+    ): Promise<AttachmentStoreResult>;
+  };
+  vision?: {
+    describe(
+      attachment: StoredAttachment,
+      options?: { signal?: AbortSignal },
+    ): Promise<string | null>;
+  };
   logger?: MessageEnricherLogger;
   /** 是否对 pptx/docx/xlsx/csv 做文本提取，默认开启 */
   documents?: boolean;
+  /** 中止信号：排队期间被 /stop 时立即停止下载与视觉理解 */
+  signal?: AbortSignal;
   /** 文档解析结果回调（用于指标） */
   onDocument?(info: { format?: string; ok: boolean; reason?: string; fileName: string }): void;
 }
@@ -100,26 +112,35 @@ export async function enrichInboundMessage(
   message: InboundMessage,
   deps: MessageEnricherDeps,
 ): Promise<EnrichmentResult> {
+  if (deps.signal?.aborted) {
+    return { message, attachments: [], failed: [] };
+  }
   if (!message.attachments || message.attachments.length === 0) {
     return { message, attachments: [], failed: [] };
   }
-  const { stored, failed } = await deps.store.store(message);
+  const { stored, failed } = deps.signal
+    ? await deps.store.store(message, { signal: deps.signal })
+    : await deps.store.store(message);
   const descriptions = new Map<string, string | null>();
   if (deps.vision) {
     for (const attachment of stored) {
+      if (deps.signal?.aborted) break;
       if (attachment.type !== 'image') continue;
       descriptions.set(
         attachment.localPath,
-        await deps.vision.describe(attachment),
+        deps.signal
+          ? await deps.vision.describe(attachment, { signal: deps.signal })
+          : await deps.vision.describe(attachment),
       );
     }
   }
   const digests = new Map<string, AttachmentDigest | null>();
   if (deps.documents !== false) {
     for (const attachment of stored) {
+      if (deps.signal?.aborted) break;
       try {
         const digest = await digestAttachment(attachment, {
-          ...(deps.vision ? { vision: deps.vision } : {}),
+          ...(deps.vision ? { vision: deps.vision as VisionDescriber } : {}),
         });
         digests.set(attachment.localPath, digest);
         if (digest) {

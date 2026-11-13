@@ -8,7 +8,9 @@ const WRITE_TOOL_PATTERN =
  * 管理工具与子代理委派一律不视为只读，避免研究单元获得写权限或递归委派。
  */
 export function isReadOnlyTool(tool: ToolDefinition): boolean {
-  if (tool.name === 'delegate_research') return false;
+  if (tool.name === 'delegate_research' || tool.name === 'dispatch_worker') {
+    return false;
+  }
   if (tool.name.startsWith('admin_')) return false;
   if (tool.risk && tool.risk !== 'read') return false;
   return !WRITE_TOOL_PATTERN.test(tool.name);

@@ -7,6 +7,7 @@ import type {
 
 type AnthropicBlock =
   | { type: 'text'; text: string }
+  | { type: 'thinking'; thinking: string; signature: string }
   | { type: 'tool_use'; id: string; name: string; input: Record<string, unknown> }
   | { type: 'tool_result'; tool_use_id: string; content: string };
 
@@ -26,15 +27,51 @@ export interface AnthropicChatModelOptions {
 }
 
 function safeParseArguments(raw: string): Record<string, unknown> {
+  if (!raw || !raw.trim()) return {};
   try {
-    const parsed: unknown = JSON.parse(raw || '{}');
+    const parsed: unknown = JSON.parse(raw);
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
       return parsed as Record<string, unknown>;
     }
-  } catch {
-    // 模型输出的参数不合法时回退为空对象，由工具侧报错
+    return {
+      __rawArguments: raw,
+      __parseError: '模型生成的工具参数不是 JSON 对象',
+    };
+  } catch (error) {
+    return {
+      __rawArguments: raw,
+      __parseError: `工具参数 JSON 解析失败: ${error instanceof Error ? error.message : String(error)}`,
+    };
   }
-  return {};
+}
+
+function appendUserBlock(
+  converted: AnthropicMessage[],
+  addition: string | AnthropicBlock,
+): void {
+  const last = converted[converted.length - 1];
+  if (last && last.role === 'user') {
+    if (typeof addition === 'string') {
+      if (typeof last.content === 'string') {
+        last.content = last.content ? `${last.content}\n\n${addition}` : addition;
+      } else {
+        last.content.push({ type: 'text', text: addition });
+      }
+      return;
+    }
+    if (typeof last.content === 'string') {
+      last.content = last.content
+        ? [{ type: 'text', text: last.content }, addition]
+        : [addition];
+    } else {
+      last.content.push(addition);
+    }
+    return;
+  }
+  converted.push({
+    role: 'user',
+    content: typeof addition === 'string' ? addition : [addition],
+  });
 }
 
 export function toAnthropicMessages(messages: ChatMessage[]): {
@@ -43,29 +80,39 @@ export function toAnthropicMessages(messages: ChatMessage[]): {
 } {
   const systemParts: string[] = [];
   const converted: AnthropicMessage[] = [];
+  let seenNonSystem = false;
 
   for (const message of messages) {
     if (message.role === 'system') {
-      systemParts.push(message.content);
+      if (!seenNonSystem) {
+        systemParts.push(message.content);
+      } else {
+        appendUserBlock(
+          converted,
+          `<system-reminder>\n${message.content}\n</system-reminder>`,
+        );
+      }
       continue;
     }
+    seenNonSystem = true;
     if (message.role === 'tool') {
-      const block: AnthropicBlock = {
+      appendUserBlock(converted, {
         type: 'tool_result',
         tool_use_id: message.toolCallId ?? '',
         content: message.content,
-      };
-      const last = converted[converted.length - 1];
-      if (last && last.role === 'user' && Array.isArray(last.content)) {
-        last.content.push(block);
-      } else {
-        converted.push({ role: 'user', content: [block] });
-      }
+      });
       continue;
     }
     if (message.role === 'assistant') {
       if (message.toolCalls?.length) {
         const blocks: AnthropicBlock[] = [];
+        if (message.reasoning && message.reasoningSignature) {
+          blocks.push({
+            type: 'thinking',
+            thinking: message.reasoning,
+            signature: message.reasoningSignature,
+          });
+        }
         if (message.content.length > 0) {
           blocks.push({ type: 'text', text: message.content });
         }
@@ -83,7 +130,7 @@ export function toAnthropicMessages(messages: ChatMessage[]): {
       }
       continue;
     }
-    converted.push({ role: 'user', content: message.content });
+    appendUserBlock(converted, message.content);
   }
 
   return { system: systemParts.join('\n\n'), messages: converted };
@@ -235,6 +282,7 @@ export class AnthropicChatModel implements ChatModel {
               type?: string;
               text?: string;
               thinking?: string;
+              signature?: string;
               partial_json?: string;
             }
           | undefined;
@@ -242,6 +290,8 @@ export class AnthropicChatModel implements ChatModel {
           yield { contentDelta: delta.text };
         } else if (delta?.type === 'thinking_delta' && delta.thinking) {
           yield { reasoningDelta: delta.thinking };
+        } else if (delta?.type === 'signature_delta' && delta.signature) {
+          yield { reasoningSignatureDelta: delta.signature };
         } else if (
           delta?.type === 'input_json_delta' &&
           delta.partial_json

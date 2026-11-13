@@ -16,8 +16,9 @@ Environment=TZ=Asia/Shanghai
 Environment=NODE_ENV=production
 Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
+# pnpm start 直接执行编译产物 node dist/index.js（deploy.sh 已先执行 pnpm build）。
 # 若 pnpm 装在别处（如 nvm 的 /home/anthys/.nvm/versions/node/*/bin），
-# 把下面的 ExecStart 换成该 pnpm 的绝对路径，否则 systemd 找不到命令
+# 把下面的 ExecStart 换成该 pnpm 或 node dist/index.js 的绝对路径，否则 systemd 找不到命令
 ExecStart=/usr/bin/env pnpm start
 
 Restart=always

@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, stat, utimes } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -107,6 +107,26 @@ describe('GroupTranscriptArchive', () => {
     await archive.append(entry({ conversationId: 'cid-2', messageId: 'x' }));
     expect(await archive.read('cid-1')).toHaveLength(1);
     expect(await archive.read('cid-2')).toHaveLength(1);
+  });
+
+  it('pruneOlderThan 按 mtime 统计或清理过期群归档文件', async () => {
+    const archive = new GroupTranscriptArchive({
+      dir,
+      maxSeenConversations: 2,
+      maxSeenPerConversation: 2,
+    });
+    await archive.append(entry({ conversationId: 'cid-old', messageId: 'm1' }));
+    await archive.append(entry({ conversationId: 'cid-new', messageId: 'm2' }));
+    const oldTime = new Date(Date.now() - 10 * 86_400_000);
+    await utimes(archive.filePathFor('cid-old'), oldTime, oldTime);
+
+    const cutoff = Date.now() - 5 * 86_400_000;
+    expect(await archive.pruneOlderThan(cutoff, { dryRun: true })).toBe(1);
+    await expect(stat(archive.filePathFor('cid-old'))).resolves.toBeTruthy();
+
+    expect(await archive.pruneOlderThan(cutoff)).toBe(1);
+    await expect(stat(archive.filePathFor('cid-old'))).rejects.toThrow();
+    await expect(stat(archive.filePathFor('cid-new'))).resolves.toBeTruthy();
   });
 });
 

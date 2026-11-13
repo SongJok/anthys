@@ -1,4 +1,4 @@
-import { appendFile, mkdir, readdir, readFile } from 'node:fs/promises';
+import { appendFile, mkdir, readdir, readFile, rm, stat } from 'node:fs/promises';
 import path from 'node:path';
 import type { TranscriptEntry } from '../types/bystander-and-memory.js';
 
@@ -12,6 +12,10 @@ export interface GroupTranscriptArchiveOptions {
   logger?: GroupTranscriptArchiveLogger;
   /** 不归档这些发送人（系统播报/机器人），默认排除 scheduler */
   ignoreSenders?: string[];
+  /** 内存中最多缓存多少个群的去重集合（LRU 淘汰），默认 200 */
+  maxSeenConversations?: number;
+  /** 每个群在内存中最多保留多少条近期 messageId 用于快速去重，默认 5000 */
+  maxSeenPerConversation?: number;
 }
 
 export interface GroupArchiveSummary {
@@ -26,6 +30,8 @@ export interface GroupArchiveReadOptions {
 }
 
 const DEFAULT_READ_LIMIT = 200;
+const DEFAULT_MAX_SEEN_CONVERSATIONS = 200;
+const DEFAULT_MAX_SEEN_PER_CONVERSATION = 5_000;
 const FILE_SUFFIX = '.jsonl';
 
 function errorMessage(error: unknown): string {
@@ -84,7 +90,9 @@ export class GroupTranscriptArchive {
   private readonly dir: string;
   private readonly logger?: GroupTranscriptArchiveLogger;
   private readonly ignoreSenders: Set<string>;
-  /** 每群已落盘的 messageId，懒加载自文件 */
+  private readonly maxSeenConversations: number;
+  private readonly maxSeenPerConversation: number;
+  /** 每群已落盘的 messageId，按群 LRU 与单群 FIFO 有界缓存 */
   private readonly seen = new Map<string, Set<string>>();
   private readonly loading = new Map<string, Promise<Set<string>>>();
 
@@ -92,6 +100,18 @@ export class GroupTranscriptArchive {
     this.dir = path.resolve(options.dir);
     this.logger = options.logger;
     this.ignoreSenders = new Set(options.ignoreSenders ?? ['scheduler']);
+    this.maxSeenConversations = Math.max(
+      1,
+      Math.trunc(
+        options.maxSeenConversations ?? DEFAULT_MAX_SEEN_CONVERSATIONS,
+      ),
+    );
+    this.maxSeenPerConversation = Math.max(
+      1,
+      Math.trunc(
+        options.maxSeenPerConversation ?? DEFAULT_MAX_SEEN_PER_CONVERSATION,
+      ),
+    );
   }
 
   public get root(): string {
@@ -109,7 +129,7 @@ export class GroupTranscriptArchive {
     const seen = await this.loadSeen(entry.conversationId);
     if (seen.has(entry.messageId)) return false;
     // has/add 之间没有 await，单线程下不会被同群并发打断
-    seen.add(entry.messageId);
+    this.addSeenId(seen, entry.messageId);
     try {
       await mkdir(this.dir, { recursive: true, mode: 0o755 });
       await appendFile(
@@ -166,6 +186,37 @@ export class GroupTranscriptArchive {
     return summaries.sort((a, b) => b.lastTimestamp - a.lastTimestamp);
   }
 
+  /** 清理 mtime 早于 cutoffMs 的过期群归档文件，返回过期/已清理文件数 */
+  public async pruneOlderThan(
+    cutoffMs: number,
+    options: { dryRun?: boolean } = {},
+  ): Promise<number> {
+    let files: string[];
+    try {
+      files = await readdir(this.dir);
+    } catch {
+      return 0;
+    }
+    let count = 0;
+    for (const file of files) {
+      const conversationId = conversationIdFromFile(file);
+      if (conversationId === null) continue;
+      const fullPath = path.join(this.dir, file);
+      try {
+        const info = await stat(fullPath);
+        if (info.mtimeMs >= cutoffMs) continue;
+        count += 1;
+        if (!options.dryRun) {
+          await rm(fullPath, { force: true });
+          this.seen.delete(conversationId);
+        }
+      } catch {
+        continue;
+      }
+    }
+    return count;
+  }
+
   private async readAll(conversationId: string): Promise<TranscriptEntry[]> {
     let content: string;
     try {
@@ -181,14 +232,38 @@ export class GroupTranscriptArchive {
     return entries;
   }
 
+  private touchSeen(conversationId: string, set: Set<string>): void {
+    this.seen.delete(conversationId);
+    this.seen.set(conversationId, set);
+    while (this.seen.size > this.maxSeenConversations) {
+      const oldestKey = this.seen.keys().next().value;
+      if (oldestKey === undefined) break;
+      this.seen.delete(oldestKey);
+    }
+  }
+
+  private addSeenId(set: Set<string>, messageId: string): void {
+    if (set.has(messageId)) set.delete(messageId);
+    set.add(messageId);
+    while (set.size > this.maxSeenPerConversation) {
+      const oldestId = set.values().next().value;
+      if (oldestId === undefined) break;
+      set.delete(oldestId);
+    }
+  }
+
   private loadSeen(conversationId: string): Promise<Set<string>> {
     const cached = this.seen.get(conversationId);
-    if (cached) return Promise.resolve(cached);
+    if (cached) {
+      this.touchSeen(conversationId, cached);
+      return Promise.resolve(cached);
+    }
     let pending = this.loading.get(conversationId);
     if (!pending) {
       pending = this.readAll(conversationId).then((entries) => {
-        const set = new Set(entries.map((entry) => entry.messageId));
-        this.seen.set(conversationId, set);
+        const recent = entries.slice(-this.maxSeenPerConversation);
+        const set = new Set(recent.map((entry) => entry.messageId));
+        this.touchSeen(conversationId, set);
         this.loading.delete(conversationId);
         return set;
       });

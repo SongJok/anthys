@@ -457,4 +457,38 @@ describe('GlossaryService 管理与校验', () => {
     expect(preview.terms.map((item) => item.id)).toEqual(['g-1']);
     expect(preview.prompt).toContain('企业术语知识库');
   });
+
+  it('按 promptCharBudget 截断常驻术语并保持命中术语召回', async () => {
+    const store = new MemoryGlossaryStore();
+    for (let i = 1; i <= 10; i += 1) {
+      store.terms.push(
+        term({
+          id: `g-${i}`,
+          standardName: `术语${i}`,
+          definition: `详细业务含义解释 ${'说明'.repeat(40)} #${i}`,
+          promptPriority: 100 - i,
+        }),
+      );
+    }
+    const service = new GlossaryService({
+      store,
+      now: () => NOW,
+      promptLimit: 50,
+      promptCharBudget: 600,
+    });
+
+    const result = await service.buildContext({
+      conversationType: '1',
+      query: '术语10 怎么用',
+    });
+
+    expect(result.injected.length).toBeLessThan(10);
+    expect(result.prompt.length).toBeLessThan(1_800);
+    // Query-relevant term is either prioritized into injected or promoted cleanly into retrieved
+    const allNames = [...result.injected, ...result.retrieved].map(
+      (item) => item.standardName,
+    );
+    expect(allNames).toContain('术语10');
+    expect(result.prompt).not.toContain('部门/项目：未标注');
+  });
 });

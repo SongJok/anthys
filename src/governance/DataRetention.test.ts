@@ -176,7 +176,12 @@ describe('DataRetentionService', () => {
     await utimes(oldDir, new Date(NOW - 48 * 3_600_000), new Date(NOW - 48 * 3_600_000));
 
     const store = new FakeStore();
-    const svc = service(store, { attachmentsDir: root, batchSize: 100 });
+    const pruneOlderThan = vi.fn(async () => 2);
+    const svc = service(store, {
+      attachmentsDir: root,
+      batchSize: 100,
+      transcriptArchive: { pruneOlderThan },
+    });
     const result = await svc.cleanup();
 
     expect(store.purgeCalls.map((call) => call.kind)).toEqual([
@@ -190,6 +195,10 @@ describe('DataRetentionService', () => {
     expect(store.purgeCalls[2]?.cutoffMs).toBe(NOW - 30 * 86_400_000);
     expect(store.purgeCalls[0]?.limit).toBe(100);
     expect(result.deleted.attachments).toBe(1);
+    expect(result.transcriptArchives).toBe(2);
+    expect(pruneOlderThan).toHaveBeenCalledWith(NOW - 180 * 86_400_000, {
+      dryRun: false,
+    });
     await expect(rm(oldDir)).rejects.toThrow();
     await expect(stat(freshDir)).resolves.toBeTruthy();
   });

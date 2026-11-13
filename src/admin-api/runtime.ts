@@ -213,6 +213,20 @@ export class TraceCollector {
           content: event.items
             .map((item) => `- [${item.status}] ${item.text}`)
             .join('\n'),
+          ...(event.durationMs !== undefined ? { durationMs: event.durationMs } : {}),
+          ...(event.initial || event.tokens !== undefined
+            ? {
+                subTraces: [
+                  {
+                    kind: 'planner',
+                    name: 'planner',
+                    steps: event.items.length,
+                    tokens: event.tokens ?? 0,
+                    durationMs: event.durationMs ?? 0,
+                  },
+                ],
+              }
+            : {}),
         });
         return;
       }
@@ -229,9 +243,16 @@ export class TraceCollector {
       }
       case 'tool_start': {
         this.flushReasoning();
+        const isSubagentTool =
+          event.toolName === 'delegate_research' ||
+          event.toolName === 'dispatch_worker';
         const step: ReActTraceStep = {
           index: this.steps.length,
-          type: event.toolName.startsWith('sandbox_') ? 'sandbox' : 'tool',
+          type: isSubagentTool
+            ? 'subagent'
+            : event.toolName.startsWith('sandbox_')
+              ? 'sandbox'
+              : 'tool',
           toolName: event.toolName,
           arguments: event.args,
         };
@@ -252,6 +273,9 @@ export class TraceCollector {
             event.durationMs ?? this.now() - open.startedAt;
           open.step.output = event.summary;
           open.step.isError = event.isError;
+          if (event.traces?.length) {
+            open.step.subTraces = event.traces;
+          }
           this.openTools.splice(this.openTools.indexOf(open), 1);
         }
         this.flushNarration();

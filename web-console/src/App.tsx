@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Button,
   Input,
@@ -6,6 +6,7 @@ import {
   Menu,
   Modal,
   Space,
+  Tag,
   Typography,
   message,
 } from 'antd';
@@ -28,7 +29,7 @@ import {
   TeamOutlined,
   UserAddOutlined,
 } from '@ant-design/icons';
-import { getToken, setToken } from './api';
+import { api, getToken, setToken, type AdminSessionStatus } from './api';
 import DashboardPage from './pages/DashboardPage';
 import SystemSettingsPage from './pages/SystemSettingsPage';
 import UserWhitelistPage from './pages/UserWhitelistPage';
@@ -91,8 +92,91 @@ const PAGE_TITLES: Record<string, string> = {
 
 export default function App() {
   const [active, setActive] = useState('dashboard');
-  const [tokenModalOpen, setTokenModalOpen] = useState(!getToken());
-  const [tokenDraft, setTokenDraft] = useState(getToken());
+  const [session, setSession] = useState<AdminSessionStatus | null>(null);
+  const [sessionEpoch, setSessionEpoch] = useState(0);
+  const [tokenModalOpen, setTokenModalOpen] = useState(false);
+  const [tokenDraft, setTokenDraft] = useState('');
+  const [loggingIn, setLoggingIn] = useState(false);
+
+  useEffect(() => {
+    let activeFlag = true;
+    const bootstrapSession = async () => {
+      try {
+        const legacy = getToken().trim();
+        if (legacy) {
+          try {
+            const migrated = await api.loginSession(legacy);
+            if (!activeFlag) return;
+            setSession(migrated);
+            setTokenModalOpen(migrated.authRequired && !migrated.authenticated);
+            setSessionEpoch((n) => n + 1);
+            return;
+          } catch {
+            setToken('');
+          }
+        }
+        const status = await api.session();
+        if (!activeFlag) return;
+        setSession(status);
+        setTokenModalOpen(status.authRequired && !status.authenticated);
+      } catch {
+        // 请求失败时不阻断页面骨架渲染
+      }
+    };
+    void bootstrapSession();
+    return () => {
+      activeFlag = false;
+    };
+  }, []);
+
+  const submitLogin = async () => {
+    const candidate = tokenDraft.trim();
+    if (!candidate) {
+      message.warning('请输入管理 API Token 或只读 Viewer Token');
+      return;
+    }
+    setLoggingIn(true);
+    try {
+      const next = await api.loginSession(candidate);
+      setSession(next);
+      setTokenDraft('');
+      setTokenModalOpen(false);
+      setSessionEpoch((n) => n + 1);
+      message.success(
+        next.role === 'viewer'
+          ? '已通过 HttpOnly 会话登录（只读模式）'
+          : '已通过 HttpOnly 会话登录（管理员）',
+      );
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoggingIn(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await api.logoutSession();
+      setSession((prev) =>
+        prev ? { ...prev, authenticated: false, role: null } : null,
+      );
+      setTokenModalOpen(true);
+      setSessionEpoch((n) => n + 1);
+      message.success('已退出管理会话');
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const statusTag = !session
+    ? { color: 'default', text: '检查会话中' }
+    : !session.authRequired
+      ? { color: 'gold', text: '开发开放模式' }
+      : !session.authenticated
+        ? { color: 'red', text: '未登录' }
+        : session.role === 'viewer'
+          ? { color: 'blue', text: '只读会话' }
+          : { color: 'green', text: '管理员会话' };
 
   return (
     <Layout style={{ minHeight: '100vh' }}>
@@ -124,15 +208,18 @@ export default function App() {
             {PAGE_TITLES[active]}
           </Typography.Title>
           <Space>
-            <Typography.Text type="secondary">
-              管理 API Token
-            </Typography.Text>
+            <Tag color={statusTag.color}>{statusTag.text}</Tag>
             <Button size="small" onClick={() => setTokenModalOpen(true)}>
-              {getToken() ? '已配置' : '未配置'}
+              {session?.authenticated ? '切换凭证' : '登录凭证'}
             </Button>
+            {session?.authRequired && session.authenticated && (
+              <Button size="small" onClick={() => void handleLogout()}>
+                退出
+              </Button>
+            )}
           </Space>
         </Header>
-        <Content style={{ padding: 24 }}>
+        <Content key={sessionEpoch} style={{ padding: 24 }}>
           {active === 'dashboard' && <DashboardPage />}
           {active === 'chat' && <ChatPage />}
           {active === 'dingtalk' && <SystemSettingsPage />}
@@ -154,25 +241,26 @@ export default function App() {
       </Layout>
 
       <Modal
-        title="设置管理 API Token"
+        title="控制台身份验证"
         open={tokenModalOpen}
-        onCancel={() => setTokenModalOpen(Boolean(getToken()))}
-        onOk={() => {
-          setToken(tokenDraft.trim());
-          setTokenModalOpen(false);
-          message.success('Token 已保存');
-          window.location.reload();
+        confirmLoading={loggingIn}
+        onCancel={() => {
+          if (!session?.authRequired || session.authenticated) {
+            setTokenModalOpen(false);
+          }
         }}
-        okText="保存"
-        cancelText="稍后"
+        onOk={() => void submitLogin()}
+        okText="登录会话"
+        cancelText="取消"
       >
         <Typography.Paragraph type="secondary">
-          Token 对应服务端环境变量 ADMIN_API_TOKEN，保存在浏览器本地。
+          请输入服务端 ADMIN_API_TOKEN（完全权限）或 ADMIN_VIEWER_TOKEN（只读权限）。校验成功后将签发 HttpOnly Cookie 会话，不再将密钥明文写入 localStorage。
         </Typography.Paragraph>
         <Input.Password
-          placeholder="请输入 ADMIN_API_TOKEN"
+          placeholder="请输入管理员或只读访问 Token"
           value={tokenDraft}
           onChange={(event) => setTokenDraft(event.target.value)}
+          onPressEnter={() => void submitLogin()}
         />
       </Modal>
     </Layout>

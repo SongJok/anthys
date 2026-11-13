@@ -31,23 +31,33 @@ export interface ScheduledTaskSchedulerOptions {
   intervalMs?: number;
   /** 领取租约时长，默认 10 分钟 */
   leaseMs?: number;
+  /** 单次 tick 并发执行上限，默认 3 */
+  maxConcurrency?: number;
+  /** 任务失败时的基础退避时间（ms），默认 30 秒 */
+  failureBackoffBaseMs?: number;
+  /** 连续失败的最大退避上限（ms），默认 15 分钟 */
+  failureBackoffMaxMs?: number;
   owner?: string;
   logger?: SchedulerLogger;
   now?: () => number;
 }
 
 /**
- * 轮询到期任务并串行执行。单个任务失败不会阻塞后续任务，
- * 失败后仍推进 nextRunAt，避免故障任务被反复重试。
+ * 轮询到期任务并按有界并发执行。单个任务失败不阻塞其他任务，
+ * 对重复失败的任务自动指数退避，避免短周期任务反复空耗。
  */
 export class ScheduledTaskScheduler {
   private timer: NodeJS.Timeout | null = null;
   private running = false;
   private tickInFlight: Promise<void> | null = null;
+  private readonly failureCounts = new Map<string, number>();
   private readonly store: ScheduledTaskStore;
   private readonly execute: (task: ScheduledTask) => Promise<void>;
   private readonly intervalMs: number;
   private readonly leaseMs: number;
+  private readonly maxConcurrency: number;
+  private readonly failureBackoffBaseMs: number;
+  private readonly failureBackoffMaxMs: number;
   private readonly owner: string;
   private readonly logger?: SchedulerLogger;
   private readonly now: () => number;
@@ -57,6 +67,12 @@ export class ScheduledTaskScheduler {
     this.execute = options.execute;
     this.intervalMs = Math.max(1_000, options.intervalMs ?? 15_000);
     this.leaseMs = Math.max(30_000, options.leaseMs ?? 10 * 60_000);
+    this.maxConcurrency = Math.max(1, options.maxConcurrency ?? 3);
+    this.failureBackoffBaseMs = Math.max(0, options.failureBackoffBaseMs ?? 30_000);
+    this.failureBackoffMaxMs = Math.max(
+      this.failureBackoffBaseMs,
+      options.failureBackoffMaxMs ?? 15 * 60_000,
+    );
     this.owner = options.owner ?? `scheduler:${process.pid}`;
     this.logger = options.logger;
     this.now = options.now ?? Date.now;
@@ -92,14 +108,21 @@ export class ScheduledTaskScheduler {
             leaseMs: this.leaseMs,
           })
         : await this.store.listDue(nowMs);
-      for (const item of due) {
+      let cursor = 0;
+      const runOne = async (item: ScheduledTask): Promise<void> => {
+        let failed = false;
         try {
           await this.execute(item);
+          this.failureCounts.delete(item.id);
         } catch (error) {
+          failed = true;
+          const streak = (this.failureCounts.get(item.id) ?? 0) + 1;
+          this.failureCounts.set(item.id, streak);
           this.logger?.warn(
             {
               taskId: item.id,
               conversationId: item.conversationId,
+              failureStreak: streak,
               error: error instanceof Error ? error.message : String(error),
             },
             'scheduled task execution failed',
@@ -109,8 +132,17 @@ export class ScheduledTaskScheduler {
           const isOneShot =
             !item.cron?.trim() &&
             !(item.intervalSeconds && item.intervalSeconds > 0);
-          const next = isOneShot ? null : computeNextRun(item, nowMs);
+          let next = isOneShot ? null : computeNextRun(item, nowMs);
+          if (failed && next !== null && this.failureBackoffBaseMs > 0) {
+            const streak = this.failureCounts.get(item.id) ?? 1;
+            const backoff = Math.min(
+              this.failureBackoffMaxMs,
+              this.failureBackoffBaseMs * Math.pow(2, streak - 1),
+            );
+            next = Math.max(next, nowMs + backoff);
+          }
           if (next === null && item.enabled) {
+            this.failureCounts.delete(item.id);
             await this.store.update(item.id, { enabled: false }, null);
           }
           await this.store.markRun(item.id, nowMs, next);
@@ -123,7 +155,19 @@ export class ScheduledTaskScheduler {
             'failed to advance scheduled task',
           );
         }
-      }
+      };
+
+      const workerCount = Math.min(this.maxConcurrency, due.length);
+      await Promise.all(
+        Array.from({ length: workerCount }, async () => {
+          while (cursor < due.length) {
+            const index = cursor;
+            cursor += 1;
+            const item = due[index];
+            if (item) await runOne(item);
+          }
+        }),
+      );
     })().finally(() => {
       this.tickInFlight = null;
     });

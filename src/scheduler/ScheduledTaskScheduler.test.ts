@@ -210,4 +210,58 @@ describe('ScheduledTaskScheduler', () => {
     await first;
     expect(executed).toEqual(['task-1']);
   });
+
+  it('按 maxConcurrency 限制并发执行，不一次性放开全部到期任务', async () => {
+    const store = new FakeStore([
+      task({ id: 't1', intervalSeconds: 60 }),
+      task({ id: 't2', intervalSeconds: 60 }),
+      task({ id: 't3', intervalSeconds: 60 }),
+      task({ id: 't4', intervalSeconds: 60 }),
+    ]);
+    let active = 0;
+    let maxObserved = 0;
+    const scheduler = new ScheduledTaskScheduler({
+      store,
+      maxConcurrency: 2,
+      execute: async () => {
+        active += 1;
+        maxObserved = Math.max(maxObserved, active);
+        await new Promise((r) => setTimeout(r, 15));
+        active -= 1;
+      },
+      now: () => 0,
+    });
+
+    await scheduler.tick();
+    expect(maxObserved).toBeLessThanOrEqual(2);
+    expect(maxObserved).toBe(2);
+    expect(store.runs).toHaveLength(4);
+  });
+
+  it('连续失败的任务应用指数退避延后下次调度时间，成功后恢复', async () => {
+    const store = new FakeStore([task({ id: 'flaky', intervalSeconds: 5 })]);
+    let shouldFail = true;
+    const scheduler = new ScheduledTaskScheduler({
+      store,
+      failureBackoffBaseMs: 30_000,
+      failureBackoffMaxMs: 300_000,
+      execute: async () => {
+        if (shouldFail) throw new Error('temporary error');
+      },
+      now: () => 1_000,
+    });
+
+    // 第 1 次失败：退避 30_000ms -> 31_000 > regularNextRun(6_000)
+    await scheduler.tick();
+    expect(store.runs[0]?.[2]).toBe(31_000);
+
+    // 第 2 次连续失败：退避 60_000ms -> 61_000
+    await scheduler.tick();
+    expect(store.runs[1]?.[2]).toBe(61_000);
+
+    // 成功后重置退避，回到正常间隔 5s -> 6_000
+    shouldFail = false;
+    await scheduler.tick();
+    expect(store.runs[2]?.[2]).toBe(6_000);
+  });
 });

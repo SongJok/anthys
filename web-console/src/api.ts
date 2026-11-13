@@ -90,14 +90,32 @@ import type {
 
 const TOKEN_KEY = 'dingtalk-agent-admin-token';
 const BASE = '/api/v1/admin';
+const SESSION_URL = '/api/v1/auth/session';
+
+export type AdminRole = 'admin' | 'viewer';
+
+export interface AdminSessionStatus {
+  authRequired: boolean;
+  authenticated: boolean;
+  role: AdminRole | null;
+  expiresAt?: string;
+}
 
 export function getToken(): string {
-  return localStorage.getItem(TOKEN_KEY) ?? '';
+  try {
+    return localStorage.getItem(TOKEN_KEY) ?? '';
+  } catch {
+    return '';
+  }
 }
 
 export function setToken(token: string): void {
-  if (token) localStorage.setItem(TOKEN_KEY, token);
-  else localStorage.removeItem(TOKEN_KEY);
+  try {
+    if (token) localStorage.setItem(TOKEN_KEY, token);
+    else localStorage.removeItem(TOKEN_KEY);
+  } catch {
+    // 非浏览器环境忽略存储异常
+  }
 }
 
 async function parsePayload<T>(response: Response): Promise<T> {
@@ -114,6 +132,7 @@ async function parsePayload<T>(response: Response): Promise<T> {
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const token = getToken();
   const response = await fetch(`${BASE}${path}`, {
+    credentials: 'same-origin',
     ...init,
     headers: {
       'content-type': 'application/json',
@@ -128,6 +147,7 @@ async function postForm<T>(path: string, form: FormData): Promise<T> {
   const token = getToken();
   const response = await fetch(`${BASE}${path}`, {
     method: 'POST',
+    credentials: 'same-origin',
     headers: token ? { authorization: `Bearer ${token}` } : undefined,
     body: form,
   });
@@ -135,6 +155,34 @@ async function postForm<T>(path: string, form: FormData): Promise<T> {
 }
 
 export const api = {
+  session: async (): Promise<AdminSessionStatus> => {
+    const response = await fetch(SESSION_URL, {
+      credentials: 'same-origin',
+    });
+    return parsePayload<AdminSessionStatus & { ok: boolean }>(response);
+  },
+  loginSession: async (token: string): Promise<AdminSessionStatus> => {
+    const response = await fetch(SESSION_URL, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ token }),
+    });
+    const result = await parsePayload<AdminSessionStatus & { ok: boolean }>(
+      response,
+    );
+    // 切换为 HttpOnly Cookie 会话后清除遗留明文 localStorage Token
+    setToken('');
+    return result;
+  },
+  logoutSession: async (): Promise<void> => {
+    const response = await fetch(SESSION_URL, {
+      method: 'DELETE',
+      credentials: 'same-origin',
+    });
+    await parsePayload<{ ok: boolean }>(response);
+    setToken('');
+  },
   dashboard: () => request<DashboardPayload>('/dashboard'),
   usage: (days = 1) =>
     request<{ summary: UsageSummary }>(`/usage?days=${days}`),

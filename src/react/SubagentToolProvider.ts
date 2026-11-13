@@ -31,22 +31,11 @@ const DEFAULT_SUBAGENT_TIMEOUT_MS = 90_000;
 const DEFAULT_SUBAGENT_MAX_TOKENS = 20_000;
 const SUBAGENT_TOOL_NAME = 'delegate_research';
 
-function toReadOnlyProvider(
-  providers: IToolProvider[],
-  allowedNames: Set<string>,
-): IToolProvider {
+function toStaticReadOnlyProvider(tools: ToolDefinition[]): IToolProvider {
   return {
     providerName: 'subagent-readonly',
-    async getTools(ctx: ExecutionContext): Promise<ToolDefinition[]> {
-      const loaded = await Promise.all(
-        providers.map((provider) => provider.getTools(ctx)),
-      );
-      const seen = new Set<string>();
-      return loaded.flat().filter((tool) => {
-        if (!allowedNames.has(tool.name) || seen.has(tool.name)) return false;
-        seen.add(tool.name);
-        return true;
-      });
+    async getTools(): Promise<ToolDefinition[]> {
+      return tools;
     },
   };
 }
@@ -75,7 +64,7 @@ export class SubagentToolProvider implements IToolProvider {
   }
 
   public async getTools(ctx: ExecutionContext): Promise<ToolDefinition[]> {
-    const available = await this.availableToolNames(ctx);
+    const available = await this.loadReadOnlyTools(ctx);
     if (available.length === 0) return [];
     return [
       {
@@ -107,15 +96,20 @@ export class SubagentToolProvider implements IToolProvider {
     return this.options.providers().filter((provider) => provider !== this);
   }
 
-  private async availableToolNames(ctx: ExecutionContext): Promise<string[]> {
+  private async loadReadOnlyTools(
+    ctx: ExecutionContext,
+  ): Promise<ToolDefinition[]> {
     const loaded = await Promise.all(
       this.visibleProviders().map((provider) => provider.getTools(ctx)),
     );
-    const names = new Set<string>();
+    const seen = new Set<string>();
+    const tools: ToolDefinition[] = [];
     for (const tool of loaded.flat()) {
-      if (isReadOnlyTool(tool)) names.add(tool.name);
+      if (!isReadOnlyTool(tool) || seen.has(tool.name)) continue;
+      seen.add(tool.name);
+      tools.push(tool);
     }
-    return [...names];
+    return tools;
   }
 
   private async delegate(
@@ -127,8 +121,8 @@ export class SubagentToolProvider implements IToolProvider {
       return { text: 'Error: delegate_research 需要非空的 task 参数', summary: '缺少 task' };
     }
     const startedAt = context.now();
-    const available = await this.availableToolNames(context);
-    if (available.length === 0) {
+    const readOnlyTools = await this.loadReadOnlyTools(context);
+    if (readOnlyTools.length === 0) {
       return {
         text: 'Error: 当前没有可供子代理使用的只读工具',
         summary: '无可用只读工具',
@@ -142,9 +136,7 @@ export class SubagentToolProvider implements IToolProvider {
 
     const runner = new ReActRunner({
       model: this.resolveModel(),
-      toolProviders: [
-        toReadOnlyProvider(this.visibleProviders(), new Set(available)),
-      ],
+      toolProviders: [toStaticReadOnlyProvider(readOnlyTools)],
       policy: {
         ...policy,
         maxWallTimeMs: Math.min(policy.maxWallTimeMs, this.timeoutMs),
@@ -170,6 +162,7 @@ export class SubagentToolProvider implements IToolProvider {
           ),
         },
         emit: () => undefined,
+        ...(context.signal ? { signal: context.signal } : {}),
       });
       this.options.logger?.info(
         {
@@ -195,6 +188,29 @@ export class SubagentToolProvider implements IToolProvider {
           .join('\n\n'),
         citations,
         summary: summary.slice(0, 200),
+        usage: {
+          totalTokens: result.usage.totalTokens,
+          ...(result.usage.inputTokens !== undefined
+            ? { inputTokens: result.usage.inputTokens }
+            : {}),
+          ...(result.usage.outputTokens !== undefined
+            ? { outputTokens: result.usage.outputTokens }
+            : {}),
+          ...(result.usage.cachedTokens !== undefined
+            ? { cachedTokens: result.usage.cachedTokens }
+            : {}),
+          steps: result.usage.steps,
+          durationMs: result.usage.durationMs,
+        },
+        traces: [
+          {
+            kind: 'subagent',
+            name: SUBAGENT_TOOL_NAME,
+            steps: result.usage.steps,
+            tokens: result.usage.totalTokens,
+            durationMs: result.usage.durationMs,
+          },
+        ],
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

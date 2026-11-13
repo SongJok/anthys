@@ -30,9 +30,13 @@ export interface CommandRuntime {
     text: string;
   }): Promise<void>;
   /** 执行等待确认的写操作，返回给用户的执行结果 */
-  confirmAction(message: InboundMessage): Promise<string>;
+  confirmAction(message: InboundMessage, actionId?: string): Promise<string>;
   /** 取消等待确认的写操作 */
-  cancelAction(conversationId: string): Promise<string>;
+  cancelAction(
+    conversationId: string,
+    staffId?: string,
+    actionId?: string,
+  ): Promise<string>;
   /** 创建/查看/取消个人提醒（仅单聊） */
   remind(message: InboundMessage, args: string[]): Promise<string>;
   /** 创建/预览/取消个人日周月报（仅单聊） */
@@ -67,6 +71,8 @@ export interface CommandRuntime {
     id: string,
     note?: string,
   ): Promise<string>;
+  /** 向正在运行的会话追加实时引导指令 */
+  steerRun?(conversationId: string, instruction: string): Promise<string> | string;
   reply(message: InboundMessage, text: string): Promise<void>;
 }
 
@@ -81,6 +87,7 @@ const HELP_TEXT = [
   '- `/help` 查看帮助',
   '- `/status` 查看机器人与模型状态',
   '- `/stop` 停止当前回答并清空排队中的问题（也可直接说「停止 / 暂停 / 关闭」）',
+  '- `/steer <补充指令>` 在当前回答进行中实时纠正或补充方向',
   '- `/retry` 重试上一条问题',
   '- `/reset` 清空本会话上下文',
   '- `/trace` 查看最近一次执行轨迹摘要',
@@ -211,6 +218,18 @@ export class CommandRouter {
         );
         return true;
       }
+      case 'steer': {
+        const instruction = command.args.join(' ').trim();
+        if (!instruction) {
+          await runtime.reply(message, '用法：`/steer 补充要求或纠正方向`');
+          return true;
+        }
+        const reply = runtime.steerRun
+          ? await runtime.steerRun(message.conversationId, instruction)
+          : '当前运行不支持实时引导。';
+        await runtime.reply(message, reply);
+        return true;
+      }
       case 'retry': {
         const result = await runtime.retryLast(message.conversationId);
         await runtime.reply(
@@ -287,13 +306,20 @@ export class CommandRouter {
         return true;
       }
       case 'confirm': {
-        await runtime.reply(message, await runtime.confirmAction(message));
+        await runtime.reply(
+          message,
+          await runtime.confirmAction(message, command.args[0]),
+        );
         return true;
       }
       case 'cancel': {
         await runtime.reply(
           message,
-          await runtime.cancelAction(message.conversationId),
+          await runtime.cancelAction(
+            message.conversationId,
+            message.senderStaffId,
+            command.args[0],
+          ),
         );
         return true;
       }

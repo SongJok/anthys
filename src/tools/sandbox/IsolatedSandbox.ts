@@ -2,7 +2,22 @@ import { execFile } from 'node:child_process';
 import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import ivm from 'isolated-vm';
+import type ivmType from 'isolated-vm';
+import { runJavascriptInWorker } from './WorkerJsSandbox.js';
+
+type IvmModule = typeof ivmType;
+let cachedIvmModule: IvmModule | null | undefined;
+
+async function loadIvmModule(): Promise<IvmModule | null> {
+  if (cachedIvmModule !== undefined) return cachedIvmModule;
+  try {
+    const mod = await import('isolated-vm');
+    cachedIvmModule = (mod.default ?? mod) as IvmModule;
+  } catch {
+    cachedIvmModule = null;
+  }
+  return cachedIvmModule;
+}
 import type {
   SandboxExecRequest,
   SandboxExecResult,
@@ -75,8 +90,8 @@ function errorMessage(error: unknown): string {
   return String(error);
 }
 
-/** isolated-vm 里的脚本包装：注入 datasets/console，并收集 result 与日志。 */
-function wrapJavascript(code: string, datasetsJson: string): string {
+/** 沙盒 JS 脚本包装：从隔离上下文的 __DATASETS_JSON__ 注入 datasets/console，并收集 result 与日志。 */
+function wrapJavascript(code: string): string {
   return `(function () {
   'use strict';
   var __logs = [];
@@ -93,7 +108,7 @@ function wrapJavascript(code: string, datasetsJson: string): string {
     warn: function () { __logs.push(Array.prototype.map.call(arguments, __stringify).join(' ')); },
     error: function () { __logs.push(Array.prototype.map.call(arguments, __stringify).join(' ')); }
   };
-  var datasets = JSON.parse(${JSON.stringify(datasetsJson)});
+  var datasets = JSON.parse(typeof __DATASETS_JSON__ === 'string' ? __DATASETS_JSON__ : '{}');
   function loadDataset(key) { return datasets[key]; }
   var result;
   try {
@@ -220,69 +235,113 @@ export class IsolatedSandbox {
     return clamp(request.timeoutMs ?? max, 50, max);
   }
 
-  private executeJavascript(
-    request: SandboxExecRequest,
-  ): SandboxExecResult {
-    const startedAt = Date.now();
-    const timeoutMs = this.timeoutFor(request, this.jsTimeoutMs);
+  private serializeDatasets(
+    inputDatasets: Record<string, unknown> | undefined,
+    startedAt: number,
+  ): { datasetsJson: string } | { errorResult: SandboxExecResult } {
     let datasetsJson: string;
     try {
-      datasetsJson = JSON.stringify(request.inputDatasets ?? {});
+      datasetsJson = JSON.stringify(inputDatasets ?? {});
     } catch (error) {
       return {
-        exitCode: 1,
-        stdout: '',
-        stderr: `数据集无法序列化为 JSON: ${errorMessage(error)}`,
-        executionTimeMs: Date.now() - startedAt,
-        truncated: false,
+        errorResult: {
+          exitCode: 1,
+          stdout: '',
+          stderr: `数据集无法序列化为 JSON: ${errorMessage(error)}`,
+          executionTimeMs: Date.now() - startedAt,
+          truncated: false,
+        },
       };
     }
     if (datasetsJson.length > MAX_DATASET_JSON_CHARS) {
       return {
+        errorResult: {
+          exitCode: 1,
+          stdout: '',
+          stderr: `数据集超过 ${MAX_DATASET_JSON_CHARS} 字符上限`,
+          executionTimeMs: Date.now() - startedAt,
+          truncated: false,
+        },
+      };
+    }
+    return { datasetsJson };
+  }
+
+  private async runJavascriptInIvm(
+    ivm: IvmModule,
+    wrappedCode: string,
+    datasetsJson: string,
+    timeoutMs: number,
+  ): Promise<{ ok: true; raw: string } | { ok: false; stderr: string }> {
+    const isolate = new ivm.Isolate({ memoryLimit: this.jsMemoryLimitMb });
+    try {
+      const context = await isolate.createContext();
+      await context.global.set('__DATASETS_JSON__', datasetsJson);
+      const script = await isolate.compileScript(wrappedCode);
+      const raw = await script.run(context, { timeout: timeoutMs, copy: true });
+      return {
+        ok: true,
+        raw: typeof raw === 'string' ? raw : JSON.stringify(raw ?? null),
+      };
+    } catch (error) {
+      return { ok: false, stderr: errorMessage(error) };
+    } finally {
+      if (!isolate.isDisposed) isolate.dispose();
+    }
+  }
+
+  private async executeJavascript(
+    request: SandboxExecRequest,
+  ): Promise<SandboxExecResult> {
+    const startedAt = Date.now();
+    const timeoutMs = this.timeoutFor(request, this.jsTimeoutMs);
+    const serialized = this.serializeDatasets(request.inputDatasets, startedAt);
+    if ('errorResult' in serialized) return serialized.errorResult;
+
+    const wrappedCode = wrapJavascript(request.code);
+    const ivm = await loadIvmModule();
+    const execution = ivm
+      ? await this.runJavascriptInIvm(
+          ivm,
+          wrappedCode,
+          serialized.datasetsJson,
+          timeoutMs,
+        )
+      : await runJavascriptInWorker({
+          wrappedCode,
+          datasetsJson: serialized.datasetsJson,
+          timeoutMs,
+          memoryLimitMb: this.jsMemoryLimitMb,
+        });
+
+    if (!execution.ok) {
+      return {
         exitCode: 1,
         stdout: '',
-        stderr: `数据集超过 ${MAX_DATASET_JSON_CHARS} 字符上限`,
+        stderr: execution.stderr,
         executionTimeMs: Date.now() - startedAt,
         truncated: false,
       };
     }
 
-    const isolate = new ivm.Isolate({ memoryLimit: this.jsMemoryLimitMb });
-    try {
-      const script = isolate.compileScriptSync(
-        wrapJavascript(request.code, datasetsJson),
-      );
-      const context = isolate.createContextSync();
-      const raw = script.runSync(context, { timeout: timeoutMs, copy: true });
-      const output =
-        typeof raw === 'string' ? raw : JSON.stringify(raw ?? null);
-      const parsed = safeParse(output);
-      const isOk = parsed?.ok !== false;
-      const stdout = isOk
-        ? JSON.stringify({ result: parsed?.result ?? null, logs: parsed?.logs ?? [] })
-        : JSON.stringify({ error: parsed?.error ?? output, logs: parsed?.logs ?? [] });
-      return this.finalize(
-        {
-          exitCode: isOk ? 0 : 1,
-          stdout,
-          stderr: isOk ? '' : String(parsed?.error ?? '沙盒脚本执行失败'),
-          executionTimeMs: Date.now() - startedAt,
-          truncated: false,
-        },
-        this.maxOutputChars,
-      );
-    } catch (error) {
-      const message = errorMessage(error);
-      return {
-        exitCode: 1,
-        stdout: '',
-        stderr: message,
+    const parsed = safeParse(execution.raw);
+    const isOk = parsed?.ok !== false;
+    const stdout = isOk
+      ? JSON.stringify({ result: parsed?.result ?? null, logs: parsed?.logs ?? [] })
+      : JSON.stringify({
+          error: parsed?.error ?? execution.raw,
+          logs: parsed?.logs ?? [],
+        });
+    return this.finalize(
+      {
+        exitCode: isOk ? 0 : 1,
+        stdout,
+        stderr: isOk ? '' : String(parsed?.error ?? '沙盒脚本执行失败'),
         executionTimeMs: Date.now() - startedAt,
         truncated: false,
-      };
-    } finally {
-      if (!isolate.isDisposed) isolate.dispose();
-    }
+      },
+      this.maxOutputChars,
+    );
   }
 
   private async executeDocker(
@@ -290,27 +349,9 @@ export class IsolatedSandbox {
   ): Promise<SandboxExecResult> {
     const startedAt = Date.now();
     const timeoutMs = this.timeoutFor(request, this.dockerTimeoutMs);
-    let datasetsJson: string;
-    try {
-      datasetsJson = JSON.stringify(request.inputDatasets ?? {});
-    } catch (error) {
-      return {
-        exitCode: 1,
-        stdout: '',
-        stderr: `数据集无法序列化为 JSON: ${errorMessage(error)}`,
-        executionTimeMs: Date.now() - startedAt,
-        truncated: false,
-      };
-    }
-    if (datasetsJson.length > MAX_DATASET_JSON_CHARS) {
-      return {
-        exitCode: 1,
-        stdout: '',
-        stderr: `数据集超过 ${MAX_DATASET_JSON_CHARS} 字符上限`,
-        executionTimeMs: Date.now() - startedAt,
-        truncated: false,
-      };
-    }
+    const serialized = this.serializeDatasets(request.inputDatasets, startedAt);
+    if ('errorResult' in serialized) return serialized.errorResult;
+    const { datasetsJson } = serialized;
 
     const workDir = await mkdtemp(join(tmpdir(), 'sandbox-'));
     try {
