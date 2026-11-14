@@ -326,7 +326,11 @@ export function startConfiguredAdminServer(
       try {
         await checkDbReady();
       } catch (error) {
-        return { ready: false, detail: `数据库不可用：${errorText(error)}` };
+        harnessLogger.warn(
+          { error: errorText(error) },
+          'readyz database check failed',
+        );
+        return { ready: false, detail: '数据库不可用' };
       }
       if (clusterEnabled && !isLeader()) {
         return { ready: true, detail: 'standby（本实例未持有 Stream 主锁）' };

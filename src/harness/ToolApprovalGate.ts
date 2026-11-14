@@ -126,6 +126,8 @@ export class PendingActionStore {
       for (let i = queue.length - 1; i >= 0; i -= 1) {
         if (queue[i]?.requestedBy.staffId === query.staffId) return i;
       }
+      // 指定 staffId 时必须精确匹配，禁止回退队尾误取消他人操作
+      return -1;
     }
     return queue.length - 1;
   }
@@ -253,6 +255,9 @@ export class PendingActionStore {
       } else if (alive.length !== queue.length) {
         this.actions.set(key, alive);
       }
+      for (const action of queue) {
+        if (action.expiresAt <= now) this.persistRemove(key, action.id);
+      }
     }
   }
 
@@ -261,6 +266,7 @@ export class PendingActionStore {
       const oldest = this.actions.keys().next();
       if (oldest.done) return;
       this.actions.delete(oldest.value);
+      this.persistRemove(oldest.value);
     }
   }
 }
@@ -268,7 +274,7 @@ export class PendingActionStore {
 const DESTRUCTIVE_PATTERN =
   /(^|[^a-z])(delete|remove|drop|purge|destroy|revoke|terminate|truncate|reset|unbind|wipe|uninstall)([^a-z]|$)/i;
 const WRITE_PATTERN =
-  /(^|[^a-z])(create|update|upsert|insert|set|add|write|upload|send|post|publish|move|rename|import|apply|execute|run|approve|reject|grant|assign|enable|disable|start|stop|restart|mute|cancel|manage|configure|modify|change|edit|patch|deploy|install|archive)([^a-z]|$)/i;
+  /(^|[^a-z])(create|update|upsert|insert|set|add|write|upload|send|post|publish|move|rename|import|apply|execute|run|approve|reject|grant|assign|enable|disable|start|stop|restart|mute|cancel|manage|configure|modify|change|edit|patch|deploy|install|archive|sync|commit|merge|push|fork|transfer|bind|link|unlink|subscribe|unsubscribe|trigger|invoke|submit|schedule|register|unregister|attach|detach|copy|clone|restore|rollback|migrate|flush|clear|prune|close|lock|unlock|block|ban|kick|invite|pin|vote)([^a-z]|$)/i;
 
 /** 工具未声明 risk 时按名称推断，宁可多问一次也不误执行写操作 */
 export function classifyToolRisk(tool: {

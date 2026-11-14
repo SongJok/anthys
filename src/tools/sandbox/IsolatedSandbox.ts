@@ -86,7 +86,8 @@ function clamp(value: number, min: number, max: number): number {
 }
 
 function errorMessage(error: unknown): string {
-  if (error instanceof Error) return error.stack ?? error.message;
+  // 只回传 message，避免堆栈把宿主路径泄漏进工具输出
+  if (error instanceof Error) return error.message;
   return String(error);
 }
 

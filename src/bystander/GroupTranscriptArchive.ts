@@ -1,4 +1,15 @@
-import { appendFile, mkdir, readdir, readFile, rm, stat } from 'node:fs/promises';
+import { createReadStream } from 'node:fs';
+import {
+  appendFile,
+  mkdir,
+  open,
+  readdir,
+  readFile,
+  rename,
+  rm,
+  stat,
+  writeFile,
+} from 'node:fs/promises';
 import path from 'node:path';
 import type { TranscriptEntry } from '../types/bystander-and-memory.js';
 
@@ -16,6 +27,10 @@ export interface GroupTranscriptArchiveOptions {
   maxSeenConversations?: number;
   /** 每个群在内存中最多保留多少条近期 messageId 用于快速去重，默认 5000 */
   maxSeenPerConversation?: number;
+  /** 单群归档文件字节上限，超出后旋转只保留最近条目，默认 8MB */
+  maxFileBytes?: number;
+  /** 旋转后保留的最近条目数，默认 5000 */
+  maxRetainedEntries?: number;
 }
 
 export interface GroupArchiveSummary {
@@ -32,6 +47,8 @@ export interface GroupArchiveReadOptions {
 const DEFAULT_READ_LIMIT = 200;
 const DEFAULT_MAX_SEEN_CONVERSATIONS = 200;
 const DEFAULT_MAX_SEEN_PER_CONVERSATION = 5_000;
+const DEFAULT_MAX_FILE_BYTES = 8 * 1024 * 1024;
+const DEFAULT_MAX_RETAINED_ENTRIES = 5_000;
 const FILE_SUFFIX = '.jsonl';
 
 function errorMessage(error: unknown): string {
@@ -84,7 +101,9 @@ function parseLine(line: string): TranscriptEntry | null {
  *
  * - 同一 messageId 只落盘一次（跨重启也去重）；
  * - 系统播报（scheduler）与空文本不归档；
- * - 追加用 O_APPEND，单行完整写入，并发不会撕行。
+ * - 追加用 O_APPEND，单行完整写入，并发不会撕行；
+ * - 单群文件超过 maxFileBytes 后旋转，只保留最近 maxRetainedEntries 条；
+ * - read/loadSeen 只读尾部窗口，listGroups 流式统计，避免大文件整file入内存。
  */
 export class GroupTranscriptArchive {
   private readonly dir: string;
@@ -92,9 +111,13 @@ export class GroupTranscriptArchive {
   private readonly ignoreSenders: Set<string>;
   private readonly maxSeenConversations: number;
   private readonly maxSeenPerConversation: number;
+  private readonly maxFileBytes: number;
+  private readonly maxRetainedEntries: number;
   /** 每群已落盘的 messageId，按群 LRU 与单群 FIFO 有界缓存 */
   private readonly seen = new Map<string, Set<string>>();
   private readonly loading = new Map<string, Promise<Set<string>>>();
+  /** 每群一个串行队列，保证「追加 + 旋转」不会与同群并发写互相撕档 */
+  private readonly queues = new Map<string, Promise<unknown>>();
 
   constructor(options: GroupTranscriptArchiveOptions) {
     this.dir = path.resolve(options.dir);
@@ -111,6 +134,14 @@ export class GroupTranscriptArchive {
       Math.trunc(
         options.maxSeenPerConversation ?? DEFAULT_MAX_SEEN_PER_CONVERSATION,
       ),
+    );
+    this.maxFileBytes = Math.max(
+      64 * 1024,
+      Math.trunc(options.maxFileBytes ?? DEFAULT_MAX_FILE_BYTES),
+    );
+    this.maxRetainedEntries = Math.max(
+      1,
+      Math.trunc(options.maxRetainedEntries ?? DEFAULT_MAX_RETAINED_ENTRIES),
     );
   }
 
@@ -131,12 +162,15 @@ export class GroupTranscriptArchive {
     // has/add 之间没有 await，单线程下不会被同群并发打断
     this.addSeenId(seen, entry.messageId);
     try {
-      await mkdir(this.dir, { recursive: true, mode: 0o755 });
-      await appendFile(
-        this.filePathFor(entry.conversationId),
-        `${JSON.stringify(entry)}\n`,
-        'utf8',
-      );
+      await this.serialize(entry.conversationId, async () => {
+        await mkdir(this.dir, { recursive: true, mode: 0o755 });
+        await appendFile(
+          this.filePathFor(entry.conversationId),
+          `${JSON.stringify(entry)}\n`,
+          'utf8',
+        );
+        await this.rotateIfNeeded(entry.conversationId);
+      });
       return true;
     } catch (error) {
       // 落盘失败时回滚去重标记，允许下次重试
@@ -153,17 +187,22 @@ export class GroupTranscriptArchive {
     }
   }
 
-  /** 读取某群最近 N 条发言（按落盘顺序，即时间顺序） */
+  /** 读取某群最近 N 条发言（按落盘顺序，即时间顺序），只读尾部窗口 */
   public async read(
     conversationId: string,
     options: GroupArchiveReadOptions = {},
   ): Promise<TranscriptEntry[]> {
-    const entries = await this.readAll(conversationId);
     const limit = Math.max(1, Math.trunc(options.limit ?? DEFAULT_READ_LIMIT));
-    return entries.slice(-limit);
+    const filePath = this.filePathFor(conversationId);
+    let window = Math.max(64 * 1024, limit * 1024);
+    for (;;) {
+      const { entries, start } = await this.readTail(filePath, window);
+      if (entries.length >= limit || start === 0) return entries.slice(-limit);
+      window *= 4;
+    }
   }
 
-  /** 列出已归档的群及其条数、最后发言时间 */
+  /** 列出已归档的群及其条数、最后发言时间（流式统计，不整file入内存） */
   public async listGroups(): Promise<GroupArchiveSummary[]> {
     let files: string[];
     try {
@@ -175,13 +214,9 @@ export class GroupTranscriptArchive {
     for (const file of files) {
       const conversationId = conversationIdFromFile(file);
       if (conversationId === null) continue;
-      const entries = await this.readAll(conversationId);
-      if (entries.length === 0) continue;
-      summaries.push({
-        conversationId,
-        entryCount: entries.length,
-        lastTimestamp: entries[entries.length - 1]?.timestamp ?? 0,
-      });
+      const summary = await this.summarizeFile(path.join(this.dir, file));
+      if (!summary) continue;
+      summaries.push({ conversationId, ...summary });
     }
     return summaries.sort((a, b) => b.lastTimestamp - a.lastTimestamp);
   }
@@ -232,6 +267,115 @@ export class GroupTranscriptArchive {
     return entries;
   }
 
+  /** 从文件尾部读取至多 window 字节，丢弃被窗口切断的首行，返回完整条目 */
+  private async readTail(
+    filePath: string,
+    window: number,
+  ): Promise<{ entries: TranscriptEntry[]; start: number }> {
+    let handle: import('node:fs/promises').FileHandle;
+    try {
+      handle = await open(filePath, 'r');
+    } catch {
+      return { entries: [], start: 0 };
+    }
+    try {
+      const size = (await handle.stat()).size;
+      const start = Math.max(0, size - window);
+      const length = size - start;
+      if (length <= 0) return { entries: [], start };
+      const buffer = Buffer.alloc(length);
+      let offset = 0;
+      while (offset < length) {
+        const { bytesRead } = await handle.read(
+          buffer,
+          offset,
+          length - offset,
+          start + offset,
+        );
+        if (bytesRead === 0) break;
+        offset += bytesRead;
+      }
+      const lines = buffer.subarray(0, offset).toString('utf8').split('\n');
+      // start>0 时首行可能被窗口切断，丢弃以免解析出半条
+      if (start > 0) lines.shift();
+      const entries: TranscriptEntry[] = [];
+      for (const line of lines) {
+        const entry = parseLine(line);
+        if (entry) entries.push(entry);
+      }
+      return { entries, start };
+    } finally {
+      await handle.close();
+    }
+  }
+
+  /** 流式统计单群文件的条目数与最后发言时间，避免整file入内存 */
+  private summarizeFile(
+    filePath: string,
+  ): Promise<{ entryCount: number; lastTimestamp: number } | null> {
+    return new Promise((resolve) => {
+      let entryCount = 0;
+      let lastTimestamp = 0;
+      let carry = '';
+      const stream = createReadStream(filePath, { encoding: 'utf8' });
+      const consume = (line: string): void => {
+        const entry = parseLine(line);
+        if (!entry) return;
+        entryCount += 1;
+        lastTimestamp = entry.timestamp;
+      };
+      stream.on('data', (chunk: string | Buffer) => {
+        carry += typeof chunk === 'string' ? chunk : chunk.toString('utf8');
+        let index = carry.indexOf('\n');
+        while (index >= 0) {
+          consume(carry.slice(0, index));
+          carry = carry.slice(index + 1);
+          index = carry.indexOf('\n');
+        }
+      });
+      stream.on('end', () => {
+        consume(carry);
+        resolve(entryCount > 0 ? { entryCount, lastTimestamp } : null);
+      });
+      stream.on('error', () => resolve(null));
+    });
+  }
+
+  /** 文件超过字节上限时旋转：只保留最近 maxRetainedEntries 条，原子替换 */
+  private async rotateIfNeeded(conversationId: string): Promise<void> {
+    const filePath = this.filePathFor(conversationId);
+    let size: number;
+    try {
+      size = (await stat(filePath)).size;
+    } catch {
+      return;
+    }
+    if (size <= this.maxFileBytes) return;
+    const entries = await this.readAll(conversationId);
+    const retained = entries.slice(-this.maxRetainedEntries);
+    const tmpPath = `${filePath}.tmp`;
+    const payload = retained.map((entry) => JSON.stringify(entry)).join('\n');
+    await writeFile(tmpPath, retained.length > 0 ? `${payload}\n` : '', 'utf8');
+    await rename(tmpPath, filePath);
+  }
+
+  /** 同群磁盘操作串行化，避免追加与旋转互相覆盖 */
+  private serialize<T>(
+    conversationId: string,
+    task: () => Promise<T>,
+  ): Promise<T> {
+    const previous = this.queues.get(conversationId) ?? Promise.resolve();
+    const run = previous.then(task, task);
+    this.queues.set(conversationId, run);
+    const cleanup = (): void => {
+      if (this.queues.get(conversationId) === run) {
+        this.queues.delete(conversationId);
+      }
+    };
+    void run.then(cleanup, cleanup);
+    return run;
+  }
+
   private touchSeen(conversationId: string, set: Set<string>): void {
     this.seen.delete(conversationId);
     this.seen.set(conversationId, set);
@@ -260,9 +404,7 @@ export class GroupTranscriptArchive {
     }
     let pending = this.loading.get(conversationId);
     if (!pending) {
-      pending = this.readAll(conversationId).then((entries) => {
-        const recent = entries.slice(-this.maxSeenPerConversation);
-        const set = new Set(recent.map((entry) => entry.messageId));
+      pending = this.loadSeenFromDisk(conversationId).then((set) => {
         this.touchSeen(conversationId, set);
         this.loading.delete(conversationId);
         return set;
@@ -270,5 +412,19 @@ export class GroupTranscriptArchive {
       this.loading.set(conversationId, pending);
     }
     return pending;
+  }
+
+  /** 跨重启去重：只读尾部窗口取最近 messageId，best-effort 覆盖近期重投 */
+  private async loadSeenFromDisk(conversationId: string): Promise<Set<string>> {
+    const window = Math.max(
+      256 * 1024,
+      this.maxSeenPerConversation * 512,
+    );
+    const { entries } = await this.readTail(
+      this.filePathFor(conversationId),
+      window,
+    );
+    const recent = entries.slice(-this.maxSeenPerConversation);
+    return new Set(recent.map((entry) => entry.messageId));
   }
 }

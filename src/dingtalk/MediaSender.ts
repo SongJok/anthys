@@ -147,6 +147,54 @@ export class DingTalkMediaSender {
     }
   }
 
+  /** 卡片通道不可用时的群 Markdown 文本兜底（机器人 groupMessages/send） */
+  public async sendGroupText(input: {
+    conversationId: string;
+    title: string;
+    text: string;
+  }): Promise<{ ok: boolean; error?: string }> {
+    try {
+      const token = await this.options.getAccessToken();
+      const robotCode =
+        typeof this.options.robotCode === 'function'
+          ? this.options.robotCode()
+          : this.options.robotCode;
+      const response = await this.fetchImpl(
+        `${this.apiBase}/v1.0/robot/groupMessages/send`,
+        {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'x-acs-dingtalk-access-token': token,
+          },
+          body: JSON.stringify({
+            robotCode,
+            openConversationId: input.conversationId,
+            msgKey: 'sampleMarkdown',
+            msgParam: JSON.stringify({
+              title: input.title,
+              text: input.text,
+            }),
+          }),
+          signal: AbortSignal.timeout(this.timeoutMs),
+        },
+      );
+      if (!response.ok) {
+        const detail = await response.text().catch(() => '');
+        throw new Error(
+          `群文本发送失败: HTTP ${response.status}${detail ? ` ${detail.slice(0, 200)}` : ''}`,
+        );
+      }
+      return { ok: true };
+    } catch (error) {
+      this.options.logger?.warn(
+        { conversationId: input.conversationId, error: errorMessage(error) },
+        'group text fallback failed',
+      );
+      return { ok: false, error: errorMessage(error) };
+    }
+  }
+
   private async upload(bytes: Buffer, fileName: string): Promise<string> {
     const token = await this.options.getAccessToken();
     const form = new FormData();

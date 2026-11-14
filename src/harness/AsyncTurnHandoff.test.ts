@@ -67,4 +67,60 @@ describe('runTurnWithAsyncHandoff', () => {
     expect(outcome).toEqual({ mode: 'foreground', result: 42 });
     expect(enqueueBackground).not.toHaveBeenCalled();
   });
+
+  it('入队后外部 /stop 中止时撤销后台任务并以中止原因拒绝', async () => {
+    const controller = new AbortController();
+    const cancelBackground = vi.fn(async () => {});
+    const onHandoff = vi.fn();
+    const enqueueBackground = vi.fn(async () => {
+      // 入队过程中用户触发 /stop
+      controller.abort(new Error('用户停止'));
+      return { id: 'job-stop' };
+    });
+    const runForeground = async (signal: AbortSignal) =>
+      new Promise<string>((_resolve, reject) => {
+        signal.addEventListener('abort', () => reject(new Error('fg aborted')));
+      });
+
+    await expect(
+      runTurnWithAsyncHandoff({
+        handoffAfterMs: 15,
+        signal: controller.signal,
+        hasSideEffects: () => false,
+        runForeground,
+        enqueueBackground,
+        cancelBackground,
+        onHandoff,
+      }),
+    ).rejects.toThrow('用户停止');
+
+    expect(enqueueBackground).toHaveBeenCalledTimes(1);
+    expect(cancelBackground).toHaveBeenCalledWith({ id: 'job-stop' });
+    expect(onHandoff).not.toHaveBeenCalled();
+  });
+
+  it('转入后台前等待前台协作式中止真正收敛后再释放', async () => {
+    let fgSettled = false;
+    const enqueueBackground = vi.fn(async () => ({ id: 'job-conv' }));
+    const runForeground = async (signal: AbortSignal) =>
+      new Promise<string>((_resolve, reject) => {
+        signal.addEventListener('abort', () => {
+          // 协作式中止需要一点时间才收敛
+          setTimeout(() => {
+            fgSettled = true;
+            reject(new Error('fg aborted'));
+          }, 20);
+        });
+      });
+
+    const outcome = await runTurnWithAsyncHandoff({
+      handoffAfterMs: 10,
+      hasSideEffects: () => false,
+      runForeground,
+      enqueueBackground,
+    });
+
+    expect(outcome).toEqual({ mode: 'background', job: { id: 'job-conv' } });
+    expect(fgSettled).toBe(true);
+  });
 });

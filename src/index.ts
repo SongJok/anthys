@@ -307,6 +307,7 @@ async function main(): Promise<void> {
       harnessLogger,
       resolveEmployeeDisplayName: ingress.resolveEmployeeDisplayName,
       createStreamer: ingress.createStreamer,
+      groupTextSender: tools.mediaSender,
       clusterEnabled,
       isLeader,
       isProjectSyncRunning: extensions.isProjectSyncRunning,

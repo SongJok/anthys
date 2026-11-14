@@ -101,6 +101,43 @@ function errorMessage(error: unknown): string {
  * 机器人媒体消息只提供 downloadCode：先用 OpenAPI 换取 downloadUrl，
  * 再把字节落盘到本地目录，供视觉模型与沙盒工具读取。
  */
+/** 流式累计读取响应体，超限立即中止；防止无 content-length 的 chunked 响应耗尽内存 */
+async function readBytesWithLimit(
+  response: Response,
+  maxBytes: number,
+): Promise<Uint8Array> {
+  const limitError = () =>
+    new Error(`附件超过 ${Math.round(maxBytes / 1024 / 1024)}MB 上限`);
+  const reader = response.body?.getReader();
+  if (!reader) {
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    if (bytes.byteLength > maxBytes) throw limitError();
+    return bytes;
+  }
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      total += value.byteLength;
+      if (total > maxBytes) throw limitError();
+      chunks.push(value);
+    }
+  } catch (error) {
+    await reader.cancel().catch(() => {});
+    throw error;
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return bytes;
+}
+
 export class AttachmentStore {
   private readonly fetchImpl: typeof fetch;
   private readonly maxBytes: number;
@@ -249,7 +286,7 @@ export class AttachmentStore {
         `附件超过 ${Math.round(this.maxBytes / 1024 / 1024)}MB 上限`,
       );
     }
-    const bytes = new Uint8Array(await fileResponse.arrayBuffer());
+    const bytes = await readBytesWithLimit(fileResponse, this.maxBytes);
     return {
       bytes,
       size: bytes.byteLength,

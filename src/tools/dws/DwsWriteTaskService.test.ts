@@ -271,6 +271,33 @@ describe('DwsWriteTaskService', () => {
     tasks.dispose();
   });
 
+  it('群内他人不能取消不属于自己会话的等待写任务', async () => {
+    const store = new MemoryTaskStore();
+    const { identity } = fakeIdentity(['authenticated']);
+    const { service: tasks, resumed } = service(store, identity);
+    await tasks.create({
+      message: message(),
+      toolName: 'dws_todo_manage',
+      args: { action: 'create' },
+      risk: 'write',
+    });
+
+    // staff-2 不是任务归属人，取消无效且任务仍在等待
+    expect(await tasks.cancelByConversationForStaff('conv-1', 'staff-2')).toBe(
+      false,
+    );
+    expect(store.tasks.get('conv-1')?.state).toBe('waiting_auth');
+
+    // 归属人 staff-1 可以取消
+    expect(await tasks.cancelByConversationForStaff('conv-1', 'staff-1')).toBe(
+      true,
+    );
+    expect(store.tasks.get('conv-1')?.state).toBe('cancelled');
+    expect(await tasks.resumeForStaff('staff-1')).toEqual([]);
+    expect(resumed).toHaveLength(0);
+    tasks.dispose();
+  });
+
   it('重启后从持久层恢复未过期的等待任务', async () => {
     vi.useFakeTimers();
     let now = 1_000_000;

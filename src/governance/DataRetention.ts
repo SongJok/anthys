@@ -1,4 +1,4 @@
-import { readdir, rm, stat } from 'node:fs/promises';
+import { access, readdir, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 
 export type RetentionKind =
@@ -426,8 +426,14 @@ export class DataRetentionService implements DataGovernancePort {
     for (const raw of new Set(messageIds)) {
       const name = safeAttachmentSegment(raw);
       if (!name) continue;
+      const target = join(this.attachmentsDir, name);
       try {
-        await rm(join(this.attachmentsDir, name), {
+        await access(target);
+      } catch {
+        continue;
+      }
+      try {
+        await rm(target, {
           recursive: true,
           force: true,
         });

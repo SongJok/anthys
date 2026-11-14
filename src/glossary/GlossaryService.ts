@@ -951,17 +951,18 @@ export class GlossaryService
 
   private async embedWrite(
     write: GlossaryTermWrite,
-  ): Promise<number[] | null | undefined> {
+  ): Promise<number[] | undefined> {
     if (!this.embedding) return undefined;
     try {
       const [vector] = await this.embedding.embed([
         this.buildEmbeddingText(write),
       ]);
-      if (!vector || vector.length !== this.embedding.dimensions) return null;
+      if (!vector || vector.length !== this.embedding.dimensions) return undefined;
       return vector;
     } catch (error) {
-      this.warn(error, 'glossary embedding failed, term saved without vector');
-      return null;
+      // 返回 undefined 而非 null：更新时保留旧向量，避免嵌入服务抖动清空已有向量
+      this.warn(error, 'glossary embedding failed, keeping previous vector');
+      return undefined;
     }
   }
 

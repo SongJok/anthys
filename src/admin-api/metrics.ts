@@ -4,11 +4,18 @@ import type { AgentStreamEvent } from '../types/core.js';
 
 type Labels = Record<string, string>;
 
+function escapeLabelValue(value: string): string {
+  return value
+    .replaceAll('\\', '\\\\')
+    .replaceAll('"', '\\"')
+    .replaceAll('\n', '\\n');
+}
+
 function labelKey(name: string, labels?: Labels): string {
   if (!labels || Object.keys(labels).length === 0) return name;
   const rendered = Object.keys(labels)
     .sort()
-    .map((key) => `${key}="${labels[key]}"`)
+    .map((key) => `${key}="${escapeLabelValue(labels[key])}"`)
     .join(',');
   return `${name}{${rendered}}`;
 }

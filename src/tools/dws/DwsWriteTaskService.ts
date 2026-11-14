@@ -196,6 +196,22 @@ export class DwsWriteTaskService {
     return true;
   }
 
+  /** 仅当该会话等待中的写任务属于指定员工时取消，避免群内他人误取消 */
+  public async cancelByConversationForStaff(
+    conversationId: string,
+    staffId: string,
+  ): Promise<boolean> {
+    const entry = this.tasks.get(conversationId);
+    if (
+      !entry ||
+      entry.task.state !== 'waiting_auth' ||
+      entry.task.staffId !== staffId
+    ) {
+      return false;
+    }
+    return this.cancelByConversation(conversationId);
+  }
+
   /** 撤销授权或改回只读时，取消该员工所有等待中的写任务 */
   public async cancelForStaff(
     staffId: string,

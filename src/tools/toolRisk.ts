@@ -7,11 +7,18 @@ const WRITE_TOOL_PATTERN =
  * 只读工具判定：既看显式 risk，也用命名兜底覆盖未标注风险的老工具。
  * 管理工具与子代理委派一律不视为只读，避免研究单元获得写权限或递归委派。
  */
-export function isReadOnlyTool(tool: ToolDefinition): boolean {
-  if (tool.name === 'delegate_research' || tool.name === 'dispatch_worker') {
+export function isReadOnlyToolName(
+  name: string,
+  risk?: ToolDefinition['risk'],
+): boolean {
+  if (name === 'delegate_research' || name === 'dispatch_worker') {
     return false;
   }
-  if (tool.name.startsWith('admin_')) return false;
-  if (tool.risk && tool.risk !== 'read') return false;
-  return !WRITE_TOOL_PATTERN.test(tool.name);
+  if (name.startsWith('admin_')) return false;
+  if (risk && risk !== 'read') return false;
+  return !WRITE_TOOL_PATTERN.test(name);
+}
+
+export function isReadOnlyTool(tool: ToolDefinition): boolean {
+  return isReadOnlyToolName(tool.name, tool.risk);
 }

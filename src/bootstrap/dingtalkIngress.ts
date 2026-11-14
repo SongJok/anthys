@@ -53,9 +53,9 @@ import type {
   RunControlRegistry,
 } from '../harness/RunControlRegistry.js';
 import {
-  classifyToolRisk,
   formatApprovalPrompt,
 } from '../harness/ToolApprovalGate.js';
+import { isReadOnlyToolName } from '../tools/toolRisk.js';
 import {
   defaultPersonKeyFor,
   normalizeIdentityAlias,
@@ -925,15 +925,23 @@ export async function setupDingTalkIngress(
       }
     },
     cancelAction: async (conversationId, staffId, actionId) => {
+      const isAdmin = Boolean(staffId && configCenter.isAdmin(staffId));
       const query = actionId
         ? { actionIdPrefix: actionId }
-        : staffId && !configCenter.isAdmin(staffId)
+        : staffId && !isAdmin
           ? { staffId }
           : undefined;
       const cancelled = tools.pendingActions.cancel(conversationId, query);
-      const cancelledWrite = query?.actionIdPrefix
+      const cancelledWrite = actionId
         ? false
-        : await dwsWriteTasksService.cancelByConversation(conversationId);
+        : isAdmin
+          ? await dwsWriteTasksService.cancelByConversation(conversationId)
+          : staffId
+            ? await dwsWriteTasksService.cancelByConversationForStaff(
+                conversationId,
+                staffId,
+              )
+            : false;
       metrics.inc('agent_tool_confirmations_total', {
         result: cancelled || cancelledWrite ? 'cancelled' : 'none',
       });
@@ -1203,10 +1211,7 @@ export async function setupDingTalkIngress(
 
       let sawMutatingTool = false;
       const trackingEmit = (event: AgentStreamEvent): void => {
-        if (
-          event.type === 'tool_start' &&
-          classifyToolRisk({ name: event.toolName }) !== 'read'
-        ) {
+        if (event.type === 'tool_start' && !isReadOnlyToolName(event.toolName)) {
           sawMutatingTool = true;
         }
         emit(event);
@@ -1238,6 +1243,9 @@ export async function setupDingTalkIngress(
               requestedAt: Date.now(),
             },
           }),
+        cancelBackground: async (job) => {
+          await jobStore.cancel(job.id);
+        },
         onHandoff: async (job) => {
           metrics.inc('agent_async_handoff_total');
           const shortId = job.id.slice(0, 8);
@@ -1268,6 +1276,11 @@ export async function setupDingTalkIngress(
         await deliverFallbackText(effective, result.answer, proactive);
       }
     } catch (error) {
+      if (run.signal.aborted) {
+        streamer.handle({ type: 'answer_delta', content: QUEUE_CANCELLED_TEXT });
+        await streamer.finish();
+        return;
+      }
       logger.error(
         { messageId: message.messageId, error: errorText(error) },
         'turn failed',

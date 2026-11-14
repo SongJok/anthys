@@ -53,6 +53,14 @@ export interface BackgroundSchedulersDeps {
     message: InboundMessage,
     options?: { mention?: string; atAll?: boolean },
   ) => CardStreamer;
+  /** 卡片不可用时向群投递 Markdown 文本的兜底通道 */
+  groupTextSender?: {
+    sendGroupText(input: {
+      conversationId: string;
+      title: string;
+      text: string;
+    }): Promise<{ ok: boolean; error?: string }>;
+  };
   clusterEnabled: boolean;
   isLeader: () => boolean;
   isProjectSyncRunning: () => boolean;
@@ -95,6 +103,7 @@ export function setupBackgroundSchedulers(
     harnessLogger: logger,
     resolveEmployeeDisplayName,
     createStreamer,
+    groupTextSender,
     clusterEnabled,
     isLeader,
     isProjectSyncRunning,
@@ -267,6 +276,21 @@ export function setupBackgroundSchedulers(
       streamer.handle({ type: 'answer_delta', content: chunk });
     }
     await streamer.finish();
+    if (!streamer.isAvailable) {
+      if (!groupTextSender) {
+        throw new Error(`群任务 ${input.id} 卡片不可用且未配置群文本兜底通道`);
+      }
+      for (const chunk of splitForDelivery(text)) {
+        const result = await groupTextSender.sendGroupText({
+          conversationId: input.conversationId,
+          title: '群定时播报',
+          text: chunk,
+        });
+        if (!result.ok) {
+          throw new Error(result.error ?? '群文本兜底发送失败');
+        }
+      }
+    }
     logger.info(
       { taskId: input.id, conversationId: input.conversationId },
       'group report delivered',

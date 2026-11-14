@@ -236,6 +236,30 @@ export class PgRetentionStore implements RetentionStore {
       deleted.messages += groupMessages;
     }
 
+    // 记忆归属键可能是 staffId、staff:<id> 或身份库 personKey；
+    // 身份归并后仅在 personKey 未绑定其他员工时才级联，避免误删他人数据
+    const aliasKeys = [staffId, `staff:${staffId}`];
+    const subjectKeys = new Set<string>(aliasKeys);
+    try {
+      const identityRows = await this.sql.query<{ person_key: string }>(
+        'SELECT DISTINCT person_key FROM person_identity_aliases WHERE alias = ANY($1)',
+        [aliasKeys],
+      );
+      for (const row of identityRows.rows) {
+        const others = await this.sql.query<{ n: string }>(
+          `SELECT count(*)::text AS n FROM person_identity_aliases
+            WHERE person_key = $1 AND alias LIKE 'staff:%' AND alias <> ALL($2)`,
+          [row.person_key, aliasKeys],
+        );
+        if (Number(others.rows[0]?.n ?? 0) === 0) {
+          subjectKeys.add(row.person_key);
+        }
+      }
+    } catch (error) {
+      if ((error as { code?: string }).code !== '42P01') throw error;
+    }
+    const keys = [...subjectKeys];
+
     const cascades: Array<[string, string, unknown[]?]> = [
       ['traces', 'DELETE FROM react_traces WHERE sender_staff_id = $1'],
       ['usage', 'DELETE FROM usage_ledger WHERE sender_staff_id = $1'],
@@ -244,8 +268,12 @@ export class PgRetentionStore implements RetentionStore {
       ['scheduledTasks', 'DELETE FROM scheduled_tasks WHERE created_by = $1'],
       [
         'semanticMemories',
-        "DELETE FROM semantic_memories WHERE scope = 'user' AND subject_key IN ($1, $2)",
-        [staffId, `staff:${staffId}`],
+        `DELETE FROM semantic_memories
+          WHERE subject_key = ANY($1)
+             OR (scope = 'group_member'
+                 AND strpos(subject_key, '::') > 0
+                 AND substring(subject_key from strpos(subject_key, '::') + 2) = ANY($1))`,
+        [keys],
       ],
     ];
     for (const [label, statement, params] of cascades) {
@@ -253,12 +281,16 @@ export class PgRetentionStore implements RetentionStore {
       deleted[label] = rowCount(result);
     }
     deleted.personas = await this.optionalDelete(
-      "DELETE FROM persona_profiles WHERE scope = 'user' AND subject_key IN ($1, $2)",
-      [staffId, `staff:${staffId}`],
+      "DELETE FROM persona_profiles WHERE scope = 'user' AND subject_key = ANY($1)",
+      [keys],
+    );
+    deleted.personAliases = await this.optionalDelete(
+      'DELETE FROM person_identity_aliases WHERE alias = ANY($1)',
+      [aliasKeys],
     );
     deleted.personIdentities = await this.optionalDelete(
-      'DELETE FROM person_identities WHERE person_key = $1',
-      [`staff:${staffId}`],
+      'DELETE FROM person_identities WHERE person_key = ANY($1)',
+      [keys],
     );
     return { deleted, messageIds };
   }

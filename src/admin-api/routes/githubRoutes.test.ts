@@ -10,6 +10,7 @@ import {
   createGithubRoutes,
   createGithubWebhookRoutes,
 } from './githubRoutes.js';
+import { bindAdminRequestSecurityContext } from './configRoutes.js';
 
 const NOW = new Date('2026-11-01T10:00:00Z').getTime();
 
@@ -48,7 +49,16 @@ function setup(result = fakeResult(true)) {
     test: vi.fn(async () => result),
   };
   const configCenter = { recordAudit } as unknown as DynamicConfigCenter;
-  const app = new Hono().route(
+  const app = new Hono();
+  // 模拟生产 Admin 中间件绑定安全上下文，webActor 才会采信受信任的操作人头
+  app.use('*', async (c, next) => {
+    bindAdminRequestSecurityContext(c.req.raw, {
+      trustActorHeader: true,
+      role: 'admin',
+    });
+    await next();
+  });
+  app.route(
     '/api/v1/admin',
     createGithubRoutes({ github, configCenter }),
   );

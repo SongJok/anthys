@@ -107,6 +107,24 @@ describe('PendingActionStore', () => {
     expect(store.peek('cid-1')).toBeNull();
     expect(store.cancel('cid-1')).toBe(false);
   });
+
+  it('指定 staffId 无匹配时不回退队尾，避免误取消他人操作', () => {
+    const store = new PendingActionStore({ multiPending: true, ttlMs: 60_000 });
+    const mine = store.put({
+      conversationId: 'group-1',
+      toolName: 'create_ticket',
+      args: { title: 'A 的工单' },
+      risk: 'write',
+      requestedBy: { staffId: 'staff-a' },
+    });
+    // staff-b 在该会话没有待确认操作，不能命中 staff-a 的队尾动作
+    expect(store.peek('group-1', { staffId: 'staff-b' })).toBeNull();
+    expect(store.take('group-1', { staffId: 'staff-b' })).toBeNull();
+    expect(store.cancel('group-1', { staffId: 'staff-b' })).toBe(false);
+    expect(store.peek('group-1', { staffId: 'staff-a' })?.id).toBe(mine.id);
+    expect(store.cancel('group-1', { staffId: 'staff-a' })).toBe(true);
+    expect(store.size).toBe(0);
+  });
 });
 
 describe('createToolApprovalGate', () => {

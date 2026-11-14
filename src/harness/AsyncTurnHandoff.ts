@@ -9,6 +9,8 @@ export interface AsyncTurnHandoffOptions<TResult, TJob> {
   runForeground: (runSignal: AbortSignal) => Promise<TResult>;
   /** 将未完成任务安全落入持久化的 agent_jobs 队列 */
   enqueueBackground: () => Promise<TJob>;
+  /** 入队后外部信号中止（如 /stop）时撤销后台任务 */
+  cancelBackground?: (job: TJob) => Promise<void> | void;
   /** 转入后台时的即时卡片/文本提示回调 */
   onHandoff?: (job: TJob) => Promise<void> | void;
 }
@@ -31,6 +33,7 @@ export async function runTurnWithAsyncHandoff<TResult, TJob>(
     hasSideEffects,
     runForeground,
     enqueueBackground,
+    cancelBackground,
     onHandoff,
   } = options;
 
@@ -74,7 +77,8 @@ export async function runTurnWithAsyncHandoff<TResult, TJob>(
         action();
       };
 
-      runForeground(runController.signal).then(
+      const foregroundPromise = runForeground(runController.signal);
+      foregroundPromise.then(
         (result) => {
           if (handedOff) return;
           settle(() => resolve({ mode: 'foreground', result }));
@@ -95,6 +99,15 @@ export async function runTurnWithAsyncHandoff<TResult, TJob>(
         runController.abort('ASYNC_HANDOFF');
         try {
           const job = await enqueueBackground();
+          // 前台中止是协作式的：等它真正收敛后再释放会话锁，避免同会话并发写历史
+          await foregroundPromise.catch(() => {});
+          if (signal?.aborted) {
+            await cancelBackground?.(job);
+            settle(() =>
+              reject(signal.reason ?? new Error('Turn aborted during handoff')),
+            );
+            return;
+          }
           await onHandoff?.(job);
           settle(() => resolve({ mode: 'background', job }));
         } catch (error) {

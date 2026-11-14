@@ -217,12 +217,16 @@ function verifySessionCookie(
   value: string | undefined,
   key: Buffer,
   nowMs: number,
+  allowAdmin: boolean,
 ): AdminRole | null {
   if (!value) return null;
   const parts = value.split('.');
   if (parts.length !== 3) return null;
   const [role, expiresRaw, sig] = parts;
   if (role !== 'admin' && role !== 'viewer') return null;
+  // 未配置 ADMIN_API_TOKEN 时签名密钥仅由 viewerToken 推导，
+  // 若仍接受 admin 角色，viewer 可离线伪造全权会话
+  if (role === 'admin' && !allowAdmin) return null;
   if (!expiresRaw || !sig) return null;
   const expiresAtMs = Number(expiresRaw);
   if (!Number.isFinite(expiresAtMs) || nowMs >= expiresAtMs) return null;
@@ -299,7 +303,7 @@ export function createAdminApp(options: AdminApiOptions): Hono {
       c.req.header('cookie'),
       ADMIN_SESSION_COOKIE,
     );
-    return verifySessionCookie(cookieVal, sessionKey, now());
+    return verifySessionCookie(cookieVal, sessionKey, now(), Boolean(token));
   };
 
   const tickets = new OneTimeTicketStore(options.ticketTtlMs ?? 60_000, now);
@@ -608,8 +612,11 @@ export function createAdminApp(options: AdminApiOptions): Hono {
         result.ready ? 200 : 503,
       );
     } catch (error) {
-      const detail = error instanceof Error ? error.message : String(error);
-      return c.json({ ok: false, ready: false, detail }, 503);
+      logger?.warn(
+        { error: error instanceof Error ? error.message : String(error) },
+        'readyz check failed',
+      );
+      return c.json({ ok: false, ready: false, detail: '服务暂不可用' }, 503);
     }
   });
 
@@ -711,7 +718,7 @@ export function createAdminApp(options: AdminApiOptions): Hono {
     }
     const message = error instanceof Error ? error.message : String(error);
     logger?.warn({ error: message, path: c.req.path }, 'admin api request failed');
-    return c.json({ ok: false, error: message }, 500);
+    return c.json({ ok: false, error: '服务器内部错误' }, 500);
   });
 
   if (options.staticDir && existsSync(options.staticDir)) {

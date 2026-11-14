@@ -130,6 +130,80 @@ describe('GroupTranscriptArchive', () => {
   });
 });
 
+describe('GroupTranscriptArchive 有界化', () => {
+  let dir: string;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(path.join(tmpdir(), 'group-archive-bound-'));
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('read 只取尾部窗口即可返回最近 N 条（大文件不全量入内存）', async () => {
+    const archive = new GroupTranscriptArchive({ dir });
+    const text = 'x'.repeat(300);
+    for (let index = 0; index < 300; index += 1) {
+      await archive.append(
+        entry({ messageId: `m${index}`, text, timestamp: index }),
+      );
+    }
+    const recent = await archive.read('cid-1', { limit: 5 });
+    expect(recent.map((item) => item.messageId)).toEqual([
+      'm295',
+      'm296',
+      'm297',
+      'm298',
+      'm299',
+    ]);
+  });
+
+  it('文件超过字节上限后旋转，只保留最近条目且仍可读取最新发言', async () => {
+    const archive = new GroupTranscriptArchive({
+      dir,
+      maxFileBytes: 64 * 1024,
+      maxRetainedEntries: 2,
+    });
+    const text = 'y'.repeat(9000);
+    for (let index = 0; index < 10; index += 1) {
+      expect(
+        await archive.append(
+          entry({ messageId: `m${index}`, text, timestamp: index }),
+        ),
+      ).toBe(true);
+    }
+    const raw = await readFile(archive.filePathFor('cid-1'), 'utf8');
+    const lineCount = raw.trim().split('\n').length;
+    expect(lineCount).toBeLessThan(10);
+    expect(lineCount).toBeGreaterThanOrEqual(2);
+
+    const recent = await archive.read('cid-1', { limit: 2 });
+    expect(recent.map((item) => item.messageId)).toEqual(['m8', 'm9']);
+
+    const groups = await archive.listGroups();
+    expect(groups[0]?.entryCount).toBe(lineCount);
+    expect(groups[0]?.lastTimestamp).toBe(9);
+
+    // 旋转后最近 messageId 仍去重
+    expect(await archive.append(entry({ messageId: 'm9', text }))).toBe(false);
+  });
+
+  it('listGroups 流式统计的条数与逐行解析一致', async () => {
+    const archive = new GroupTranscriptArchive({ dir });
+    for (let index = 0; index < 120; index += 1) {
+      await archive.append(
+        entry({ messageId: `m${index}`, timestamp: index }),
+      );
+    }
+    const raw = await readFile(archive.filePathFor('cid-1'), 'utf8');
+    const lineCount = raw.trim().split('\n').length;
+    const groups = await archive.listGroups();
+    expect(groups[0]?.entryCount).toBe(lineCount);
+    expect(groups[0]?.lastTimestamp).toBe(119);
+  });
+});
+
 describe('GroupTranscriptBuffer onAppend 钩子', () => {
   it('只在新发言入池时触发，重投不触发', () => {
     const appended: TranscriptEntry[] = [];

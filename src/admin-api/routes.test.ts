@@ -1,3 +1,4 @@
+import { createHash, createHmac } from 'node:crypto';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -1312,6 +1313,7 @@ describe('术语知识库管理接口', () => {
 
 describe('安全加固：RBAC、HttpOnly Cookie 会话与反代头校验', () => {
   const buildHardenedApp = async (extra?: {
+    authToken?: string;
     viewerToken?: string;
     trustActorHeader?: boolean;
     now?: () => number;
@@ -1339,7 +1341,7 @@ describe('安全加固：RBAC、HttpOnly Cookie 会话与反代头校验', () =>
         status: () => [],
         applyServers: async () => undefined,
       },
-      authToken: TOKEN,
+      authToken: extra?.authToken ?? TOKEN,
       ...(extra?.viewerToken ? { viewerToken: extra.viewerToken } : {}),
       ...(extra?.trustActorHeader !== undefined
         ? { trustActorHeader: extra.trustActorHeader }
@@ -1468,6 +1470,41 @@ describe('安全加固：RBAC、HttpOnly Cookie 会话与反代头校验', () =>
     });
     expect(logout.status).toBe(200);
     expect(logout.headers.get('set-cookie')).toContain('Max-Age=0');
+  });
+
+  it('仅配置 viewerToken 时拒绝离线伪造的 admin 角色 Cookie（H1）', async () => {
+    const { app } = await buildHardenedApp({
+      authToken: '',
+      viewerToken: 'viewer-only',
+      now: () => NOW,
+    });
+    // 攻击者已知 viewerToken，可离线推导签名密钥并伪造任意角色会话
+    const sessionKey = createHash('sha256')
+      .update('anthys-admin-session-v1::viewer-only')
+      .digest();
+    const expiresAtMs = NOW + 60_000;
+    const forge = (role: string): string => {
+      const payload = `${role}.${expiresAtMs}`;
+      const sig = createHmac('sha256', sessionKey).update(payload).digest('hex');
+      return `anthys_admin_session=${encodeURIComponent(`${payload}.${sig}`)}`;
+    };
+
+    const adminRes = await app.request('/api/v1/admin/config/llm', {
+      headers: { cookie: forge('admin') },
+    });
+    expect(adminRes.status).toBe(401);
+
+    // 同密钥伪造的 viewer 角色仍有效，但只读
+    const viewerGet = await app.request('/api/v1/admin/config/llm', {
+      headers: { cookie: forge('viewer') },
+    });
+    expect(viewerGet.status).toBe(200);
+    const viewerPut = await app.request('/api/v1/admin/config/llm', {
+      method: 'PUT',
+      headers: { cookie: forge('viewer'), 'content-type': 'application/json' },
+      body: JSON.stringify({ temperature: 0.1 }),
+    });
+    expect(viewerPut.status).toBe(403);
   });
 
   it('默认忽略伪造的 x-admin-staff-id，仅 trustActorHeader=true 时采信', async () => {

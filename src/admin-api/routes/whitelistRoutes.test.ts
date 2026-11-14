@@ -1,3 +1,4 @@
+import { Hono } from 'hono';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { DynamicConfigCenter } from '../../config/DynamicConfigCenter.js';
 import type {
@@ -7,6 +8,7 @@ import type {
   WhitelistStats,
 } from '../../types/whitelist.js';
 import { createWhitelistRoutes } from './whitelistRoutes.js';
+import { bindAdminRequestSecurityContext } from './configRoutes.js';
 
 const NOW = '2026-11-04T10:00:00.000Z';
 
@@ -68,10 +70,22 @@ function setup() {
     setStatusBatch: vi.fn(async () => 2),
   };
   const configCenter = { recordAudit } as unknown as DynamicConfigCenter;
-  const app = createWhitelistRoutes({
-    whitelist: whitelist as unknown as UserWhitelistAdminPort,
-    configCenter,
+  const app = new Hono();
+  // 模拟生产 Admin 中间件绑定安全上下文，webActor 才会采信受信任的操作人头
+  app.use('*', async (c, next) => {
+    bindAdminRequestSecurityContext(c.req.raw, {
+      trustActorHeader: true,
+      role: 'admin',
+    });
+    await next();
   });
+  app.route(
+    '/',
+    createWhitelistRoutes({
+      whitelist: whitelist as unknown as UserWhitelistAdminPort,
+      configCenter,
+    }),
+  );
   return { app, whitelist, recordAudit };
 }
 

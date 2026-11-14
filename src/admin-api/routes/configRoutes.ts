@@ -166,7 +166,9 @@ export function webActor(c: {
   const sec = c.req.raw
     ? REQUEST_SECURITY_CONTEXT.get(c.req.raw)
     : undefined;
-  if (sec && !sec.trustActorHeader) {
+  // 缺少安全上下文时 fail-closed：不采信任何请求头，防止绕过 Admin 中间件伪造操作人
+  if (!sec) return 'web-console';
+  if (!sec.trustActorHeader) {
     return sec.role === 'viewer' ? 'web-viewer' : 'web-console';
   }
   const id = c.req.header('x-admin-staff-id')?.trim();

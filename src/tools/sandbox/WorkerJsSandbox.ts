@@ -47,9 +47,7 @@ try {
 `;
 
 function workerExecArgv(): string[] {
-  return process.allowedNodeEnvironmentFlags.has('--permission')
-    ? ['--permission']
-    : [];
+  return ['--permission'];
 }
 
 function classifyWorkerFailure(error: unknown): WorkerJsResult {
@@ -85,6 +83,16 @@ function classifyWorkerFailure(error: unknown): WorkerJsResult {
 export async function runJavascriptInWorker(
   request: WorkerJsRequest,
 ): Promise<WorkerJsResult> {
+  // vm.createContext 不是硬隔离边界；没有 --permission 时 worker 仍可触达 fs/process，
+  // 宁可拒绝执行也不降级为无约束运行（engines 要求 Node >= 24，均支持该标志）
+  if (!process.allowedNodeEnvironmentFlags.has('--permission')) {
+    return {
+      ok: false,
+      stderr:
+        'Worker sandbox requires Node.js --permission support; refusing to run unconfined',
+      timedOut: false,
+    };
+  }
   const maxYoungMb = Math.min(32, Math.max(4, Math.floor(request.memoryLimitMb / 4)));
   return new Promise<WorkerJsResult>((resolve) => {
     let settled = false;
@@ -106,6 +114,7 @@ export async function runJavascriptInWorker(
       if (settled) return;
       settled = true;
       clearTimeout(watchdog);
+      clearInterval(memoryWatchdog);
       void worker.terminate().catch(() => {});
       resolve(result);
     };
@@ -117,6 +126,20 @@ export async function runJavascriptInWorker(
         timedOut: true,
       });
     }, request.timeoutMs + 150);
+
+    // resourceLimits 只约束 V8 堆，ArrayBuffer/Buffer 等外部内存不受限；
+    // worker 与主进程共享 RSS，在父线程采样可覆盖同步执行期间的内存暴涨
+    const rssCapBytes =
+      process.memoryUsage().rss + (request.memoryLimitMb + 128) * 1024 * 1024;
+    const memoryWatchdog = setInterval(() => {
+      if (process.memoryUsage().rss > rssCapBytes) {
+        settle({
+          ok: false,
+          stderr: 'Worker memory limit exceeded (process RSS cap)',
+          timedOut: false,
+        });
+      }
+    }, 50);
 
     worker.once('message', (payload: WorkerPayload) => {
       if (payload.ok) {

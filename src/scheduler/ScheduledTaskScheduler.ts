@@ -51,6 +51,7 @@ export class ScheduledTaskScheduler {
   private running = false;
   private tickInFlight: Promise<void> | null = null;
   private readonly failureCounts = new Map<string, number>();
+  private tickCount = 0;
   private readonly store: ScheduledTaskStore;
   private readonly execute: (task: ScheduledTask) => Promise<void>;
   private readonly intervalMs: number;
@@ -168,6 +169,19 @@ export class ScheduledTaskScheduler {
           }
         }),
       );
+
+      this.tickCount += 1;
+      if (this.failureCounts.size > 0 && this.tickCount % 60 === 0) {
+        try {
+          const all = await this.store.list();
+          const ids = new Set(all.map((task) => task.id));
+          for (const key of this.failureCounts.keys()) {
+            if (!ids.has(key)) this.failureCounts.delete(key);
+          }
+        } catch {
+          // 清理失败计数不影响调度本身
+        }
+      }
     })().finally(() => {
       this.tickInFlight = null;
     });
