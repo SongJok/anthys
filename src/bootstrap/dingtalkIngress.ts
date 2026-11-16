@@ -1846,6 +1846,9 @@ export async function setupDingTalkIngress(
     bystanderListener = undefined;
   };
 
+  // 空载时也要写入并发 gauge，否则监控无法区分「0 在途」与「没有数据」
+  refreshLoadMetrics();
+
   return {
     createStreamer,
     resolveEmployeeDisplayName,
