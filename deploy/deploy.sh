@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 幂等部署：拉代码 → 装依赖 → 构建 → 同步表结构 → 重启 → 健康检查
 # 用法：sudo bash deploy/deploy.sh
-# 环境变量：APP_USER APP_DIR BRANCH SERVICE SKIP_DB_PUSH ADMIN_PORT
+# 环境变量：APP_USER APP_DIR APP_HOME BRANCH SERVICE SKIP_DB_PUSH ADMIN_PORT
 set -euo pipefail
 
 APP_USER="${APP_USER:-anthys}"
@@ -18,15 +18,28 @@ die() { printf '\033[31m!!\033[0m %s\n' "$*" >&2; exit 1; }
 SUDO=""
 [ "$(id -u)" -eq 0 ] || SUDO="sudo"
 
+# 服务单元常把 HOME 指向可写目录（ProtectHome=read-only 时 pnpm store 必须落在 ReadWritePaths）。
+# 部署必须沿用同一 HOME，否则 pnpm 认为 store 变了，会要求清空 node_modules 重装。
+APP_HOME="${APP_HOME:-}"
+if [ -z "$APP_HOME" ]; then
+  APP_HOME="$($SUDO systemctl show "$SERVICE" -p Environment --value 2>/dev/null \
+    | tr ' ' '\n' | sed -n 's/^HOME=//p' || true)"
+fi
+
 # 以应用用户执行命令。root 下 SUDO 为空，直接写 "$SUDO -u" 会把 -u 当成命令名，
 # 因此按是否 root 分别走 runuser / sudo。
 as_app() {
+  local -a prefix
   if [ -n "$SUDO" ]; then
-    sudo -u "$APP_USER" "$@"
+    prefix=(sudo -u "$APP_USER")
   else
-    runuser -u "$APP_USER" -- "$@"
+    prefix=(runuser -u "$APP_USER" --)
   fi
+  [ -z "$APP_HOME" ] || prefix+=(env "HOME=$APP_HOME")
+  "${prefix[@]}" "$@"
 }
+
+log "应用用户 ${APP_USER}，HOME=${APP_HOME:-登录默认}"
 
 [ -d "$APP_PATH/.git" ] || die "未找到 $APP_PATH/.git，请先完成首次克隆：sudo -u $APP_USER git clone <repo> $APP_PATH"
 
