@@ -12,6 +12,7 @@ import type {
   LlmDialect,
   ThinkingMode,
 } from '../types/core.js';
+import { LlmRequestGate } from './LlmRequestGate.js';
 
 interface ReasoningDelta {
   reasoning_content?: string;
@@ -34,6 +35,7 @@ export interface OpenAIChatModelOptions {
   timeoutMs?: number;
   maxRetries?: number;
   client?: OpenAI;
+  requestGate?: LlmRequestGate;
 }
 
 export function toOpenAIMessages(
@@ -103,12 +105,14 @@ export class OpenAIChatModel implements ChatModel {
   private readonly dialect: LlmDialect;
   private readonly thinking: ThinkingMode;
   private readonly maxTokens?: number;
+  private readonly requestGate: LlmRequestGate;
 
   constructor(options: OpenAIChatModelOptions) {
     this.modelName = options.model;
     this.dialect = options.dialect ?? 'openai';
     this.thinking = options.thinking ?? 'auto';
     this.maxTokens = options.maxTokens;
+    this.requestGate = options.requestGate ?? new LlmRequestGate({ limit: 0 });
     this.client =
       options.client ??
       new OpenAI({
@@ -120,6 +124,18 @@ export class OpenAIChatModel implements ChatModel {
   }
 
   public async *streamChat(
+    request: ChatCompletionRequest,
+    signal?: AbortSignal,
+  ): AsyncIterable<ChatStreamChunk> {
+    const release = await this.requestGate.acquire(signal);
+    try {
+      yield* this.streamChatUngated(request, signal);
+    } finally {
+      release();
+    }
+  }
+
+  private async *streamChatUngated(
     request: ChatCompletionRequest,
     signal?: AbortSignal,
   ): AsyncIterable<ChatStreamChunk> {

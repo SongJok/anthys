@@ -56,6 +56,7 @@ import {
   formatApprovalPrompt,
 } from '../harness/ToolApprovalGate.js';
 import { isReadOnlyToolName } from '../tools/toolRisk.js';
+import { sharedLlmGateStats } from '../react/LlmRequestGate.js';
 import {
   defaultPersonKeyFor,
   normalizeIdentityAlias,
@@ -80,6 +81,11 @@ import type {
 } from '../types/core.js';
 import type { AgentJobStore } from '../types/jobs.js';
 import { isWorkerName } from '../types/workers.js';
+import {
+  divertTurnToBackground,
+  shouldDivertForBackpressure,
+  type ConcurrencyBackpressureDeps,
+} from './concurrencyBackpressure.js';
 import type { AgentRuntimesContext } from './agentRuntimes.js';
 import type { BackgroundSchedulersContext } from './backgroundSchedulers.js';
 import type { MemoryAndBystanderContext } from './memoryAndBystander.js';
@@ -196,6 +202,11 @@ export async function setupDingTalkIngress(
   const asyncHandoffMs = asyncReactEnabled
     ? envSeconds(process.env.ASYNC_REACT_THRESHOLD_SECONDS, 25) * 1_000
     : 0;
+  // 全局槽位满时把新问题转入持久化后台队列，而不是让所有会话一起变慢
+  const backpressureToBackground = envEnabled(
+    process.env.BACKPRESSURE_TO_BACKGROUND,
+    true,
+  );
 
   const cardApiRef: { current: OpenApiCardApi } = {
     current: new OpenApiCardApi({
@@ -617,10 +628,15 @@ export async function setupDingTalkIngress(
     },
     status: () => {
       const llm = configCenter.getLLMConfig();
+      const limit = runControl.concurrencyLimit();
+      const gates = sharedLlmGateStats();
+      const llmActive = gates.reduce((sum, gate) => sum + gate.active, 0);
+      const llmWaiting = gates.reduce((sum, gate) => sum + gate.waiting, 0);
       return [
         `模型：${llm.provider} / ${llm.model}`,
-        `进行中的回答：${runControl.activeCount()}`,
-        `排队中的问题：${runControl.pendingCount()}`,
+        `进行中的回答：${runControl.activeCount()}${limit > 0 ? ` / 上限 ${limit}` : '（未限流）'}`,
+        `排队中的问题：${runControl.pendingCount()}（等待全局槽位 ${runControl.slotWaiterCount()}）`,
+        `LLM 在途请求：${llmActive}${llmWaiting > 0 ? `，排队 ${llmWaiting}` : ''}`,
         `Stream：${streamConnected ? '已连接' : '未连接'}`,
         `运行时长：${Math.floor(process.uptime() / 60)} 分钟`,
       ].join('\n');
@@ -1118,13 +1134,44 @@ export async function setupDingTalkIngress(
     reply: replyTo,
   });
 
-  function markQueued(streamer: CardStreamer, run: BeginRunResult): void {
-    if (run.queuedAhead <= 0) return;
-    streamer.handle({
-      type: 'status',
-      message: `前方还有 ${run.queuedAhead} 条消息正在处理，已加入队列按顺序回复；发送 /stop 可取消排队。`,
-    });
+  function refreshLoadMetrics(): void {
+    metrics.set('agent_active_runs', runControl.activeCount());
+    metrics.set('agent_pending_runs', runControl.pendingCount());
+    metrics.set('agent_slot_waiters', runControl.slotWaiterCount());
+    const gates = sharedLlmGateStats();
+    metrics.set(
+      'agent_llm_inflight_requests',
+      gates.reduce((sum, gate) => sum + gate.active, 0),
+    );
+    metrics.set(
+      'agent_llm_queued_requests',
+      gates.reduce((sum, gate) => sum + gate.waiting, 0),
+    );
   }
+
+  function markQueued(streamer: CardStreamer, run: BeginRunResult): void {
+    if (run.queuedAhead > 0) {
+      streamer.handle({
+        type: 'status',
+        message: `前方还有 ${run.queuedAhead} 条消息正在处理，已加入队列按顺序回复；发送 /stop 可取消排队。`,
+      });
+      return;
+    }
+    if (run.waitForSlot) {
+      streamer.handle({
+        type: 'status',
+        message: `当前并发已满（同时最多 ${runControl.concurrencyLimit()} 个回答），正在等待空闲槽位；发送 /stop 可取消排队。`,
+      });
+    }
+  }
+
+  const backpressureDeps: ConcurrencyBackpressureDeps = {
+    jobStore,
+    concurrencyLimit: () => runControl.concurrencyLimit(),
+    activeRuns: () => runControl.activeCount(),
+    metrics,
+    logger,
+  };
 
   async function enrichMessageInTurn(
     message: InboundMessage,
@@ -1293,7 +1340,7 @@ export async function setupDingTalkIngress(
       }
     } finally {
       run.finish();
-      metrics.set('agent_active_runs', runControl.activeCount());
+      refreshLoadMetrics();
     }
   }
 
@@ -1353,17 +1400,28 @@ export async function setupDingTalkIngress(
 
     const run = runControl.begin(message);
     runControl.remember(message);
-    metrics.set('agent_active_runs', runControl.activeCount());
+    refreshLoadMetrics();
     try {
       emotionReplier.mark(message);
       const streamer = createStreamer(message, {
         mention: replyMention(message),
       });
       await streamer.start();
+      if (shouldDivertForBackpressure(run, message, backpressureToBackground)) {
+        try {
+          await divertTurnToBackground(message, streamer, backpressureDeps);
+          return;
+        } catch (error) {
+          logger.warn(
+            { messageId: message.messageId, error: errorText(error) },
+            'backpressure divert failed, falling back to in-process queue',
+          );
+        }
+      }
       await runTurn(message, run, false, streamer);
     } finally {
       run.finish();
-      metrics.set('agent_active_runs', runControl.activeCount());
+      refreshLoadMetrics();
       void emotionReplier.clear(message);
     }
   }
@@ -1373,7 +1431,7 @@ export async function setupDingTalkIngress(
     decision: BystanderEvaluationResult,
   ): Promise<void> {
     const run = runControl.begin(message);
-    metrics.set('agent_active_runs', runControl.activeCount());
+    refreshLoadMetrics();
     let streamer: CardStreamer | null = null;
     const collector = new TraceCollector();
     try {
@@ -1415,7 +1473,7 @@ export async function setupDingTalkIngress(
       }
     } finally {
       run.finish();
-      metrics.set('agent_active_runs', runControl.activeCount());
+      refreshLoadMetrics();
     }
   }
 

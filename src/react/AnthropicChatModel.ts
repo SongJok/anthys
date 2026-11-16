@@ -4,6 +4,7 @@ import type {
   ChatModel,
   ChatStreamChunk,
 } from '../types/core.js';
+import { LlmRequestGate } from './LlmRequestGate.js';
 
 type AnthropicBlock =
   | { type: 'text'; text: string }
@@ -24,6 +25,7 @@ export interface AnthropicChatModelOptions {
   thinkingBudgetTokens?: number;
   anthropicVersion?: string;
   fetchImpl?: typeof fetch;
+  requestGate?: LlmRequestGate;
 }
 
 function safeParseArguments(raw: string): Record<string, unknown> {
@@ -170,14 +172,28 @@ export class AnthropicChatModel implements ChatModel {
   public readonly modelName: string;
   private readonly options: AnthropicChatModelOptions;
   private readonly fetchImpl: typeof fetch;
+  private readonly requestGate: LlmRequestGate;
 
   constructor(options: AnthropicChatModelOptions) {
     this.options = options;
     this.modelName = options.model;
     this.fetchImpl = options.fetchImpl ?? fetch;
+    this.requestGate = options.requestGate ?? new LlmRequestGate({ limit: 0 });
   }
 
   public async *streamChat(
+    request: ChatCompletionRequest,
+    signal?: AbortSignal,
+  ): AsyncIterable<ChatStreamChunk> {
+    const release = await this.requestGate.acquire(signal);
+    try {
+      yield* this.streamChatUngated(request, signal);
+    } finally {
+      release();
+    }
+  }
+
+  private async *streamChatUngated(
     request: ChatCompletionRequest,
     signal?: AbortSignal,
   ): AsyncIterable<ChatStreamChunk> {

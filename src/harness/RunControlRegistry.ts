@@ -12,15 +12,25 @@ export interface ActiveRunInfo {
 interface QueuedRun extends ActiveRunInfo {
   controller: AbortController;
   signalStarted: () => void;
+  /** 已拿到全局槽位并真正开始执行；false 表示仍在排队 */
+  started: boolean;
 }
 
 export interface BeginRunResult {
   signal: AbortSignal;
-  /** 入队时前面已有的任务数；0 表示立即开始 */
+  /** 入队时前面已有的任务数；0 表示本会话空闲 */
   queuedAhead: number;
+  /** 本会话空闲但全局槽位已满，需要等待其他会话释放 */
+  waitForSlot: boolean;
   /** 轮到自己或被取消时 resolve；恢复后必须检查 signal.aborted */
   started: Promise<void>;
   finish: () => void;
+}
+
+export interface RunControlOptions {
+  lastMessageLimit?: number;
+  /** 进程级同时执行的回答上限；<= 0 表示不限流 */
+  maxActiveRuns?: number;
 }
 
 function conversationKeyFor(message: InboundMessage): string {
@@ -31,6 +41,9 @@ function conversationKeyFor(message: InboundMessage): string {
  * 会话级运行控制：同一会话严格按到达顺序串行执行，
  * 新消息只排队、不会打断进行中的回答；只有 /stop（stop）与进程退出（stopAll）
  * 会中止当前回答并清空该会话的排队任务。
+ *
+ * 在此之上叠加进程级槽位闸门：同时执行的回答数不超过 maxActiveRuns，
+ * 超出的会话队首按到达顺序等待，避免突发流量把 LLM 与数据库连接打满。
  */
 export class RunControlRegistry {
   private readonly queues = new Map<string, QueuedRun[]>();
@@ -38,12 +51,17 @@ export class RunControlRegistry {
   private readonly lastMessages = new Map<string, InboundMessage>();
   private readonly messagesById = new Map<string, InboundMessage>();
   private readonly lastMessageLimit: number;
+  private readonly maxActiveRuns: number;
+  /** 等待全局槽位的会话队首，按到达顺序排列 */
+  private readonly slotWaiters: QueuedRun[] = [];
+  private startedCount = 0;
 
   constructor(
     private readonly now: () => number = Date.now,
-    options: { lastMessageLimit?: number } = {},
+    options: RunControlOptions = {},
   ) {
     this.lastMessageLimit = options.lastMessageLimit ?? 500;
+    this.maxActiveRuns = options.maxActiveRuns ?? 0;
   }
 
   public begin(message: InboundMessage): BeginRunResult {
@@ -64,13 +82,15 @@ export class RunControlRegistry {
       stopReason: null,
       controller: new AbortController(),
       signalStarted,
+      started: false,
     };
     const queuedAhead = queue.length;
     queue.push(run);
-    if (queuedAhead === 0) this.startRun(run);
+    if (queuedAhead === 0) this.startIfPossible(run);
     return {
       signal: run.controller.signal,
       queuedAhead,
+      waitForSlot: queuedAhead === 0 && !run.started,
       started,
       finish: () => this.release(key, run),
     };
@@ -111,29 +131,37 @@ export class RunControlRegistry {
     return (this.queues.get(conversationId)?.length ?? 0) > 0;
   }
 
-  /** 正在执行的会话数（每个会话同时只有一个回答在跑） */
+  /** 正在执行的回答数（已拿到全局槽位，每个会话同时只有一个） */
   public activeCount(): number {
+    return this.startedCount;
+  }
+
+  /** 尚未开始执行的问题数：会话内积压 + 等待全局槽位 */
+  public pendingCount(): number {
     let count = 0;
     for (const queue of this.queues.values()) {
-      if (queue.length > 0) count += 1;
+      for (const run of queue) {
+        if (!run.started) count += 1;
+      }
     }
     return count;
   }
 
-  /** 正在等待轮到自己执行的问题数 */
-  public pendingCount(): number {
-    let count = 0;
-    for (const queue of this.queues.values()) {
-      count += Math.max(0, queue.length - 1);
-    }
-    return count;
+  /** 本会话空闲但因全局槽位已满而等待的回答数 */
+  public slotWaiterCount(): number {
+    return this.slotWaiters.length;
+  }
+
+  /** 进程级并发上限；0 表示不限流 */
+  public concurrencyLimit(): number {
+    return this.maxActiveRuns;
   }
 
   public activeRuns(): ActiveRunInfo[] {
     const runs: ActiveRunInfo[] = [];
     for (const queue of this.queues.values()) {
       const head = queue[0];
-      if (!head) continue;
+      if (!head || !head.started) continue;
       runs.push({
         conversationId: head.conversationId,
         messageId: head.messageId,
@@ -170,9 +198,38 @@ export class RunControlRegistry {
     return this.messagesById.get(messageId) ?? null;
   }
 
+  private hasFreeSlot(): boolean {
+    return this.maxActiveRuns <= 0 || this.startedCount < this.maxActiveRuns;
+  }
+
+  private startIfPossible(run: QueuedRun): void {
+    if (run.started) return;
+    if (this.hasFreeSlot()) {
+      this.startRun(run);
+      return;
+    }
+    if (!this.slotWaiters.includes(run)) this.slotWaiters.push(run);
+  }
+
   private startRun(run: QueuedRun): void {
+    run.started = true;
     run.startedAt = this.now();
+    this.startedCount += 1;
     run.signalStarted();
+  }
+
+  /** 槽位空出后按到达顺序唤醒等待中的会话队首 */
+  private pumpSlots(): void {
+    while (this.slotWaiters.length > 0 && this.hasFreeSlot()) {
+      const next = this.slotWaiters.shift();
+      if (!next || next.started || next.stopReason) continue;
+      this.startRun(next);
+    }
+  }
+
+  private dropSlotWaiter(run: QueuedRun): void {
+    const index = this.slotWaiters.indexOf(run);
+    if (index >= 0) this.slotWaiters.splice(index, 1);
   }
 
   /** finish 与 stop 都会走到这里；不在队列中时是安全的空操作 */
@@ -182,11 +239,21 @@ export class RunControlRegistry {
     const index = queue.indexOf(run);
     if (index < 0) return;
     queue.splice(index, 1);
+    if (run.started) {
+      this.startedCount -= 1;
+    } else {
+      this.dropSlotWaiter(run);
+    }
     if (queue.length === 0) {
       this.queues.delete(key);
-      return;
+    } else if (index === 0) {
+      // 新队首排到全局等待队尾，避免同一会话持续插队饿死其他会话
+      const next = queue[0]!;
+      if (!next.started && !this.slotWaiters.includes(next)) {
+        this.slotWaiters.push(next);
+      }
     }
-    if (index === 0) this.startRun(queue[0]!);
+    this.pumpSlots();
   }
 
   private abortAll(
@@ -200,10 +267,16 @@ export class RunControlRegistry {
     const runs = queue.splice(0);
     for (const run of runs) {
       run.stopReason = reason;
+      if (run.started) {
+        this.startedCount -= 1;
+      } else {
+        this.dropSlotWaiter(run);
+      }
       if (!run.controller.signal.aborted) run.controller.abort();
       // 让排队中的任务醒来自行检查 signal，避免永久等待
       run.signalStarted();
     }
+    this.pumpSlots();
     return runs.length;
   }
 }

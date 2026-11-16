@@ -12,6 +12,7 @@ import {
 } from './bootstrap/backgroundSchedulers.js';
 import { setupDingTalkIngress } from './bootstrap/dingtalkIngress.js';
 import {
+  envCount,
   envEnabled,
   envSeconds,
   errorText,
@@ -154,7 +155,9 @@ async function main(): Promise<void> {
       logger: harnessLogger,
     });
 
-    const runControl = new RunControlRegistry();
+    const runControl = new RunControlRegistry(Date.now, {
+      maxActiveRuns: envCount(process.env.MAX_ACTIVE_RUNS, 10),
+    });
     const metrics = new MetricsRegistry();
     const clusterEnabled = envEnabled(process.env.CLUSTER_ENABLED, false);
     const isLeader = (): boolean => !clusterEnabled || Boolean(leadership?.isLeader());
@@ -479,6 +482,7 @@ async function main(): Promise<void> {
         compressionThresholdTokens: memoryConfig.compressionThresholdTokens,
         glossaryEmbeddingEnabled: Boolean(extensions.embeddingClient),
         adminApiPort: adminServer.port,
+        maxActiveRuns: runControl.concurrencyLimit(),
       },
       'dingtalk agent is ready',
     );
