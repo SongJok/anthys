@@ -818,6 +818,8 @@ export class DwsCliToolProvider implements IToolProvider {
       name: 'dws_org_and_schedule',
       description:
         '只读查询钉钉组织与办公信息：contact 通讯录（search/get/list/self）、calendar 日程（list/today/search/freebusy）、todo 待办（list/search/get/today）、approval 审批（list-pending/list-submitted/detail/records/tasks/list-forms/search-forms/form-schema）。写操作请使用对应的写工具。',
+      risk: 'read',
+      source: 'dws',
       parametersJsonSchema: {
         type: 'object',
         properties: {

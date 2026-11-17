@@ -1,5 +1,9 @@
 import { readFile, stat } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
+import {
+  createToolApprovalGate,
+  PendingActionStore,
+} from '../../harness/ToolApprovalGate.js';
 import type { ExecutionContext, ToolDefinition } from '../../types/core.js';
 import type { DwsCommandRequest } from '../../types/mcp-and-sandbox.js';
 import { DwsCliToolProvider } from './DwsCliToolProvider.js';
@@ -318,5 +322,40 @@ describe('DWS 听记工具', () => {
     });
     await minutes.execute({ action: 'action_items' }, ctx);
     expect(runs[1]).toMatchObject({ subcommand: '+action-items', flags: {} });
+  });
+});
+
+describe('DWS 只读工具风险分级', () => {
+  it('只读工具直接放行审批闸门，不产生待确认操作', async () => {
+    const { provider } = setup();
+    const store = new PendingActionStore();
+    const gate = createToolApprovalGate({ store });
+    const readOnlyTools = [
+      'dws_org_and_schedule',
+      'dws_doc_search_and_read',
+      'dws_report_read',
+      'dws_aitable',
+      'dws_minutes',
+    ];
+    for (const name of readOnlyTools) {
+      const definition = await tool(provider, name);
+      const decision = await gate({
+        toolName: definition.name,
+        args: {},
+        ...(definition.risk ? { risk: definition.risk } : {}),
+        ...(definition.source ? { source: definition.source } : {}),
+        conversationId: ctx.conversationId,
+        senderStaffId: ctx.senderStaffId,
+      });
+      expect(decision.approved, `${name} 应为只读放行`).toBe(true);
+    }
+    expect(store.size).toBe(0);
+  });
+
+  it('dws_org_and_schedule 显式声明 read，避免名字里的 schedule 被误判为写', async () => {
+    const { provider } = setup();
+    const definition = await tool(provider, 'dws_org_and_schedule');
+    expect(definition.risk).toBe('read');
+    expect(definition.source).toBe('dws');
   });
 });
