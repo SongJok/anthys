@@ -292,4 +292,107 @@ describe('WebSearchToolProvider', () => {
       result: 'error',
     });
   });
+
+  it('主引擎空结果时回退备用引擎，并缓存回退结果', async () => {
+    const primary = vi.fn(async (_input: WebSearchRequest) => []);
+    const fallback = vi.fn(async (_input: WebSearchRequest) => [SAMPLE]);
+    const metrics = { inc: vi.fn() };
+    const tool = await toolOf(
+      makeProvider(primary, { fallbackClient: { search: fallback }, metrics }),
+    );
+
+    const output = await tool.executeStructured!({ query: '今日要闻' }, context());
+    expect(output.text).toContain('返回 1 条');
+    expect(primary).toHaveBeenCalledTimes(1);
+    expect(fallback).toHaveBeenCalledTimes(1);
+    expect(metrics.inc).toHaveBeenCalledWith('web_search_requests_total', {
+      result: 'fallback_empty',
+    });
+
+    await tool.executeStructured!({ query: '今日要闻' }, context());
+    expect(primary).toHaveBeenCalledTimes(1);
+    expect(fallback).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ['NO_DATA', new WebSearchError('搜索引擎未返回有效数据', 'NO_DATA')],
+    ['TIMEOUT', new WebSearchError('联网搜索超时', 'TIMEOUT')],
+    ['HTTP_500', new WebSearchError('联网搜索服务暂不可用', 'HTTP_500')],
+    ['网络失败', new WebSearchError('联网搜索请求失败：fetch failed')],
+  ])('主引擎 %s 时回退备用引擎成功', async (_label, error) => {
+    const primary = vi.fn(async (_input: WebSearchRequest) => {
+      throw error;
+    });
+    const fallback = vi.fn(async (_input: WebSearchRequest) => [SAMPLE]);
+    const metrics = { inc: vi.fn() };
+    const tool = await toolOf(
+      makeProvider(primary, { fallbackClient: { search: fallback }, metrics }),
+    );
+
+    const output = await tool.executeStructured!({ query: '今日要闻' }, context());
+    expect(output.text).toContain('返回 1 条');
+    expect(fallback).toHaveBeenCalledTimes(1);
+    expect(metrics.inc).toHaveBeenCalledWith('web_search_requests_total', {
+      result: 'fallback_error',
+    });
+    expect(metrics.inc).toHaveBeenCalledWith('web_search_requests_total', {
+      result: 'success',
+    });
+  });
+
+  it.each([
+    ['HTTP_401', new WebSearchError('联网搜索鉴权失败', 'HTTP_401')],
+    ['HTTP_400', new WebSearchError('联网搜索失败（HTTP 400）', 'HTTP_400')],
+    ['ABORTED', new WebSearchError('联网搜索已取消', 'ABORTED')],
+  ])('主引擎 %s 属于不可重试错误，不回退直接抛出', async (_label, error) => {
+    const fallback = vi.fn(async (_input: WebSearchRequest) => [SAMPLE]);
+    const tool = await toolOf(
+      makeProvider(
+        async () => {
+          throw error;
+        },
+        { fallbackClient: { search: fallback } },
+      ),
+    );
+
+    await expect(
+      tool.executeStructured!({ query: '今日要闻' }, context()),
+    ).rejects.toThrow(error.message);
+    expect(fallback).not.toHaveBeenCalled();
+  });
+
+  it('主备引擎都空时返回无结果引导且不缓存', async () => {
+    const primary = vi.fn(async (_input: WebSearchRequest) => []);
+    const fallback = vi.fn(async (_input: WebSearchRequest) => []);
+    const tool = await toolOf(
+      makeProvider(primary, { fallbackClient: { search: fallback } }),
+    );
+
+    const output = await tool.executeStructured!({ query: '今日要闻' }, context());
+    expect(output.summary).toBe('联网搜索无结果');
+    await tool.executeStructured!({ query: '今日要闻' }, context());
+    expect(primary).toHaveBeenCalledTimes(2);
+    expect(fallback).toHaveBeenCalledTimes(2);
+  });
+
+  it('主引擎可重试失败且备用引擎也失败时抛出备用错误', async () => {
+    const tool = await toolOf(
+      makeProvider(
+        async () => {
+          throw new WebSearchError('联网搜索超时', 'TIMEOUT');
+        },
+        {
+          fallbackClient: {
+            search: async () => {
+              throw new WebSearchError('备用引擎鉴权失败', 'HTTP_401');
+            },
+          },
+        },
+      ),
+    );
+
+    await expect(
+      tool.executeStructured!({ query: '今日要闻' }, context()),
+    ).rejects.toThrow('备用引擎鉴权失败');
+  });
 });

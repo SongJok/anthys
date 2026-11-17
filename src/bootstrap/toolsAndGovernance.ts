@@ -324,18 +324,31 @@ export async function setupToolsAndGovernance(
   }
 
   const webSearchConfig = configCenter.getWebSearchConfig?.();
+  const webSearchClientOptions = webSearchConfig
+    ? {
+        baseUrl: webSearchConfig.baseUrl,
+        apiKey: webSearchConfig.apiKey,
+        count: webSearchConfig.count,
+        contentSize: webSearchConfig.contentSize,
+        timeoutMs: webSearchConfig.timeoutMs,
+        redactOutbound: webSearchConfig.redactOutbound,
+      }
+    : undefined;
   const webSearchProvider =
-    webSearchConfig && webSearchConfig.apiKey
+    webSearchConfig && webSearchClientOptions && webSearchConfig.apiKey
       ? new WebSearchToolProvider({
           client: new WebSearchClient({
-            baseUrl: webSearchConfig.baseUrl,
-            apiKey: webSearchConfig.apiKey,
+            ...webSearchClientOptions,
             engine: webSearchConfig.engine,
-            count: webSearchConfig.count,
-            contentSize: webSearchConfig.contentSize,
-            timeoutMs: webSearchConfig.timeoutMs,
-            redactOutbound: webSearchConfig.redactOutbound,
           }),
+          ...(webSearchConfig.fallbackEngine
+            ? {
+                fallbackClient: new WebSearchClient({
+                  ...webSearchClientOptions,
+                  engine: webSearchConfig.fallbackEngine,
+                }),
+              }
+            : {}),
           enabled: () => configCenter.getWebSearchConfig?.()?.enabled ?? false,
           logger,
           metrics,
@@ -355,6 +368,7 @@ export async function setupToolsAndGovernance(
       enabled: webSearchConfig?.enabled ?? false,
       ready: Boolean(webSearchProvider),
       engine: webSearchConfig?.engine,
+      fallbackEngine: webSearchConfig?.fallbackEngine ?? '',
       count: webSearchConfig?.count,
       cacheTtlSeconds: webSearchConfig?.cacheTtlSeconds,
       maxCallsPerHour: webSearchConfig?.maxCallsPerHour,

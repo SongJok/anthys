@@ -53,7 +53,19 @@ function parseWebSearchEngine(value: string | undefined): WebSearchEngine {
   const engine = (value ?? '').trim();
   return (WEB_SEARCH_ENGINES as readonly string[]).includes(engine)
     ? (engine as WebSearchEngine)
-    : 'search_pro';
+    : 'search_pro_sogou';
+}
+
+function parseWebSearchFallbackEngine(
+  value: string | undefined,
+  primary: WebSearchEngine,
+): WebSearchEngine | '' {
+  const engine = (value ?? '').trim();
+  if (value !== undefined && engine === '') return '';
+  if ((WEB_SEARCH_ENGINES as readonly string[]).includes(engine)) {
+    return engine === primary ? '' : (engine as WebSearchEngine);
+  }
+  return primary === 'search_pro_quark' ? 'search_pro_sogou' : 'search_pro_quark';
 }
 
 function parseWebSearchCount(
@@ -434,6 +446,10 @@ export class EnvConfigProvider implements IConfigProvider {
       dailyLimit: Math.max(
         0,
         Math.trunc(parseNumber(this.env.WEB_SEARCH_DAILY_LIMIT, 500)),
+      ),
+      fallbackEngine: parseWebSearchFallbackEngine(
+        this.env.WEB_SEARCH_FALLBACK_ENGINE,
+        engine,
       ),
     };
   }

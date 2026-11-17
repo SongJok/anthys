@@ -82,6 +82,8 @@ export interface WebSearchConfig {
   maxCallsPerHour: number;
   /** 进程内每天最多真实调用次数，0 表示不限制 */
   dailyLimit: number;
+  /** 主引擎空结果或临时故障时回退的引擎；空字符串关闭回退 */
+  fallbackEngine: WebSearchEngine | '';
 }
 
 export interface IConfigProvider {

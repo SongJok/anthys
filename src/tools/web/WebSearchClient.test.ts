@@ -205,4 +205,33 @@ describe('WebSearchClient', () => {
       'https://example.com/1',
     ]);
   });
+
+  it('上游 1703 映射为 NO_DATA 并给出可操作提示', async () => {
+    const noData = (async () =>
+      jsonResponse(
+        { error: { code: '1703', message: '搜索引擎未返回有效数据，请调整查询条件。' } },
+        400,
+      )) as typeof fetch;
+    await expect(
+      clientWith(noData).search({ query: '今日重要新闻 2026年11月17日' }),
+    ).rejects.toMatchObject({
+      name: 'WebSearchError',
+      code: 'NO_DATA',
+      message: expect.stringContaining('缩短查询词'),
+    });
+  });
+
+  it('搜狗引擎把条数归一到 10/20/30/40/50', async () => {
+    const calls: CapturedCall[] = [];
+    const fetchImpl = (async (_url: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: String(_url), init: init ?? {} });
+      return jsonResponse({ search_result: [] });
+    }) as typeof fetch;
+    const client = clientWith(fetchImpl, { engine: 'search_pro_sogou' });
+
+    await client.search({ query: '今日新闻', count: 7 });
+    await client.search({ query: '今日新闻' });
+    expect(JSON.parse(String(calls[0]?.init.body)).count).toBe(10);
+    expect(JSON.parse(String(calls[1]?.init.body)).count).toBe(10);
+  });
 });

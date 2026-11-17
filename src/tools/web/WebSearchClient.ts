@@ -11,6 +11,7 @@ const MAX_QUERY_CHARS = 70;
 const MAX_COUNT = 50;
 const MAX_TITLE_CHARS = 300;
 const MAX_CONTENT_CHARS = 4_000;
+const SOGOU_COUNTS = [10, 20, 30, 40, 50] as const;
 
 export interface WebSearchClientOptions {
   baseUrl: string;
@@ -81,6 +82,12 @@ function isHttpUrl(value: string): boolean {
 function clampCount(value: number): number {
   if (!Number.isFinite(value)) return MAX_COUNT;
   return Math.min(MAX_COUNT, Math.max(1, Math.trunc(value)));
+}
+
+/** 搜狗引擎只接受 10/20/30/40/50，其余条数会被接口拒绝 */
+function snapCountForEngine(count: number, engine: WebSearchEngine): number {
+  if (engine !== 'search_pro_sogou') return count;
+  return SOGOU_COUNTS.find((allowed) => allowed >= count) ?? MAX_COUNT;
 }
 
 function parseResults(payload: unknown, limit: number): WebSearchResult[] {
@@ -171,7 +178,10 @@ export class WebSearchClient implements WebSearchExecutor {
       this.options.redactOutbound === false
         ? rawQuery
         : redactText(rawQuery);
-    const count = clampCount(input.count ?? this.options.count);
+    const count = snapCountForEngine(
+      clampCount(input.count ?? this.options.count),
+      this.options.engine,
+    );
     const controller = new AbortController();
     let timedOut = false;
     const timer = setTimeout(() => {
@@ -210,6 +220,15 @@ export class WebSearchClient implements WebSearchExecutor {
       });
       const payload = (await response.json().catch(() => null)) as unknown;
       if (!response.ok) {
+        const upstreamCode = String(
+          (payload as { error?: { code?: unknown } })?.error?.code ?? '',
+        );
+        if (upstreamCode === '1703') {
+          throw new WebSearchError(
+            '搜索引擎未返回有效数据（1703），请缩短查询词、去掉完整日期后重试',
+            'NO_DATA',
+          );
+        }
         throw new WebSearchError(
           describeHttpError(response.status, payload),
           `HTTP_${response.status}`,

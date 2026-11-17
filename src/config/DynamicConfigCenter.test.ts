@@ -139,6 +139,7 @@ function fakeDefaults(
       cacheTtlSeconds: 300,
       maxCallsPerHour: 30,
       dailyLimit: 500,
+      fallbackEngine: 'search_pro_quark',
     }),
     getModelConfigSource: () => options.modelSource ?? 'database',
     getModelProfiles: () => {

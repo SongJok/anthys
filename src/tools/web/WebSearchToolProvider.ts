@@ -13,6 +13,7 @@ import type {
 } from './WebSearchClient.js';
 import { WebSearchError } from './WebSearchClient.js';
 import { formatShanghaiDate } from '../../time/shanghaiTime.js';
+import { redactText } from '../../governance/redaction.js';
 
 export interface WebSearchToolLogger {
   info?(obj: Record<string, unknown>, msg: string): void;
@@ -25,6 +26,8 @@ export interface WebSearchToolMetrics {
 
 export interface WebSearchToolProviderOptions {
   client: WebSearchExecutor;
+  /** 主引擎空结果或临时故障时重试一次的备用引擎客户端 */
+  fallbackClient?: WebSearchExecutor;
   /** 运行期开关；返回 false 时不下发工具 */
   enabled?: () => boolean;
   logger?: WebSearchToolLogger;
@@ -173,6 +176,20 @@ function emptyOutput(): ToolExecutionOutput {
   };
 }
 
+/** 鉴权/参数类错误换引擎也无济于事；空数据、限流、超时与网络/服务端故障才值得回退 */
+function isRetryableSearchError(error: unknown): boolean {
+  if (!(error instanceof WebSearchError)) return false;
+  if (error.code === undefined) return true;
+  if (
+    error.code === 'NO_DATA' ||
+    error.code === 'TIMEOUT' ||
+    error.code === 'HTTP_429'
+  ) {
+    return true;
+  }
+  return /^HTTP_5\d\d$/.test(error.code);
+}
+
 /**
  * 公网搜索工具：只访问公开网页摘要，企业内部数据仍应走 DWS / 企业 MCP。
  * 生产护栏：相同查询短期缓存、并发去重、单会话小时配额与进程日配额，
@@ -219,7 +236,7 @@ export class WebSearchToolProvider implements IToolProvider {
     return {
       name: 'web_search',
       description:
-        '搜索公网公开信息，适合查询报错信息、官方文档、版本发布说明、行业公告、政策法规以及训练数据之后发生的事实。返回网页标题、链接、发布时间与摘要。不要用它查询企业内部系统、私有接口或内部文档，那些应使用企业 MCP 或钉钉 DWS。',
+        '搜索公网公开信息，适合查询报错信息、官方文档、版本发布说明、行业公告、政策法规以及训练数据之后发生的事实。返回网页标题、链接、发布时间与摘要。新闻类查询用简短关键词（如「今日要闻」「AI 大模型 发布」），时间范围交给 recency 参数，不要把完整日期拼进查询词。不要用它查询企业内部系统、私有接口或内部文档，那些应使用企业 MCP 或钉钉 DWS。',
       parametersJsonSchema: {
         type: 'object',
         properties: {
@@ -336,6 +353,8 @@ export class WebSearchToolProvider implements IToolProvider {
     this.options.logger?.info?.(
       {
         conversationId: ctx.conversationId,
+        query: redactText(query),
+        recency: recency ?? '',
         queryLength: query.length,
         resultCount: results.length,
         durationMs,
@@ -351,39 +370,86 @@ export class WebSearchToolProvider implements IToolProvider {
     ctx: ExecutionContext,
   ): Promise<WebSearchResult[]> {
     const startedAt = this.now();
-    try {
-      const results = await this.options.client.search(input);
-      const durationMs = Math.max(0, this.now() - startedAt);
-      this.options.metrics?.inc(
-        'web_search_duration_ms_total',
-        undefined,
-        durationMs,
-      );
-      this.options.metrics?.inc(
-        'web_search_results_total',
-        undefined,
-        results.length,
-      );
-      this.options.metrics?.inc('web_search_requests_total', {
-        result: results.length === 0 ? 'empty' : 'success',
-      });
-      // 突发新闻索引滞后时空结果会随时间变化，缓存空结果会让重试一直拿不到新覆盖
-      if (results.length > 0) this.writeCache(cacheKey, results);
-      return results;
-    } catch (error) {
-      this.options.metrics?.inc('web_search_requests_total', {
-        result: 'error',
-      });
-      this.options.logger?.warn(
-        {
-          conversationId: ctx.conversationId,
-          code: error instanceof WebSearchError ? error.code : undefined,
-          error: error instanceof Error ? error.message : String(error),
-        },
-        'web search failed',
-      );
-      throw error;
+    const clients: WebSearchExecutor[] = [this.options.client];
+    if (this.options.fallbackClient) clients.push(this.options.fallbackClient);
+    let lastError: unknown;
+    for (let attempt = 0; attempt < clients.length; attempt += 1) {
+      const isLast = attempt === clients.length - 1;
+      try {
+        const results = await clients[attempt].search(input);
+        if (results.length > 0 || isLast) {
+          this.recordSuccess(results, startedAt, cacheKey);
+          return results;
+        }
+        this.options.logger?.warn(
+          {
+            conversationId: ctx.conversationId,
+            query: redactText(input.query),
+          },
+          'web search empty, trying fallback engine',
+        );
+        this.options.metrics?.inc('web_search_requests_total', {
+          result: 'fallback_empty',
+        });
+      } catch (error) {
+        lastError = error;
+        if (isLast || !isRetryableSearchError(error)) {
+          this.recordFailure(error, ctx);
+          throw error;
+        }
+        this.options.logger?.warn(
+          {
+            conversationId: ctx.conversationId,
+            query: redactText(input.query),
+            code: error instanceof WebSearchError ? error.code : undefined,
+            error: error instanceof Error ? error.message : String(error),
+          },
+          'web search failed, trying fallback engine',
+        );
+        this.options.metrics?.inc('web_search_requests_total', {
+          result: 'fallback_error',
+        });
+      }
     }
+    this.recordFailure(lastError, ctx);
+    throw lastError;
+  }
+
+  private recordSuccess(
+    results: WebSearchResult[],
+    startedAt: number,
+    cacheKey: string,
+  ): void {
+    const durationMs = Math.max(0, this.now() - startedAt);
+    this.options.metrics?.inc(
+      'web_search_duration_ms_total',
+      undefined,
+      durationMs,
+    );
+    this.options.metrics?.inc(
+      'web_search_results_total',
+      undefined,
+      results.length,
+    );
+    this.options.metrics?.inc('web_search_requests_total', {
+      result: results.length === 0 ? 'empty' : 'success',
+    });
+    // 突发新闻索引滞后时空结果会随时间变化，缓存空结果会让重试一直拿不到新覆盖
+    if (results.length > 0) this.writeCache(cacheKey, results);
+  }
+
+  private recordFailure(error: unknown, ctx: ExecutionContext): void {
+    this.options.metrics?.inc('web_search_requests_total', {
+      result: 'error',
+    });
+    this.options.logger?.warn(
+      {
+        conversationId: ctx.conversationId,
+        code: error instanceof WebSearchError ? error.code : undefined,
+        error: error instanceof Error ? error.message : String(error),
+      },
+      'web search failed',
+    );
   }
 
   private respond(

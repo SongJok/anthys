@@ -106,7 +106,7 @@ describe('EnvConfigProvider model profiles', () => {
 });
 
 describe('EnvConfigProvider web search', () => {
-  it('默认 search_pro，并复用智谱的 baseUrl 与 API Key', () => {
+  it('默认搜狗引擎并互备夸克，复用智谱的 baseUrl 与 API Key', () => {
     const provider = new EnvConfigProvider({
       LLM_BASE_URL: 'https://open.bigmodel.cn/api/paas/v4',
       LLM_API_KEY: 'zhipu-key',
@@ -117,14 +117,15 @@ describe('EnvConfigProvider web search', () => {
       enabled: true,
       baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
       apiKey: 'zhipu-key',
-      engine: 'search_pro',
-      count: 5,
+      engine: 'search_pro_sogou',
+      count: 10,
       contentSize: 'medium',
       timeoutMs: 12_000,
       redactOutbound: true,
       cacheTtlSeconds: 300,
       maxCallsPerHour: 30,
       dailyLimit: 500,
+      fallbackEngine: 'search_pro_quark',
     });
   });
 
@@ -168,7 +169,45 @@ describe('EnvConfigProvider web search', () => {
       cacheTtlSeconds: 0,
       maxCallsPerHour: 12,
       dailyLimit: 80,
+      fallbackEngine: 'search_pro_quark',
     });
+  });
+
+  it('备用引擎可显式覆盖、关闭，且不与主引擎相同', () => {
+    const base = {
+      LLM_API_KEY: 'zhipu-key',
+      WEB_SEARCH_ENGINE: 'search_pro_sogou',
+    };
+    expect(
+      new EnvConfigProvider({
+        ...base,
+        WEB_SEARCH_FALLBACK_ENGINE: 'search_std',
+      }).getWebSearchConfig().fallbackEngine,
+    ).toBe('search_std');
+    expect(
+      new EnvConfigProvider({
+        ...base,
+        WEB_SEARCH_FALLBACK_ENGINE: '',
+      }).getWebSearchConfig().fallbackEngine,
+    ).toBe('');
+    expect(
+      new EnvConfigProvider({
+        ...base,
+        WEB_SEARCH_FALLBACK_ENGINE: 'search_pro_sogou',
+      }).getWebSearchConfig().fallbackEngine,
+    ).toBe('');
+    expect(
+      new EnvConfigProvider({
+        ...base,
+        WEB_SEARCH_FALLBACK_ENGINE: 'bing',
+      }).getWebSearchConfig().fallbackEngine,
+    ).toBe('search_pro_quark');
+    expect(
+      new EnvConfigProvider({
+        LLM_API_KEY: 'zhipu-key',
+        WEB_SEARCH_ENGINE: 'search_pro_quark',
+      }).getWebSearchConfig().fallbackEngine,
+    ).toBe('search_pro_sogou');
   });
 
   it('非法引擎与内容长度回退默认值', () => {
@@ -183,11 +222,12 @@ describe('EnvConfigProvider web search', () => {
     });
 
     const config = provider.getWebSearchConfig();
-    expect(config.engine).toBe('search_pro');
+    expect(config.engine).toBe('search_pro_sogou');
     expect(config.contentSize).toBe('medium');
     expect(config.count).toBe(50);
     expect(config.cacheTtlSeconds).toBe(0);
     expect(config.maxCallsPerHour).toBe(0);
     expect(config.dailyLimit).toBe(500);
+    expect(config.fallbackEngine).toBe('search_pro_quark');
   });
 });
