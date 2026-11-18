@@ -98,6 +98,42 @@ function assertConfig(config: EnterpriseMcpServerConfig): void {
   if (!Number.isFinite(config.maxResultChars) || config.maxResultChars <= 0) {
     throw new Error(`MCP Server "${config.id}" 的 maxResultChars 必须为正数`);
   }
+  assertRiskFields(config);
+}
+
+const RISK_LEVELS = ['read', 'write', 'destructive'] as const;
+type McpRisk = (typeof RISK_LEVELS)[number];
+
+function assertRiskFields(config: EnterpriseMcpServerConfig): void {
+  if (
+    config.defaultRisk !== undefined &&
+    !(RISK_LEVELS as readonly string[]).includes(config.defaultRisk)
+  ) {
+    throw new Error(
+      `MCP Server "${config.id}" 的 defaultRisk 非法: ${config.defaultRisk}（允许: ${RISK_LEVELS.join(', ')}）`,
+    );
+  }
+  if (config.toolRisk !== undefined) {
+    for (const [name, risk] of Object.entries(config.toolRisk)) {
+      if (!(RISK_LEVELS as readonly string[]).includes(risk)) {
+        throw new Error(
+          `MCP Server "${config.id}" 的 toolRisk.${name} 非法: ${risk}（允许: ${RISK_LEVELS.join(', ')}）`,
+        );
+      }
+    }
+  }
+}
+
+/** toolRisk 覆盖 > MCP annotations > defaultRisk > write（fail-closed） */
+function resolveMcpToolRisk(
+  config: EnterpriseMcpServerConfig,
+  tool: { name: string; annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean } },
+): McpRisk {
+  const override = config.toolRisk?.[tool.name];
+  if (override) return override;
+  if (tool.annotations?.destructiveHint) return 'destructive';
+  if (tool.annotations?.readOnlyHint) return 'read';
+  return config.defaultRisk ?? 'write';
 }
 
 function headersOf(config: EnterpriseMcpServerConfig): Record<string, string> {
@@ -478,6 +514,7 @@ export class McpClientPool {
             ? (tool.inputSchema as Record<string, unknown>)
             : { type: 'object', properties: {} },
         maxResultChars: state.config.maxResultChars,
+        risk: resolveMcpToolRisk(state.config, tool),
       };
       if (byName.has(descriptor.namespacedName)) {
         throw new Error(

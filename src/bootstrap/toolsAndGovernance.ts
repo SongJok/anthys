@@ -2,6 +2,7 @@ import { resolve } from 'node:path';
 import type { MetricsRegistry } from '../admin-api/metrics.js';
 import type { DynamicConfigCenter } from '../config/DynamicConfigCenter.js';
 import { DrizzlePendingActionPersistence } from '../db/approvalSchema.js';
+import { DrizzleToolExecutionLedgerPersistence } from '../db/executionLedgerSchema.js';
 import type { DatabaseHandle } from '../db/client.js';
 import type {
   DrizzleGroupDirectory,
@@ -33,6 +34,7 @@ import {
   createToolApprovalGate,
   PendingActionStore,
 } from '../harness/ToolApprovalGate.js';
+import { ToolExecutionLedger } from '../harness/ToolExecutionLedger.js';
 import {
   parseToolExecutionPolicy,
   PolicyToolProvider,
@@ -100,6 +102,7 @@ export interface ToolsAndGovernanceDeps {
 
 export interface ToolsAndGovernanceContext {
   pendingActions: PendingActionStore;
+  writeLedger: ToolExecutionLedger;
   resolveToolApproval: (
     request: ToolApprovalRequest,
     context: ExecutionContext,
@@ -153,7 +156,38 @@ export async function setupToolsAndGovernance(
     persistence: new DrizzlePendingActionPersistence(dbHandle.db),
     logger,
   });
-  await pendingActions.hydrate();
+  const unknownActions = await pendingActions.hydrate();
+  if (unknownActions.length > 0) {
+    metrics.inc(
+      'agent_pending_actions_unknown_total',
+      undefined,
+      unknownActions.length,
+    );
+    logger.warn(
+      {
+        count: unknownActions.length,
+        actions: unknownActions.map((action) => ({
+          id: action.id,
+          conversationId: action.conversationId,
+          toolName: action.toolName,
+        })),
+      },
+      '上一进程有写操作在执行中丢失结果，已标记 unknown，不会自动重放；请人工核实外部系统后决定是否重新发起',
+    );
+  }
+
+  const writeLedger = new ToolExecutionLedger({
+    persistence: new DrizzleToolExecutionLedgerPersistence(dbHandle.db),
+    logger,
+  });
+  void writeLedger
+    .purgeSettled(Date.now() - 7 * 24 * 3_600_000)
+    .catch((error) => {
+      logger.warn(
+        { error: error instanceof Error ? error.message : String(error) },
+        'failed to purge settled tool execution ledger entries',
+      );
+    });
 
   const approvalMessageFor = (context: ExecutionContext): InboundMessage => ({
     messageId: context.messageId,
@@ -185,6 +219,10 @@ export async function setupToolsAndGovernance(
       ...(request.source ? { source: request.source } : {}),
     });
     if (request.toolName === 'glossary_candidate_submit') {
+      return { approved: true };
+    }
+    // 产物投递只发往当前会话，是回答的预期输出通道，免二次确认
+    if (request.toolName === 'deliver_artifact') {
       return { approved: true };
     }
     if (
@@ -628,6 +666,7 @@ export async function setupToolsAndGovernance(
 
   return {
     pendingActions,
+    writeLedger,
     resolveToolApproval,
     mediaSender,
     adminTextSender,

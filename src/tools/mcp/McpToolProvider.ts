@@ -208,6 +208,8 @@ export class McpToolProvider implements IToolProvider {
         `[MCP ${descriptor.serverName} · ${descriptor.domain}] ${descriptor.description}` +
         `（超 ${descriptor.maxResultChars} 字自动转存沙盒 datasets）`,
       parametersJsonSchema: descriptor.inputSchema,
+      risk: descriptor.risk,
+      source: `mcp:${descriptor.serverId}`,
       execute: async (args, ctx) => {
         const stepId = this.nextStepId(ctx);
         const result = await this.options.pool.callTool(

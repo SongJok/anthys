@@ -125,6 +125,8 @@ export class AdminChatOpsToolProvider implements IToolProvider {
   private inspectStatusTool(): ToolDefinition {
     return {
       name: 'admin_inspect_system_status',
+      risk: 'read',
+      source: 'admin',
       description:
         '查看系统运行状态：在线 MCP Server 健康状态、今日 Token 消耗/轮次、各群旁听与主动回复统计。',
       parametersJsonSchema: {
@@ -530,6 +532,8 @@ export class AdminChatOpsToolProvider implements IToolProvider {
   private queryTracesTool(): ToolDefinition {
     return {
       name: 'admin_query_traces',
+      risk: 'read',
+      source: 'admin',
       description:
         '查询今天的 ReAct 执行轨迹，可按耗时或 Token 排序，用于定位最慢/最贵的查询。',
       parametersJsonSchema: {

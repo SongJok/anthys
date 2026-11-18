@@ -1,7 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { DynamicLoopGuard, type LoopStepResult } from '../harness/DynamicLoopGuard.js';
 import { formatRuntimeRefusal } from '../harness/RequestAdmission.js';
-import { isReadOnlyTool } from '../tools/toolRisk.js';
+import { isReadOnlyTool, resolveToolRisk } from '../tools/toolRisk.js';
+import {
+  hashToolArgs,
+  writeLedgerKey,
+  type ToolExecutionLedger,
+} from '../harness/ToolExecutionLedger.js';
 import type {
   AgentEngine,
   AgentStreamEvent,
@@ -81,6 +86,8 @@ export interface ReActRunnerOptions {
     request: ToolApprovalRequest,
     context: ExecutionContext,
   ) => Promise<ToolApprovalDecision>;
+  /** 后台任务的写操作幂等台账；设置后 job 上下文内的写工具执行前登记、成功后可重放 */
+  writeLedger?: ToolExecutionLedger;
   /** 复杂问题先规划再执行；返回 null 表示不需要计划 */
   planner?: Planner;
   /** 执行层工具白名单：返回 false 的工具不会暴露给模型 */
@@ -900,10 +907,12 @@ export class ReActRunner implements AgentEngine {
     });
 
     for (const item of prepared) {
+      const startedTool = toolMap.get(item.call.function.name);
       emit({
         type: 'tool_start',
         toolName: item.call.function.name,
         args: item.args,
+        ...(startedTool?.risk ? { risk: startedTool.risk } : {}),
         stepId: item.stepId,
         turnId,
       });
@@ -1056,6 +1065,48 @@ export class ReActRunner implements AgentEngine {
       }
     }
 
+    const risk = resolveToolRisk({
+      name: tool.name,
+      ...(tool.risk ? { risk: tool.risk } : {}),
+      ...(tool.source ? { source: tool.source } : {}),
+    });
+    let ledgerKey: string | undefined;
+    if (this.options.writeLedger && context.jobId && risk !== 'read') {
+      ledgerKey = writeLedgerKey(`job:${context.jobId}`, tool.name, item.args);
+      try {
+        const begin = await this.options.writeLedger.begin(ledgerKey, {
+          jobId: context.jobId,
+          toolName: tool.name,
+          argsHash: hashToolArgs(item.args),
+        });
+        if (begin.outcome === 'replay') {
+          const content = begin.result || '（写操作已执行，但未记录结果文本）';
+          return base({
+            content,
+            summary: truncate(content, TOOL_SUMMARY_LIMIT),
+            isError: false,
+          });
+        }
+        if (begin.outcome === 'blocked') {
+          const content = `Error: ${begin.reason}`;
+          return base({
+            content,
+            summary: truncate(content, TOOL_SUMMARY_LIMIT),
+            isError: true,
+          });
+        }
+      } catch (error) {
+        const content = `Error: 写执行台账不可用，已阻止执行写操作：${
+          error instanceof Error ? error.message : String(error)
+        }`;
+        return base({
+          content,
+          summary: truncate(content, TOOL_SUMMARY_LIMIT),
+          isError: true,
+        });
+      }
+    }
+
     const timeoutMs = this.options.toolTimeoutMs ?? DEFAULT_TOOL_TIMEOUT_MS;
     const toolController = new AbortController();
     const signal = context.signal
@@ -1127,6 +1178,9 @@ export class ReActRunner implements AgentEngine {
       }
       const summary =
         output.summary ?? truncate(content, TOOL_SUMMARY_LIMIT);
+      if (ledgerKey) {
+        await this.options.writeLedger?.settle(ledgerKey, 'succeeded', content);
+      }
       return base({
         content,
         summary,
@@ -1158,6 +1212,9 @@ export class ReActRunner implements AgentEngine {
         context,
       );
       if (summarized !== null) content = summarized;
+      if (ledgerKey) {
+        await this.options.writeLedger?.settle(ledgerKey, 'failed', message);
+      }
       return base({
         content,
         summary: truncate(content, TOOL_SUMMARY_LIMIT),

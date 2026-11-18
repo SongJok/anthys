@@ -1,4 +1,9 @@
 import { describe, expect, it } from 'vitest';
+import {
+  ToolExecutionLedger,
+  writeLedgerKey,
+  type ToolExecutionLedgerPersistence,
+} from '../harness/ToolExecutionLedger.js';
 import { BuiltinToolProvider } from './BuiltinTools.js';
 import { ReActRunner } from './ReActRunner.js';
 import type {
@@ -1238,5 +1243,188 @@ describe('ReActRunner 全员通知真实性拦截', () => {
     expect(approvals).toEqual(['write_a']);
     expect(result.answer).toContain('待确认 write_a');
     expect(result.usage.totalTokens).toBeGreaterThanOrEqual(55);
+  });
+});
+
+describe('ReActRunner 写执行台账', () => {
+  function writeProvider(counter: { calls: number }): IToolProvider {
+    return {
+      providerName: 'writes',
+      getTools: async () => [
+        {
+          name: 'send_report',
+          description: '发送报告（写）',
+          parametersJsonSchema: { type: 'object', properties: {} },
+          risk: 'write',
+          execute: async () => {
+            counter.calls += 1;
+            return `已发送 #${counter.calls}`;
+          },
+        },
+      ],
+    };
+  }
+
+  function ledgerPersistence() {
+    const rows = new Map<
+      string,
+      { status: 'executing' | 'succeeded' | 'failed'; result?: string }
+    >();
+    const persistence: ToolExecutionLedgerPersistence =
+      {
+        async insertExecuting(entry) {
+          if (rows.has(entry.idempotencyKey)) return false;
+          rows.set(entry.idempotencyKey, { status: 'executing' });
+          return true;
+        },
+        async get(key) {
+          const row = rows.get(key);
+          if (!row) return null;
+          return {
+            idempotencyKey: key,
+            toolName: 'send_report',
+            argsHash: 'hash',
+            createdAt: 0,
+            ...row,
+          };
+        },
+        async reclaimFailed(key) {
+          const row = rows.get(key);
+          if (!row || row.status !== 'failed') return false;
+          row.status = 'executing';
+          return true;
+        },
+        async settle(key, status, detail) {
+          const row = rows.get(key);
+          if (row) {
+            row.status = status;
+            if (status === 'succeeded') row.result = detail;
+          }
+        },
+        async purgeSettled() {
+          return 0;
+        },
+      };
+    return { rows, persistence };
+  }
+
+  const jobContext = (): ExecutionContext => ({
+    ...makeContext(),
+    jobId: 'job-1',
+    jobKind: 'task',
+  });
+
+  it('任务重跑时同工具同参数重放台账结果，不重复执行', async () => {
+    const { persistence } = ledgerPersistence();
+    const ledger = new ToolExecutionLedger({ persistence });
+    const counter = { calls: 0 };
+    const script = () => [
+      toolTurn([{ index: 0, id: 'w1', name: 'send_report', args: {} }]),
+      [{ contentDelta: '完成。' }, { finishReason: 'stop' }],
+    ];
+    const first = new ReActRunner({
+      model: new ScriptedModel(script()),
+      toolProviders: [writeProvider(counter)],
+      policy,
+      writeLedger: ledger,
+    });
+    await first.run({
+      messages: userMessages,
+      context: jobContext(),
+      emit: () => {},
+    });
+    expect(counter.calls).toBe(1);
+
+    const second = new ReActRunner({
+      model: new ScriptedModel(script()),
+      toolProviders: [writeProvider(counter)],
+      policy,
+      writeLedger: ledger,
+    });
+    await second.run({
+      messages: userMessages,
+      context: jobContext(),
+      emit: () => {},
+    });
+    expect(counter.calls).toBe(1);
+  });
+
+  it('台账遗留 executing（上次中断）时阻止执行并给出核实提示', async () => {
+    const { rows, persistence } = ledgerPersistence();
+    rows.set(writeLedgerKey('job:job-1', 'send_report', {}), {
+      status: 'executing',
+    });
+    const ledger = new ToolExecutionLedger({ persistence });
+    const counter = { calls: 0 };
+    const runner = new ReActRunner({
+      model: new ScriptedModel([
+        toolTurn([{ index: 0, id: 'w1', name: 'send_report', args: {} }]),
+        [{ contentDelta: '已停止。' }, { finishReason: 'stop' }],
+      ]),
+      toolProviders: [writeProvider(counter)],
+      policy,
+      writeLedger: ledger,
+    });
+    const events: AgentStreamEvent[] = [];
+    await runner.run({
+      messages: userMessages,
+      context: jobContext(),
+      emit: (event) => events.push(event),
+    });
+    expect(counter.calls).toBe(0);
+    const toolEnd = events.find((event) => event.type === 'tool_end');
+    expect(toolEnd).toMatchObject({ isError: true });
+    expect(
+      toolEnd && 'summary' in toolEnd ? toolEnd.summary : '',
+    ).toContain('结果未知');
+  });
+
+  it('台账不可用时 fail-closed 阻止写操作', async () => {
+    const { persistence } = ledgerPersistence();
+    persistence.insertExecuting = async () => {
+      throw new Error('db down');
+    };
+    const ledger = new ToolExecutionLedger({ persistence });
+    const counter = { calls: 0 };
+    const runner = new ReActRunner({
+      model: new ScriptedModel([
+        toolTurn([{ index: 0, id: 'w1', name: 'send_report', args: {} }]),
+        [{ contentDelta: '已停止。' }, { finishReason: 'stop' }],
+      ]),
+      toolProviders: [writeProvider(counter)],
+      policy,
+      writeLedger: ledger,
+    });
+    const events: AgentStreamEvent[] = [];
+    await runner.run({
+      messages: userMessages,
+      context: jobContext(),
+      emit: (event) => events.push(event),
+    });
+    expect(counter.calls).toBe(0);
+    const toolEnd = events.find((event) => event.type === 'tool_end');
+    expect(toolEnd).toMatchObject({ isError: true });
+  });
+
+  it('非任务上下文（无 jobId）不登记台账，写工具照常执行', async () => {
+    const { rows, persistence } = ledgerPersistence();
+    const ledger = new ToolExecutionLedger({ persistence });
+    const counter = { calls: 0 };
+    const runner = new ReActRunner({
+      model: new ScriptedModel([
+        toolTurn([{ index: 0, id: 'w1', name: 'send_report', args: {} }]),
+        [{ contentDelta: '完成。' }, { finishReason: 'stop' }],
+      ]),
+      toolProviders: [writeProvider(counter)],
+      policy,
+      writeLedger: ledger,
+    });
+    await runner.run({
+      messages: userMessages,
+      context: makeContext(),
+      emit: () => {},
+    });
+    expect(counter.calls).toBe(1);
+    expect(rows.size).toBe(0);
   });
 });

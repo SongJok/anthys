@@ -59,15 +59,22 @@ describe('isReadOnlyTool', () => {
       parametersJsonSchema: { type: 'object', properties: {} },
       execute: async () => '',
     };
-    expect(isReadOnlyTool({ ...base, name: 'search_docs' })).toBe(true);
+    expect(isReadOnlyTool({ ...base, name: 'search_docs', risk: 'read' })).toBe(
+      true,
+    );
+    expect(isReadOnlyTool({ ...base, name: 'search_docs' })).toBe(false);
     expect(isReadOnlyTool({ ...base, name: 'create_ticket' })).toBe(false);
     expect(isReadOnlyTool({ ...base, name: 'delegate_research' })).toBe(false);
     expect(isReadOnlyTool({ ...base, name: 'admin_inspect_system_status' })).toBe(
       false,
     );
     expect(
-      isReadOnlyTool({ ...base, name: 'mcp__crm__delete_contact', risk: 'read' }),
+      isReadOnlyTool({ ...base, name: 'mcp__crm__delete_contact', risk: 'write' }),
     ).toBe(false);
+    // 显式声明是权威来源：声明 read 即按 read 处理，名称不再二次否决
+    expect(
+      isReadOnlyTool({ ...base, name: 'mcp__crm__delete_contact', risk: 'read' }),
+    ).toBe(true);
   });
 });
 
@@ -166,6 +173,7 @@ describe('SubagentToolProvider', () => {
             name: 'read_log',
             description: '读取日志',
             parametersJsonSchema: { type: 'object', properties: {} },
+            risk: 'read',
             execute: async () => '',
           },
         ]),

@@ -36,6 +36,7 @@ import {
   parseWorkerOutput,
 } from '../workers/WorkerOutput.js';
 import { QuotaExceededError } from '../billing/UsageGuard.js';
+import type { UsageReservation } from '../types/admin-and-console.js';
 import { defaultPersonKeyFor } from '../identity/PersonIdentityService.js';
 import type { PersonaResolver } from '../persona/PersonaResolver.js';
 import type { PersonIdentityResolver } from '../types/persona-and-identity.js';
@@ -112,25 +113,32 @@ export interface AgentHarnessOptions {
   fullHistoryLimit?: number;
   /** 每日 Token 配额与用量记账 */
   usageGuard?: {
-    assertWithinQuota(input: {
-      senderStaffId: string;
-      conversationId: string;
-      conversationType: '1' | '2';
-    }): Promise<void>;
-    record(input: {
-      conversationId: string;
-      conversationType: '1' | '2';
-      senderStaffId: string;
-      senderNick: string;
-      model: string;
-      totalTokens: number;
-      steps: number;
-      durationMs: number;
-      proactive: boolean;
-      jobId?: string;
-      jobKind?: string;
-      worker?: string;
-    }): Promise<void>;
+    assertWithinQuota(
+      input: {
+        senderStaffId: string;
+        conversationId: string;
+        conversationType: '1' | '2';
+      },
+      options?: { reserveTokens?: number },
+    ): Promise<UsageReservation | null | void>;
+    record(
+      input: {
+        conversationId: string;
+        conversationType: '1' | '2';
+        senderStaffId: string;
+        senderNick: string;
+        model: string;
+        totalTokens: number;
+        steps: number;
+        durationMs: number;
+        proactive: boolean;
+        jobId?: string;
+        jobKind?: string;
+        worker?: string;
+      },
+      reservation?: UsageReservation | null,
+    ): Promise<void>;
+    release?(reservation: UsageReservation | null): Promise<void>;
   };
 }
 
@@ -230,8 +238,8 @@ export class AgentHarness {
     }
     const text = message.text.trim();
     if (!text) return null;
-    const quotaAnswer = await this.enforceQuota(message, handle.emit, false);
-    if (quotaAnswer) return quotaAnswer;
+    const quota = await this.enforceQuota(message, handle.emit, false);
+    if (quota.answer) return quota.answer;
     const admissionAnswer = this.enforceAdmission(
       message.senderStaffId,
       message.conversationId,
@@ -239,7 +247,10 @@ export class AgentHarness {
       handle.emit,
       handle.proactive ?? false,
     );
-    if (admissionAnswer) return admissionAnswer;
+    if (admissionAnswer) {
+      await this.options.usageGuard?.release?.(quota.reservation);
+      return admissionAnswer;
+    }
 
     const { repository, assembler, engine, policy } = this.options;
     const { persona, personKey } = await this.resolveTurnContext(message);
@@ -345,7 +356,13 @@ export class AgentHarness {
       );
       throw error;
     }
-    await this.recordUsage(message, result, handle.proactive ?? false);
+    await this.recordUsage(
+      message,
+      result,
+      handle.proactive ?? false,
+      {},
+      quota.reservation,
+    );
 
     await repository.appendMessage({
       conversationId: conversation.id,
@@ -405,7 +422,8 @@ export class AgentHarness {
       );
       return null;
     }
-    if (await this.enforceQuota(message, handle.emit, true)) return null;
+    const quota = await this.enforceQuota(message, handle.emit, true);
+    if (quota.answer) return null;
 
     const { repository, assembler, engine, policy } = this.options;
     const { persona, personKey } = await this.resolveTurnContext(message);
@@ -414,6 +432,7 @@ export class AgentHarness {
       policyConfig &&
       handle.decision.confidence < policyConfig.confidenceThreshold
     ) {
+      await this.options.usageGuard?.release?.(quota.reservation);
       this.options.logger?.info(
         {
           conversationId: message.conversationId,
@@ -507,7 +526,7 @@ export class AgentHarness {
       emit: handle.emit,
       signal: handle.signal,
     });
-    await this.recordUsage(message, result, true);
+    await this.recordUsage(message, result, true, {}, quota.reservation);
 
     await repository.appendMessage({
       conversationId: conversation.id,
@@ -680,8 +699,13 @@ export class AgentHarness {
     };
     const proactive = job.metadata.proactive === true;
 
-    const quotaAnswer = await this.enforceQuota(message, handle.emit, false);
-    if (quotaAnswer) return quotaAnswer;
+    const quota = await this.enforceQuota(
+      message,
+      handle.emit,
+      false,
+      workerProfile?.policy.maxTotalTokens,
+    );
+    if (quota.answer) return quota.answer;
 
     const { repository, assembler } = this.options;
     const { persona, personKey } = await this.resolveTurnContext(message);
@@ -778,11 +802,17 @@ export class AgentHarness {
       emit: handle.emit,
       signal: handle.signal,
     });
-    await this.recordUsage(message, result, proactive, {
-      jobId: job.id,
-      jobKind: job.kind,
-      ...(workerName ? { worker: workerName } : {}),
-    });
+    await this.recordUsage(
+      message,
+      result,
+      proactive,
+      {
+        jobId: job.id,
+        jobKind: job.kind,
+        ...(workerName ? { worker: workerName } : {}),
+      },
+      quota.reservation,
+    );
 
     let workerOutput: WorkerOutput | undefined;
     if (workerProfile) {
@@ -1101,16 +1131,23 @@ export class AgentHarness {
     message: InboundMessage,
     emit: (event: AgentStreamEvent) => void,
     proactive: boolean,
-  ): Promise<RunResult | null> {
+    reserveTokens?: number,
+  ): Promise<{
+    answer: RunResult | null;
+    reservation: UsageReservation | null;
+  }> {
     const guard = this.options.usageGuard;
-    if (!guard) return null;
+    if (!guard) return { answer: null, reservation: null };
     try {
-      await guard.assertWithinQuota({
-        senderStaffId: message.senderStaffId,
-        conversationId: message.conversationId,
-        conversationType: message.conversationType,
-      });
-      return null;
+      const reservation = await guard.assertWithinQuota(
+        {
+          senderStaffId: message.senderStaffId,
+          conversationId: message.conversationId,
+          conversationType: message.conversationType,
+        },
+        { reserveTokens: reserveTokens ?? this.options.policy.maxTotalTokens },
+      );
+      return { answer: null, reservation: reservation ?? null };
     } catch (error) {
       if (!(error instanceof QuotaExceededError)) throw error;
       this.options.logger?.warn(
@@ -1124,11 +1161,19 @@ export class AgentHarness {
         },
         'daily token quota exceeded',
       );
-      if (proactive) return { answer: '', reasoning: '', usage: emptyUsage() };
+      if (proactive) {
+        return {
+          answer: { answer: '', reasoning: '', usage: emptyUsage() },
+          reservation: null,
+        };
+      }
       const answer = `${error.message}，配额将在次日 0 点（Asia/Shanghai）重置。`;
       emit({ type: 'answer_delta', content: answer, final: true });
       emit({ type: 'completed', usage: emptyUsage() });
-      return { answer, reasoning: '', usage: emptyUsage() };
+      return {
+        answer: { answer, reasoning: '', usage: emptyUsage() },
+        reservation: null,
+      };
     }
   }
 
@@ -1166,33 +1211,37 @@ export class AgentHarness {
     result: RunResult,
     proactive: boolean,
     attribution: { jobId?: string; jobKind?: string; worker?: string } = {},
+    reservation: UsageReservation | null = null,
   ): Promise<void> {
     const guard = this.options.usageGuard;
     if (!guard) return;
     try {
-      await guard.record({
-        conversationId: message.conversationId,
-        conversationType: message.conversationType,
-        senderStaffId: message.senderStaffId,
-        senderNick: message.senderNick,
-        model: result.model ?? 'unknown',
-        totalTokens: result.usage.totalTokens,
-        ...(result.usage.inputTokens !== undefined
-          ? { inputTokens: result.usage.inputTokens }
-          : {}),
-        ...(result.usage.outputTokens !== undefined
-          ? { outputTokens: result.usage.outputTokens }
-          : {}),
-        ...(result.usage.cachedTokens !== undefined
-          ? { cachedTokens: result.usage.cachedTokens }
-          : {}),
-        steps: result.usage.steps,
-        durationMs: result.usage.durationMs,
-        proactive,
-        ...(attribution.jobId ? { jobId: attribution.jobId } : {}),
-        ...(attribution.jobKind ? { jobKind: attribution.jobKind } : {}),
-        ...(attribution.worker ? { worker: attribution.worker } : {}),
-      });
+      await guard.record(
+        {
+          conversationId: message.conversationId,
+          conversationType: message.conversationType,
+          senderStaffId: message.senderStaffId,
+          senderNick: message.senderNick,
+          model: result.model ?? 'unknown',
+          totalTokens: result.usage.totalTokens,
+          ...(result.usage.inputTokens !== undefined
+            ? { inputTokens: result.usage.inputTokens }
+            : {}),
+          ...(result.usage.outputTokens !== undefined
+            ? { outputTokens: result.usage.outputTokens }
+            : {}),
+          ...(result.usage.cachedTokens !== undefined
+            ? { cachedTokens: result.usage.cachedTokens }
+            : {}),
+          steps: result.usage.steps,
+          durationMs: result.usage.durationMs,
+          proactive,
+          ...(attribution.jobId ? { jobId: attribution.jobId } : {}),
+          ...(attribution.jobKind ? { jobKind: attribution.jobKind } : {}),
+          ...(attribution.worker ? { worker: attribution.worker } : {}),
+        },
+        reservation,
+      );
     } catch (error) {
       this.options.logger?.warn(
         {

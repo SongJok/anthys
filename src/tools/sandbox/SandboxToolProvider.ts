@@ -113,6 +113,8 @@ export class SandboxToolProvider implements IToolProvider {
   private aggregateTool(): ToolDefinition {
     return {
       name: 'sandbox_analyze_and_aggregate',
+      risk: 'read',
+      source: 'sandbox',
       description:
         '在隔离沙盒中执行分析脚本，用于日志正则提取、异常堆栈聚类、多表 Join、同比/环比与统计汇总。' +
         'javascript 模式（默认）无需任何依赖，脚本可直接使用全局变量 datasets 与 loadDataset(key)，把最终结果赋值给 result，console.log 的内容会一并返回；' +

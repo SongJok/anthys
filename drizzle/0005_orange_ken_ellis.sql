@@ -1,0 +1,1 @@
+ALTER TABLE "semantic_memories" ADD COLUMN "review_status" varchar(16) DEFAULT 'approved' NOT NULL;

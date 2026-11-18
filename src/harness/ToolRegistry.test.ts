@@ -621,4 +621,117 @@ describe('loadMcpServerConfigs', () => {
       'maxResultChars 必须 >= 200',
     );
   });
+
+  it('解析 defaultRisk 与 toolRisk 声明', async () => {
+    const path = await tempConfig(
+      JSON.stringify([
+        {
+          id: 'risked',
+          domain: 'general',
+          transport: 'streamable-http',
+          endpointOrCommand: 'http://127.0.0.1/mcp',
+          timeoutMs: 1000,
+          maxResultChars: 8000,
+          defaultRisk: 'read',
+          toolRisk: { drop_index: 'destructive', chat: 'read' },
+        },
+      ]),
+    );
+    const [server] = await loadMcpServerConfigs(path, {});
+    expect(server.defaultRisk).toBe('read');
+    expect(server.toolRisk).toEqual({
+      drop_index: 'destructive',
+      chat: 'read',
+    });
+  });
+
+  it('拒绝非法 defaultRisk / toolRisk', async () => {
+    const badDefault = await tempConfig(
+      JSON.stringify([
+        {
+          id: 'bad',
+          domain: 'log',
+          transport: 'sse',
+          endpointOrCommand: 'http://127.0.0.1/sse',
+          timeoutMs: 1000,
+          maxResultChars: 8000,
+          defaultRisk: 'admin',
+        },
+      ]),
+    );
+    await expect(loadMcpServerConfigs(badDefault, {})).rejects.toThrow(
+      'defaultRisk 非法',
+    );
+
+    const badTool = await tempConfig(
+      JSON.stringify([
+        {
+          id: 'bad',
+          domain: 'log',
+          transport: 'sse',
+          endpointOrCommand: 'http://127.0.0.1/sse',
+          timeoutMs: 1000,
+          maxResultChars: 8000,
+          toolRisk: { search: 'root' },
+        },
+      ]),
+    );
+    await expect(loadMcpServerConfigs(badTool, {})).rejects.toThrow(
+      'toolRisk.search 非法',
+    );
+  });
+});
+
+describe('ToolRegistry 风险声明审计', () => {
+  it('未声明 risk 的工具按名称去重告警一次，声明后不告警', async () => {
+    const warnings: Array<Record<string, unknown>> = [];
+    const undeclared = {
+      name: 'legacy_lookup',
+      description: '老工具',
+      parametersJsonSchema: { type: 'object', properties: {} },
+      execute: async () => 'ok',
+    };
+    const declared = {
+      name: 'modern_lookup',
+      description: '新工具',
+      parametersJsonSchema: { type: 'object', properties: {} },
+      risk: 'read' as const,
+      execute: async () => 'ok',
+    };
+    const registry = await ToolRegistry.create({
+      enableBuiltin: false,
+      enableDws: false,
+      enableSandbox: false,
+      enableMarketData: false,
+      mcpServers: [],
+      workspaceRoot: await mkdtemp(join(tmpdir(), 'registry-audit-')),
+      logger: {
+        warn: (obj) => {
+          warnings.push(obj);
+        },
+      },
+      glossaryProvider: {
+        providerName: 'fake',
+        getTools: async () => [undeclared, declared],
+      },
+    });
+    cleanup.push(async () => {
+      await registry.close();
+    });
+    const ctx = {
+      conversationId: 'c1',
+      messageId: 'm1',
+      senderStaffId: 's1',
+      conversationType: '1' as const,
+      deadlineAt: Date.now() + 30_000,
+      now: () => Date.now(),
+    };
+    await registry.assembleTools(ctx as never);
+    await registry.assembleTools(ctx as never);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toMatchObject({
+      tool: 'legacy_lookup',
+      inferredRisk: 'read',
+    });
+  });
 });

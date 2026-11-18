@@ -205,7 +205,7 @@ export class JobRunner {
     let leaseLost = false;
     const heartbeatTimer = setInterval(() => {
       void this.store
-        .heartbeat(job.id, this.owner, this.now(), this.leaseMs)
+        .heartbeat(job.id, this.owner, job.fencingToken, this.now(), this.leaseMs)
         .then((ok) => {
           if (!ok) {
             leaseLost = true;
@@ -250,9 +250,20 @@ export class JobRunner {
         emit,
         signal: controller.signal,
         heartbeat: () =>
-          this.store.heartbeat(job.id, this.owner, this.now(), this.leaseMs),
+          this.store.heartbeat(
+            job.id,
+            this.owner,
+            job.fencingToken,
+            this.now(),
+            this.leaseMs,
+          ),
       });
-      const completed = await this.store.complete(job.id, this.owner, result);
+      const completed = await this.store.complete(
+        job.id,
+        this.owner,
+        job.fencingToken,
+        result,
+      );
       if (!completed) {
         this.logger?.warn(
           { jobId: job.id },
@@ -285,7 +296,12 @@ export class JobRunner {
       const message =
         error instanceof Error ? error.message : String(error);
       if (error instanceof JobPauseError) {
-        const paused = await this.store.pause(job.id, this.owner, message);
+        const paused = await this.store.pause(
+          job.id,
+          this.owner,
+          job.fencingToken,
+          message,
+        );
         if (paused) {
           await this.store.appendEvent({
             jobId: job.id,
@@ -315,6 +331,7 @@ export class JobRunner {
           await this.store.fail(
             job.id,
             this.owner,
+            job.fencingToken,
             leaseLost ? 'job lease lost' : 'job aborted',
             true,
           );
@@ -324,6 +341,7 @@ export class JobRunner {
       const failed = await this.store.fail(
         job.id,
         this.owner,
+        job.fencingToken,
         message,
         true,
       );

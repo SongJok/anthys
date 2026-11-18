@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { resolveToolRisk } from '../tools/toolRisk.js';
 import type {
   ExecutionContext,
   ToolApprovalDecision,
@@ -27,7 +28,29 @@ export interface PendingToolAction {
 export interface PendingActionPersistence {
   load(nowMs: number): Promise<PendingToolAction[]>;
   save(action: PendingToolAction): Promise<void>;
+  /** 容量淘汰专用删除；用户取消走 cancelPending 保留审计 */
   remove(conversationId: string, actionId?: string): Promise<void>;
+  /** CAS：pending 且未过期 → executing；失败返回 null */
+  claim(
+    actionId: string,
+    owner: string,
+    nowMs: number,
+  ): Promise<PendingToolAction | null>;
+  settle(
+    actionId: string,
+    status: 'succeeded' | 'failed' | 'cancelled',
+    detail: string,
+    nowMs: number,
+  ): Promise<void>;
+  cancelPending(
+    conversationId: string,
+    actionId?: string,
+    nowMs?: number,
+  ): Promise<number>;
+  /** 重启时把上一进程 executing 的动作标记 unknown，返回受影响动作 */
+  recoverExecuting(nowMs: number): Promise<PendingToolAction[]>;
+  markExpired(nowMs: number): Promise<number>;
+  purgeSettled(beforeMs: number): Promise<number>;
 }
 
 export interface PendingActionQuery {
@@ -47,12 +70,14 @@ export interface PendingActionStoreOptions {
   maxPendingPerConversation?: number;
   /** 持久化后端；重启后未过期的待确认操作可以恢复 */
   persistence?: PendingActionPersistence;
+  /** 终态审计记录保留期，默认 7 天 */
+  settledRetentionMs?: number;
   logger?: {
     warn(obj: Record<string, unknown>, msg: string): void;
   };
 }
 
-/** 待确认写操作暂存区：支持单条覆盖或同会话多用户/多动作并发隔离 */
+/** 待确认写操作暂存区：持久化优先登记，执行前 CAS 抢占，重启不自动重放 */
 export class PendingActionStore {
   private readonly actions = new Map<string, PendingToolAction[]>();
   private readonly ttlMs: number;
@@ -61,6 +86,7 @@ export class PendingActionStore {
   private readonly multiPending: boolean;
   private readonly maxPendingPerConversation: number;
   private readonly persistence?: PendingActionPersistence;
+  private readonly settledRetentionMs: number;
   private readonly logger?: PendingActionStoreOptions['logger'];
 
   constructor(options: PendingActionStoreOptions = {}) {
@@ -73,26 +99,41 @@ export class PendingActionStore {
       options.maxPendingPerConversation ?? 8,
     );
     this.persistence = options.persistence;
+    this.settledRetentionMs = options.settledRetentionMs ?? 7 * 24 * 3_600_000;
     this.logger = options.logger;
   }
 
-  /** 从持久层恢复未过期的待确认操作（应在开始服务前调用） */
-  public async hydrate(): Promise<void> {
+  /**
+   * 从持久层恢复未过期的待确认操作（应在开始服务前调用）。
+   * 上一进程 executing 的动作标记为 unknown 并返回，交由调用方告警，绝不自动重放。
+   */
+  public async hydrate(): Promise<PendingToolAction[]> {
     const persistence = this.persistence;
-    if (!persistence) return;
+    if (!persistence) return [];
+    let unknown: PendingToolAction[] = [];
     try {
       const now = this.now();
+      unknown = await persistence.recoverExecuting(now);
       for (const action of await persistence.load(now)) {
         if (action.expiresAt <= now) continue;
         this.insertIntoQueue(action);
       }
       this.trim();
+      void persistence
+        .purgeSettled(now - this.settledRetentionMs)
+        .catch((error) => {
+          this.logger?.warn(
+            { error: error instanceof Error ? error.message : String(error) },
+            'failed to purge settled pending actions',
+          );
+        });
     } catch (error) {
       this.logger?.warn(
         { error: error instanceof Error ? error.message : String(error) },
         'failed to hydrate pending tool actions',
       );
     }
+    return unknown;
   }
 
   private insertIntoQueue(action: PendingToolAction): void {
@@ -132,18 +173,6 @@ export class PendingActionStore {
     return queue.length - 1;
   }
 
-  private persistSave(action: PendingToolAction): void {
-    void this.persistence?.save(action).catch((error) => {
-      this.logger?.warn(
-        {
-          conversationId: action.conversationId,
-          error: error instanceof Error ? error.message : String(error),
-        },
-        'failed to persist pending tool action',
-      );
-    });
-  }
-
   private persistRemove(conversationId: string, actionId?: string): void {
     void this.persistence?.remove(conversationId, actionId).catch((error) => {
       this.logger?.warn(
@@ -156,13 +185,14 @@ export class PendingActionStore {
     });
   }
 
-  public put(input: {
+  /** 持久化优先：先落库再进入内存队列；落库失败直接抛错，由闸门拒绝执行 */
+  public async put(input: {
     conversationId: string;
     toolName: string;
     args: Record<string, unknown>;
     risk: ToolRiskLevel;
     requestedBy: PendingToolAction['requestedBy'];
-  }): PendingToolAction {
+  }): Promise<PendingToolAction> {
     this.prune();
     const createdAt = this.now();
     const action: PendingToolAction = {
@@ -175,9 +205,9 @@ export class PendingActionStore {
       createdAt,
       expiresAt: createdAt + this.ttlMs,
     };
+    await this.persistence?.save(action);
     this.insertIntoQueue(action);
     this.trim();
-    this.persistSave(action);
     return action;
   }
 
@@ -197,40 +227,102 @@ export class PendingActionStore {
     return [...(this.actions.get(conversationId) ?? [])];
   }
 
-  public take(
+  private removeFromMemory(
     conversationId: string,
-    query?: PendingActionQuery,
-  ): PendingToolAction | null {
+    actionId: string,
+  ): void {
+    const queue = this.actions.get(conversationId);
+    if (!queue) return;
+    const idx = queue.findIndex((item) => item.id === actionId);
+    if (idx >= 0) queue.splice(idx, 1);
+    if (queue.length === 0) this.actions.delete(conversationId);
+  }
+
+  /**
+   * 执行前 CAS 抢占：持久层 pending→executing 成功才返回动作，
+   * 重复确认 / 跨进程竞争 / 已过期都会返回 null。
+   */
+  public async claimForExecution(
+    conversationId: string,
+    query: PendingActionQuery | undefined,
+    owner: string,
+  ): Promise<PendingToolAction | null> {
     this.prune();
     const queue = this.actions.get(conversationId);
     if (!queue || queue.length === 0) return null;
     const idx = this.findIndex(queue, query);
     if (idx < 0) return null;
-    const [action] = queue.splice(idx, 1);
+    const action = queue[idx];
     if (!action) return null;
-    if (queue.length === 0) this.actions.delete(conversationId);
-    this.persistRemove(conversationId, action.id);
+    if (this.persistence) {
+      const claimed = await this.persistence.claim(
+        action.id,
+        owner,
+        this.now(),
+      );
+      if (!claimed) {
+        this.removeFromMemory(conversationId, action.id);
+        return null;
+      }
+      this.removeFromMemory(conversationId, action.id);
+      return claimed;
+    }
+    this.removeFromMemory(conversationId, action.id);
     return action;
   }
 
-  public cancel(
+  /** 执行落定：succeeded / failed / cancelled；失败只告警不抛错 */
+  public async settle(
+    actionId: string,
+    status: 'succeeded' | 'failed' | 'cancelled',
+    detail: string,
+  ): Promise<boolean> {
+    if (!this.persistence) return true;
+    try {
+      await this.persistence.settle(actionId, status, detail, this.now());
+      return true;
+    } catch (error) {
+      this.logger?.warn(
+        {
+          actionId,
+          status,
+          error: error instanceof Error ? error.message : String(error),
+        },
+        'failed to settle pending tool action',
+      );
+      return false;
+    }
+  }
+
+  public async cancel(
     conversationId: string,
     query?: PendingActionQuery,
-  ): boolean {
+  ): Promise<boolean> {
     this.prune();
     const queue = this.actions.get(conversationId);
-    if (!queue || queue.length === 0) return false;
-    if (query?.actionIdPrefix || query?.staffId) {
-      const idx = this.findIndex(queue, query);
-      if (idx < 0) return false;
-      const [removed] = queue.splice(idx, 1);
-      if (queue.length === 0) this.actions.delete(conversationId);
-      if (removed) this.persistRemove(conversationId, removed.id);
-      return Boolean(removed);
+    let removedFromMemory = false;
+    if (queue && queue.length > 0) {
+      if (query?.actionIdPrefix || query?.staffId) {
+        const idx = this.findIndex(queue, query);
+        if (idx >= 0) {
+          const [removed] = queue.splice(idx, 1);
+          if (queue.length === 0) this.actions.delete(conversationId);
+          removedFromMemory = Boolean(removed);
+          if (removed) {
+            await this.persistence?.cancelPending(
+              conversationId,
+              removed.id,
+              this.now(),
+            );
+          }
+        }
+      } else {
+        this.actions.delete(conversationId);
+        removedFromMemory = true;
+        await this.persistence?.cancelPending(conversationId, undefined, this.now());
+      }
     }
-    this.actions.delete(conversationId);
-    this.persistRemove(conversationId);
-    return true;
+    return removedFromMemory;
   }
 
   public get size(): number {
@@ -248,6 +340,7 @@ export class PendingActionStore {
 
   private prune(): void {
     const now = this.now();
+    let sawExpired = false;
     for (const [key, queue] of this.actions) {
       const alive = queue.filter((action) => action.expiresAt > now);
       if (alive.length === 0) {
@@ -255,9 +348,15 @@ export class PendingActionStore {
       } else if (alive.length !== queue.length) {
         this.actions.set(key, alive);
       }
-      for (const action of queue) {
-        if (action.expiresAt <= now) this.persistRemove(key, action.id);
-      }
+      if (alive.length !== queue.length) sawExpired = true;
+    }
+    if (sawExpired && this.persistence) {
+      void this.persistence.markExpired(now).catch((error) => {
+        this.logger?.warn(
+          { error: error instanceof Error ? error.message : String(error) },
+          'failed to mark expired pending actions',
+        );
+      });
     }
   }
 
@@ -271,23 +370,8 @@ export class PendingActionStore {
   }
 }
 
-const DESTRUCTIVE_PATTERN =
-  /(^|[^a-z])(delete|remove|drop|purge|destroy|revoke|terminate|truncate|reset|unbind|wipe|uninstall)([^a-z]|$)/i;
-const WRITE_PATTERN =
-  /(^|[^a-z])(create|update|upsert|insert|set|add|write|upload|send|post|publish|move|rename|import|apply|execute|run|approve|reject|grant|assign|enable|disable|start|stop|restart|mute|cancel|manage|configure|modify|change|edit|patch|deploy|install|archive|sync|commit|merge|push|fork|transfer|bind|link|unlink|subscribe|unsubscribe|trigger|invoke|submit|schedule|register|unregister|attach|detach|copy|clone|restore|rollback|migrate|flush|clear|prune|close|lock|unlock|block|ban|kick|invite|pin|vote)([^a-z]|$)/i;
-
-/** 工具未声明 risk 时按名称推断，宁可多问一次也不误执行写操作 */
-export function classifyToolRisk(tool: {
-  name: string;
-  risk?: ToolRiskLevel;
-  source?: string;
-}): ToolRiskLevel {
-  if (tool.risk) return tool.risk;
-  const name = tool.name;
-  if (DESTRUCTIVE_PATTERN.test(name)) return 'destructive';
-  if (WRITE_PATTERN.test(name)) return 'write';
-  return 'read';
-}
+/** 统一走 fail-closed 风险注册表：显式声明优先，未声明按 write 进入审批 */
+export { resolveToolRisk as classifyToolRisk } from '../tools/toolRisk.js';
 
 export interface ToolApprovalGateOptions {
   store: PendingActionStore;
@@ -301,7 +385,7 @@ export interface ToolApprovalGateOptions {
 function formatArgs(args: Record<string, unknown>): string {
   try {
     const text = JSON.stringify(args);
-    return text.length > 600 ? `${text.slice(0, 600)}…` : text;
+    return text.length > 1_200 ? `${text.slice(0, 1_200)}…` : text;
   } catch {
     return String(args);
   }
@@ -313,16 +397,21 @@ export function formatApprovalPrompt(
 ): string {
   const label = action.risk === 'destructive' ? '高危写操作' : '写操作';
   const shortId = action.id.slice(0, 8);
+  const impact =
+    action.risk === 'destructive'
+      ? '影响：该操作可能删除或不可逆地修改企业数据，执行后无法自动撤销。'
+      : '影响：该操作会对外产生写入（发送消息 / 修改日程 / 提交数据等）。';
   return [
     `操作需要确认：机器人准备调用工具 \`${action.toolName}\`（${label}，编号 \`${shortId}\`）。`,
     `参数：${formatArgs(action.args)}`,
+    impact,
     `回复「确认」或 \`/confirm ${shortId}\` 执行，或「取消」放弃；${ttlSeconds} 秒内有效。`,
   ].join('\n');
 }
 
 /**
- * ReAct 写操作闸门：风险工具在执行前登记为待确认动作，
- * 本轮立即结束并提示用户 /confirm；确认后由指令路由直接执行。
+ * ReAct 写操作闸门：风险工具在执行前持久化登记为待确认动作，
+ * 本轮立即结束并提示用户 /confirm；确认后由指令路由 CAS 抢占执行。
  */
 export function createToolApprovalGate(
   options: ToolApprovalGateOptions,
@@ -333,27 +422,37 @@ export function createToolApprovalGate(
   const enabled = options.enabled ?? true;
   return async (request, context) => {
     if (!enabled) return { approved: true };
-    const risk = classifyToolRisk({
+    const risk = resolveToolRisk({
       name: request.toolName,
       ...(request.risk ? { risk: request.risk } : {}),
       ...(request.source ? { source: request.source } : {}),
     });
     if (risk === 'read') return { approved: true };
-    const action = options.store.put({
-      conversationId: request.conversationId,
-      toolName: request.toolName,
-      args: request.args,
-      risk,
-      requestedBy: {
-        staffId: request.senderStaffId,
-        ...(context?.senderNick ? { nick: context.senderNick } : {}),
-        ...(context?.messageId ? { messageId: context.messageId } : {}),
-        ...(context?.conversationType
-          ? { conversationType: context.conversationType }
-          : {}),
-        ...(context?.personKey ? { personKey: context.personKey } : {}),
-      },
-    });
+    let action: PendingToolAction;
+    try {
+      action = await options.store.put({
+        conversationId: request.conversationId,
+        toolName: request.toolName,
+        args: request.args,
+        risk,
+        requestedBy: {
+          staffId: request.senderStaffId,
+          ...(context?.senderNick ? { nick: context.senderNick } : {}),
+          ...(context?.messageId ? { messageId: context.messageId } : {}),
+          ...(context?.conversationType
+            ? { conversationType: context.conversationType }
+            : {}),
+          ...(context?.personKey ? { personKey: context.personKey } : {}),
+        },
+      });
+    } catch (error) {
+      return {
+        approved: false,
+        reason: `审批登记失败（持久化不可用），已阻止执行 \`${request.toolName}\`，请稍后重试：${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      };
+    }
     options.logger?.info?.(
       {
         conversationId: request.conversationId,

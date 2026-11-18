@@ -6,6 +6,7 @@ import type {
   WorkspacePaths,
 } from '../types/mcp-and-sandbox.js';
 import { BuiltinToolProvider } from '../react/BuiltinTools.js';
+import { inferRiskFromName } from '../tools/toolRisk.js';
 import { expandEnvPlaceholder } from '../config/envPlaceholder.js';
 import { DwsCliRunner } from '../tools/dws/DwsCliRunner.js';
 import {
@@ -186,6 +187,47 @@ function normalizeServer(
   if (!Number.isFinite(maxResultChars) || maxResultChars < 200) {
     throw new Error(`MCP Server ${id} 的 maxResultChars 必须 >= 200`);
   }
+  const riskLevels = ['read', 'write', 'destructive'] as const;
+  let defaultRisk: EnterpriseMcpServerConfig['defaultRisk'];
+  if (record.defaultRisk !== undefined) {
+    if (
+      typeof record.defaultRisk !== 'string' ||
+      !(riskLevels as readonly string[]).includes(record.defaultRisk)
+    ) {
+      throw new Error(
+        `MCP Server ${id} 的 defaultRisk 非法: ${String(record.defaultRisk)}（允许: ${riskLevels.join(', ')}）`,
+      );
+    }
+    defaultRisk = record.defaultRisk as NonNullable<
+      EnterpriseMcpServerConfig['defaultRisk']
+    >;
+  }
+  let toolRisk: EnterpriseMcpServerConfig['toolRisk'];
+  if (record.toolRisk !== undefined) {
+    if (
+      !record.toolRisk ||
+      typeof record.toolRisk !== 'object' ||
+      Array.isArray(record.toolRisk)
+    ) {
+      throw new Error(`MCP Server ${id} 的 toolRisk 必须是对象`);
+    }
+    toolRisk = {};
+    for (const [name, risk] of Object.entries(
+      record.toolRisk as Record<string, unknown>,
+    )) {
+      if (
+        typeof risk !== 'string' ||
+        !(riskLevels as readonly string[]).includes(risk)
+      ) {
+        throw new Error(
+          `MCP Server ${id} 的 toolRisk.${name} 非法: ${String(risk)}（允许: ${riskLevels.join(', ')}）`,
+        );
+      }
+      toolRisk[name] = risk as NonNullable<
+        EnterpriseMcpServerConfig['defaultRisk']
+      >;
+    }
+  }
   return {
     id,
     name:
@@ -200,6 +242,8 @@ function normalizeServer(
     timeoutMs,
     maxResultChars,
     enabled: record.enabled !== false,
+    ...(defaultRisk ? { defaultRisk } : {}),
+    ...(toolRisk ? { toolRisk } : {}),
   };
 }
 
@@ -247,6 +291,7 @@ export class ToolRegistry {
   public readonly workspace: WorkspacePaths;
   public readonly pool: McpClientPool | null;
   private dwsProvider: DwsCliToolProvider | null;
+  private readonly riskWarned = new Set<string>();
 
   private constructor(
     providers: IToolProvider[],
@@ -254,6 +299,7 @@ export class ToolRegistry {
     pool: McpClientPool | null,
     dwsProvider: DwsCliToolProvider | null,
     private readonly createDwsProvider: () => DwsCliToolProvider,
+    private readonly logger?: McpPoolLogger,
   ) {
     this.providers = providers;
     this.workspace = workspace;
@@ -388,6 +434,7 @@ export class ToolRegistry {
       pool,
       dwsProvider,
       createDwsProvider,
+      options.logger,
     );
   }
 
@@ -406,6 +453,17 @@ export class ToolRegistry {
         throw new Error(`工具名称重复: ${tool.name}`);
       }
       seen.add(tool.name);
+      if (tool.risk === undefined && !this.riskWarned.has(tool.name)) {
+        this.riskWarned.add(tool.name);
+        this.logger?.warn?.(
+          {
+            tool: tool.name,
+            source: tool.source ?? 'unknown',
+            inferredRisk: inferRiskFromName(tool.name),
+          },
+          `工具 ${tool.name} 未声明 risk，已按 write 进入审批闸门；请补齐显式风险声明`,
+        );
+      }
       tools.push(tool);
     }
     return tools;

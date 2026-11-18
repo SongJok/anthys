@@ -32,6 +32,7 @@ const MCP_DOMAINS = [
   'general',
 ] as const;
 const MCP_TRANSPORTS = ['stdio', 'sse', 'streamable-http'] as const;
+const RISK_LEVELS = ['read', 'write', 'destructive'] as const;
 
 export interface McpRouteDeps {
   configCenter: DynamicConfigCenter;
@@ -94,6 +95,38 @@ function readServerBody(
   if (maxResultChars < 200) {
     throw new HTTPException(400, { message: 'maxResultChars 必须 >= 200' });
   }
+  const defaultRisk = readString(body, 'defaultRisk');
+  if (
+    defaultRisk !== undefined &&
+    !(RISK_LEVELS as readonly string[]).includes(defaultRisk)
+  ) {
+    throw new HTTPException(400, {
+      message: `defaultRisk 非法，允许值: ${RISK_LEVELS.join(', ')}`,
+    });
+  }
+  let toolRisk: Record<string, 'read' | 'write' | 'destructive'> | undefined;
+  const rawToolRisk = body.toolRisk;
+  if (rawToolRisk !== undefined && rawToolRisk !== null) {
+    if (typeof rawToolRisk !== 'object' || Array.isArray(rawToolRisk)) {
+      throw new HTTPException(400, {
+        message: 'toolRisk 必须是字符串键值对象',
+      });
+    }
+    toolRisk = {};
+    for (const [key, value] of Object.entries(
+      rawToolRisk as Record<string, unknown>,
+    )) {
+      if (
+        typeof value !== 'string' ||
+        !(RISK_LEVELS as readonly string[]).includes(value)
+      ) {
+        throw new HTTPException(400, {
+          message: `toolRisk.${key} 非法，允许值: ${RISK_LEVELS.join(', ')}`,
+        });
+      }
+      toolRisk[key] = value as 'read' | 'write' | 'destructive';
+    }
+  }
   return {
     id,
     name: readString(body, 'name')?.trim() || id,
@@ -105,6 +138,10 @@ function readServerBody(
     timeoutMs,
     maxResultChars,
     enabled: readBoolean(body, 'enabled') ?? true,
+    ...(defaultRisk
+      ? { defaultRisk: defaultRisk as 'read' | 'write' | 'destructive' }
+      : {}),
+    ...(toolRisk ? { toolRisk } : {}),
   };
 }
 

@@ -17,6 +17,10 @@ export interface EnterpriseMcpServerConfig {
   /** 运行时合并来源；手工配置省略。插件服务只用于展示与审计 */
   source?: 'manual' | 'plugin';
   pluginId?: string;
+  /** 该节点工具的默认风险；未声明且无 annotations 时按 write（fail-closed） */
+  defaultRisk?: 'read' | 'write' | 'destructive';
+  /** 按原始工具名覆盖风险，优先级高于 annotations 与 defaultRisk */
+  toolRisk?: Record<string, 'read' | 'write' | 'destructive'>;
 }
 
 /** 2. 钉钉原生 DWS CLI 执行契约 */
@@ -69,6 +73,8 @@ export interface McpToolDescriptor {
   description: string;
   inputSchema: Record<string, unknown>;
   maxResultChars: number;
+  /** 连接池解析后的最终风险：toolRisk 覆盖 > annotations > defaultRisk > write */
+  risk: 'read' | 'write' | 'destructive';
 }
 
 /** 单次 MCP 工具调用结果 */

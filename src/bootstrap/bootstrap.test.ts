@@ -62,6 +62,7 @@ class InMemoryJobStore implements AgentJobStore {
       priority: input.priority ?? 0,
       attempts: 0,
       maxAttempts: input.maxAttempts ?? 2,
+      fencingToken: 0,
       leaseOwner: null,
       leaseExpiresAt: null,
       createdAt: now,
@@ -80,6 +81,7 @@ class InMemoryJobStore implements AgentJobStore {
     job.leaseOwner = input.owner;
     job.leaseExpiresAt = input.nowMs + input.leaseMs;
     job.attempts += 1;
+    job.fencingToken += 1;
     job.startedAt = input.nowMs;
     return { ...job };
   }
@@ -91,6 +93,7 @@ class InMemoryJobStore implements AgentJobStore {
   async complete(
     jobId: string,
     owner: string,
+    _fencingToken: number,
     result: AgentJobResult,
   ): Promise<AgentJob | null> {
     const job = this.jobs.get(jobId);
@@ -104,6 +107,7 @@ class InMemoryJobStore implements AgentJobStore {
   async fail(
     jobId: string,
     owner: string,
+    _fencingToken: number,
     error: string,
   ): Promise<AgentJob | null> {
     const job = this.jobs.get(jobId);

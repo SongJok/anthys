@@ -11,6 +11,7 @@ import {
   sql,
 } from 'drizzle-orm';
 import {
+  bigint,
   index,
   integer,
   jsonb,
@@ -18,6 +19,7 @@ import {
   serial,
   text,
   timestamp,
+  uniqueIndex,
   uuid,
   varchar,
 } from 'drizzle-orm/pg-core';
@@ -57,6 +59,9 @@ export const agentJobs = pgTable(
     priority: integer('priority').notNull().default(0),
     attempts: integer('attempts').notNull().default(0),
     maxAttempts: integer('max_attempts').notNull().default(2),
+    fencingToken: bigint('fencing_token', { mode: 'number' })
+      .notNull()
+      .default(0),
     leaseOwner: text('lease_owner'),
     leaseExpiresAt: timestamp('lease_expires_at', { withTimezone: true }),
     availableAt: timestamp('available_at', { withTimezone: true })
@@ -82,6 +87,10 @@ export const agentJobs = pgTable(
       table.conversationId,
       table.createdAt,
     ),
+    // 消息驱动任务按 (会话, 消息, 类型) 幂等；定时任务 messageId 为空不受约束
+    uniqueIndex('agent_jobs_message_dedupe_idx')
+      .on(table.conversationId, table.messageId, table.kind)
+      .where(sql`${table.messageId} <> ''`),
   ],
 );
 
@@ -142,6 +151,7 @@ function toJob(row: typeof agentJobs.$inferSelect): AgentJob {
     priority: row.priority,
     attempts: row.attempts,
     maxAttempts: row.maxAttempts,
+    fencingToken: row.fencingToken,
     leaseOwner: row.leaseOwner ?? null,
     leaseExpiresAt: row.leaseExpiresAt?.getTime() ?? null,
     createdAt: row.createdAt.getTime(),
@@ -171,10 +181,28 @@ export class DrizzleAgentJobStore implements AgentJobStore {
         maxAttempts: Math.max(1, input.maxAttempts ?? 2),
         availableAt: new Date(),
       })
+      .onConflictDoNothing({
+        target: [agentJobs.conversationId, agentJobs.messageId, agentJobs.kind],
+        where: sql`${agentJobs.messageId} <> ''`,
+      })
       .returning();
     const row = rows[0];
-    if (!row) throw new Error('failed to enqueue agent job');
-    return toJob(row);
+    if (row) return toJob(row);
+    // 消息重投命中幂等约束：返回已存在的任务而不是重复入队
+    const existing = await this.db
+      .select()
+      .from(agentJobs)
+      .where(
+        and(
+          eq(agentJobs.conversationId, input.conversationId),
+          eq(agentJobs.messageId, input.messageId),
+          eq(agentJobs.kind, input.kind),
+        ),
+      )
+      .limit(1);
+    const found = existing[0];
+    if (!found) throw new Error('failed to enqueue agent job');
+    return toJob(found);
   }
 
   public async claimNext(input: ClaimJobInput): Promise<AgentJob | null> {
@@ -213,6 +241,7 @@ export class DrizzleAgentJobStore implements AgentJobStore {
           leaseOwner: input.owner,
           leaseExpiresAt: new Date(input.nowMs + input.leaseMs),
           attempts: sql`${agentJobs.attempts} + 1`,
+          fencingToken: sql`${agentJobs.fencingToken} + 1`,
           startedAt: candidate.startedAt ?? now,
           updatedAt: now,
         })
@@ -226,6 +255,7 @@ export class DrizzleAgentJobStore implements AgentJobStore {
   public async heartbeat(
     jobId: string,
     owner: string,
+    fencingToken: number,
     nowMs: number,
     leaseMs: number,
   ): Promise<boolean> {
@@ -239,6 +269,7 @@ export class DrizzleAgentJobStore implements AgentJobStore {
         and(
           eq(agentJobs.id, jobId),
           eq(agentJobs.leaseOwner, owner),
+          eq(agentJobs.fencingToken, fencingToken),
           eq(agentJobs.status, 'running'),
         ),
       )
@@ -249,6 +280,7 @@ export class DrizzleAgentJobStore implements AgentJobStore {
   public async complete(
     jobId: string,
     owner: string,
+    fencingToken: number,
     result: AgentJobResult,
   ): Promise<AgentJob | null> {
     const now = new Date();
@@ -267,6 +299,7 @@ export class DrizzleAgentJobStore implements AgentJobStore {
         and(
           eq(agentJobs.id, jobId),
           eq(agentJobs.leaseOwner, owner),
+          eq(agentJobs.fencingToken, fencingToken),
           eq(agentJobs.status, 'running'),
         ),
       )
@@ -277,6 +310,7 @@ export class DrizzleAgentJobStore implements AgentJobStore {
   public async fail(
     jobId: string,
     owner: string,
+    fencingToken: number,
     error: string,
     retryable = true,
   ): Promise<AgentJob | null> {
@@ -290,6 +324,7 @@ export class DrizzleAgentJobStore implements AgentJobStore {
       if (
         !current ||
         current.leaseOwner !== owner ||
+        current.fencingToken !== fencingToken ||
         current.status !== 'running'
       ) {
         return null;
@@ -340,6 +375,7 @@ export class DrizzleAgentJobStore implements AgentJobStore {
   public async pause(
     jobId: string,
     owner: string,
+    fencingToken: number,
     reason: string,
   ): Promise<AgentJob | null> {
     const now = new Date();
@@ -357,6 +393,7 @@ export class DrizzleAgentJobStore implements AgentJobStore {
         and(
           eq(agentJobs.id, jobId),
           eq(agentJobs.leaseOwner, owner),
+          eq(agentJobs.fencingToken, fencingToken),
           eq(agentJobs.status, 'running'),
         ),
       )

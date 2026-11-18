@@ -53,6 +53,7 @@ export class ArtifactToolProvider implements IToolProvider {
   private deliverTool(roots: string[]): ToolDefinition {
     return {
       name: 'deliver_artifact',
+      risk: 'write',
       description:
         '把本地文件作为附件发送到当前钉钉会话，用于交付报表、导出数据、图片或生成的文档。' +
         `只允许发送工作区内的文件，单个文件不超过 ${Math.round(this.maxBytes / 1024 / 1024)}MB。` +

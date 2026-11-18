@@ -127,6 +127,13 @@ export async function setupMemoryAndBystander(
     ledger: usageLedger,
     policy: () => configCenter.getUsagePolicy(),
     ...(modelPricing.configured ? { pricing: modelPricing } : {}),
+    onRecordFailure: (error) => {
+      metrics.inc('agent_usage_record_failures_total');
+      logger.warn(
+        { error: errorText(error) },
+        'failed to record token usage after retries',
+      );
+    },
   });
 
   let clusterSync: ClusterStateSync | undefined;

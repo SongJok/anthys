@@ -24,6 +24,7 @@ export default defineConfig({
     './src/db/taskMemorySchema.ts',
     './src/db/taskSchema.ts',
     './src/db/approvalSchema.ts',
+    './src/db/executionLedgerSchema.ts',
     './src/db/investigationSchema.ts',
     './src/db/whitelistSchema.ts',
   ],

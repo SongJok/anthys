@@ -1,4 +1,5 @@
 export { pendingActions } from './approvalSchema.js';
+export { toolExecutionLedger } from './executionLedgerSchema.js';
 export { clusterSharedState } from './clusterSchema.js';
 export {
   adminAuditLogs,

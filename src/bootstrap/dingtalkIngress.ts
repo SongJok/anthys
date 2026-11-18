@@ -55,6 +55,7 @@ import type {
 import {
   formatApprovalPrompt,
 } from '../harness/ToolApprovalGate.js';
+import { hashToolArgs } from '../harness/ToolExecutionLedger.js';
 import { isReadOnlyToolName } from '../tools/toolRisk.js';
 import { sharedLlmGateStats } from '../react/LlmRequestGate.js';
 import {
@@ -491,7 +492,7 @@ export async function setupDingTalkIngress(
     const gate = await registry.dwsAuthorizationGate(ctx, true);
     if (gate) throw new Error(gate.userText);
     if (requiresExplicitDwsConfirmation(task)) {
-      const action = tools.pendingActions.put({
+      const action = await tools.pendingActions.put({
         conversationId: task.conversationId,
         toolName: task.toolName,
         args: task.args,
@@ -883,11 +884,21 @@ export async function setupDingTalkIngress(
       if (!isRequester && !configCenter.isAdmin(message.senderStaffId)) {
         return '只有发起人或管理员可以确认该操作。';
       }
-      tools.pendingActions.take(message.conversationId, {
-        actionIdPrefix: action.id,
-      });
+      const claimed = await tools.pendingActions.claimForExecution(
+        message.conversationId,
+        { actionIdPrefix: action.id },
+        `confirm:${process.pid}`,
+      );
+      if (!claimed) {
+        return '该操作已被处理、正在执行或已过期，请勿重复确认。';
+      }
       if (!tools.executionPolicy.allows(action.toolName)) {
         metrics.inc('agent_tool_confirmations_total', { result: 'blocked' });
+        await tools.pendingActions.settle(
+          action.id,
+          'cancelled',
+          `工具 ${action.toolName} 已被执行策略禁用`,
+        );
         return `工具 \`${action.toolName}\` 已被执行策略禁用，操作已取消。`;
       }
       const base = buildConfirmedActionContext({ action, fallback: message });
@@ -917,7 +928,30 @@ export async function setupDingTalkIngress(
       );
       if (!tool) {
         metrics.inc('agent_tool_confirmations_total', { result: 'unavailable' });
+        await tools.pendingActions.settle(
+          action.id,
+          'cancelled',
+          `工具 ${action.toolName} 当前不可用`,
+        );
         return `工具 \`${action.toolName}\` 当前不可用，操作已取消。`;
+      }
+      const ledgerKey = `confirm:${action.id}`;
+      try {
+        const begin = await tools.writeLedger.begin(ledgerKey, {
+          actionId: action.id,
+          toolName: action.toolName,
+          argsHash: hashToolArgs(action.args),
+        });
+        if (begin.outcome === 'replay') {
+          return `该操作此前已执行成功，未重复执行。台账记录：\n${begin.result}`;
+        }
+        if (begin.outcome === 'blocked') {
+          return begin.reason;
+        }
+      } catch (error) {
+        return `写执行台账不可用，已阻止执行 \`${action.toolName}\`：${
+          error instanceof Error ? error.message : String(error)
+        }`;
       }
       try {
         const output = await runWithTimeout(
@@ -932,12 +966,30 @@ export async function setupDingTalkIngress(
         metrics.inc('agent_tool_confirmations_total', { result: 'executed' });
         const clipped =
           output.length > 2_000 ? `${output.slice(0, 2_000)}…` : output;
+        const settled = await tools.pendingActions.settle(
+          action.id,
+          'succeeded',
+          clipped,
+        );
+        if (!settled) {
+          metrics.inc('agent_pending_action_settle_failures_total');
+        }
+        await tools.writeLedger.settle(ledgerKey, 'succeeded', clipped);
         return `已执行 \`${action.toolName}\`：\n${clipped}`;
       } catch (error) {
         metrics.inc('agent_tool_confirmations_total', { result: 'failed' });
-        return `执行 \`${action.toolName}\` 失败：${
-          error instanceof Error ? error.message : String(error)
-        }`;
+        const detail =
+          error instanceof Error ? error.message : String(error);
+        const settled = await tools.pendingActions.settle(
+          action.id,
+          'failed',
+          detail,
+        );
+        if (!settled) {
+          metrics.inc('agent_pending_action_settle_failures_total');
+        }
+        await tools.writeLedger.settle(ledgerKey, 'failed', detail);
+        return `执行 \`${action.toolName}\` 失败：${detail}`;
       }
     },
     cancelAction: async (conversationId, staffId, actionId) => {
@@ -947,7 +999,7 @@ export async function setupDingTalkIngress(
         : staffId && !isAdmin
           ? { staffId }
           : undefined;
-      const cancelled = tools.pendingActions.cancel(conversationId, query);
+      const cancelled = await tools.pendingActions.cancel(conversationId, query);
       const cancelledWrite = actionId
         ? false
         : isAdmin
@@ -1258,7 +1310,10 @@ export async function setupDingTalkIngress(
 
       let sawMutatingTool = false;
       const trackingEmit = (event: AgentStreamEvent): void => {
-        if (event.type === 'tool_start' && !isReadOnlyToolName(event.toolName)) {
+        if (
+          event.type === 'tool_start' &&
+          !isReadOnlyToolName(event.toolName, event.risk)
+        ) {
           sawMutatingTool = true;
         }
         emit(event);

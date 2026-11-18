@@ -366,6 +366,10 @@ export class EnvConfigProvider implements IConfigProvider {
         0,
         parseNumber(this.env.USAGE_DAILY_TOKENS_PER_CONVERSATION, 0),
       ),
+      dailyCostMicros: Math.max(
+        0,
+        parseNumber(this.env.USAGE_DAILY_COST_MICROS, 0),
+      ),
     };
   }
 

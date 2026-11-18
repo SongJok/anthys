@@ -11,11 +11,16 @@ import {
 } from 'drizzle-orm/pg-core';
 import type { Database } from './client.js';
 import type {
+  QuotaReservationInput,
+  QuotaReservationResult,
   UsageBreakdownRow,
   UsageLedgerInput,
   UsageLedgerStore,
   UsageSummary,
 } from '../types/admin-and-console.js';
+
+/** 崩溃残留的预留行超过该时长后自愈清理，避免永久占用配额 */
+const RESERVATION_TTL_MS = 2 * 60 * 60 * 1_000;
 
 /** 每次模型调用的用量流水，用于配额判定与账单报表 */
 export const usageLedger = pgTable(
@@ -36,6 +41,8 @@ export const usageLedger = pgTable(
     /** 人民币 micros；priced=false 表示未配置该模型价格，不能当作 0 元 */
     costMicros: integer('cost_micros').notNull().default(0),
     priced: boolean('priced').notNull().default(false),
+    /** true 表示准入预留行（估算额度），结算后置 false；崩溃残留靠 TTL 自愈 */
+    estimated: boolean('estimated').notNull().default(false),
     steps: integer('steps').notNull().default(0),
     durationMs: integer('duration_ms').notNull().default(0),
     proactive: boolean('proactive').notNull().default(false),
@@ -56,6 +63,9 @@ export const usageLedger = pgTable(
       table.conversationId,
       table.createdAt,
     ),
+    index('usage_ledger_estimated_idx')
+      .on(table.createdAt)
+      .where(sql`${table.estimated}`),
   ],
 );
 
@@ -65,7 +75,10 @@ function toNumber(value: unknown): number {
 }
 
 export class DrizzleUsageLedgerStore implements UsageLedgerStore {
-  constructor(private readonly db: Database) {}
+  constructor(
+    private readonly db: Database,
+    private readonly now: () => number = Date.now,
+  ) {}
 
   public async append(input: UsageLedgerInput): Promise<void> {
     await this.db.insert(usageLedger).values({
@@ -108,6 +121,176 @@ export class DrizzleUsageLedgerStore implements UsageLedgerStore {
       .from(usageLedger)
       .where(and(...conditions));
     return toNumber(rows[0]?.tokens);
+  }
+
+  public async costSince(sinceMs: number): Promise<number> {
+    const rows = await this.db
+      .select({
+        cost: sql<string>`coalesce(sum(${usageLedger.costMicros}), 0)`,
+      })
+      .from(usageLedger)
+      .where(
+        and(
+          gte(usageLedger.createdAt, new Date(sinceMs)),
+          eq(usageLedger.priced, true),
+        ),
+      );
+    return toNumber(rows[0]?.cost);
+  }
+
+  public async reserveQuota(
+    input: QuotaReservationInput,
+  ): Promise<QuotaReservationResult> {
+    return this.db.transaction(async (tx) => {
+      // 先清理崩溃残留的过期预留行，再在固定顺序的咨询锁内判定，杜绝并发超发
+      await tx
+        .delete(usageLedger)
+        .where(
+          and(
+            eq(usageLedger.estimated, true),
+            lt(usageLedger.createdAt, new Date(this.now() - RESERVATION_TTL_MS)),
+          ),
+        );
+      if (input.dailyCostMicros > 0) {
+        await tx.execute(sql`select pg_advisory_xact_lock(hashtext('usage:cost'))`);
+      }
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtext(${`usage:user:${input.senderStaffId}`}))`,
+      );
+      if (
+        input.conversationType === '2' &&
+        input.dailyTokensPerConversation > 0
+      ) {
+        await tx.execute(
+          sql`select pg_advisory_xact_lock(hashtext(${`usage:conv:${input.conversationId}`}))`,
+        );
+      }
+
+      const since = new Date(input.sinceMs);
+      const sumTokens = sql<string>`coalesce(sum(${usageLedger.totalTokens}), 0)`;
+      if (input.dailyTokensPerUser > 0) {
+        const rows = await tx
+          .select({ tokens: sumTokens })
+          .from(usageLedger)
+          .where(
+            and(
+              gte(usageLedger.createdAt, since),
+              eq(usageLedger.senderStaffId, input.senderStaffId),
+            ),
+          );
+        const used = toNumber(rows[0]?.tokens);
+        if (used >= input.dailyTokensPerUser) {
+          return { ok: false, scope: 'user', used, limit: input.dailyTokensPerUser };
+        }
+      }
+      if (
+        input.conversationType === '2' &&
+        input.dailyTokensPerConversation > 0
+      ) {
+        const rows = await tx
+          .select({ tokens: sumTokens })
+          .from(usageLedger)
+          .where(
+            and(
+              gte(usageLedger.createdAt, since),
+              eq(usageLedger.conversationId, input.conversationId),
+            ),
+          );
+        const used = toNumber(rows[0]?.tokens);
+        if (used >= input.dailyTokensPerConversation) {
+          return {
+            ok: false,
+            scope: 'conversation',
+            used,
+            limit: input.dailyTokensPerConversation,
+          };
+        }
+      }
+      if (input.dailyCostMicros > 0) {
+        const rows = await tx
+          .select({
+            cost: sql<string>`coalesce(sum(${usageLedger.costMicros}), 0)`,
+          })
+          .from(usageLedger)
+          .where(
+            and(
+              gte(usageLedger.createdAt, since),
+              eq(usageLedger.priced, true),
+            ),
+          );
+        const used = toNumber(rows[0]?.cost);
+        if (used >= input.dailyCostMicros) {
+          return { ok: false, scope: 'cost', used, limit: input.dailyCostMicros };
+        }
+      }
+
+      const [row] = await tx
+        .insert(usageLedger)
+        .values({
+          conversationId: input.conversationId,
+          conversationType: input.conversationType,
+          senderStaffId: input.senderStaffId,
+          totalTokens: Math.max(0, Math.round(input.reserveTokens)),
+          estimated: true,
+        })
+        .returning({ id: usageLedger.id });
+      return { ok: true, reservationId: row.id };
+    });
+  }
+
+  public async settleReservation(
+    reservationId: string,
+    input: UsageLedgerInput,
+  ): Promise<void> {
+    const updated = await this.db
+      .update(usageLedger)
+      .set({
+        conversationId: input.conversationId,
+        conversationType: input.conversationType,
+        senderStaffId: input.senderStaffId,
+        senderNick: input.senderNick,
+        model: input.model,
+        totalTokens: Math.max(0, Math.round(input.totalTokens)),
+        inputTokens: Math.max(0, Math.round(input.inputTokens ?? 0)),
+        outputTokens: Math.max(0, Math.round(input.outputTokens ?? 0)),
+        cachedTokens: Math.max(0, Math.round(input.cachedTokens ?? 0)),
+        costMicros: Math.max(0, Math.round(input.costMicros ?? 0)),
+        priced: input.priced === true,
+        steps: Math.max(0, Math.round(input.steps)),
+        durationMs: Math.max(0, Math.round(input.durationMs)),
+        proactive: input.proactive,
+        jobId: input.jobId ?? null,
+        jobKind: input.jobKind ?? null,
+        worker: input.worker ?? null,
+        estimated: false,
+      })
+      .where(
+        and(
+          eq(usageLedger.id, reservationId),
+          eq(usageLedger.estimated, true),
+        ),
+      )
+      .returning({ id: usageLedger.id });
+    if (updated.length > 0) return;
+    // 未更新到预留行：可能上一次结算已提交（重试幂等），也可能已被自愈/释放
+    const existing = await this.db
+      .select({ id: usageLedger.id })
+      .from(usageLedger)
+      .where(eq(usageLedger.id, reservationId));
+    if (existing.length > 0) return;
+    // 预留行确实不存在：退化为普通追加，保证用量不丢
+    await this.append(input);
+  }
+
+  public async releaseReservation(reservationId: string): Promise<void> {
+    await this.db
+      .delete(usageLedger)
+      .where(
+        and(
+          eq(usageLedger.id, reservationId),
+          eq(usageLedger.estimated, true),
+        ),
+      );
   }
 
   public async summarySince(sinceMs: number): Promise<UsageSummary> {

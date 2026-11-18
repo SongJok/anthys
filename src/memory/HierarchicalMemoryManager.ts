@@ -168,7 +168,7 @@ export interface SemanticFactExtractor {
 }
 
 const EXTRACTION_SYSTEM_PROMPT = [
-  '你是企业记忆抽取器，只输出 JSON：{"facts":[{"scope":"user|group|group_member|global","kind":"profile|terminology","content":"...","keywords":["..."]}]}',
+  '你是企业记忆抽取器，只输出 JSON：{"facts":[{"scope":"user|group|group_member","kind":"profile|terminology","content":"...","keywords":["..."]}]}',
   '只提取对话中明确陈述、长期有效的事实：员工跨群通用职责/负责系统（user）、群内成员仅在本群的角色/分工/偏好（群聊用 group_member）、本群团队常用术语/项目代号/约定（group）。',
   '不要提取临时故障状态、一次性问题、猜测内容。没有可提取内容时返回 {"facts":[]}。',
 ].join('\n');
@@ -225,12 +225,17 @@ export class LlmSemanticFactExtractor implements SemanticFactExtractor {
     return facts.flatMap((fact): ExtractedSemanticFact[] => {
       if (fact === null || typeof fact !== 'object') return [];
       const record = fact as Record<string, unknown>;
-      const scope: SemanticMemoryScope =
-        record.scope === 'group' ||
-        record.scope === 'group_member' ||
-        record.scope === 'global'
-          ? record.scope
-          : 'user';
+      // fail-closed：只接受明确声明的 user/group/group_member；
+      // 未知作用域不猜测归档，global 禁止由 LLM 写入（避免跨会话污染所有人上下文）
+      const rawScope = record.scope;
+      if (
+        rawScope !== 'user' &&
+        rawScope !== 'group' &&
+        rawScope !== 'group_member'
+      ) {
+        return [];
+      }
+      const scope: SemanticMemoryScope = rawScope;
       const kind = record.kind === 'terminology' ? 'terminology' : 'profile';
       const factContent =
         typeof record.content === 'string' ? record.content.trim() : '';
@@ -584,6 +589,7 @@ export class HierarchicalMemoryManager {
                 query: queryText,
                 scope: 'group',
                 subjectKey: input.groupConversationId,
+                excludeSensitive: true,
               },
               queryVector,
             )
@@ -653,7 +659,10 @@ export class HierarchicalMemoryManager {
     input: SemanticExtractionInput,
   ): Promise<SemanticMemoryRecord[]> {
     if (!this.extractor) return [];
-    const facts = await this.extractor.extract(input);
+    // 双重防线：即便抽取器返回 global 也一律丢弃，全局记忆只能由管理员维护
+    const facts = (await this.extractor.extract(input)).filter(
+      (fact) => fact.scope !== 'global',
+    );
     if (facts.length === 0) return [];
 
     return this.remember(

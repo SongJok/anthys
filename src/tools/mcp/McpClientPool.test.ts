@@ -549,4 +549,154 @@ describe('McpToolProvider', () => {
     expect(first.datasetKey).not.toBe(second.datasetKey);
     expect(second.datasetKey).toBe('data_msgidwithspecial_2.json');
   });
+
+  it('把连接池解析出的 risk 与 mcp 来源注入工具定义', async () => {
+    const { factory } = inMemoryFactory();
+    const pool = new McpClientPool({
+      servers: [config('prod_log')],
+      transportFactory: factory,
+    });
+    cleanup.push(() => pool.close());
+    await pool.init();
+    const provider = new McpToolProvider({
+      pool,
+      workspace: { hostDir: tmpdir(), sandboxDir: '/workspace' },
+    });
+    const tools = await provider.getTools(ctx);
+    // fakePartner 未提供 annotations / defaultRisk，全部 fail-closed 为 write
+    for (const tool of tools) {
+      expect(tool.risk).toBe('write');
+      expect(tool.source).toBe('mcp:prod_log');
+    }
+  });
+
+  it('defaultRisk=read 时工具注入 read，可被只读研究单元使用', async () => {
+    const { factory } = inMemoryFactory();
+    const pool = new McpClientPool({
+      servers: [config('prod_log', { defaultRisk: 'read' })],
+      transportFactory: factory,
+    });
+    cleanup.push(() => pool.close());
+    await pool.init();
+    const provider = new McpToolProvider({
+      pool,
+      workspace: { hostDir: tmpdir(), sandboxDir: '/workspace' },
+    });
+    const tools = await provider.getTools(ctx);
+    expect(tools.every((tool) => tool.risk === 'read')).toBe(true);
+  });
+
+  it('toolRisk 按原始工具名覆盖 defaultRisk', async () => {
+    const { factory } = inMemoryFactory();
+    const pool = new McpClientPool({
+      servers: [
+        config('prod_log', {
+          defaultRisk: 'read',
+          toolRisk: { unstable_write: 'destructive' },
+        }),
+      ],
+      transportFactory: factory,
+    });
+    cleanup.push(() => pool.close());
+    await pool.init();
+    const provider = new McpToolProvider({
+      pool,
+      workspace: { hostDir: tmpdir(), sandboxDir: '/workspace' },
+    });
+    const tools = await provider.getTools(ctx);
+    const write = tools.find(
+      (tool) => tool.name === 'mcp__prod_log__unstable_write',
+    );
+    const read = tools.find(
+      (tool) => tool.name === 'mcp__prod_log__query_errors',
+    );
+    expect(write!.risk).toBe('destructive');
+    expect(read!.risk).toBe('read');
+  });
+});
+
+describe('MCP 风险解析（annotations / defaultRisk / toolRisk）', () => {
+  async function annotatedPool(
+    overrides: Partial<EnterpriseMcpServerConfig> = {},
+  ): Promise<McpClientPool> {
+    const [clientTransport, serverTransport] =
+      InMemoryTransport.createLinkedPair();
+    const server = new Server(
+      { name: 'annotated', version: '1.0.0' },
+      { capabilities: { tools: {} } },
+    );
+    server.setRequestHandler(ListToolsRequestSchema, async () => ({
+      tools: [
+        {
+          name: 'search_docs',
+          description: '只读检索',
+          inputSchema: { type: 'object' as const, properties: {} },
+          annotations: { readOnlyHint: true },
+        },
+        {
+          name: 'drop_index',
+          description: '删除索引',
+          inputSchema: { type: 'object' as const, properties: {} },
+          annotations: { destructiveHint: true },
+        },
+        {
+          name: 'plain_tool',
+          description: '未标注',
+          inputSchema: { type: 'object' as const, properties: {} },
+        },
+      ],
+    }));
+    await server.connect(serverTransport);
+    cleanup.push(() => server.close());
+    const pool = new McpClientPool({
+      servers: [config('annotated', overrides)],
+      transportFactory: async () => clientTransport,
+    });
+    cleanup.push(() => pool.close());
+    await pool.init();
+    return pool;
+  }
+
+  it('annotations 优先：readOnlyHint→read，destructiveHint→destructive，未标注→write', async () => {
+    const pool = await annotatedPool();
+    const tools = await pool.listTools();
+    const byName = new Map(tools.map((tool) => [tool.originalName, tool.risk]));
+    expect(byName.get('search_docs')).toBe('read');
+    expect(byName.get('drop_index')).toBe('destructive');
+    expect(byName.get('plain_tool')).toBe('write');
+  });
+
+  it('defaultRisk 只兜底未标注工具，不覆盖 annotations', async () => {
+    const pool = await annotatedPool({ defaultRisk: 'read' });
+    const tools = await pool.listTools();
+    const byName = new Map(tools.map((tool) => [tool.originalName, tool.risk]));
+    expect(byName.get('plain_tool')).toBe('read');
+    expect(byName.get('drop_index')).toBe('destructive');
+  });
+
+  it('toolRisk 覆盖优先级最高', async () => {
+    const pool = await annotatedPool({
+      defaultRisk: 'read',
+      toolRisk: { search_docs: 'write', drop_index: 'read' },
+    });
+    const tools = await pool.listTools();
+    const byName = new Map(tools.map((tool) => [tool.originalName, tool.risk]));
+    expect(byName.get('search_docs')).toBe('write');
+    expect(byName.get('drop_index')).toBe('read');
+    expect(byName.get('plain_tool')).toBe('read');
+  });
+
+  it('非法 defaultRisk / toolRisk 在热应用时被拒绝', async () => {
+    const pool = await annotatedPool();
+    await expect(
+      pool.applyServers([
+        config('annotated', { defaultRisk: 'admin' as never }),
+      ]),
+    ).rejects.toThrow(/defaultRisk/);
+    await expect(
+      pool.applyServers([
+        config('annotated', { toolRisk: { search_docs: 'root' as never } }),
+      ]),
+    ).rejects.toThrow(/toolRisk/);
+  });
 });

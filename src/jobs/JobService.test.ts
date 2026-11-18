@@ -36,6 +36,7 @@ function job(overrides: Partial<AgentJob> = {}): AgentJob {
     priority: 0,
     attempts: 1,
     maxAttempts: 2,
+    fencingToken: 1,
     leaseOwner: 'runner',
     leaseExpiresAt: 0,
     createdAt: 0,

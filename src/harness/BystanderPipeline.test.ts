@@ -143,6 +143,7 @@ function createMemoryStores(): {
             input.sensitivity ??
             (input.scope === 'user' ? 'private' : 'normal'),
           status: input.status ?? 'active',
+          reviewStatus: input.reviewStatus ?? 'approved',
           sourceConversationId: input.sourceConversationId ?? null,
           sourceConversationType: input.sourceConversationType ?? null,
           sourceMessageId: input.sourceMessageId ?? null,

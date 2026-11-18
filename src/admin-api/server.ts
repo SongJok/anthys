@@ -30,6 +30,8 @@ import {
   bindAdminRequestSecurityContext,
   createConfigRoutes,
   readJsonBody,
+  recordWebAudit,
+  webActor,
 } from './routes/configRoutes.js';
 import { createMcpRoutes } from './routes/mcpRoutes.js';
 import { createGlossaryRoutes } from './routes/glossaryRoutes.js';
@@ -68,6 +70,7 @@ import {
   type ConsoleChatHandler,
 } from './chatStream.js';
 import type { MetricsRegistry } from './metrics.js';
+import { LoginAttemptLimiter } from './loginRateLimit.js';
 
 export interface AdminApiLogger {
   info(obj: Record<string, unknown>, msg: string): void;
@@ -97,10 +100,16 @@ export interface AdminApiOptions {
   authToken?: string;
   /** 只读控制台访问 Token（ADMIN_VIEWER_TOKEN）：仅放行 GET/HEAD/OPTIONS，写操作返回 403 */
   viewerToken?: string;
+  /** 运行环境（默认取 process.env.NODE_ENV）；production 下未配置 Token 且未显式放行时拒绝启动 */
+  nodeEnv?: string;
+  /** 显式允许生产环境开放访问（ADMIN_ALLOW_INSECURE=true），默认 false */
+  allowInsecure?: boolean;
   /** 是否采信客户端传入的 X-Admin-Staff-Id（仅受信反向代理场景可设为 true，默认 false） */
   trustActorHeader?: boolean;
   /** HttpOnly 登录 Cookie 会话有效期（毫秒），默认 24 小时 */
   sessionTtlMs?: number;
+  /** 登录失败按 IP 限流：窗口内最大失败次数与窗口时长（毫秒） */
+  loginRateLimit?: { maxAttempts?: number; windowMs?: number };
   /** web-console 生产构建目录，存在时由后端静态托管 */
   staticDir?: string;
   logger?: AdminApiLogger;
@@ -262,6 +271,21 @@ function isHttpsRequest(
   );
 }
 
+function clientIp(c: {
+  req: { header: (name: string) => string | undefined };
+  env?: unknown;
+}): string {
+  const forwarded = c.req.header('x-forwarded-for');
+  const firstHop = forwarded?.split(',')[0]?.trim();
+  if (firstHop) return firstHop;
+  const realIp = c.req.header('x-real-ip')?.trim();
+  if (realIp) return realIp;
+  const env = c.env as
+    | { incoming?: { socket?: { remoteAddress?: string } } }
+    | undefined;
+  return env?.incoming?.socket?.remoteAddress ?? 'unknown';
+}
+
 /** 组装管理后台 Hono 应用（REST API + SPA 静态托管） */
 export function createAdminApp(options: AdminApiOptions): Hono {
   const logger = options.logger;
@@ -274,6 +298,14 @@ export function createAdminApp(options: AdminApiOptions): Hono {
     ''
   ).trim();
   const authEnabled = Boolean(token || viewerToken);
+  const nodeEnv = options.nodeEnv ?? process.env.NODE_ENV ?? '';
+  const allowInsecure =
+    options.allowInsecure ?? process.env.ADMIN_ALLOW_INSECURE === 'true';
+  if (nodeEnv === 'production' && !authEnabled && !allowInsecure) {
+    throw new Error(
+      '生产环境必须配置 ADMIN_API_TOKEN 或 ADMIN_VIEWER_TOKEN；如确需开放访问请显式设置 ADMIN_ALLOW_INSECURE=true',
+    );
+  }
   const trustActorHeader =
     options.trustActorHeader ?? process.env.ADMIN_TRUST_ACTOR_HEADER === 'true';
   const sessionTtlMs = options.sessionTtlMs ?? DEFAULT_SESSION_TTL_MS;
@@ -306,6 +338,10 @@ export function createAdminApp(options: AdminApiOptions): Hono {
     return verifySessionCookie(cookieVal, sessionKey, now(), Boolean(token));
   };
 
+  const loginLimiter = new LoginAttemptLimiter({
+    ...(options.loginRateLimit ?? {}),
+    now,
+  });
   const tickets = new OneTimeTicketStore(options.ticketTtlMs ?? 60_000, now);
   const chatDeps: ChatStreamDeps = {
     tickets,
@@ -539,38 +575,73 @@ export function createAdminApp(options: AdminApiOptions): Hono {
     if (!input.conversationId?.trim() || (needsPrompt && !input.prompt?.trim())) {
       return c.json({ ok: false, error: '缺少 conversationId 或 prompt' }, 400);
     }
+    let task: ScheduledTask;
     try {
-      const task = await options.scheduledTasks.create(input);
-      return c.json({ ok: true, task });
+      task = await options.scheduledTasks.create(input);
     } catch (error) {
       return c.json(
         { ok: false, error: error instanceof Error ? error.message : String(error) },
         400,
       );
     }
+    await recordWebAudit(
+      options.configCenter,
+      webActor(c),
+      'UPDATE_SCHEDULES',
+      {},
+      { ...task },
+    );
+    return c.json({ ok: true, task });
   });
 
   admin.put('/scheduled-tasks/:id', async (c) => {
     if (!options.scheduledTasks) {
       return c.json({ ok: false, error: '定时任务未启用' }, 503);
     }
+    const id = c.req.param('id');
     const input = (await c.req.json().catch(() => ({}))) as ScheduledTaskUpdate;
+    const before = {
+      ...((await options.scheduledTasks.list()).find((task) => task.id === id) ??
+        { id }),
+    };
+    let task: ScheduledTask;
     try {
-      const task = await options.scheduledTasks.update(c.req.param('id'), input);
-      return c.json({ ok: true, task });
+      task = await options.scheduledTasks.update(id, input);
     } catch (error) {
       return c.json(
         { ok: false, error: error instanceof Error ? error.message : String(error) },
         400,
       );
     }
+    await recordWebAudit(
+      options.configCenter,
+      webActor(c),
+      'UPDATE_SCHEDULES',
+      { ...before },
+      { ...task },
+    );
+    return c.json({ ok: true, task });
   });
 
   admin.delete('/scheduled-tasks/:id', async (c) => {
     if (!options.scheduledTasks) {
       return c.json({ ok: false, error: '定时任务未启用' }, 503);
     }
-    const removed = await options.scheduledTasks.remove(c.req.param('id'));
+    const id = c.req.param('id');
+    const before = {
+      ...((await options.scheduledTasks.list()).find((task) => task.id === id) ??
+        { id }),
+    };
+    const removed = await options.scheduledTasks.remove(id);
+    if (removed) {
+      await recordWebAudit(
+        options.configCenter,
+        webActor(c),
+        'UPDATE_SCHEDULES',
+        { ...before },
+        {},
+      );
+    }
     return c.json({ ok: true, removed });
   });
 
@@ -578,15 +649,23 @@ export function createAdminApp(options: AdminApiOptions): Hono {
     if (!options.scheduledTasks?.runNow) {
       return c.json({ ok: false, error: '立即执行未启用' }, 503);
     }
+    const id = c.req.param('id');
     try {
-      await options.scheduledTasks.runNow(c.req.param('id'));
-      return c.json({ ok: true });
+      await options.scheduledTasks.runNow(id);
     } catch (error) {
       return c.json(
         { ok: false, error: error instanceof Error ? error.message : String(error) },
         400,
       );
     }
+    await recordWebAudit(
+      options.configCenter,
+      webActor(c),
+      'UPDATE_SCHEDULES',
+      { id },
+      { id, trigger: 'run-now' },
+    );
+    return c.json({ ok: true });
   });
 
   admin.post('/chat/tickets', (c) => {
@@ -639,6 +718,15 @@ export function createAdminApp(options: AdminApiOptions): Hono {
         role: 'admin' satisfies AdminRole,
       });
     }
+    const ip = clientIp(c);
+    const limit = loginLimiter.check(ip);
+    if (!limit.allowed) {
+      c.header('retry-after', String(Math.ceil(limit.retryAfterMs / 1000)));
+      return c.json(
+        { ok: false, error: '登录失败次数过多，请稍后再试' },
+        429,
+      );
+    }
     const body: Record<string, unknown> = await readJsonBody(c).catch(() => ({}));
     const bodyToken = typeof body.token === 'string' ? body.token : '';
     const authHeader = c.req.header('authorization');
@@ -647,8 +735,10 @@ export function createAdminApp(options: AdminApiOptions): Hono {
       : '';
     const role = resolveTokenRole(bodyToken || bearer);
     if (!role) {
+      loginLimiter.recordFailure(ip);
       return c.json({ ok: false, error: '未授权：Token 无效' }, 401);
     }
+    loginLimiter.recordSuccess(ip);
     const expiresAtMs = now() + sessionTtlMs;
     const cookieVal = signSessionCookie(role, expiresAtMs, sessionKey);
     const secure = isHttpsRequest(

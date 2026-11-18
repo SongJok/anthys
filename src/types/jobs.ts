@@ -34,6 +34,8 @@ export interface AgentJob {
   priority: number;
   attempts: number;
   maxAttempts: number;
+  /** 每次领取 +1；心跳 / 落定必须携带，旧进程的过期租约无法再写状态 */
+  fencingToken: number;
   leaseOwner: string | null;
   leaseExpiresAt: number | null;
   createdAt: number;
@@ -82,17 +84,20 @@ export interface AgentJobStore {
   heartbeat(
     jobId: string,
     owner: string,
+    fencingToken: number,
     nowMs: number,
     leaseMs: number,
   ): Promise<boolean>;
   complete(
     jobId: string,
     owner: string,
+    fencingToken: number,
     result: AgentJobResult,
   ): Promise<AgentJob | null>;
   fail(
     jobId: string,
     owner: string,
+    fencingToken: number,
     error: string,
     retryable?: boolean,
   ): Promise<AgentJob | null>;
@@ -100,6 +105,7 @@ export interface AgentJobStore {
   pause(
     jobId: string,
     owner: string,
+    fencingToken: number,
     reason: string,
   ): Promise<AgentJob | null>;
   /** 恢复已暂停的任务；可追加补充要求后重新执行 */

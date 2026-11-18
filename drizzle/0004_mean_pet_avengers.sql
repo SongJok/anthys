@@ -1,0 +1,2 @@
+ALTER TABLE "usage_ledger" ADD COLUMN "estimated" boolean DEFAULT false NOT NULL;--> statement-breakpoint
+CREATE INDEX "usage_ledger_estimated_idx" ON "usage_ledger" USING btree ("created_at") WHERE "usage_ledger"."estimated";

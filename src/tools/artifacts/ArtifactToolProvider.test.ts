@@ -57,7 +57,7 @@ describe('ArtifactToolProvider', () => {
     const deliver = await tool(send);
 
     expect(deliver.name).toBe('deliver_artifact');
-    expect(deliver.risk).toBeUndefined();
+    expect(deliver.risk).toBe('write');
     const output = JSON.parse(
       await deliver.execute({ path: 'report.csv' }, context()),
     ) as Record<string, unknown>;

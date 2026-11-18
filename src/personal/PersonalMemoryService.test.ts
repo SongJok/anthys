@@ -67,7 +67,7 @@ function record(
     embedding: null,
     shareableInGroup: false,
     sensitivity: 'private',
-    status: 'active',
+    status: 'active', reviewStatus: 'approved',
     sourceConversationId: 'cid-1',
     sourceConversationType: '1',
     sourceMessageId: null,

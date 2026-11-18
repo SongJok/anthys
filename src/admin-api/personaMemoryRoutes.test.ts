@@ -149,7 +149,7 @@ function memoryRecord(
     embedding: [0.1, 0.2],
     shareableInGroup: false,
     sensitivity: 'private',
-    status: 'active',
+    status: 'active', reviewStatus: 'approved',
     sourceConversationId: 'single:staff:staff-1',
     sourceConversationType: '1',
     sourceMessageId: 'm-1',

@@ -251,7 +251,35 @@ export interface UsagePolicy {
   dailyTokensPerUser: number;
   /** 单个群每日 Token 上限，0 表示不限 */
   dailyTokensPerConversation: number;
+  /** 全部署每日人民币成本预算（micros），0 表示不限；只统计已定价轮次 */
+  dailyCostMicros: number;
 }
+
+/** 配额预留凭证：准入时占用估算额度，运行结束后结算或释放 */
+export interface UsageReservation {
+  readonly id: string;
+}
+
+export interface QuotaReservationInput {
+  sinceMs: number;
+  senderStaffId: string;
+  conversationId: string;
+  conversationType: '1' | '2';
+  /** 本次运行预估占用的 Token（通常取循环策略 maxTotalTokens） */
+  reserveTokens: number;
+  dailyTokensPerUser: number;
+  dailyTokensPerConversation: number;
+  dailyCostMicros: number;
+}
+
+export type QuotaReservationResult =
+  | { ok: true; reservationId: string }
+  | {
+      ok: false;
+      scope: 'user' | 'conversation' | 'cost';
+      used: number;
+      limit: number;
+    };
 
 export interface UsageLedgerInput {
   conversationId: string;
@@ -314,8 +342,19 @@ export interface UsageLedgerStore {
     senderStaffId?: string;
     conversationId?: string;
   }): Promise<number>;
+  /** 当日已定价成本合计（micros），用于成本预算判定 */
+  costSince?(sinceMs: number): Promise<number>;
   summarySince(sinceMs: number): Promise<UsageSummary>;
   purgeBefore(epochMs: number): Promise<number>;
+  /** 事务内加锁判定配额并写入估算预留行；缺省时降级为检查式判定 */
+  reserveQuota?(input: QuotaReservationInput): Promise<QuotaReservationResult>;
+  /** 用真实用量结算预留行；预留行已不存在时退化为追加，避免丢账 */
+  settleReservation?(
+    reservationId: string,
+    input: UsageLedgerInput,
+  ): Promise<void>;
+  /** 释放未使用的预留行（零 Token 运行或准入后放弃） */
+  releaseReservation?(reservationId: string): Promise<void>;
 }
 
 /**

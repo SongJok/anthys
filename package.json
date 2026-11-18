@@ -27,6 +27,8 @@
     "db:push": "drizzle-kit push",
     "db:extend": "tsx src/db/extend.ts",
     "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:baseline": "tsx src/db/baseline.ts",
     "db:seed": "tsx src/db/seed.ts",
     "eval:golden": "tsx src/eval/runGoldenSet.ts",
     "eval:flow": "tsx src/eval/runFlowEval.ts",

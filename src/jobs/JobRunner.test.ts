@@ -35,6 +35,7 @@ class MemoryJobStore implements AgentJobStore {
       priority: input.priority ?? 0,
       attempts: 0,
       maxAttempts: input.maxAttempts ?? 2,
+      fencingToken: 0,
       leaseOwner: null,
       leaseExpiresAt: null,
       createdAt: now,
@@ -53,6 +54,7 @@ class MemoryJobStore implements AgentJobStore {
     job.leaseOwner = input.owner;
     job.leaseExpiresAt = input.nowMs + input.leaseMs;
     job.attempts += 1;
+    job.fencingToken += 1;
     job.startedAt = input.nowMs;
     return { ...job };
   }
@@ -60,11 +62,17 @@ class MemoryJobStore implements AgentJobStore {
   async heartbeat(
     jobId: string,
     owner: string,
+    fencingToken: number,
     nowMs: number,
     leaseMs: number,
   ): Promise<boolean> {
     const job = this.jobs.get(jobId);
-    if (!job || job.leaseOwner !== owner || job.status !== 'running') {
+    if (
+      !job ||
+      job.leaseOwner !== owner ||
+      job.fencingToken !== fencingToken ||
+      job.status !== 'running'
+    ) {
       return false;
     }
     job.leaseExpiresAt = nowMs + leaseMs;
@@ -74,10 +82,16 @@ class MemoryJobStore implements AgentJobStore {
   async complete(
     jobId: string,
     owner: string,
+    fencingToken: number,
     result: AgentJobResult,
   ): Promise<AgentJob | null> {
     const job = this.jobs.get(jobId);
-    if (!job || job.leaseOwner !== owner || job.status !== 'running') {
+    if (
+      !job ||
+      job.leaseOwner !== owner ||
+      job.fencingToken !== fencingToken ||
+      job.status !== 'running'
+    ) {
       return null;
     }
     job.status = 'succeeded';
@@ -89,11 +103,17 @@ class MemoryJobStore implements AgentJobStore {
   async fail(
     jobId: string,
     owner: string,
+    fencingToken: number,
     error: string,
     retryable = true,
   ): Promise<AgentJob | null> {
     const job = this.jobs.get(jobId);
-    if (!job || job.leaseOwner !== owner || job.status !== 'running') {
+    if (
+      !job ||
+      job.leaseOwner !== owner ||
+      job.fencingToken !== fencingToken ||
+      job.status !== 'running'
+    ) {
       return null;
     }
     job.error = error;
@@ -121,10 +141,16 @@ class MemoryJobStore implements AgentJobStore {
   async pause(
     jobId: string,
     owner: string,
+    fencingToken: number,
     reason: string,
   ): Promise<AgentJob | null> {
     const job = this.jobs.get(jobId);
-    if (!job || job.leaseOwner !== owner || job.status !== 'running') {
+    if (
+      !job ||
+      job.leaseOwner !== owner ||
+      job.fencingToken !== fencingToken ||
+      job.status !== 'running'
+    ) {
       return null;
     }
     job.status = 'paused';
@@ -360,5 +386,74 @@ describe('JobRunner', () => {
     expect((await store.get(job.id))?.status).toBe('succeeded');
 
     await runner.stop();
+  });
+
+  it('每次领取 fencingToken 递增，旧 token 的心跳 / 落定被拒绝', async () => {
+    const store = new MemoryJobStore();
+    const job = await store.enqueue(sampleInput);
+    const first = await store.claimNext({
+      owner: 'p1',
+      nowMs: 1_000,
+      leaseMs: 60_000,
+    });
+    expect(first?.fencingToken).toBe(1);
+
+    // 模拟租约到期后重新入队并被另一进程领取
+    const stored = store.jobs.get(job.id)!;
+    stored.status = 'queued';
+    stored.leaseOwner = null;
+    const second = await store.claimNext({
+      owner: 'p2',
+      nowMs: 70_000,
+      leaseMs: 60_000,
+    });
+    expect(second?.fencingToken).toBe(2);
+
+    expect(await store.heartbeat(job.id, 'p1', 1, 70_000, 60_000)).toBe(false);
+    expect(await store.complete(job.id, 'p1', 1, sampleResult)).toBeNull();
+    expect(await store.fail(job.id, 'p1', 1, 'stale')).toBeNull();
+    expect(await store.pause(job.id, 'p1', 1, 'stale')).toBeNull();
+    expect(await store.heartbeat(job.id, 'p2', 2, 70_000, 60_000)).toBe(true);
+    expect((await store.complete(job.id, 'p2', 2, sampleResult))?.status).toBe(
+      'succeeded',
+    );
+  });
+
+  it('执行期间租约被其他进程抢走时，旧进程结果不落库', async () => {
+    const store = new MemoryJobStore();
+    const job = await store.enqueue(sampleInput);
+    let completedCalled = false;
+    let heartbeatOk: boolean | undefined;
+    let finished: (() => void) | undefined;
+    const done = new Promise<void>((resolve) => {
+      finished = resolve;
+    });
+    const runner = new JobRunner({
+      store,
+      intervalMs: 1_000,
+      now: () => 1_000,
+      execute: async (_job, context) => {
+        // 模拟另一进程在 execute 期间重新领取（fencingToken +1）
+        const stored = store.jobs.get(job.id)!;
+        stored.fencingToken += 1;
+        stored.leaseOwner = 'other-process';
+        heartbeatOk = await context.heartbeat();
+        finished?.();
+        return sampleResult;
+      },
+      onCompleted: async () => {
+        completedCalled = true;
+      },
+    });
+
+    await runner.start();
+    await done;
+    await runner.stop();
+
+    expect(heartbeatOk).toBe(false);
+    expect(completedCalled).toBe(false);
+    const stored = await store.get(job.id);
+    expect(stored?.result).toBeNull();
+    expect(stored?.leaseOwner).toBe('other-process');
   });
 });

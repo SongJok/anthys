@@ -33,6 +33,7 @@ function fakeJob(id = 'job-1234567890'): AgentJob {
     priority: 0,
     attempts: 0,
     maxAttempts: 3,
+    fencingToken: 0,
     leaseOwner: null,
     leaseExpiresAt: null,
     metadata: {},

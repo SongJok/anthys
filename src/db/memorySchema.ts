@@ -83,6 +83,10 @@ export const semanticMemories = pgTable(
       .notNull()
       .default('normal'),
     status: varchar('status', { length: 16 }).notNull().default('active'),
+    /** 审核状态：默认 approved 保持既有行为；pending/rejected 不参与召回 */
+    reviewStatus: varchar('review_status', { length: 16 })
+      .notNull()
+      .default('approved'),
     sourceConversationId: text('source_conversation_id'),
     sourceConversationType: varchar('source_conversation_type', { length: 2 }),
     sourceMessageId: text('source_message_id'),
@@ -181,6 +185,7 @@ function toSemanticRecord(row: {
   shareableInGroup: boolean;
   sensitivity: string;
   status: string;
+  reviewStatus: string;
   sourceConversationId: string | null;
   sourceConversationType: string | null;
   sourceMessageId: string | null;
@@ -200,6 +205,7 @@ function toSemanticRecord(row: {
     shareableInGroup: row.shareableInGroup,
     sensitivity: row.sensitivity as SemanticMemoryRecord['sensitivity'],
     status: row.status as SemanticMemoryRecord['status'],
+    reviewStatus: row.reviewStatus as SemanticMemoryRecord['reviewStatus'],
     sourceConversationId: row.sourceConversationId,
     sourceConversationType:
       row.sourceConversationType === '1' || row.sourceConversationType === '2'
@@ -275,6 +281,7 @@ export class DrizzleMemoryStore
         shareableInGroup,
         sensitivity,
         status: input.status ?? 'active',
+        reviewStatus: input.reviewStatus ?? 'approved',
         sourceConversationId: input.sourceConversationId ?? null,
         sourceConversationType: input.sourceConversationType ?? null,
         sourceMessageId: input.sourceMessageId ?? null,
@@ -300,6 +307,9 @@ export class DrizzleMemoryStore
             : {}),
           ...(input.sensitivity !== undefined ? { sensitivity } : {}),
           ...(input.status !== undefined ? { status: input.status } : {}),
+          ...(input.reviewStatus !== undefined
+            ? { reviewStatus: input.reviewStatus }
+            : {}),
           ...(input.sourceConversationId !== undefined
             ? { sourceConversationId: input.sourceConversationId }
             : {}),
@@ -334,6 +344,8 @@ export class DrizzleMemoryStore
     const now = new Date(query.now ?? Date.now());
 
     conditions.push(eq(semanticMemories.status, 'active'));
+    // 待审核/已驳回的记忆不进入模型上下文
+    conditions.push(eq(semanticMemories.reviewStatus, 'approved'));
     conditions.push(
       or(
         isNull(semanticMemories.expiresAt),
@@ -488,6 +500,9 @@ export class DrizzleMemoryStore
           ? { sensitivity: patch.sensitivity }
           : {}),
         ...(patch.status !== undefined ? { status: patch.status } : {}),
+        ...(patch.reviewStatus !== undefined
+          ? { reviewStatus: patch.reviewStatus }
+          : {}),
         ...(patch.confidence !== undefined
           ? { confidence: patch.confidence }
           : {}),

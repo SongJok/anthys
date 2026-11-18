@@ -1090,6 +1090,30 @@ describe('在线对话与可观测性接口', () => {
       { method: 'DELETE', headers: headers() },
     );
     expect((await body(removed)).removed).toBe(true);
+
+    const scheduleAudits = (await ctx.center.listAuditLogs(200)).filter(
+      (entry) => entry.actionType === 'UPDATE_SCHEDULES',
+    );
+    expect(scheduleAudits).toHaveLength(4);
+    const createAudit = scheduleAudits.find(
+      (entry) =>
+        entry.afterSnapshot.title === '每日巡检' &&
+        Object.keys(entry.beforeSnapshot).length === 0,
+    );
+    expect(createAudit?.beforeSnapshot).toEqual({});
+    expect(createAudit?.adminStaffId).toBe('web-console');
+    const updateAudit = scheduleAudits.find(
+      (entry) => entry.afterSnapshot.enabled === false,
+    );
+    expect(updateAudit?.beforeSnapshot.enabled).toBe(true);
+    const runAudit = scheduleAudits.find(
+      (entry) => entry.afterSnapshot.trigger === 'run-now',
+    );
+    expect(runAudit?.afterSnapshot.id).toBe(task.id);
+    const deleteAudit = scheduleAudits.find(
+      (entry) => Object.keys(entry.afterSnapshot).length === 0,
+    );
+    expect(deleteAudit?.beforeSnapshot.id).toBe(task.id);
   });
 
   it('系统级周期循环只读接口需要鉴权并返回循环列表', async () => {
@@ -1319,6 +1343,9 @@ describe('安全加固：RBAC、HttpOnly Cookie 会话与反代头校验', () =>
     trustActorHeader?: boolean;
     now?: () => number;
     sessionTtlMs?: number;
+    nodeEnv?: string;
+    allowInsecure?: boolean;
+    loginRateLimit?: { maxAttempts?: number; windowMs?: number };
   }) => {
     const auditStore = new MemoryAuditStore();
     const center = new Center({
@@ -1349,6 +1376,11 @@ describe('安全加固：RBAC、HttpOnly Cookie 会话与反代头校验', () =>
         : {}),
       ...(extra?.now ? { now: extra.now } : {}),
       ...(extra?.sessionTtlMs ? { sessionTtlMs: extra.sessionTtlMs } : {}),
+      ...(extra?.nodeEnv !== undefined ? { nodeEnv: extra.nodeEnv } : {}),
+      ...(extra?.allowInsecure !== undefined
+        ? { allowInsecure: extra.allowInsecure }
+        : {}),
+      ...(extra?.loginRateLimit ? { loginRateLimit: extra.loginRateLimit } : {}),
       metrics,
     });
     return { app, auditStore, metrics };
@@ -1534,6 +1566,113 @@ describe('安全加固：RBAC、HttpOnly Cookie 会话与反代头校验', () =>
     });
     expect(res2.status).toBe(200);
     expect(trusted.auditStore.entries[0]?.adminStaffId).toBe('trusted-staff');
+  });
+
+  it('生产环境未配置 Token 且未显式放行时拒绝启动（fail-closed）', async () => {
+    await expect(
+      buildHardenedApp({ authToken: '', nodeEnv: 'production' }),
+    ).rejects.toThrow(/生产环境必须配置 ADMIN_API_TOKEN/);
+  });
+
+  it('生产环境显式 ADMIN_ALLOW_INSECURE=true 时允许开放访问', async () => {
+    const { app } = await buildHardenedApp({
+      authToken: '',
+      nodeEnv: 'production',
+      allowInsecure: true,
+    });
+    const res = await app.request('/api/v1/auth/session', { method: 'POST' });
+    expect(res.status).toBe(200);
+    expect(await body(res)).toMatchObject({ authRequired: false, role: 'admin' });
+  });
+
+  it('生产环境配置 Token 后正常启动并可登录', async () => {
+    const { app } = await buildHardenedApp({ nodeEnv: 'production' });
+    const res = await app.request('/api/v1/auth/session', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ token: TOKEN }),
+    });
+    expect(res.status).toBe(200);
+  });
+
+  it('非生产环境未配置 Token 仍开放访问（本地开发）', async () => {
+    const { app } = await buildHardenedApp({
+      authToken: '',
+      nodeEnv: 'development',
+    });
+    const res = await app.request('/api/v1/auth/session', { method: 'POST' });
+    expect(res.status).toBe(200);
+    expect(await body(res)).toMatchObject({ authRequired: false });
+  });
+
+  it('登录失败按 IP 限流：超过阈值返回 429，且不影响其他 IP', async () => {
+    const { app } = await buildHardenedApp({
+      loginRateLimit: { maxAttempts: 3, windowMs: 60_000 },
+    });
+    const badLogin = (ip: string) =>
+      app.request('/api/v1/auth/session', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-forwarded-for': ip },
+        body: JSON.stringify({ token: 'wrong' }),
+      });
+    for (let i = 0; i < 3; i += 1) {
+      expect((await badLogin('1.2.3.4')).status).toBe(401);
+    }
+    const blocked = await badLogin('1.2.3.4');
+    expect(blocked.status).toBe(429);
+    expect(Number(blocked.headers.get('retry-after'))).toBeGreaterThan(0);
+    // 即便携带正确 Token，被限流的 IP 仍拒绝
+    const blockedGood = await app.request('/api/v1/auth/session', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-forwarded-for': '1.2.3.4' },
+      body: JSON.stringify({ token: TOKEN }),
+    });
+    expect(blockedGood.status).toBe(429);
+    // 其他 IP 不受影响
+    const otherIp = await app.request('/api/v1/auth/session', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-forwarded-for': '5.6.7.8' },
+      body: JSON.stringify({ token: TOKEN }),
+    });
+    expect(otherIp.status).toBe(200);
+  });
+
+  it('登录成功清零该 IP 的失败计数', async () => {
+    const { app } = await buildHardenedApp({
+      loginRateLimit: { maxAttempts: 3, windowMs: 60_000 },
+    });
+    const attempt = (token: string) =>
+      app.request('/api/v1/auth/session', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-forwarded-for': '9.9.9.9' },
+        body: JSON.stringify({ token }),
+      });
+    expect((await attempt('wrong')).status).toBe(401);
+    expect((await attempt('wrong')).status).toBe(401);
+    expect((await attempt(TOKEN)).status).toBe(200); // 成功清零
+    expect((await attempt('wrong')).status).toBe(401);
+    expect((await attempt('wrong')).status).toBe(401);
+    expect((await attempt('wrong')).status).toBe(401);
+    expect((await attempt('wrong')).status).toBe(429);
+  });
+
+  it('限流窗口过期后自动恢复', async () => {
+    let clock = NOW;
+    const { app } = await buildHardenedApp({
+      now: () => clock,
+      loginRateLimit: { maxAttempts: 2, windowMs: 60_000 },
+    });
+    const badLogin = () =>
+      app.request('/api/v1/auth/session', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-forwarded-for': '7.7.7.7' },
+        body: JSON.stringify({ token: 'wrong' }),
+      });
+    expect((await badLogin()).status).toBe(401);
+    expect((await badLogin()).status).toBe(401);
+    expect((await badLogin()).status).toBe(429);
+    clock += 60_001;
+    expect((await badLogin()).status).toBe(401);
   });
 });
 

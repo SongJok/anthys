@@ -153,6 +153,7 @@ export type AgentStreamEvent =
       type: 'tool_start';
       toolName: string;
       args: Record<string, unknown>;
+      risk?: 'read' | 'write' | 'destructive';
       stepId?: string;
       turnId?: string;
     }

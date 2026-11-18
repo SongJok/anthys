@@ -578,6 +578,7 @@ describe('AgentHarness', () => {
       priority: 0,
       attempts: 1,
       maxAttempts: 2,
+      fencingToken: 1,
       leaseOwner: 'runner',
       leaseExpiresAt: 0,
       createdAt: 0,
@@ -694,6 +695,7 @@ describe('AgentHarness', () => {
       priority: 0,
       attempts: 1,
       maxAttempts: 2,
+      fencingToken: 1,
       leaseOwner: 'runner',
       leaseExpiresAt: 0,
       createdAt: 0,
@@ -782,6 +784,7 @@ describe('AgentHarness', () => {
       priority: 0,
       attempts: 1,
       maxAttempts: 2,
+      fencingToken: 1,
       leaseOwner: 'runner',
       leaseExpiresAt: 0,
       createdAt: 0,
@@ -1029,6 +1032,39 @@ describe('AgentHarness', () => {
       totalTokens: 12,
       proactive: false,
     });
+  });
+
+  it('配额预留凭证传入结算，准入拒接时释放预留', async () => {
+    const calls: { messages: unknown[] }[] = [];
+    const recorded: Array<{ reservation: unknown }> = [];
+    const released: unknown[] = [];
+    const reserveOpts: Array<{ reserveTokens?: number }> = [];
+    const { harness } = createHarness(scriptedEngine(calls), {
+      async assertWithinQuota(_input, options) {
+        reserveOpts.push(options ?? {});
+        return { id: 'res-1' };
+      },
+      async record(_input, reservation) {
+        recorded.push({ reservation });
+      },
+      async release(reservation) {
+        released.push(reservation);
+      },
+    });
+
+    await harness.handleMessage(inbound(), { emit: () => undefined });
+    expect(reserveOpts[0]?.reserveTokens).toBe(1_000);
+    expect(recorded[0]?.reservation).toEqual({ id: 'res-1' });
+    expect(released).toHaveLength(0);
+
+    const result = await harness.handleMessage(
+      inbound({ messageId: 'msg-2', text: '帮我整理季度报表，大概需要 40 分钟' }),
+      { emit: () => undefined },
+    );
+    expect(result?.answer).toContain('机器人不认可这个需求');
+    expect(released).toEqual([{ id: 'res-1' }]);
+    expect(recorded).toHaveLength(1);
+    expect(calls).toHaveLength(1);
   });
 
   it('引擎抛错时不写入助手消息并向上抛出', async () => {

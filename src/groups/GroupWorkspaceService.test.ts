@@ -178,7 +178,7 @@ function semanticRecord(
     embedding: null,
     shareableInGroup: true,
     sensitivity: 'normal',
-    status: 'active',
+    status: 'active', reviewStatus: 'approved',
     sourceConversationId: 'cid-group-1',
     sourceConversationType: '2',
     sourceMessageId: null,

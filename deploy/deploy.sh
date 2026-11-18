@@ -61,10 +61,10 @@ log "构建（控制台静态资源 + 服务端 dist/index.js）"
 as_app pnpm -C "$APP_PATH" build
 
 if [ "$SKIP_DB_PUSH" != "1" ]; then
-  log "同步数据库表结构"
-  as_app pnpm -C "$APP_PATH" run db:push
-  log "补齐扩展索引与约束迁移（pgvector HNSW / pg_trgm / tsvector / pending_actions）"
-  as_app pnpm -C "$APP_PATH" run db:extend
+  log "存量库基线标记（空库或已有迁移记录时自动跳过）"
+  as_app pnpm -C "$APP_PATH" run db:baseline
+  log "应用版本化迁移（drizzle/）"
+  as_app pnpm -C "$APP_PATH" run db:migrate
 fi
 
 log "重启服务"

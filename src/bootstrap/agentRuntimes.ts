@@ -12,6 +12,7 @@ import type {
 import { AgentRuntimeRegistry } from '../harness/AgentRuntimeRegistry.js';
 import { ModelRoutingEngine } from '../harness/ModelRoutingEngine.js';
 import type { RunControlRegistry } from '../harness/RunControlRegistry.js';
+import type { ToolExecutionLedger } from '../harness/ToolExecutionLedger.js';
 import type { PersonaInput } from '../memory/ContextAssembler.js';
 import { createChatModel, inferDialect } from '../react/createChatModel.js';
 import { createPlanner } from '../react/Planner.js';
@@ -48,6 +49,7 @@ export interface AgentRuntimesDeps {
     request: ToolApprovalRequest,
     context: ExecutionContext,
   ) => Promise<ToolApprovalDecision>;
+  writeLedger: ToolExecutionLedger;
   jobStore: Pick<AgentJobStore, 'enqueue'>;
 }
 
@@ -84,6 +86,7 @@ export function setupAgentRuntimes(
     toolProviders,
     applyExecutionPolicy,
     resolveToolApproval,
+    writeLedger,
     jobStore,
   } = deps;
 
@@ -187,6 +190,7 @@ export function setupAgentRuntimes(
         (llmConfig.enableNativeReasoning ? 'auto' : 'off')) !== 'off',
     ...(llmConfig.maxTokens ? { maxTokens: llmConfig.maxTokens } : {}),
     approval: resolveToolApproval,
+    writeLedger,
     toolTimeoutMs,
     ...(planner ? { planner } : {}),
     consumeSteering,
@@ -200,6 +204,7 @@ export function setupAgentRuntimes(
     temperature: 0,
     enableNativeReasoning: false,
     approval: resolveToolApproval,
+    writeLedger,
     toolTimeoutMs,
     toolFilter: (tool) => tool.risk === 'read',
     ...watchdogRunOptions,
@@ -225,6 +230,7 @@ export function setupAgentRuntimes(
         temperature: 0,
         enableNativeReasoning: false,
         approval: resolveToolApproval,
+    writeLedger,
         toolTimeoutMs,
         ...watchdogRunOptions,
       }),
@@ -292,6 +298,7 @@ export function setupAgentRuntimes(
       enableNativeReasoning: profile.thinking !== 'off',
       ...(profile.maxTokens ? { maxTokens: profile.maxTokens } : {}),
       approval: resolveToolApproval,
+    writeLedger,
       toolTimeoutMs,
       ...(planner ? { planner } : {}),
       consumeSteering,
@@ -337,6 +344,7 @@ export function setupAgentRuntimes(
         enableNativeReasoning: profile.thinking !== 'off',
         ...(profile.maxTokens ? { maxTokens: profile.maxTokens } : {}),
         approval: resolveToolApproval,
+    writeLedger,
         toolTimeoutMs,
         ...(planner ? { planner } : {}),
         consumeSteering,

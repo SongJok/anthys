@@ -64,6 +64,8 @@ export type SemanticMemoryScope = 'global' | 'group' | 'group_member' | 'user';
 export type SemanticMemoryKind = 'terminology' | 'profile';
 export type SemanticMemoryStatus = 'active' | 'retired';
 export type SemanticMemorySensitivity = 'normal' | 'private' | 'sensitive';
+/** 审核状态：只有 approved 的记忆会被召回；pending/rejected 对模型不可见 */
+export type SemanticMemoryReviewStatus = 'approved' | 'pending' | 'rejected';
 
 /** 群内成员专属记忆的主体键：`<groupConversationId>::<personKey>`，严格按群与成员双重隔离 */
 export function groupMemberSubjectKey(
@@ -98,6 +100,7 @@ export interface SemanticMemoryRecord {
   shareableInGroup: boolean;
   sensitivity: SemanticMemorySensitivity;
   status: SemanticMemoryStatus;
+  reviewStatus: SemanticMemoryReviewStatus;
   sourceConversationId: string | null;
   sourceConversationType: '1' | '2' | null;
   sourceMessageId: string | null;
@@ -118,6 +121,7 @@ export interface SemanticMemoryUpsertInput {
   shareableInGroup?: boolean;
   sensitivity?: SemanticMemorySensitivity;
   status?: SemanticMemoryStatus;
+  reviewStatus?: SemanticMemoryReviewStatus;
   sourceConversationId?: string | null;
   sourceConversationType?: '1' | '2' | null;
   sourceMessageId?: string | null;
@@ -146,6 +150,7 @@ export interface SemanticMemoryPatch {
   shareableInGroup?: boolean;
   sensitivity?: SemanticMemorySensitivity;
   status?: SemanticMemoryStatus;
+  reviewStatus?: SemanticMemoryReviewStatus;
   confidence?: number;
   expiresAt?: number | null;
 }

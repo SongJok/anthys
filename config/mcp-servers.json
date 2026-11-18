@@ -10,7 +10,10 @@
         "authorization": "Bearer ${ENTERPRISE_MCP_TOKEN}"
       },
       "timeoutMs": 480000,
-      "maxResultChars": 16000
+      "maxResultChars": 16000,
+      "toolRisk": {
+        "chat": "read"
+      }
     },
     {
       "id": "amap",
@@ -20,6 +23,7 @@
       "endpointOrCommand": "https://mcp.amap.com/mcp?key=${AMAP_WEB_KEY}",
       "timeoutMs": 30000,
       "maxResultChars": 16000,
+      "defaultRisk": "read",
       "enabled": false
     },
     {

@@ -3,6 +3,7 @@ import { HTTPException } from 'hono/http-exception';
 import { maskSecret } from '../../config/DynamicConfigCenter.js';
 import type { DynamicConfigCenter } from '../../config/DynamicConfigCenter.js';
 import type {
+  AdminActionType,
   AdminAuditLog,
   GroupDirectory,
   LlmSandboxTestResult,
@@ -120,6 +121,31 @@ function readObject(
   return value as Record<string, unknown>;
 }
 
+/** 高危/不可逆/安全敏感操作：审计写入失败必须 fail-closed，不能静默吞掉 */
+const CRITICAL_AUDIT_ACTIONS = new Set<AdminActionType>([
+  'EMERGENCY_MUTE',
+  'PURGE_DATA',
+  'DELETE_USER_DATA',
+  'UPDATE_RETENTION',
+  'RELOAD_MCP',
+  'UPDATE_MCP_POLICY',
+  'DELETE_PERSONA',
+  'DELETE_SEMANTIC_MEMORY',
+  'DELETE_PROJECT',
+  'DELETE_GROUP_GOAL',
+  'DELETE_GROUP_TASK',
+  'DELETE_GROUP_MODEL_ROUTE',
+  'INSTALL_PLUGIN',
+  'UPGRADE_PLUGIN',
+  'ROLLBACK_PLUGIN',
+  'UNINSTALL_PLUGIN',
+  'UPDATE_WHITELIST',
+  'SYNC_WHITELIST',
+  'BIND_PERSON_IDENTITY',
+  'GROUP_NOTIFY_ALL',
+  'UPDATE_SCHEDULES',
+]);
+
 /** 管理后台 Web 改动同样落审计，保证 ChatOps 与 Web 双通道可追溯 */
 export async function recordWebAudit(
   center: DynamicConfigCenter,
@@ -127,18 +153,38 @@ export async function recordWebAudit(
   actionType: AdminAuditLog['actionType'],
   beforeSnapshot: Record<string, unknown>,
   afterSnapshot: Record<string, unknown>,
+  options: { critical?: boolean } = {},
 ): Promise<void> {
-  try {
-    await center.recordAudit({
-      adminStaffId: actorStaffId,
-      adminNick: actorStaffId,
-      actionType,
-      beforeSnapshot,
-      afterSnapshot,
-    });
-  } catch {
-    // 审计落库失败不能阻断已生效的热更新
+  const critical = options.critical ?? CRITICAL_AUDIT_ACTIONS.has(actionType);
+  const input = {
+    adminStaffId: actorStaffId,
+    adminNick: actorStaffId,
+    actionType,
+    beforeSnapshot,
+    afterSnapshot,
+  };
+  if (!critical) {
+    try {
+      await center.recordAudit(input);
+    } catch {
+      // 非高危热更新已生效，审计落库失败不阻断
+    }
+    return;
   }
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      await center.recordAudit(input);
+      return;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  const detail =
+    lastError instanceof Error ? lastError.message : String(lastError);
+  throw new HTTPException(500, {
+    message: `高危操作审计写入失败，已拒绝返回成功（${actionType}）：${detail}`,
+  });
 }
 
 export interface AdminRequestSecurityContext {

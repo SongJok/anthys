@@ -315,6 +315,7 @@ export class DynamicConfigCenter
         enabled: false,
         dailyTokensPerUser: 0,
         dailyTokensPerConversation: 0,
+        dailyCostMicros: 0,
       }
     );
   }

@@ -5,6 +5,7 @@ import type {
   SemanticMemoryAdminPort,
   SemanticMemoryKind,
   SemanticMemoryPatch,
+  SemanticMemoryReviewStatus,
   SemanticMemoryScope,
   SemanticMemorySensitivity,
   SemanticMemoryStatus,
@@ -36,6 +37,11 @@ const SENSITIVITIES: SemanticMemorySensitivity[] = [
   'normal',
   'private',
   'sensitive',
+];
+const REVIEW_STATUSES: SemanticMemoryReviewStatus[] = [
+  'approved',
+  'pending',
+  'rejected',
 ];
 
 function parseEnum<T extends string>(
@@ -98,6 +104,11 @@ export function createMemoryRoutes(deps: MemoryRouteDeps): Hono {
       STATUSES,
       'status',
     );
+    const reviewStatus = parseEnum(
+      readString(body, 'reviewStatus'),
+      REVIEW_STATUSES,
+      'reviewStatus',
+    );
     const confidence = readNumber(body, 'confidence');
     if (
       confidence !== undefined &&
@@ -117,6 +128,7 @@ export function createMemoryRoutes(deps: MemoryRouteDeps): Hono {
         : {}),
       ...(sensitivity ? { sensitivity } : {}),
       ...(status ? { status } : {}),
+      ...(reviewStatus ? { reviewStatus } : {}),
       ...(confidence !== undefined ? { confidence } : {}),
     };
     if (Object.prototype.hasOwnProperty.call(body, 'expiresAt')) {

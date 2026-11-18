@@ -234,6 +234,7 @@ async function main(): Promise<void> {
       toolProviders: tools.toolRegistry.providers,
       applyExecutionPolicy: tools.applyExecutionPolicy,
       resolveToolApproval: tools.resolveToolApproval,
+      writeLedger: tools.writeLedger,
       jobStore,
     });
 
