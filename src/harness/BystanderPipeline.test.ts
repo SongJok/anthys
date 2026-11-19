@@ -349,9 +349,11 @@ describe('群聊旁听与非 @ 自主回复主链路', () => {
       content: string;
     }>;
     expect(messages[0]?.role).toBe('system');
-    expect(messages[0]?.content).toContain('群聊旁听记录');
-    expect(messages[0]?.content).toContain('王五');
-    expect(messages[0]?.content).toContain('数据库连接池打满');
+    const bystanderTail = messages.at(-2)?.content ?? '';
+    expect(messages.at(-2)?.role).toBe('system');
+    expect(bystanderTail).toContain('群聊旁听记录');
+    expect(bystanderTail).toContain('王五');
+    expect(bystanderTail).toContain('数据库连接池打满');
     expect(messages.at(-1)?.content).toContain('主动提供帮助');
     expect(messages.at(-1)?.content).toContain('订单接口一直报 504');
 
@@ -462,9 +464,11 @@ describe('群聊旁听与非 @ 自主回复主链路', () => {
       role: string;
       content: string;
     }>;
-    expect(messages[0]?.content).toContain('群聊旁听记录');
-    expect(messages[0]?.content).toContain('数据库连接池打满了');
-    expect(messages[0]?.content).toContain('王五你看下这个报错堆栈');
+    const followUpTail = messages.at(-2)?.content ?? '';
+    expect(messages.at(-2)?.role).toBe('system');
+    expect(followUpTail).toContain('群聊旁听记录');
+    expect(followUpTail).toContain('数据库连接池打满了');
+    expect(followUpTail).toContain('王五你看下这个报错堆栈');
     expect(messages.at(-1)).toEqual({
       role: 'user',
       content: '李四：按刚才大家讨论的报错现象帮我查一下日志',

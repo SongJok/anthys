@@ -951,11 +951,12 @@ describe('AgentHarness', () => {
       'system',
       'user',
       'assistant',
+      'system',
       'user',
     ]);
     expect(second[1]?.content).toBe('现在几点？');
     expect(second[2]?.content).toContain('现在是十点。');
-    expect(second[3]?.content).toBe('那明天呢？');
+    expect(second[4]?.content).toBe('那明天呢？');
   });
 
   it('群聊 @ 机器人时按会话维度复用记忆', async () => {
@@ -981,6 +982,7 @@ describe('AgentHarness', () => {
       'system',
       'user',
       'assistant',
+      'system',
       'user',
     ]);
   });

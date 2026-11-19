@@ -36,7 +36,7 @@ describe('ContextAssembler', () => {
       userText: '你好',
     });
 
-    expect(messages).toHaveLength(2);
+    expect(messages).toHaveLength(3);
     const system = messages[0];
     expect(system?.role).toBe('system');
     expect(system?.content).toContain('小钉');
@@ -44,11 +44,67 @@ describe('ContextAssembler', () => {
     expect(system?.content).toContain('先结论后要点');
     expect(system?.content).toContain('优先调用可用工具');
     expect(system?.content).toContain('未标记错误的工具返回就是真实数据');
-    expect(system?.content).toContain('当前时间（Asia/Shanghai，UTC+08:00）');
-    expect(system?.content).toContain('今天是 2026-10-30（周五）');
-    expect(system?.content).toContain('明天是 2026-10-31（周六）');
-    expect(system?.content).toContain('只在其消息标注的日期成立');
-    expect(messages[1]).toEqual({ role: 'user', content: '你好' });
+    const tail = messages[1];
+    expect(tail?.role).toBe('system');
+    expect(tail?.content).toContain('当前时间（Asia/Shanghai，UTC+08:00）');
+    expect(tail?.content).toContain('今天是 2026-10-30（周五）');
+    expect(tail?.content).toContain('明天是 2026-10-31（周六）');
+    expect(tail?.content).toContain('只在其消息标注的日期成立');
+    expect(messages[2]).toEqual({ role: 'user', content: '你好' });
+  });
+
+  it('易变时钟与记忆放在历史之后，稳定前缀跨轮逐字节一致', () => {
+    let clock = Date.UTC(2026, 9, 30, 2, 0, 0);
+    const assembler = new ContextAssembler({
+      windowMessages: 20,
+      now: () => clock,
+    });
+    const history = [
+      historyMessage('m1', 'user', '第一句'),
+      historyMessage('m2', 'assistant', '第一答'),
+    ];
+    const first = assembler.build({ persona, history, userText: '第二句' });
+
+    clock += 61_000;
+    const second = assembler.build({
+      persona,
+      history: [
+        ...history,
+        historyMessage('m3', 'user', '第二句'),
+        historyMessage('m4', 'assistant', '第二答'),
+      ],
+      userText: '第三句',
+    });
+
+    expect(second[0]).toEqual(first[0]);
+    expect(second.slice(1, 3)).toEqual(first.slice(1, 3));
+    expect(second[1]?.content).not.toContain('当前时间');
+    const firstTail = first[first.length - 2]?.content ?? '';
+    const secondTail = second[second.length - 2]?.content ?? '';
+    expect(firstTail).not.toBe(secondTail);
+    expect(secondTail).toContain('2026-10-30 10:01');
+  });
+
+  it('三层记忆随易变尾部注入，不污染稳定前缀', () => {
+    const assembler = new ContextAssembler({ windowMessages: 20, now: fixedNow });
+    const messages = assembler.build({
+      persona,
+      history: [],
+      userText: '他是谁',
+      memoryContext: {
+        personaSystemPrompt: '你是小钉',
+        userSemanticProfile: '张三，后端工程师',
+        groupRecentTranscript: '',
+        episodicSummary: '上次讨论过部署',
+        activeTurnMessages: [],
+      },
+    });
+    expect(messages[0]?.content).toBe('你是小钉');
+    const tail = messages[1]?.content ?? '';
+    expect(tail).toContain('## 三层记忆上下文');
+    expect(tail).toContain('张三，后端工程师');
+    expect(tail).toContain('上次讨论过部署');
+    expect(tail).toContain('当前时间（Asia/Shanghai');
   });
 
   it('把术语库等额外系统提示合并到同一条 system 消息', () => {
@@ -60,12 +116,12 @@ describe('ContextAssembler', () => {
       extraSystemPrompt: '## 企业术语知识库\n- CQ：变更请求单',
     });
 
-    expect(messages).toHaveLength(2);
+    expect(messages).toHaveLength(3);
     const system = messages[0]?.content ?? '';
     expect(system).toContain('小钉');
     expect(system).toContain('## 企业术语知识库');
     expect(system).toContain('CQ：变更请求单');
-    expect(messages[1]).toEqual({ role: 'user', content: 'CQ 是什么' });
+    expect(messages[2]).toEqual({ role: 'user', content: 'CQ 是什么' });
   });
 
   it('按窗口截断历史并保持原有顺序', () => {
@@ -106,6 +162,7 @@ describe('ContextAssembler', () => {
     expect(messages.map((m) => m.content)).toEqual([
       expect.stringContaining('小钉'),
       '[2026-10-30 09:00 周五] 旧回答',
+      expect.stringContaining('当前时间（Asia/Shanghai'),
       '新问题',
     ]);
   });
@@ -135,7 +192,7 @@ describe('ContextAssembler', () => {
       role: 'assistant',
       content: '[2026-10-30 09:00 周五] 正在排查',
     });
-    expect(messages[3]).toEqual({ role: 'user', content: '李四：看下日志' });
+    expect(messages[4]).toEqual({ role: 'user', content: '李四：看下日志' });
   });
 
   it('单聊场景不添加发言人前缀', () => {
@@ -156,7 +213,7 @@ describe('ContextAssembler', () => {
       userText: '看下日志',
     });
     expect(messages[1]).toEqual({ role: 'user', content: '部署失败了吗' });
-    expect(messages[2]).toEqual({ role: 'user', content: '看下日志' });
+    expect(messages[3]).toEqual({ role: 'user', content: '看下日志' });
   });
 
   it('不把 assistant 的内部思维链注入后续上下文', () => {

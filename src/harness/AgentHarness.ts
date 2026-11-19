@@ -281,7 +281,7 @@ export class AgentHarness {
       dbConversationId: conversation.id,
       userText: text,
       personKey,
-      personaSystemPrompt: buildSystemPrompt(persona, this.now),
+      personaSystemPrompt: buildSystemPrompt(persona),
       audience: message.conversationType === '2' ? 'group' : 'single',
       excludeMessageId: message.messageId,
     });
@@ -463,7 +463,7 @@ export class AgentHarness {
       dbConversationId: conversation.id,
       userText: text,
       personKey,
-      personaSystemPrompt: buildSystemPrompt(persona, this.now),
+      personaSystemPrompt: buildSystemPrompt(persona),
       audience: 'group',
     });
     const glossaryPrompt = await this.buildGlossaryPrompt(message, text);
@@ -593,7 +593,7 @@ export class AgentHarness {
       dbConversationId: conversation.id,
       userText: query,
       personKey,
-      personaSystemPrompt: buildSystemPrompt(persona, this.now),
+      personaSystemPrompt: buildSystemPrompt(persona),
       audience: 'group',
       excludeMessageId: message.messageId,
     });
@@ -730,7 +730,7 @@ export class AgentHarness {
       dbConversationId: conversation.id,
       userText: text,
       personKey,
-      personaSystemPrompt: buildSystemPrompt(persona, this.now),
+      personaSystemPrompt: buildSystemPrompt(persona),
       audience: message.conversationType === '2' ? 'group' : 'single',
     });
     const extraSystemPrompt = await this.buildExtraSystemPrompt(

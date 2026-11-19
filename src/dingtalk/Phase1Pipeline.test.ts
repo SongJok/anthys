@@ -405,10 +405,11 @@ describe('阶段一链路集成（网关 → Harness → ReAct → 卡片）', (
       'system',
       'user',
       'assistant',
+      'system',
       'user',
     ]);
     expect(secondTurn?.messages[2]?.content).toContain('答案是 4。');
-    expect(secondTurn?.messages[3]?.content).toBe('再加 1 呢？');
+    expect(secondTurn?.messages[4]?.content).toBe('再加 1 呢？');
     expect(
       ctx.updates.some(
         (update) =>

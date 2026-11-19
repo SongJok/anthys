@@ -15,6 +15,7 @@ import type { RunControlRegistry } from '../harness/RunControlRegistry.js';
 import type { ToolExecutionLedger } from '../harness/ToolExecutionLedger.js';
 import type { PersonaInput } from '../memory/ContextAssembler.js';
 import { createChatModel, inferDialect } from '../react/createChatModel.js';
+import { createModelRetryPolicy } from '../react/modelRetry.js';
 import { createPlanner } from '../react/Planner.js';
 import { ReActRunner } from '../react/ReActRunner.js';
 import { SubagentToolProvider } from '../react/SubagentToolProvider.js';
@@ -177,6 +178,29 @@ export function setupAgentRuntimes(
   };
   logger.info({ policy: watchdogPolicy }, 'run watchdog configured');
 
+  const modelRetryPolicy = createModelRetryPolicy(process.env);
+  const modelRetryRunOptions = {
+    modelRetry: modelRetryPolicy,
+    onModelRetry: (info: {
+      step: number;
+      attempt: number;
+      delayMs: number;
+      message: string;
+    }): void => {
+      metrics.inc('agent_model_retry_total', { attempt: String(info.attempt) });
+      logger.warn(
+        {
+          step: info.step,
+          attempt: info.attempt,
+          delayMs: info.delayMs,
+          reason: info.message,
+        },
+        'model call transient failure, retrying',
+      );
+    },
+  };
+  logger.info({ policy: modelRetryPolicy }, 'model retry configured');
+
   const consumeSteering = (context: ExecutionContext): string[] =>
     runControl.consumeSteering(context.conversationId);
 
@@ -195,6 +219,7 @@ export function setupAgentRuntimes(
     ...(planner ? { planner } : {}),
     consumeSteering,
     ...watchdogRunOptions,
+    ...modelRetryRunOptions,
   });
 
   const investigationEngine = new ReActRunner({
@@ -208,6 +233,7 @@ export function setupAgentRuntimes(
     toolTimeoutMs,
     toolFilter: (tool) => tool.risk === 'read',
     ...watchdogRunOptions,
+    ...modelRetryRunOptions,
   });
 
   const workerRegistry = createWorkerRegistry({
@@ -233,6 +259,7 @@ export function setupAgentRuntimes(
     writeLedger,
         toolTimeoutMs,
         ...watchdogRunOptions,
+        ...modelRetryRunOptions,
       }),
     };
   }
@@ -303,6 +330,7 @@ export function setupAgentRuntimes(
       ...(planner ? { planner } : {}),
       consumeSteering,
       ...watchdogRunOptions,
+      ...modelRetryRunOptions,
     });
     routedEngines.set(role, runner);
     return runner;
@@ -349,6 +377,7 @@ export function setupAgentRuntimes(
         ...(planner ? { planner } : {}),
         consumeSteering,
         ...watchdogRunOptions,
+        ...modelRetryRunOptions,
       });
     },
     logger,

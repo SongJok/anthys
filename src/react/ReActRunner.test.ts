@@ -933,7 +933,10 @@ describe('ReActRunner', () => {
     expect(result.watchdog?.action).toBe('degrade');
     expect(executions).toBe(4);
     const finalRequest = model.requests.at(-1);
-    expect(finalRequest?.tools).toEqual([]);
+    expect(finalRequest?.tools?.map((tool) => tool.function.name)).toEqual([
+      'lookup',
+    ]);
+    expect(finalRequest?.tools).toEqual(model.requests[0]?.tools);
     expect(finalRequest?.toolChoice).toBe('none');
     expect(
       finalRequest?.messages.some(
@@ -1426,5 +1429,324 @@ describe('ReActRunner 写执行台账', () => {
     });
     expect(counter.calls).toBe(1);
     expect(rows.size).toBe(0);
+  });
+});
+
+describe('ReActRunner 模型瞬态重试', () => {
+  const fastRetry = { maxAttempts: 3, baseDelayMs: 0, maxDelayMs: 0 };
+
+  class FlakyModel implements ChatModel {
+    public readonly modelName = 'flaky-model';
+    public requests: ChatCompletionRequest[] = [];
+
+    constructor(private readonly script: Array<ChatStreamChunk[] | Error>) {}
+
+    public get calls(): number {
+      return this.requests.length;
+    }
+
+    public async *streamChat(
+      request: ChatCompletionRequest,
+    ): AsyncIterable<ChatStreamChunk> {
+      this.requests.push(request);
+      const turn = this.script[this.requests.length - 1];
+      if (turn instanceof Error) throw turn;
+      for (const chunk of turn ?? [{ finishReason: 'stop' }]) {
+        yield chunk;
+      }
+    }
+  }
+
+  function transient(status = 503, message = 'upstream overloaded'): Error {
+    return Object.assign(new Error(message), { status });
+  }
+
+  function retryRecorder(): {
+    retries: Array<{ step: number; attempt: number; delayMs: number; message: string }>;
+    onModelRetry: (info: {
+      step: number;
+      attempt: number;
+      delayMs: number;
+      message: string;
+    }) => void;
+  } {
+    const retries: Array<{
+      step: number;
+      attempt: number;
+      delayMs: number;
+      message: string;
+    }> = [];
+    return { retries, onModelRetry: (info) => retries.push(info) };
+  }
+
+  it('瞬态故障重试后成功，turn_start 只发一次且请求内容不变', async () => {
+    const model = new FlakyModel([
+      transient(),
+      [
+        { contentDelta: '已恢复' },
+        { finishReason: 'stop', usage: { totalTokens: 7 } },
+      ],
+    ]);
+    const { retries, onModelRetry } = retryRecorder();
+    const runner = new ReActRunner({
+      model,
+      toolProviders: [new BuiltinToolProvider()],
+      policy,
+      modelRetry: fastRetry,
+      onModelRetry,
+    });
+    const events: AgentStreamEvent[] = [];
+
+    const result = await runner.run({
+      messages: userMessages,
+      context: makeContext(),
+      emit: (event) => events.push(event),
+    });
+
+    expect(result.answer).toContain('已恢复');
+    expect(model.calls).toBe(2);
+    expect(retries).toEqual([
+      { step: 1, attempt: 1, delayMs: 0, message: 'upstream overloaded' },
+    ]);
+    expect(events.filter((event) => event.type === 'turn_start')).toHaveLength(1);
+    expect(model.requests[1]?.messages).toEqual(model.requests[0]?.messages);
+    expect(events.some((event) => event.type === 'error')).toBe(false);
+  });
+
+  it('重试次数耗尽后抛出原始错误并发 error 事件', async () => {
+    const failure = Object.assign(new Error('socket hang up'), {
+      code: 'ECONNRESET',
+    });
+    const model = new FlakyModel([failure, failure, failure]);
+    const { retries, onModelRetry } = retryRecorder();
+    const runner = new ReActRunner({
+      model,
+      toolProviders: [new BuiltinToolProvider()],
+      policy,
+      modelRetry: { ...fastRetry, maxAttempts: 2 },
+      onModelRetry,
+    });
+    const events: AgentStreamEvent[] = [];
+
+    await expect(
+      runner.run({
+        messages: userMessages,
+        context: makeContext(),
+        emit: (event) => events.push(event),
+      }),
+    ).rejects.toThrow('socket hang up');
+    expect(model.calls).toBe(2);
+    expect(retries.map((item) => item.attempt)).toEqual([1]);
+    expect(events.filter((event) => event.type === 'error')).toHaveLength(1);
+  });
+
+  it('鉴权类错误不重试', async () => {
+    const model = new FlakyModel([
+      transient(401, 'invalid api key'),
+      [{ contentDelta: '不该出现' }, { finishReason: 'stop' }],
+    ]);
+    const { retries, onModelRetry } = retryRecorder();
+    const runner = new ReActRunner({
+      model,
+      toolProviders: [new BuiltinToolProvider()],
+      policy,
+      modelRetry: fastRetry,
+      onModelRetry,
+    });
+
+    await expect(
+      runner.run({
+        messages: userMessages,
+        context: makeContext(),
+        emit: () => undefined,
+      }),
+    ).rejects.toThrow('invalid api key');
+    expect(model.calls).toBe(1);
+    expect(retries).toEqual([]);
+  });
+
+  it('maxAttempts 为 1 时关闭重试', async () => {
+    const model = new FlakyModel([
+      transient(),
+      [{ contentDelta: '不该出现' }, { finishReason: 'stop' }],
+    ]);
+    const runner = new ReActRunner({
+      model,
+      toolProviders: [new BuiltinToolProvider()],
+      policy,
+      modelRetry: { ...fastRetry, maxAttempts: 1 },
+    });
+    await expect(
+      runner.run({
+        messages: userMessages,
+        context: makeContext(),
+        emit: () => undefined,
+      }),
+    ).rejects.toThrow('upstream overloaded');
+    expect(model.calls).toBe(1);
+  });
+
+  it('重试前清空已流出的半句正文，避免卡片重复拼接', async () => {
+    let calls = 0;
+    const model: ChatModel = {
+      modelName: 'half-stream',
+      async *streamChat() {
+        calls += 1;
+        if (calls === 1) {
+          yield { contentDelta: '前半句' };
+          throw transient(503, 'terminated');
+        }
+        yield { contentDelta: '完整答案' };
+        yield { finishReason: 'stop', usage: { totalTokens: 5 } };
+      },
+    };
+    const runner = new ReActRunner({
+      model,
+      toolProviders: [new BuiltinToolProvider()],
+      policy,
+      modelRetry: fastRetry,
+    });
+    const events: AgentStreamEvent[] = [];
+
+    const result = await runner.run({
+      messages: userMessages,
+      context: makeContext(),
+      emit: (event) => events.push(event),
+    });
+
+    expect(calls).toBe(2);
+    expect(events).toContainEqual({
+      type: 'answer_reset',
+      narration: '',
+      turnId: expect.any(String),
+    });
+    expect(result.answer).toContain('完整答案');
+    expect(result.answer).not.toContain('前半句');
+  });
+
+  it('流在工具调用后中断时重试不会重复执行工具', async () => {
+    let calls = 0;
+    let executions = 0;
+    const provider: IToolProvider = {
+      providerName: 'static',
+      getTools: async () => [
+        {
+          name: 'lookup',
+          description: 'lookup once',
+          parametersJsonSchema: { type: 'object', properties: {} },
+          execute: async () => {
+            executions += 1;
+            return '查询结果';
+          },
+        },
+      ],
+    };
+    const model: ChatModel = {
+      modelName: 'interrupted-tool-stream',
+      async *streamChat() {
+        calls += 1;
+        if (calls === 1) {
+          yield {
+            toolCallDelta: {
+              index: 0,
+              id: 'c1',
+              name: 'lookup',
+              argumentsDelta: '{}',
+            },
+          };
+          throw transient(502, 'other side closed');
+        }
+        if (calls === 2) {
+          for (const chunk of toolTurn([
+            { index: 0, id: 'c2', name: 'lookup', args: {} },
+          ])) {
+            yield chunk;
+          }
+          return;
+        }
+        yield { contentDelta: '结论' };
+        yield { finishReason: 'stop', usage: { totalTokens: 5 } };
+      },
+    };
+    const runner = new ReActRunner({
+      model,
+      toolProviders: [provider],
+      policy,
+      modelRetry: fastRetry,
+    });
+
+    const result = await runner.run({
+      messages: userMessages,
+      context: makeContext(),
+      emit: () => undefined,
+    });
+
+    expect(calls).toBe(3);
+    expect(executions).toBe(1);
+    expect(result.answer).toContain('结论');
+  });
+
+  it('用户取消后不再重试', async () => {
+    const controller = new AbortController();
+    let calls = 0;
+    const model: ChatModel = {
+      modelName: 'cancelled',
+      async *streamChat() {
+        calls += 1;
+        controller.abort();
+        throw transient(503, 'terminated');
+      },
+    };
+    const { retries, onModelRetry } = retryRecorder();
+    const runner = new ReActRunner({
+      model,
+      toolProviders: [new BuiltinToolProvider()],
+      policy,
+      modelRetry: fastRetry,
+      onModelRetry,
+    });
+
+    const result = await runner.run({
+      messages: userMessages,
+      context: makeContext(),
+      emit: () => undefined,
+      signal: controller.signal,
+    });
+
+    expect(calls).toBe(1);
+    expect(retries).toEqual([]);
+    expect(result.usage.steps).toBe(1);
+  });
+
+  it('预算截止时间已过时不再重试', async () => {
+    let clock = 1_000_000;
+    let calls = 0;
+    const model: ChatModel = {
+      modelName: 'deadline',
+      async *streamChat() {
+        calls += 1;
+        clock += 10_000;
+        throw transient(503, 'terminated');
+      },
+    };
+    const { retries, onModelRetry } = retryRecorder();
+    const runner = new ReActRunner({
+      model,
+      toolProviders: [new BuiltinToolProvider()],
+      policy,
+      modelRetry: fastRetry,
+      onModelRetry,
+      now: () => clock,
+    });
+
+    await expect(
+      runner.run({
+        messages: userMessages,
+        context: { ...makeContext(), deadlineAt: clock + 5_000, now: () => clock },
+        emit: () => undefined,
+      }),
+    ).rejects.toThrow('terminated');
+    expect(calls).toBe(1);
+    expect(retries).toEqual([]);
   });
 });

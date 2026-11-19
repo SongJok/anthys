@@ -25,7 +25,7 @@ export interface BuildContextInput {
   userText: string;
   now?: () => number;
   memoryContext?: AssembledMemoryContext;
-  /** 术语库等额外系统指令，排在 persona 之后、三层记忆之前 */
+  /** 术语库等额外系统指令，排在 persona 之后、历史之前 */
   extraSystemPrompt?: string;
   /** 群聊历史需要保留发言人，避免多个成员的话被当成同一个人 */
   groupChat?: boolean;
@@ -61,10 +61,8 @@ const TOOL_GUIDANCE = [
   '- 需求预计需要 20 分钟以上、长时间运行或消耗大量 Token 时，直接说明机器人不认可该需求并建议拆分，不要开始执行。',
 ].join('\n');
 
-export function buildSystemPrompt(
-  persona: PersonaInput,
-  now: () => number = Date.now,
-): string {
+/** 只含跨轮稳定的内容；时钟与三层记忆属于易变尾部，放在历史之后，避免击穿 KV 缓存前缀 */
+export function buildSystemPrompt(persona: PersonaInput): string {
   return [
     `你是「${persona.name}」，企业内部钉钉智能助手。`,
     persona.rolePrompt,
@@ -77,8 +75,6 @@ export function buildSystemPrompt(
     buildDefaultLocationPrompt(resolveDefaultLocation()),
     '',
     TOOL_GUIDANCE,
-    '',
-    shanghaiPromptClock(now()),
   ].join('\n');
 }
 
@@ -93,13 +89,8 @@ export class ContextAssembler {
   public build(input: BuildContextInput): ChatMessage[] {
     const basePrompt =
       input.memoryContext?.personaSystemPrompt?.trim() ||
-      buildSystemPrompt(input.persona, input.now ?? this.options.now);
-    const memorySections = this.renderMemorySections(input.memoryContext);
-    const systemContent = [
-      basePrompt,
-      input.extraSystemPrompt?.trim(),
-      memorySections,
-    ]
+      buildSystemPrompt(input.persona);
+    const systemContent = [basePrompt, input.extraSystemPrompt?.trim()]
       .filter((section): section is string => Boolean(section))
       .join('\n\n');
     const messages: ChatMessage[] = [
@@ -139,6 +130,15 @@ export class ContextAssembler {
         content: `${stamp}${sanitizedAssistant}`,
       });
     }
+
+    const now = input.now ?? this.options.now ?? Date.now;
+    const volatileContext = [
+      this.renderMemorySections(input.memoryContext),
+      shanghaiPromptClock(now()),
+    ]
+      .filter((section): section is string => Boolean(section))
+      .join('\n\n');
+    messages.push({ role: 'system', content: volatileContext });
 
     const speaker =
       input.groupChat && input.userSpeaker ? `${input.userSpeaker}：` : '';

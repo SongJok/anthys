@@ -34,6 +34,13 @@ import {
 } from './Planner.js';
 import { extractCitations } from './citations.js';
 import {
+  DEFAULT_MODEL_RETRY_POLICY,
+  isTransientModelError,
+  modelRetryDelayMs,
+  sleepWithSignal,
+  type ModelRetryPolicy,
+} from './modelRetry.js';
+import {
   RunWatchdog,
   contentHash,
   toWatchdogOutcome,
@@ -111,6 +118,15 @@ export interface ReActRunnerOptions {
   onWatchdog?: (decision: WatchdogDecision) => void;
   /** 每轮推理前消费进行中会话的实时引导指令（active steering） */
   consumeSteering?: (context: ExecutionContext) => string[];
+  /** 模型传输层瞬态故障（429/5xx/连接中断）的重试策略；工具执行不经过此路径 */
+  modelRetry?: Partial<ModelRetryPolicy>;
+  /** 每次模型重试的观测回调，用于指标与排查 */
+  onModelRetry?: (info: {
+    step: number;
+    attempt: number;
+    delayMs: number;
+    message: string;
+  }) => void;
 }
 
 interface TurnResult {
@@ -126,6 +142,16 @@ interface TurnResult {
   cachedTokens: number;
   aborted: boolean;
   externallyAborted: boolean;
+}
+
+interface StreamTurnParams {
+  messages: ChatMessage[];
+  tools: ToolSchema[];
+  toolChoice: 'auto' | 'none';
+  signal?: AbortSignal;
+  deadlineAt: number;
+  emit: (event: AgentStreamEvent) => void;
+  step: number;
 }
 
 interface ToolExecutionResult {
@@ -505,7 +531,8 @@ export class ReActRunner implements AgentEngine {
         steps += 1;
         const turn = await this.streamTurn({
           messages,
-          tools: toolsDisabled ? [] : toolSchemas,
+          // 降级只收 toolChoice：移除 schema 会让缓存前缀失效，且历史仍引用这些工具名
+          tools: toolSchemas,
           toolChoice: toolsDisabled ? 'none' : 'auto',
           signal: runController.signal,
           deadlineAt,
@@ -1248,15 +1275,7 @@ export class ReActRunner implements AgentEngine {
     }
   }
 
-  private async streamTurn(params: {
-    messages: ChatMessage[];
-    tools: ToolSchema[];
-    toolChoice: 'auto' | 'none';
-    signal?: AbortSignal;
-    deadlineAt: number;
-    emit: (event: AgentStreamEvent) => void;
-    step: number;
-  }): Promise<TurnResult> {
+  private async streamTurn(params: StreamTurnParams): Promise<TurnResult> {
     const turnId = `turn_${randomUUID().slice(0, 8)}`;
     params.emit({
       type: 'turn_start',
@@ -1264,6 +1283,42 @@ export class ReActRunner implements AgentEngine {
       step: params.step,
     });
 
+    const retryPolicy = {
+      ...DEFAULT_MODEL_RETRY_POLICY,
+      ...this.options.modelRetry,
+    };
+    const maxAttempts = Math.max(1, Math.floor(retryPolicy.maxAttempts));
+
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        return await this.streamTurnOnce(params, turnId);
+      } catch (error) {
+        // 只重试模型传输层瞬态故障；工具副作用发生在流结束之后，不在此路径
+        const retryable =
+          attempt < maxAttempts &&
+          isTransientModelError(error) &&
+          !params.signal?.aborted &&
+          this.now() < params.deadlineAt;
+        if (!retryable) throw error;
+        const delayMs = modelRetryDelayMs(attempt, retryPolicy);
+        this.options.onModelRetry?.({
+          step: params.step,
+          attempt,
+          delayMs,
+          message: error instanceof Error ? error.message : String(error),
+        });
+        await sleepWithSignal(delayMs, params.signal);
+        if (params.signal?.aborted || this.now() >= params.deadlineAt) {
+          throw error;
+        }
+      }
+    }
+  }
+
+  private async streamTurnOnce(
+    params: StreamTurnParams,
+    turnId: string,
+  ): Promise<TurnResult> {
     const pending = new Map<
       number,
       { id?: string; name?: string; arguments: string }
@@ -1361,6 +1416,10 @@ export class ReActRunner implements AgentEngine {
       }
     } catch (error) {
       if (!turnController.signal.aborted && !isAbortError(error)) {
+        // 重试前丢弃已流出的半句，避免卡片正文重复拼接
+        if (content && isTransientModelError(error)) {
+          params.emit({ type: 'answer_reset', narration: '', turnId });
+        }
         throw error;
       }
       aborted = true;
