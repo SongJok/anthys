@@ -6,6 +6,11 @@ import type {
   TranscriptEntry,
 } from '../types/bystander-and-memory.js';
 import type { ChatMessage, ChatModel, InboundMessage } from '../types/core.js';
+import {
+  collectContentStream,
+  reportBackgroundUsage,
+  type BackgroundUsageRecorder,
+} from '../billing/backgroundUsage.js';
 
 /** L2 判官看到的群聊上下文条数 */
 const L2_WINDOW_SIZE = 15;
@@ -252,6 +257,7 @@ export class LlmBystanderClassifier implements BystanderClassifier {
       temperature?: number;
       logger?: BystanderLogger;
       now?: () => number;
+      onUsage?: BackgroundUsageRecorder;
     },
   ) {}
 
@@ -279,16 +285,30 @@ export class LlmBystanderClassifier implements BystanderClassifier {
       },
     ];
 
-    let content = '';
-    for await (const chunk of this.options.model.streamChat({
-      messages,
-      tools: [],
-      toolChoice: 'none',
-      temperature: this.options.temperature ?? 0,
-      enableNativeReasoning: false,
-    })) {
-      content += chunk.contentDelta ?? '';
-    }
+    const { content, usage, durationMs } = await collectContentStream(
+      this.options.model.streamChat({
+        messages,
+        tools: [],
+        toolChoice: 'none',
+        temperature: this.options.temperature ?? 0,
+        enableNativeReasoning: false,
+      }),
+      this.options.now,
+    );
+
+    await reportBackgroundUsage(this.options.onUsage, {
+      worker: 'triage',
+      model: this.options.model.modelName,
+      conversationId: input.conversationId,
+      conversationType: '2',
+      senderStaffId: input.current.senderStaffId,
+      senderNick: input.current.senderNick,
+      totalTokens: usage?.totalTokens ?? 0,
+      ...(usage?.inputTokens !== undefined ? { inputTokens: usage.inputTokens } : {}),
+      ...(usage?.outputTokens !== undefined ? { outputTokens: usage.outputTokens } : {}),
+      ...(usage?.cachedTokens !== undefined ? { cachedTokens: usage.cachedTokens } : {}),
+      durationMs,
+    });
 
     const parsed = extractJsonObject(content);
     const action =

@@ -285,4 +285,107 @@ describe('LlmBystanderClassifier', () => {
       }),
     ).rejects.toThrow('no JSON object');
   });
+
+  function modelWithUsage(content: string): ChatModel {
+    return {
+      modelName: 'triage-model',
+      async *streamChat(): AsyncIterable<ChatStreamChunk> {
+        yield { contentDelta: content };
+        yield {
+          usage: {
+            totalTokens: 120,
+            inputTokens: 100,
+            outputTokens: 20,
+            cachedTokens: 40,
+          },
+        };
+      },
+    };
+  }
+
+  const decisionJson = JSON.stringify({
+    action: 'SILENT',
+    confidence: 0.2,
+    triggerReason: 'NONE',
+    rationale: '闲聊',
+  });
+
+  it('把判官流式用量按 triage 归因上报台账', async () => {
+    const records: Array<Record<string, unknown>> = [];
+    const classifier = new LlmBystanderClassifier({
+      model: modelWithUsage(decisionJson),
+      now: () => BASE_TIME,
+      onUsage: (record) => {
+        records.push(record as unknown as Record<string, unknown>);
+      },
+    });
+
+    await classifier.classify({
+      conversationId: 'cid-g',
+      current: transcript('m1', '订单接口报 504', BASE_TIME, {
+        senderStaffId: 'staff-x',
+        senderNick: '张三',
+      }),
+      window: [],
+      policy: createDefaultBystanderPolicy('cid-g'),
+    });
+
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({
+      worker: 'triage',
+      model: 'triage-model',
+      conversationId: 'cid-g',
+      conversationType: '2',
+      senderStaffId: 'staff-x',
+      senderNick: '张三',
+      totalTokens: 120,
+      inputTokens: 100,
+      outputTokens: 20,
+      cachedTokens: 40,
+    });
+  });
+
+  it('供应商未返回用量时不上报台账', async () => {
+    const records: unknown[] = [];
+    const classifier = new LlmBystanderClassifier({
+      model: scriptedModel(decisionJson),
+      onUsage: (record) => {
+        records.push(record);
+      },
+    });
+    await classifier.classify({
+      conversationId: 'cid-g',
+      current: transcript('m1', '订单接口报 504', BASE_TIME),
+      window: [],
+      policy: createDefaultBystanderPolicy('cid-g'),
+    });
+    expect(records).toHaveLength(0);
+  });
+
+  it('台账记账失败不阻断判官决策（同步抛出与异步拒绝）', async () => {
+    const syncThrow = new LlmBystanderClassifier({
+      model: modelWithUsage(decisionJson),
+      onUsage: () => {
+        throw new Error('ledger down');
+      },
+    });
+    const asyncReject = new LlmBystanderClassifier({
+      model: modelWithUsage(decisionJson),
+      onUsage: async () => {
+        throw new Error('ledger down');
+      },
+    });
+    const input = {
+      conversationId: 'cid-g',
+      current: transcript('m1', '订单接口报 504', BASE_TIME),
+      window: [],
+      policy: createDefaultBystanderPolicy('cid-g'),
+    };
+    await expect(syncThrow.classify(input)).resolves.toMatchObject({
+      action: 'SILENT',
+    });
+    await expect(asyncReject.classify(input)).resolves.toMatchObject({
+      action: 'SILENT',
+    });
+  });
 });

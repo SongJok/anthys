@@ -18,6 +18,11 @@ import {
   formatShanghaiDateTime,
   formatShanghaiMessageStamp,
 } from '../time/shanghaiTime.js';
+import {
+  collectContentStream,
+  reportBackgroundUsage,
+  type BackgroundUsageRecorder,
+} from '../billing/backgroundUsage.js';
 
 export interface MemoryLogger {
   info(obj: Record<string, unknown>, msg: string): void;
@@ -67,6 +72,8 @@ export class LlmEpisodeSummarizer implements EpisodeSummarizer {
       model: ChatModel;
       temperature?: number;
       maxOutputChars?: number;
+      onUsage?: BackgroundUsageRecorder;
+      now?: () => number;
     },
   ) {}
 
@@ -89,16 +96,30 @@ export class LlmEpisodeSummarizer implements EpisodeSummarizer {
       },
     ];
 
-    let summary = '';
-    for await (const chunk of this.options.model.streamChat({
-      messages,
-      tools: [],
-      toolChoice: 'none',
-      temperature: this.options.temperature ?? 0.2,
-      enableNativeReasoning: false,
-    })) {
-      summary += chunk.contentDelta ?? '';
-    }
+    const { content: summary, usage, durationMs } = await collectContentStream(
+      this.options.model.streamChat({
+        messages,
+        tools: [],
+        toolChoice: 'none',
+        temperature: this.options.temperature ?? 0.2,
+        enableNativeReasoning: false,
+      }),
+      this.options.now,
+    );
+
+    await reportBackgroundUsage(this.options.onUsage, {
+      worker: 'memory_compress',
+      model: this.options.model.modelName,
+      conversationId: input.conversationId,
+      conversationType: '1',
+      senderStaffId: '',
+      senderNick: '',
+      totalTokens: usage?.totalTokens ?? 0,
+      ...(usage?.inputTokens !== undefined ? { inputTokens: usage.inputTokens } : {}),
+      ...(usage?.outputTokens !== undefined ? { outputTokens: usage.outputTokens } : {}),
+      ...(usage?.cachedTokens !== undefined ? { cachedTokens: usage.cachedTokens } : {}),
+      durationMs,
+    });
 
     const trimmed = summary.trim();
     if (!trimmed) throw new Error('summarizer returned empty summary');
@@ -181,33 +202,49 @@ export class LlmSemanticFactExtractor implements SemanticFactExtractor {
     private readonly options: {
       model: ChatModel;
       temperature?: number;
+      onUsage?: BackgroundUsageRecorder;
+      now?: () => number;
     },
   ) {}
 
   public async extract(
     input: SemanticExtractionInput,
   ): Promise<ExtractedSemanticFact[]> {
-    let content = '';
-    for await (const chunk of this.options.model.streamChat({
-      messages: [
-        { role: 'system', content: EXTRACTION_SYSTEM_PROMPT },
-        {
-          role: 'user',
-          content: [
-            `发言人：${input.speakerNick}（${input.userId}）`,
-            `会话类型：${input.conversationType === '1' ? '单聊' : '群聊'}`,
-            `用户：${input.userText}`,
-            `助手：${input.assistantText}`,
-          ].join('\n'),
-        },
-      ],
-      tools: [],
-      toolChoice: 'none',
-      temperature: this.options.temperature ?? 0,
-      enableNativeReasoning: false,
-    })) {
-      content += chunk.contentDelta ?? '';
-    }
+    const { content, usage, durationMs } = await collectContentStream(
+      this.options.model.streamChat({
+        messages: [
+          { role: 'system', content: EXTRACTION_SYSTEM_PROMPT },
+          {
+            role: 'user',
+            content: [
+              `发言人：${input.speakerNick}（${input.userId}）`,
+              `会话类型：${input.conversationType === '1' ? '单聊' : '群聊'}`,
+              `用户：${input.userText}`,
+              `助手：${input.assistantText}`,
+            ].join('\n'),
+          },
+        ],
+        tools: [],
+        toolChoice: 'none',
+        temperature: this.options.temperature ?? 0,
+        enableNativeReasoning: false,
+      }),
+      this.options.now,
+    );
+
+    await reportBackgroundUsage(this.options.onUsage, {
+      worker: 'memory_extract',
+      model: this.options.model.modelName,
+      conversationId: input.conversationId,
+      conversationType: input.conversationType,
+      senderStaffId: input.userId,
+      senderNick: input.speakerNick,
+      totalTokens: usage?.totalTokens ?? 0,
+      ...(usage?.inputTokens !== undefined ? { inputTokens: usage.inputTokens } : {}),
+      ...(usage?.outputTokens !== undefined ? { outputTokens: usage.outputTokens } : {}),
+      ...(usage?.cachedTokens !== undefined ? { cachedTokens: usage.cachedTokens } : {}),
+      durationMs,
+    });
 
     const start = content.indexOf('{');
     const end = content.lastIndexOf('}');

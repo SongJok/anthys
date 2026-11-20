@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   HierarchicalMemoryManager,
+  LlmEpisodeSummarizer,
   LlmSemanticFactExtractor,
   type EpisodeSummarizer,
   type EpisodeSummarizerInput,
@@ -17,6 +18,7 @@ import type {
   SemanticRecallQuery,
 } from '../types/bystander-and-memory.js';
 import type {
+  ChatModel,
   ChatStreamChunk,
   StoredMessage,
 } from '../types/core.js';
@@ -913,5 +915,132 @@ describe('HierarchicalMemoryManager', () => {
     expect(group1Member2.userSemanticProfile).not.toContain(
       '张三在一群的成员记忆',
     );
+  });
+});
+
+describe('后台维护 LLM 用量入账', () => {
+  function modelWithUsage(content: string, modelName: string): ChatModel {
+    return {
+      modelName,
+      async *streamChat(): AsyncIterable<ChatStreamChunk> {
+        yield { contentDelta: content };
+        yield {
+          usage: {
+            totalTokens: 80,
+            inputTokens: 70,
+            outputTokens: 10,
+            cachedTokens: 30,
+          },
+        };
+      },
+    };
+  }
+
+  const storedMessages: StoredMessage[] = [
+    {
+      id: 'm1',
+      role: 'user',
+      content: '订单接口 504 怎么排查',
+      reasoning: null,
+      createdAt: Date.UTC(2026, 9, 30, 6, 0, 0),
+    },
+  ];
+
+  it('记忆压缩按 memory_compress 归因上报，senderStaffId 留空只计全局成本', async () => {
+    const records: Array<Record<string, unknown>> = [];
+    const summarizer = new LlmEpisodeSummarizer({
+      model: modelWithUsage('摘要正文', 'compress-model'),
+      now: () => 1_000,
+      onUsage: (record) => {
+        records.push(record as unknown as Record<string, unknown>);
+      },
+    });
+
+    const summary = await summarizer.summarize({
+      conversationId: 'conv-db-1',
+      messages: storedMessages,
+    });
+
+    expect(summary).toBe('摘要正文');
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({
+      worker: 'memory_compress',
+      model: 'compress-model',
+      conversationId: 'conv-db-1',
+      senderStaffId: '',
+      senderNick: '',
+      totalTokens: 80,
+      inputTokens: 70,
+      outputTokens: 10,
+      cachedTokens: 30,
+    });
+  });
+
+  it('语义抽取按 memory_extract 归因上报，沿用 userId 与会话类型', async () => {
+    const records: Array<Record<string, unknown>> = [];
+    const extractor = new LlmSemanticFactExtractor({
+      model: modelWithUsage(
+        JSON.stringify({
+          facts: [
+            { scope: 'user', kind: 'profile', content: '张三负责支付网关', keywords: [] },
+          ],
+        }),
+        'extract-model',
+      ),
+      now: () => 1_000,
+      onUsage: (record) => {
+        records.push(record as unknown as Record<string, unknown>);
+      },
+    });
+
+    const facts = await extractor.extract({
+      userId: 'staff:staff-1',
+      speakerNick: '张三',
+      conversationId: 'cid-group-1',
+      conversationType: '2',
+      userText: '我负责支付网关',
+      assistantText: '收到',
+    });
+
+    expect(facts).toHaveLength(1);
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({
+      worker: 'memory_extract',
+      model: 'extract-model',
+      conversationId: 'cid-group-1',
+      conversationType: '2',
+      senderStaffId: 'staff:staff-1',
+      senderNick: '张三',
+      totalTokens: 80,
+    });
+  });
+
+  it('记账失败不阻断压缩与抽取', async () => {
+    const summarizer = new LlmEpisodeSummarizer({
+      model: modelWithUsage('摘要正文', 'compress-model'),
+      onUsage: async () => {
+        throw new Error('ledger down');
+      },
+    });
+    await expect(
+      summarizer.summarize({ conversationId: 'conv-db-1', messages: storedMessages }),
+    ).resolves.toBe('摘要正文');
+
+    const extractor = new LlmSemanticFactExtractor({
+      model: modelWithUsage(JSON.stringify({ facts: [] }), 'extract-model'),
+      onUsage: () => {
+        throw new Error('ledger down');
+      },
+    });
+    await expect(
+      extractor.extract({
+        userId: 'staff:staff-1',
+        speakerNick: '张三',
+        conversationId: 'cid-1',
+        conversationType: '1',
+        userText: '你好',
+        assistantText: '收到',
+      }),
+    ).resolves.toEqual([]);
   });
 });

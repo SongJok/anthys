@@ -1,6 +1,7 @@
 import type { MetricsRegistry } from '../admin-api/metrics.js';
 import { parseModelPricing } from '../billing/ModelPricing.js';
 import { UsageGuard } from '../billing/UsageGuard.js';
+import type { BackgroundUsageRecorder } from '../billing/backgroundUsage.js';
 import {
   BystanderPolicyProvider,
 } from '../bystander/BystanderPolicyProvider.js';
@@ -136,6 +137,27 @@ export async function setupMemoryAndBystander(
     },
   });
 
+  // 后台维护类 LLM 调用（旁听判官 / 记忆压缩 / 语义抽取）也入账，
+  // 复用 UsageGuard 的定价、重试与失败告警；proactive=true 与主动回复同口径。
+  const recordBackgroundUsage: BackgroundUsageRecorder = async (record) => {
+    await usageGuard.record({
+      conversationId: record.conversationId,
+      conversationType: record.conversationType,
+      senderStaffId: record.senderStaffId,
+      senderNick: record.senderNick,
+      model: record.model,
+      totalTokens: record.totalTokens,
+      ...(record.inputTokens !== undefined ? { inputTokens: record.inputTokens } : {}),
+      ...(record.outputTokens !== undefined ? { outputTokens: record.outputTokens } : {}),
+      ...(record.cachedTokens !== undefined ? { cachedTokens: record.cachedTokens } : {}),
+      steps: 1,
+      durationMs: record.durationMs,
+      proactive: true,
+      jobKind: record.worker,
+      worker: record.worker,
+    });
+  };
+
   let clusterSync: ClusterStateSync | undefined;
   const scheduleSharedPersist = (conversationId: string): void => {
     clusterSync?.schedulePersist(conversationId);
@@ -185,6 +207,7 @@ export async function setupMemoryAndBystander(
       model: runtimes.proactiveModel,
       temperature: 0,
       logger,
+      onUsage: recordBackgroundUsage,
     }),
     debounceMs: bystanderConfig.debounceMs,
     logger,
@@ -192,8 +215,14 @@ export async function setupMemoryAndBystander(
   const hierarchicalMemory = new HierarchicalMemoryManager({
     summaryStore: memoryStore,
     semanticStore: memoryStore,
-    summarizer: new LlmEpisodeSummarizer({ model: runtimes.proactiveModel }),
-    extractor: new LlmSemanticFactExtractor({ model: runtimes.proactiveModel }),
+    summarizer: new LlmEpisodeSummarizer({
+      model: runtimes.proactiveModel,
+      onUsage: recordBackgroundUsage,
+    }),
+    extractor: new LlmSemanticFactExtractor({
+      model: runtimes.proactiveModel,
+      onUsage: recordBackgroundUsage,
+    }),
     compressionThresholdTokens: memoryConfig.compressionThresholdTokens,
     compressionRatio: memoryConfig.compressionRatio,
     semanticLimit: memoryConfig.semanticLimit,
