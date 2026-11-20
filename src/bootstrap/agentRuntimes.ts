@@ -19,6 +19,7 @@ import { createModelRetryPolicy } from '../react/modelRetry.js';
 import { createPlanner } from '../react/Planner.js';
 import { ReActRunner } from '../react/ReActRunner.js';
 import { SubagentToolProvider } from '../react/SubagentToolProvider.js';
+import { PROJECT_CODE_SUITE } from '../react/ToolSuiteGate.js';
 import type {
   ChatModel,
   DynamicLoopPolicy,
@@ -204,6 +205,10 @@ export function setupAgentRuntimes(
   const consumeSteering = (context: ExecutionContext): string[] =>
     runControl.consumeSteering(context.conversationId);
 
+  // 工具两级加载（默认关闭）：仅主交互引擎把低频项目/代码套件改为按需激活，
+  // 后台 worker 与调查引擎保持各自 scoped 工具常驻，不受影响。
+  const toolSuitesEnabled = envEnabled(process.env.TOOL_SUITES_ENABLED, false);
+
   const engine = new ReActRunner({
     model: chatModel,
     toolProviders: applyExecutionPolicy(() => toolProviders),
@@ -218,6 +223,9 @@ export function setupAgentRuntimes(
     toolTimeoutMs,
     ...(planner ? { planner } : {}),
     consumeSteering,
+    ...(toolSuitesEnabled
+      ? { suiteGate: { enabled: true, suites: [PROJECT_CODE_SUITE] } }
+      : {}),
     ...watchdogRunOptions,
     ...modelRetryRunOptions,
   });

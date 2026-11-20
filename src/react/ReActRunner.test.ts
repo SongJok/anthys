@@ -6,6 +6,7 @@ import {
 } from '../harness/ToolExecutionLedger.js';
 import { BuiltinToolProvider } from './BuiltinTools.js';
 import { ReActRunner } from './ReActRunner.js';
+import { PROJECT_CODE_SUITE } from './ToolSuiteGate.js';
 import type {
   AgentStreamEvent,
   ChatCompletionRequest,
@@ -1748,5 +1749,151 @@ describe('ReActRunner 模型瞬态重试', () => {
     ).rejects.toThrow('terminated');
     expect(calls).toBe(1);
     expect(retries).toEqual([]);
+  });
+});
+
+describe('ReActRunner 工具两级加载', () => {
+  function suiteProvider(withProject: boolean): IToolProvider {
+    return {
+      providerName: 'suite-test',
+      async getTools(): Promise<ToolDefinition[]> {
+        const resident: ToolDefinition = {
+          name: 'resident_echo',
+          description: '常驻工具',
+          risk: 'read',
+          source: 'builtin',
+          parametersJsonSchema: { type: 'object', properties: {} },
+          execute: async () => 'echo',
+        };
+        if (!withProject) return [resident];
+        return [
+          resident,
+          {
+            name: 'project_search',
+            description: '代码检索',
+            risk: 'read',
+            source: 'projects',
+            parametersJsonSchema: {
+              type: 'object',
+              properties: { query: { type: 'string' } },
+            },
+            execute: async (args) => `搜索:${String(args.query ?? '')}`,
+          },
+        ];
+      },
+    };
+  }
+
+  // 工具 schema 数组在激活时被原地追加，必须在调用当轮快照，不能事后读引用
+  class CapturingModel implements ChatModel {
+    public readonly modelName = 'capturing';
+    public toolNamesPerTurn: string[][] = [];
+    public headPerTurn: string[] = [];
+    public messagesPerTurn: Array<
+      Array<{ role: string; content: string; toolName?: string }>
+    > = [];
+    constructor(private readonly script: ChatStreamChunk[][]) {}
+    public async *streamChat(
+      request: ChatCompletionRequest,
+    ): AsyncIterable<ChatStreamChunk> {
+      this.toolNamesPerTurn.push(
+        request.tools.map((tool) => tool.function.name).sort(),
+      );
+      this.headPerTurn.push(
+        request.messages.find((m) => m.role === 'system')?.content ?? '',
+      );
+      this.messagesPerTurn.push(
+        request.messages.map((m) => ({
+          role: m.role,
+          content: m.content,
+          ...(m.toolName ? { toolName: m.toolName } : {}),
+        })),
+      );
+      const turn = this.script.shift() ?? [{ finishReason: 'stop' }];
+      for (const chunk of turn) yield chunk;
+    }
+  }
+
+  it('默认关闭：项目工具常驻，无 activate_tools 与目录', async () => {
+    const model = new CapturingModel([
+      toolTurn([{ index: 0, id: 'c1', name: 'project_search', args: { query: '网关' } }]),
+      [{ contentDelta: '找到了', finishReason: 'stop', usage: { totalTokens: 5 } }],
+    ]);
+    const runner = new ReActRunner({
+      model,
+      toolProviders: [suiteProvider(true)],
+      policy,
+    });
+    await runner.run({
+      messages: userMessages,
+      context: makeContext(),
+      emit: () => undefined,
+    });
+    expect(model.toolNamesPerTurn[0]).toEqual([
+      'project_search',
+      'resident_echo',
+    ]);
+    expect(model.headPerTurn[0]).not.toContain('按需工具套件');
+  });
+
+  it('开启后门控项目工具，activate_tools 激活后追加 schema 并可调用', async () => {
+    const model = new CapturingModel([
+      toolTurn([{ index: 0, id: 'c1', name: 'activate_tools', args: { suite: 'project_code' } }]),
+      toolTurn([{ index: 0, id: 'c2', name: 'project_search', args: { query: '网关' } }]),
+      [{ contentDelta: '找到了', finishReason: 'stop', usage: { totalTokens: 5 } }],
+    ]);
+    const runner = new ReActRunner({
+      model,
+      toolProviders: [suiteProvider(true)],
+      policy,
+      suiteGate: { enabled: true, suites: [PROJECT_CODE_SUITE] },
+    });
+    const result = await runner.run({
+      messages: [{ role: 'system', content: '头部人设' }, ...userMessages],
+      context: makeContext(),
+      emit: () => undefined,
+    });
+
+    // 首轮：项目工具被门控，仅常驻 + 元工具
+    expect(model.toolNamesPerTurn[0]).toEqual([
+      'activate_tools',
+      'resident_echo',
+    ]);
+    // 目录注入头部系统提示，保持前缀稳定
+    expect(model.headPerTurn[0]).toContain('头部人设');
+    expect(model.headPerTurn[0]).toContain('按需工具套件');
+    expect(model.headPerTurn[0]).toContain('project_code');
+
+    // 激活后第二轮：项目工具 schema 已追加
+    expect(model.toolNamesPerTurn[1]).toEqual([
+      'activate_tools',
+      'project_search',
+      'resident_echo',
+    ]);
+    // 第三轮真正调用项目工具并拿到结果
+    const toolMessage = model.messagesPerTurn[2]?.find(
+      (m) => m.role === 'tool' && m.toolName === 'project_search',
+    );
+    expect(toolMessage?.content).toContain('搜索:网关');
+    expect(result.answer).toBe('找到了');
+  });
+
+  it('开启但当前上下文无项目工具：不注入元工具与目录', async () => {
+    const model = new CapturingModel([
+      [{ contentDelta: '你好', finishReason: 'stop', usage: { totalTokens: 3 } }],
+    ]);
+    const runner = new ReActRunner({
+      model,
+      toolProviders: [suiteProvider(false)],
+      policy,
+      suiteGate: { enabled: true, suites: [PROJECT_CODE_SUITE] },
+    });
+    await runner.run({
+      messages: userMessages,
+      context: makeContext(),
+      emit: () => undefined,
+    });
+    expect(model.toolNamesPerTurn[0]).toEqual(['resident_echo']);
+    expect(model.headPerTurn[0]).not.toContain('按需工具套件');
   });
 });

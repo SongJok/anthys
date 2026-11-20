@@ -34,6 +34,13 @@ import {
 } from './Planner.js';
 import { extractCitations } from './citations.js';
 import {
+  buildActivateToolsTool,
+  buildSuiteCatalog,
+  injectSuiteCatalog,
+  partitionSuites,
+  type ToolSuite,
+} from './ToolSuiteGate.js';
+import {
   DEFAULT_MODEL_RETRY_POLICY,
   isTransientModelError,
   modelRetryDelayMs,
@@ -102,6 +109,11 @@ export interface ReActRunnerOptions {
     tool: ToolDefinition,
     context: ExecutionContext,
   ) => boolean;
+  /** 工具两级加载：enabled 时把命中套件的工具改为按需激活，常驻 activate_tools 元工具 */
+  suiteGate?: {
+    enabled: boolean;
+    suites: ToolSuite[];
+  };
   /** 丢弃 / 截断技能指令时的告警回调，用于审计与排查 */
   instructionWarning?: (message: string) => void;
   /** 运行看门狗：空转/重复/预算风险干预；后台任务按 job 模式暂停 */
@@ -170,6 +182,7 @@ interface ToolExecutionResult {
   instructions?: ToolInstruction[];
   usage?: ToolExecutionOutput['usage'];
   traces?: ToolExecutionOutput['traces'];
+  activateTools?: string[];
 }
 
 function truncate(text: string, limit: number): string {
@@ -399,12 +412,31 @@ export class ReActRunner implements AgentEngine {
     const injectedInstructionIds = new Set<string>();
 
     try {
-      const tools = await this.loadTools(context);
+      const loadedTools = await this.loadTools(context);
+      const gate = this.options.suiteGate;
+      let tools = loadedTools;
+      let suiteCatalog = '';
+      const gatedSuites = new Map<string, ToolDefinition[]>();
+      if (gate?.enabled && gate.suites.length > 0) {
+        const partition = partitionSuites(loadedTools, gate.suites);
+        const available = gate.suites.filter(
+          (suite) => (partition.gated.get(suite.id)?.length ?? 0) > 0,
+        );
+        tools = partition.resident;
+        if (available.length > 0) {
+          for (const suite of available) {
+            gatedSuites.set(suite.id, partition.gated.get(suite.id) ?? []);
+          }
+          tools = [...partition.resident, buildActivateToolsTool(available)];
+          suiteCatalog = buildSuiteCatalog(available);
+        }
+      }
       const toolMap = new Map(tools.map((tool) => [tool.name, tool]));
       const toolSchemas = tools.map(toToolSchema);
       const messages: ChatMessage[] = input.messages.map((message) => ({
         ...message,
       }));
+      if (suiteCatalog) injectSuiteCatalog(messages, suiteCatalog);
       const addCitations = (items: StreamCitation[] | undefined): void => {
         if (!items?.length) return;
         const fresh: StreamCitation[] = [];
@@ -644,6 +676,22 @@ export class ReActRunner implements AgentEngine {
             toolName: execution.name,
             content: this.buildToolMessage(execution.content),
           });
+        }
+
+        // 按需激活：把元工具请求的套件 schema 追加进本次运行的工具列表。
+        // 仅在真正激活时改变前缀（低频），未激活的运行保持缓存前缀稳定。
+        for (const execution of executions) {
+          if (execution.isError || execution.denied) continue;
+          for (const suiteId of execution.activateTools ?? []) {
+            const suiteTools = gatedSuites.get(suiteId);
+            if (!suiteTools) continue;
+            gatedSuites.delete(suiteId);
+            for (const tool of suiteTools) {
+              if (toolMap.has(tool.name)) continue;
+              toolMap.set(tool.name, tool);
+              toolSchemas.push(toToolSchema(tool));
+            }
+          }
         }
 
         const denied = executions.filter((execution) => execution.denied);
@@ -1222,6 +1270,9 @@ export class ReActRunner implements AgentEngine {
           : {}),
         ...(output.usage ? { usage: output.usage } : {}),
         ...(output.traces?.length ? { traces: output.traces } : {}),
+        ...(output.activateTools?.length
+          ? { activateTools: output.activateTools }
+          : {}),
       });
     } catch (error) {
       execution.catch(() => undefined);

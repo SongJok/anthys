@@ -248,6 +248,8 @@ export interface ToolExecutionOutput {
   summary?: string;
   /** 仅受信任的 Provider 可以返回；ReActRunner 按来源白名单校验后注入 */
   instructions?: ToolInstruction[];
+  /** 元工具请求按需激活的工具套件 ID；ReActRunner 据此在运行中追加套件 schema */
+  activateTools?: string[];
   /** 复合工具 / 子代理汇总的内部 Token 用量，用于合并到主运行总用量 */
   usage?: {
     totalTokens: number;
