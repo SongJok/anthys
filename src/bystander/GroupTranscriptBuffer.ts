@@ -24,7 +24,14 @@ export interface FormattedTranscriptOptions {
   limit?: number;
   /** 排除指定 messageId（通常是当前正在处理的 @ 消息） */
   excludeMessageId?: string;
+  /** 渲染总字符预算，超出时从最旧一侧丢弃，保留最近上下文 */
+  charBudget?: number;
+  /** 单条发言渲染截断长度 */
+  perEntryCharLimit?: number;
 }
+
+const DEFAULT_TRANSCRIPT_CHAR_BUDGET = 3_000;
+const DEFAULT_TRANSCRIPT_ENTRY_CHARS = 200;
 
 const SHANGHAI_TIME = new Intl.DateTimeFormat('zh-CN', {
   timeZone: 'Asia/Shanghai',
@@ -136,12 +143,26 @@ export class GroupTranscriptBuffer {
         entry.messageId !== options.excludeMessageId &&
         entry.text.trim() !== '',
     );
-    return entries
-      .map(
-        (entry) =>
-          `[${formatClock(entry.timestamp)}] ${entry.senderNick}: ${normalizeText(entry.text)}`,
-      )
-      .join('\n');
+    const perEntryLimit = Math.max(
+      1,
+      options.perEntryCharLimit ?? DEFAULT_TRANSCRIPT_ENTRY_CHARS,
+    );
+    const budget = Math.max(1, options.charBudget ?? DEFAULT_TRANSCRIPT_CHAR_BUDGET);
+    const lines: string[] = [];
+    let used = 0;
+    // 从最新一侧累加，超出预算即停止，确保保留最近上下文
+    for (let index = entries.length - 1; index >= 0; index -= 1) {
+      const entry = entries[index];
+      const text = normalizeText(entry.text);
+      const clipped =
+        text.length > perEntryLimit ? `${text.slice(0, perEntryLimit)}…` : text;
+      const line = `[${formatClock(entry.timestamp)}] ${entry.senderNick}: ${clipped}`;
+      const cost = line.length + 1;
+      if (lines.length > 0 && used + cost > budget) break;
+      lines.push(line);
+      used += cost;
+    }
+    return lines.reverse().join('\n');
   }
 
   /** 在指定时间之后、由其他群成员发出的消息（用于防抢答判断） */

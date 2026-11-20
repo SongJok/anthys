@@ -108,6 +108,29 @@ describe('GroupTranscriptBuffer', () => {
     );
   });
 
+  it('格式化按总字符预算保留最近上下文，单条超长发言截断', () => {
+    const buffer = new GroupTranscriptBuffer({ defaultWindowSize: 50 });
+    for (let index = 1; index <= 30; index += 1) {
+      buffer.append(
+        entry('cid-1', `m${index}`, `第${index}条发言内容`.repeat(10), {
+          timestamp: Date.UTC(2026, 9, 30, 6, 0, index),
+        }),
+      );
+    }
+    const formatted = buffer.format('cid-1', { charBudget: 500 });
+    expect(formatted.length).toBeLessThanOrEqual(500);
+    // 保留最新一条，丢弃最旧
+    expect(formatted).toContain('第30条发言内容');
+    expect(formatted).not.toContain('第1条发言内容');
+
+    const single = buffer.format('cid-1', {
+      limit: 1,
+      perEntryCharLimit: 20,
+    });
+    expect(single).toContain('…');
+    expect(single.length).toBeLessThan(60);
+  });
+
   it('entriesSince 只返回防抢答窗口内其他成员的非 @ 消息', () => {
     const buffer = new GroupTranscriptBuffer();
     const base = Date.UTC(2026, 9, 30, 6, 0, 0);

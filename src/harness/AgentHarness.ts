@@ -1,5 +1,6 @@
 import {
   buildSystemPrompt,
+  HISTORY_TRIM_SLACK,
   type ContextAssembler,
   type PersonaInput,
 } from '../memory/ContextAssembler.js';
@@ -266,7 +267,7 @@ export class AgentHarness {
 
     const rawHistory = await repository.recentMessages(
       conversation.id,
-      this.historyWindow(message.conversationType),
+      this.historyWindow(message.conversationType) + HISTORY_TRIM_SLACK,
     );
     // 重试同一条失败消息（同 messageId 且尚未形成配对助手回复）时，避免在输入上下文中重复拼接该条用户发言
     const trailing = rawHistory[rawHistory.length - 1];
@@ -303,6 +304,7 @@ export class AgentHarness {
       persona,
       history,
       windowMessages: this.historyWindow(message.conversationType),
+      conversationKey: conversation.id,
       userText: text,
       now: this.now,
       memoryContext,

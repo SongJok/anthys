@@ -107,7 +107,7 @@ describe('ContextAssembler', () => {
     expect(tail).toContain('当前时间（Asia/Shanghai');
   });
 
-  it('把术语库等额外系统提示合并到同一条 system 消息', () => {
+  it('术语卡等附加指令移到历史后易变尾部，头部稳定前缀仍保留术语优先指令', () => {
     const assembler = new ContextAssembler({ windowMessages: 20, now: fixedNow });
     const messages = assembler.build({
       persona,
@@ -119,9 +119,46 @@ describe('ContextAssembler', () => {
     expect(messages).toHaveLength(3);
     const system = messages[0]?.content ?? '';
     expect(system).toContain('小钉');
-    expect(system).toContain('## 企业术语知识库');
-    expect(system).toContain('CQ：变更请求单');
+    expect(system).toContain('先查公司术语');
+    expect(system).not.toContain('## 企业术语知识库');
+    expect(system).not.toContain('CQ：变更请求单');
+    const tail = messages[1]?.content ?? '';
+    expect(tail).toContain('## 企业术语知识库');
+    expect(tail).toContain('CQ：变更请求单');
+    expect(tail).toContain('当前时间（Asia/Shanghai');
     expect(messages[2]).toEqual({ role: 'user', content: 'CQ 是什么' });
+  });
+
+  it('术语卡随问题变化时稳定前缀与历史逐字节一致，不击穿缓存', () => {
+    const assembler = new ContextAssembler({ windowMessages: 20, now: fixedNow });
+    const history = [
+      historyMessage('m1', 'user', '第一句'),
+      historyMessage('m2', 'assistant', '第一答'),
+    ];
+    const first = assembler.build({
+      persona,
+      history,
+      userText: 'CQ 是什么',
+      extraSystemPrompt: '## 企业术语知识库\n- CQ：变更请求单',
+    });
+    const second = assembler.build({
+      persona,
+      history: [
+        ...history,
+        historyMessage('m3', 'user', 'CQ 是什么'),
+        historyMessage('m4', 'assistant', 'CQ 是变更请求单'),
+      ],
+      userText: 'PO 又是什么',
+      extraSystemPrompt: '## 企业术语知识库\n- PO：采购订单',
+    });
+
+    expect(second[0]).toEqual(first[0]);
+    expect(second.slice(1, 3)).toEqual(first.slice(1, 3));
+    const firstTail = first[first.length - 2]?.content ?? '';
+    const secondTail = second[second.length - 2]?.content ?? '';
+    expect(firstTail).toContain('CQ：变更请求单');
+    expect(secondTail).toContain('PO：采购订单');
+    expect(secondTail).not.toContain('CQ：变更请求单');
   });
 
   it('按窗口截断历史并保持原有顺序', () => {
@@ -292,5 +329,75 @@ describe('ContextAssembler', () => {
     expect(system).toContain('多角度获取');
     expect(system).toContain('交叉比对多个独立来源');
     expect(system).toContain('增加反驳或纠正观点');
+  });
+
+  it('历史滞回裁剪：锚点稳定期内首条历史不变，滑出后一次性回裁', () => {
+    const assembler = new ContextAssembler({ windowMessages: 4, now: fixedNow });
+    const make = (n: number) =>
+      Array.from({ length: n }, (_, i) =>
+        historyMessage(`m${i + 1}`, i % 2 === 0 ? 'user' : 'assistant', `消息${i + 1}`),
+      );
+    const key = 'conv-1';
+    const first = assembler.build({
+      persona,
+      history: make(4),
+      conversationKey: key,
+      userText: '问1',
+    });
+    const grown = assembler.build({
+      persona,
+      history: make(10),
+      conversationKey: key,
+      userText: '问2',
+    });
+    // 锚点 m1 仍在取数集合内：首条历史与稳定前缀逐字节一致
+    expect(grown[0]).toEqual(first[0]);
+    expect(grown[1]).toEqual(first[1]);
+    expect(grown[1]?.content).toContain('消息1');
+
+    // 取数集合滑动到 m3..m16（m1 滑出）：回裁到最近 4 条并重新锚定
+    const slid = Array.from({ length: 14 }, (_, i) =>
+      historyMessage(`m${i + 3}`, i % 2 === 0 ? 'user' : 'assistant', `消息${i + 3}`),
+    );
+    const trimmed = assembler.build({
+      persona,
+      history: slid,
+      conversationKey: key,
+      userText: '问3',
+    });
+    const conversational = trimmed.filter((m) => m.role !== 'system');
+    expect(conversational).toHaveLength(5);
+    expect(conversational[0]?.content).toContain('消息13');
+  });
+
+  it('无 conversationKey 时退化为普通窗口截断', () => {
+    const assembler = new ContextAssembler({ windowMessages: 2, now: fixedNow });
+    const history = Array.from({ length: 6 }, (_, i) =>
+      historyMessage(`m${i}`, 'user', `消息${i}`),
+    );
+    const messages = assembler.build({ persona, history, userText: '新' });
+    const conversational = messages.filter((m) => m.role !== 'system');
+    expect(conversational).toHaveLength(3);
+    expect(conversational[0]?.content).toContain('消息4');
+  });
+
+  it('历史 assistant 回复截断到约 600 字，用户发言保留全文', () => {
+    const assembler = new ContextAssembler({ windowMessages: 20, now: fixedNow });
+    const longAnswer = '答'.repeat(900);
+    const longQuestion = '问'.repeat(900);
+    const messages = assembler.build({
+      persona,
+      history: [
+        historyMessage('u1', 'user', longQuestion),
+        historyMessage('a1', 'assistant', longAnswer),
+      ],
+      userText: '追问',
+    });
+    const userMsg = messages[1]?.content ?? '';
+    const assistantMsg = messages[2]?.content ?? '';
+    expect(userMsg).toContain(longQuestion);
+    expect(assistantMsg).toContain('答'.repeat(600));
+    expect(assistantMsg).not.toContain('答'.repeat(601));
+    expect(assistantMsg.endsWith('…')).toBe(true);
   });
 });

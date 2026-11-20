@@ -746,7 +746,7 @@ export class DwsCliToolProvider implements IToolProvider {
       risk: 'read',
       source: 'dws',
       description:
-        '检索并读取钉钉文档与知识库，仅限于提问人本人有权限查看的内容。action=search 按关键词搜索，read/get 按 documentId 读取正文（长文可用 page 翻页），list 列出本人最近文档。找不到时可能只是无权访问，不要断言企业内不存在。',
+        '检索/读取钉钉文档与知识库（仅本人有权内容）。search 关键词搜索，read/get 按 documentId 读正文（page 翻页），list 列最近文档。查不到可能只是无权访问，勿断言企业内不存在。',
       parametersJsonSchema: {
         type: 'object',
         properties: {
@@ -819,7 +819,7 @@ export class DwsCliToolProvider implements IToolProvider {
     return {
       name: 'dws_org_and_schedule',
       description:
-        '只读查询钉钉组织与办公信息：contact 通讯录（search/get/list/self）、calendar 日程（list/today/search/freebusy）、todo 待办（list/search/get/today）、approval 审批（list-pending/list-submitted/detail/records/tasks/list-forms/search-forms/form-schema）。写操作请使用对应的写工具。',
+        '只读查询钉钉组织办公信息：contact 通讯录、calendar 日程、todo 待办、approval 审批。写操作用对应写工具。',
       risk: 'read',
       source: 'dws',
       parametersJsonSchema: {
@@ -834,7 +834,7 @@ export class DwsCliToolProvider implements IToolProvider {
             type: 'string',
             enum: [...ORG_ACTIONS],
             description:
-              '查询操作，按资源不同可选：contact=search/get/list/self，calendar=list/today/search/freebusy，todo=list/search/get/today，approval=list-pending/list-submitted/detail/records/tasks/list-forms/search-forms/form-schema',
+              '查询操作，取值见 enum，按 resource 适用不同子集（contact=search/get/list/self，calendar=list/today/search/freebusy，todo=list/search/get/today，approval=list-pending/list-submitted/detail/records/tasks/list-forms/search-forms/form-schema）',
           },
           query: { type: 'string', description: '搜索关键词，如姓名、待办标题、审批标题' },
           userId: { type: 'string', description: '目标员工 userId（查日程或待办时使用）' },
@@ -992,7 +992,7 @@ export class DwsCliToolProvider implements IToolProvider {
     return {
       name: 'dws_calendar_manage',
       description:
-        '创建或修改钉钉日程（写操作）。action=create 需要 title、start、end；action=update 需要 eventId 以及至少一个要修改的字段。时间为 ISO-8601，例如 2026-03-10T14:00:00+08:00。请直接调用本工具提交：已获本人写授权时系统会直接执行；不要只输出文字确认或编造已创建的结果。',
+        '创建/修改钉钉日程（写）。create 需 title、start、end；update 需 eventId 及至少一个修改字段。时间 ISO-8601（如 2026-03-10T14:00:00+08:00）。须真实调用本工具，勿只输出文字确认或编造结果。',
       risk: 'write',
       source: 'dws',
       parametersJsonSchema: {
@@ -1096,7 +1096,7 @@ export class DwsCliToolProvider implements IToolProvider {
     return {
       name: 'dws_calendar_cancel',
       description:
-        '取消（删除）钉钉日程（高危写操作）。必须提供 eventId；可先用只读工具确认日程真实存在。请直接调用本工具提交：系统会登记为待确认动作并提示用户回复 /confirm；不要只输出文字确认或声称已取消。',
+        '取消（删除）钉钉日程（高危写）。需 eventId，可先只读确认存在。须真实调用本工具，系统登记待确认并提示用户 /confirm；勿只输出文字确认或声称已取消。',
       risk: 'destructive',
       source: 'dws',
       parametersJsonSchema: {
@@ -1139,7 +1139,7 @@ export class DwsCliToolProvider implements IToolProvider {
     return {
       name: 'dws_todo_manage',
       description:
-        '创建、修改或完成钉钉待办（写操作）。action=create 需要 title，executors 省略时默认指派给当前提问人；action=update 需要 taskId；action=complete 需要 taskId，status 默认 true。请直接调用本工具提交：已获本人写授权时系统会直接执行；不要只输出文字确认或编造待办 ID。',
+        '创建/修改/完成钉钉待办（写）。create 需 title（executors 省略默认提问人）；update 需 taskId；complete 需 taskId（status 默认 true）。须真实调用本工具，勿只输出文字确认或编造待办 ID。',
       risk: 'write',
       source: 'dws',
       parametersJsonSchema: {
@@ -1260,7 +1260,7 @@ export class DwsCliToolProvider implements IToolProvider {
     return {
       name: 'dws_contact_manage',
       description:
-        '邀请员工加入企业或修改员工组织信息（写操作）。action=invite 需要 orgUserName、orgUserMobile；action=update 需要 userId 以及至少一个修改项。部门用 deptIds 数字数组传入。请直接调用本工具提交：已获本人写授权时系统会直接执行；不要只输出文字确认。',
+        '邀请员工入职或修改员工组织信息（写）。invite 需 orgUserName、orgUserMobile；update 需 userId 及至少一个修改项。部门用 deptIds 数字数组。须真实调用本工具，勿只输出文字确认。',
       risk: 'write',
       source: 'dws',
       parametersJsonSchema: {
@@ -1361,7 +1361,7 @@ export class DwsCliToolProvider implements IToolProvider {
     return {
       name: 'dws_approval_manage',
       description:
-        '发起、同意或拒绝钉钉审批（写操作）。action=create 需要 processCode 与 formValues（表单字段对象）；action=approve/reject 需要 instanceId 与 taskId。发起前应先用只读工具查询表单 Schema。请直接调用本工具提交：已获本人写授权时系统会直接执行；不要只输出文字确认。',
+        '发起/同意/拒绝钉钉审批（写）。create 需 processCode 与 formValues（表单字段对象），发起前先只读查表单 Schema；approve/reject 需 instanceId 与 taskId。须真实调用本工具，勿只输出文字确认。',
       risk: 'write',
       source: 'dws',
       parametersJsonSchema: {
@@ -1483,7 +1483,7 @@ export class DwsCliToolProvider implements IToolProvider {
     return {
       name: 'dws_doc_manage',
       description:
-        '创建钉钉在线文档，或向已有文档追加/覆盖 Markdown 内容（写操作）。action=create 需要 name 与 content，可选 folder（文件夹 nodeId）或 workspace（知识库 ID）；action=append 需要 documentId 与 content，只在文档末尾追加；action=overwrite 会清空原文，必须额外传 confirmOverwrite=true，并建议先用 dws_doc_search_and_read 备份正文。长内容自动写入临时文件传给 DWS。已获本人写授权时 create/append 会直接执行；overwrite 仍需用户回复 /confirm。不要只输出文字确认或编造文档链接。',
+        '创建钉钉在线文档或追加/覆盖 Markdown（写）。create 需 name、content，可选 folder/workspace；append 需 documentId、content（末尾追加）；overwrite 清空原文，须 confirmOverwrite=true 且建议先备份正文，仍需用户 /confirm。长内容自动转临时文件。须真实调用本工具，勿编造文档链接。',
       risk: 'write',
       source: 'dws',
       parametersJsonSchema: {
@@ -1601,7 +1601,7 @@ export class DwsCliToolProvider implements IToolProvider {
     return {
       name: 'dws_report_read',
       description:
-        '只读查询钉钉日志（OA 周报应用）：templates 列出可用模版，template 读取模版字段，inbox 查我收到的日志，outbox 查我发出的日志，entry 读取单份正文，stats 读取已读统计，latest 读取我最近提交的日志。时间使用 ISO-8601（如 2026-03-10T00:00:00+08:00）；inbox 必须提供 start 与 end；outbox 查询跨度最多 20 天。提交日志请使用 dws_report_submit。',
+        '只读查询钉钉日志（OA 周报）：templates 列模版、template 读字段、inbox 收到的、outbox 发出的、entry 单份正文、stats 已读统计、latest 我最近提交。时间 ISO-8601；inbox 需 start/end；outbox 跨度≤20 天。提交用 dws_report_submit。',
       risk: 'read',
       source: 'dws',
       parametersJsonSchema: {
@@ -1752,7 +1752,7 @@ export class DwsCliToolProvider implements IToolProvider {
     return {
       name: 'dws_report_submit',
       description:
-        '按钉钉日志模版提交一份日报/周报（写操作）。先调用 dws_report_read 的 templates/template 取得 templateId 与字段定义；contents 中每项的 key 必须等于模版字段名，content 为字段正文；toUserIds 至少一个接收人，否则日志对任何人都不可见。请直接调用本工具提交：已获本人写授权时系统会直接执行；不要只输出文字确认或编造提交结果。',
+        '按钉钉日志模版提交日报/周报（写）。先用 dws_report_read 的 templates/template 取 templateId 与字段定义；contents 每项 key=模版字段名、content=正文；toUserIds 至少一个接收人否则无人可见。须真实调用本工具，勿编造提交结果。',
       risk: 'write',
       source: 'dws',
       parametersJsonSchema: {
@@ -1868,7 +1868,7 @@ export class DwsCliToolProvider implements IToolProvider {
     return {
       name: 'dws_aitable',
       description:
-        '只读查询钉钉 AI 表格（多维表）：base_list/base_search 找 Base，base_get 看表目录，table_get 看字段与视图，field_get 展开字段配置，record_query 查记录（支持 filters/sort/keyword/recordIds），record_stats 做 COUNT/SUM/AVG 等标量统计，record_group_stats 做分组与 DISTINCT 统计。数值比较的过滤值必须是 JSON 数字；单选/多选过滤使用选项名称字面量。写记录请使用对应的企业 MCP 或 DWS 写工具。',
+        '只读查询钉钉 AI 表格（多维表）：base_list/base_search 找 Base，base_get 表目录，table_get 字段与视图，field_get 字段配置，record_query 查记录（filters/sort/keyword/recordIds），record_stats 标量统计（COUNT/SUM/AVG），record_group_stats 分组/DISTINCT。数值过滤值须 JSON 数字，单选/多选用选项名。写记录用企业 MCP 或 DWS 写工具。',
       risk: 'read',
       source: 'dws',
       parametersJsonSchema: {
@@ -2095,7 +2095,7 @@ export class DwsCliToolProvider implements IToolProvider {
     return {
       name: 'dws_minutes',
       description:
-        '只读查询钉钉 AI 听记（妙记）：list 按 mine/shared/all 列出听记，latest 取我最新一条，search 按标题关键词/时间搜索，info 看基础信息，summary 看 AI 摘要，transcript 看完整转写，keywords 看关键词，todos 看提取的待办，action_items 看行动项。先用 list/latest/search 拿到 taskUuid，再读取详情；转写较长时会分页。',
+        '只读查询钉钉 AI 听记（妙记）：list 按 mine/shared/all 列出，latest 我最新一条，search 标题/时间搜索，info 基础信息，summary AI 摘要，transcript 完整转写，keywords 关键词，todos 待办，action_items 行动项。先 list/latest/search 拿 taskUuid 再读详情；转写长会分页。',
       risk: 'read',
       source: 'dws',
       parametersJsonSchema: {

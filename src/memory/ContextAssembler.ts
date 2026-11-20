@@ -25,7 +25,7 @@ export interface BuildContextInput {
   userText: string;
   now?: () => number;
   memoryContext?: AssembledMemoryContext;
-  /** 术语库等额外系统指令，排在 persona 之后、历史之前 */
+  /** 术语卡/技能目录/项目简报/个人偏好等随问题变化的附加指令，排在历史之后的易变尾部（靠近当前问题），不进入稳定前缀 */
   extraSystemPrompt?: string;
   /** 群聊历史需要保留发言人，避免多个成员的话被当成同一个人 */
   groupChat?: boolean;
@@ -33,6 +33,20 @@ export interface BuildContextInput {
   userSpeaker?: string;
   /** 本次组装的历史条数上限，按会话类型覆盖默认窗口（群聊 20 / 单聊 10） */
   windowMessages?: number;
+  /** 会话稳定标识（DB conversation.id）；提供时启用历史批量裁剪锚点，稳定缓存前缀 */
+  conversationKey?: string;
+}
+
+/** 历史高水位 slack：取数窗口 = window + slack，超过高水位才一次性回裁到 window，避免每轮滑动击穿缓存 */
+export const HISTORY_TRIM_SLACK = 10;
+/** 历史中 assistant 回复的渲染截断长度（用户发言保留全文），确定性裁剪以稳定缓存前缀 */
+const ASSISTANT_HISTORY_CHAR_LIMIT = 600;
+const MAX_HISTORY_ANCHORS = 2_000;
+
+function clipAssistantHistory(text: string): string {
+  return text.length <= ASSISTANT_HISTORY_CHAR_LIMIT
+    ? text
+    : `${text.slice(0, ASSISTANT_HISTORY_CHAR_LIMIT)}…`;
 }
 
 const SAFETY_GUARDRAILS = [
@@ -79,6 +93,8 @@ export function buildSystemPrompt(persona: PersonaInput): string {
 }
 
 export class ContextAssembler {
+  private readonly historyAnchors = new Map<string, string>();
+
   constructor(
     private readonly options: {
       windowMessages: number;
@@ -90,18 +106,22 @@ export class ContextAssembler {
     const basePrompt =
       input.memoryContext?.personaSystemPrompt?.trim() ||
       buildSystemPrompt(input.persona);
-    const systemContent = [basePrompt, input.extraSystemPrompt?.trim()]
-      .filter((section): section is string => Boolean(section))
-      .join('\n\n');
+    // 头部只保留跨轮逐字节稳定的人设/安全/工具规范前缀（含“先查公司术语”的术语优先指令）。
+    // 术语卡、技能目录、项目简报、个人偏好、控制台附加设定等随问题变化的 extraSystemPrompt
+    // 移到历史之后的易变尾部，避免每轮击穿 KV 缓存前缀。
     const messages: ChatMessage[] = [
       {
         role: 'system',
-        content: systemContent,
+        content: basePrompt,
       },
     ];
 
     const window = Math.max(1, input.windowMessages ?? this.options.windowMessages);
-    const history = input.history.slice(-window);
+    const history = this.selectHistory(
+      input.history,
+      window,
+      input.conversationKey,
+    );
     for (const item of history) {
       const stamp =
         item.createdAt > 0
@@ -124,7 +144,7 @@ export class ContextAssembler {
         rawContent,
       )
         ? '[系统记录：该轮写操作曾等待用户确认；若用户要求继续、修改或取消，请真实发起对应的 tool_calls 工具调用，严禁直接输出确认提示文本]'
-        : rawContent;
+        : clipAssistantHistory(rawContent);
       messages.push({
         role: 'assistant',
         content: `${stamp}${sanitizedAssistant}`,
@@ -133,6 +153,7 @@ export class ContextAssembler {
 
     const now = input.now ?? this.options.now ?? Date.now;
     const volatileContext = [
+      input.extraSystemPrompt?.trim(),
       this.renderMemorySections(input.memoryContext),
       shanghaiPromptClock(now()),
     ]
@@ -144,6 +165,41 @@ export class ContextAssembler {
       input.groupChat && input.userSpeaker ? `${input.userSpeaker}：` : '';
     messages.push({ role: 'user', content: `${speaker}${input.userText}` });
     return messages;
+  }
+
+  /**
+   * 历史批量裁剪（滞回）：取数窗口为 window + slack，锚定首条历史 messageId，
+   * 锚点仍在取数集合内时保持起点不变（新消息只在尾部追加，缓存前缀逐字节稳定）；
+   * 锚点滑出取数集合时一次性回裁到最近 window 条并重新锚定。无 conversationKey 时退化为普通窗口截断。
+   */
+  private selectHistory(
+    fetched: StoredMessage[],
+    window: number,
+    conversationKey?: string,
+  ): StoredMessage[] {
+    if (!conversationKey || fetched.length === 0) {
+      return fetched.slice(-window);
+    }
+    const highWater = window + HISTORY_TRIM_SLACK;
+    const anchorId = this.historyAnchors.get(conversationKey);
+    const anchorIndex = anchorId
+      ? fetched.findIndex((item) => item.id === anchorId)
+      : -1;
+    const start =
+      anchorIndex >= 0 && fetched.length - anchorIndex <= highWater
+        ? anchorIndex
+        : Math.max(0, fetched.length - window);
+    const selected = fetched.slice(start);
+    const newAnchor = selected[0]?.id;
+    if (newAnchor) {
+      this.historyAnchors.delete(conversationKey);
+      this.historyAnchors.set(conversationKey, newAnchor);
+      if (this.historyAnchors.size > MAX_HISTORY_ANCHORS) {
+        const oldest = this.historyAnchors.keys().next().value;
+        if (oldest !== undefined) this.historyAnchors.delete(oldest);
+      }
+    }
+    return selected;
   }
 
   private renderMemorySections(

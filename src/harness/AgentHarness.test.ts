@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { AgentHarness, conversationTitleFor } from './AgentHarness.js';
-import { ContextAssembler } from '../memory/ContextAssembler.js';
+import { ContextAssembler, HISTORY_TRIM_SLACK } from '../memory/ContextAssembler.js';
 import { PersonaResolver } from '../persona/PersonaResolver.js';
 import type { HierarchicalMemoryManager } from '../memory/HierarchicalMemoryManager.js';
 import type { PersonaProfileStore } from '../types/persona-and-identity.js';
@@ -211,7 +211,7 @@ describe('AgentHarness', () => {
       { emit: () => undefined },
     );
 
-    expect(limits).toEqual([10, 20]);
+    expect(limits).toEqual([10 + HISTORY_TRIM_SLACK, 20 + HISTORY_TRIM_SLACK]);
   });
 
   it('群聊未 @ 机器人时直接忽略且不写库', async () => {
@@ -454,7 +454,9 @@ describe('AgentHarness', () => {
     await harness.flushMemoryTasks();
     const singleSystem = (
       calls[0]?.messages as Array<{ role: string; content: string }>
-    ).find((message) => message.role === 'system');
+    )
+      .filter((message) => message.role === 'system')
+      .at(-1);
     expect(singleSystem?.content).toContain('称呼这位员工为「老张」');
     expect(buildPrompt).toHaveBeenCalledWith('staff:staff-1', '1');
     expect(resolveGroupMode).not.toHaveBeenCalled();
@@ -471,7 +473,9 @@ describe('AgentHarness', () => {
     await harness.flushMemoryTasks();
     const groupSystem = (
       calls[1]?.messages as Array<{ role: string; content: string }>
-    ).find((message) => message.role === 'system');
+    )
+      .filter((message) => message.role === 'system')
+      .at(-1);
     expect(groupSystem?.content).not.toContain('称呼这位员工为「老张」');
     expect(resolveGroupMode).toHaveBeenCalledWith(
       'staff:staff-1',
@@ -888,8 +892,11 @@ describe('AgentHarness', () => {
       emit: () => undefined,
     });
     const messages = calls[0]?.messages as Array<{ role: string; content: string }>;
-    expect(messages[0]?.content).toContain('## 企业术语知识库');
     expect(messages[0]?.content).toContain('小钉');
+    expect(messages[0]?.content).toContain('先查公司术语');
+    expect(messages[0]?.content).not.toContain('## 企业术语知识库');
+    const tail = messages[messages.length - 2]?.content ?? '';
+    expect(tail).toContain('## 企业术语知识库');
     expect(inputs[0]).toMatchObject({ conversationType: '1', query: 'CQ 怎么提' });
 
     const failing: { messages: unknown[] }[] = [];
