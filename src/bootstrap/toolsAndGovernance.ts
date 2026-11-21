@@ -645,6 +645,15 @@ export async function setupToolsAndGovernance(
           baseUrl: visionConfig.baseUrl,
           apiKey: visionConfig.apiKey,
           model: visionConfig.model,
+          ...(visionConfig.maxTokens !== undefined
+            ? { maxTokens: visionConfig.maxTokens }
+            : {}),
+          ...(visionConfig.timeoutMs !== undefined
+            ? { timeoutMs: visionConfig.timeoutMs }
+            : {}),
+          ...(visionConfig.reasoningEffort !== undefined
+            ? { reasoningEffort: visionConfig.reasoningEffort }
+            : {}),
           logger,
         })
       : undefined;
@@ -654,6 +663,9 @@ export async function setupToolsAndGovernance(
       ready: Boolean(visionDescriber),
       apiKeyConfigured: Boolean(visionConfig?.apiKey),
       model: visionConfig?.model,
+      maxTokens: visionConfig?.maxTokens ?? 4096,
+      timeoutMs: visionConfig?.timeoutMs ?? 90_000,
+      reasoningEffort: visionConfig?.reasoningEffort ?? '(provider default)',
     },
     'vision configuration resolved',
   );

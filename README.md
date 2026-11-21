@@ -308,6 +308,9 @@ pnpm run db:seed      # 可选：预写入默认人设与模型配置，已有�
 | `VISION_BASE_URL` | 存在 `GLM_API_KEY` 时为智谱地址，否则沿用 `LLM_BASE_URL` | 视觉模型接口地址 |
 | `VISION_API_KEY` | 沿用 `GLM_API_KEY`，再回退 `LLM_API_KEY` | 视觉模型接口密钥 |
 | `VISION_MODEL` | 存在 `GLM_API_KEY` 时为 `glm-5.3-flash`，否则沿用 `LLM_MODEL` | 支持图片输入的模型名 |
+| `VISION_MAX_TOKENS` | `4096` | 视觉识别单次输出上限（推理 token 也计入；过低会截断文档转录） |
+| `VISION_TIMEOUT_MS` | `90000` | 视觉识别单次超时；文档逐字转录较慢 |
+| `VISION_REASONING_EFFORT` | 空（供应商默认） | 视觉推理档位 `low`/`medium`/`high`；智谱 GLM-5.3 建议 `low` |
 | `ATTACHMENT_MAX_MB` | `20` | 入站附件大小上限 |
 | `ARTIFACT_DELIVERY_ENABLED` | `true` | 是否向模型暴露 `deliver_artifact` 文件回传工具 |
 | `ARTIFACT_MAX_MB` | `20` | 回传文件大小上限 |
@@ -520,7 +523,7 @@ sudo cp deploy/nginx.conf /etc/nginx/conf.d/ && sudo nginx -t && sudo systemctl 
 ### 附件与产物
 
 - 支持在单聊或群里直接发送**图片、文件**（语音/视频按文件落盘）并 @ 机器人提问；附件按下载码落盘到 `.workspace/attachments/<messageId>/`，提示词里会附带文件名、大小与本地路径。
-- 开启 `VISION_ENABLED` 后，图片先由视觉模型转成文字描述（界面文字、报错信息、图表要点），主模型无需支持多模态即可理解截图；视觉接口失败时只保留路径并记录告警。
+- 开启 `VISION_ENABLED` 后，图片先由视觉模型转成文本：文档、试卷、表格、代码与截图会逐字转录（数学公式用 LaTeX），再交给纯文本主模型；输出被截断时自动扩容重试一次，仍不完整会明确提示。视觉接口失败时只保留路径并记录告警。
 - 模型可通过 `deliver_artifact` 工具把工作区内的文件回传为钉钉文件消息：先上传媒体换取 `media_id`，再按单聊/群聊接口发送；只允许白名单目录（`.workspace` 与 `ARTIFACT_ROOTS`），超限或越界会直接拒绝。
 - 入站附件下载失败不会丢弃整条消息：失败项会写进提示词，用户仍可收到基于现有信息的回答；指标 `agent_attachments_total` / `agent_attachment_failures_total` 可观察下载情况。
 

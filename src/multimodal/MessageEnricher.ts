@@ -99,7 +99,10 @@ export function renderAttachmentSection(
     );
   }
   lines.push(
-    '说明：文本/CSV/JSON/Markdown 及已解析的 Office 附件可用 workspace_read_file 读取（pptx/docx/xlsx 会自动转为文本），整表分析可把路径传给 sandbox_analyze_and_aggregate 的 datasetKeys；回答时直接说明附件结论，无需复述路径。',
+    '说明：文本/CSV/JSON/Markdown 及已解析的 Office 附件可用 workspace_read_file 读取（pptx/docx/xlsx 会自动转为文本），整表分析可把路径传给 sandbox_analyze_and_aggregate 的 datasetKeys；回答时直接说明附件结论，无需复述路径。' +
+      (stored.some((item) => item.type === 'image')
+        ? '沙盒没有 OCR/图像识别能力，不要尝试用沙盒识别图片；识别内容不完整时请让用户分块上传或补充文字。'
+        : ''),
   );
   return lines.join('\n');
 }

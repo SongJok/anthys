@@ -103,6 +103,34 @@ describe('EnvConfigProvider model profiles', () => {
     });
     expect(provider.getWebSearchConfig().apiKey).toBe('glm-key');
   });
+
+  it('视觉输出上限、超时与推理档位可由 env 覆盖', () => {
+    const provider = new EnvConfigProvider({
+      ...multiVendorEnv,
+      VISION_ENABLED: 'true',
+      VISION_MAX_TOKENS: '6000',
+      VISION_TIMEOUT_MS: '120000',
+      VISION_REASONING_EFFORT: 'low',
+    });
+
+    expect(provider.getVisionConfig()).toMatchObject({
+      maxTokens: 6000,
+      timeoutMs: 120_000,
+      reasoningEffort: 'low',
+    });
+  });
+
+  it('非法的视觉推理档位忽略，不阻断启动', () => {
+    const provider = new EnvConfigProvider({
+      ...multiVendorEnv,
+      VISION_ENABLED: 'true',
+      VISION_MAX_TOKENS: 'abc',
+      VISION_REASONING_EFFORT: 'ultra',
+    });
+
+    expect(provider.getVisionConfig()).not.toHaveProperty('maxTokens');
+    expect(provider.getVisionConfig()).not.toHaveProperty('reasoningEffort');
+  });
 });
 
 describe('EnvConfigProvider web search', () => {

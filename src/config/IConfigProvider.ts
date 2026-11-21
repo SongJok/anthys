@@ -54,6 +54,12 @@ export interface VisionConfig {
   baseUrl: string;
   apiKey: string;
   model: string;
+  /** 单次输出上限；推理模型的推理 token 也计入该上限 */
+  maxTokens?: number;
+  /** 单次调用超时（毫秒） */
+  timeoutMs?: number;
+  /** 显式下发 reasoning_effort；留空用供应商默认 */
+  reasoningEffort?: 'low' | 'medium' | 'high';
 }
 
 export type WebSearchEngine =

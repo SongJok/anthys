@@ -40,6 +40,28 @@ function parseBoolean(value: string | undefined, fallback: boolean): boolean {
   return ['1', 'true', 'yes', 'on'].includes(value.trim().toLowerCase());
 }
 
+function parseOptionalBoundedInt(
+  value: string | undefined,
+  min: number,
+  max: number,
+): number | undefined {
+  if (value === undefined || value.trim() === '') return undefined;
+  const parsed = Math.trunc(Number(value));
+  if (!Number.isFinite(parsed)) return undefined;
+  return Math.min(max, Math.max(min, parsed));
+}
+
+const VISION_REASONING_EFFORTS = ['low', 'medium', 'high'] as const;
+
+function parseVisionReasoningEffort(
+  value: string | undefined,
+): VisionConfig['reasoningEffort'] {
+  const effort = (value ?? '').trim();
+  return (VISION_REASONING_EFFORTS as readonly string[]).includes(effort)
+    ? (effort as NonNullable<VisionConfig['reasoningEffort']>)
+    : undefined;
+}
+
 const ZHIPU_BASE_URL = 'https://open.bigmodel.cn/api/paas/v4';
 const WEB_SEARCH_ENGINES: readonly WebSearchEngine[] = [
   'search_std',
@@ -400,11 +422,27 @@ export class EnvConfigProvider implements IConfigProvider {
     const model =
       (this.env.VISION_MODEL ?? '').trim() ||
       (glmKey && !explicitBaseUrl ? 'glm-5.3-flash' : llm.model);
+    const maxTokens = parseOptionalBoundedInt(
+      this.env.VISION_MAX_TOKENS,
+      256,
+      16_384,
+    );
+    const timeoutMs = parseOptionalBoundedInt(
+      this.env.VISION_TIMEOUT_MS,
+      5_000,
+      300_000,
+    );
+    const reasoningEffort = parseVisionReasoningEffort(
+      this.env.VISION_REASONING_EFFORT,
+    );
     return {
       enabled: parseBoolean(this.env.VISION_ENABLED, false),
       baseUrl,
       apiKey,
       model,
+      ...(maxTokens !== undefined ? { maxTokens } : {}),
+      ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+      ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
     };
   }
 
