@@ -7,6 +7,14 @@ import type {
 /**
  * 1. 统一入站消息契约
  */
+export interface QuotedMessageContext {
+  messageId?: string;
+  senderStaffId?: string;
+  senderNick?: string;
+  text?: string;
+  msgtype?: string;
+}
+
 export interface InboundAttachment {
   type: 'image' | 'file' | 'audio' | 'video';
   /** 钉钉机器人消息附件下载码，需换取 downloadUrl 后才能下载 */
@@ -14,6 +22,8 @@ export interface InboundAttachment {
   fileName?: string;
   fileSize?: number;
   durationMs?: number;
+  /** 钉钉语音消息原生附带的语音识别文本（若存在） */
+  nativeRecognition?: string;
 }
 
 export interface InboundMessage {
@@ -34,6 +44,8 @@ export interface InboundMessage {
   /** 群名称；仅机器人回调携带，DWS 个人事件没有该字段 */
   conversationTitle?: string;
   attachments?: InboundAttachment[];
+  /** 用户在群聊或单聊中引用回复的历史消息上下文 */
+  quotedMessage?: QuotedMessageContext;
   rawPayload: Record<string, unknown>;
   timestamp: number;
 }
@@ -424,11 +436,33 @@ export interface ConversationRecord {
   createdAt: number;
 }
 
+/** ReAct 步骤级检查点：仅在只读工具边界或看门狗暂停时落盘，用于 /job-resume 断点续跑 */
+export interface ReActCheckpointState {
+  stepIndex: number;
+  messages: ChatMessage[];
+  accumulatedTokens: number;
+  accumulatedInputTokens: number;
+  accumulatedOutputTokens: number;
+  accumulatedCachedTokens: number;
+  accumulatedWallMs: number;
+  activatedSuites: string[];
+}
+
+export interface ReActCheckpointHooks {
+  /** 恢复执行时的起始检查点 */
+  initial?: ReActCheckpointState;
+  /** 人工恢复时追加的补充约束（拼接在检查点历史尾部） */
+  resumeGuidance?: string;
+  /** 每完成一个安全只读步骤或暂停前回调 */
+  onCheckpoint?: (state: ReActCheckpointState) => Promise<void> | void;
+}
+
 export interface AgentEngine {
   run(input: {
     messages: ChatMessage[];
     context: ExecutionContext;
     emit: (event: AgentStreamEvent) => void;
     signal?: AbortSignal;
+    checkpoint?: ReActCheckpointHooks;
   }): Promise<RunResult>;
 }

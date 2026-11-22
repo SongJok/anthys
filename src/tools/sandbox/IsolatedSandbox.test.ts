@@ -394,4 +394,67 @@ describe('SandboxToolProvider', () => {
       ),
     ).rejects.toThrow('沙盒未配置工作区');
   });
+
+  it('JS 沙盒可通过 emitArtifact 导出安全文件并过滤非法扩展名', async () => {
+    const provider = new SandboxToolProvider({
+      workspace: { hostDir: workDir, sandboxDir: '/workspace' },
+    });
+    const tool = await findTool('sandbox_analyze_and_aggregate', provider);
+    const output = JSON.parse(
+      await tool.execute(
+        {
+          language: 'javascript',
+          code: `
+            emitArtifact('summary.csv', 'k,v\\na,1\\n');
+            emitArtifact('chart.png', 'iVBORw0KGgo=', { encoding: 'base64' });
+            emitArtifact('../evil.sh', '#!/bin/sh');
+            result = { exported: true };
+          `,
+        },
+        ctx,
+      ),
+    ) as {
+      exitCode: number;
+      generatedArtifacts?: Array<{
+        workspaceRelativePath: string;
+        fileName: string;
+        sizeBytes: number;
+      }>;
+      hint?: string;
+    };
+    expect(output.exitCode).toBe(0);
+    expect(output.generatedArtifacts?.map((a) => a.fileName)).toEqual([
+      'summary.csv',
+      'chart.png',
+    ]);
+    expect(output.hint).toContain('deliver_artifact');
+  });
+
+  it('Docker 模式挂载可写 /workspace/out 并将合法产物回收到工作区', async () => {
+    const capturedArgs: string[] = [];
+    const sandbox = new IsolatedSandbox({
+      dockerExecutor: async ({ args }) => {
+        capturedArgs.push(...args);
+        const outMount = args.find((arg) => arg.endsWith(':/workspace/out:rw'));
+        expect(outMount).toBeDefined();
+        const hostOutDir = outMount!.slice(0, -':/workspace/out:rw'.length);
+        await writeFile(join(hostOutDir, 'plot.png'), Buffer.from([137, 80, 78, 71]));
+        await writeFile(join(hostOutDir, 'ignore.exe'), 'nope');
+        return { stdout: 'done\n', stderr: '', exitCode: 0, timedOut: false };
+      },
+    });
+    const result = await sandbox.execute({
+      language: 'python',
+      code: 'print("done")',
+      artifactOutput: { workspaceRoot: workDir, subdir: 'generated/docker-test' },
+    });
+    expect(result.exitCode).toBe(0);
+    expect(result.generatedArtifacts).toHaveLength(1);
+    expect(result.generatedArtifacts?.[0]?.fileName).toBe('plot.png');
+    expect(result.generatedArtifacts?.[0]?.workspaceRelativePath).toBe(
+      'generated/docker-test/plot.png',
+    );
+    expect(capturedArgs).toContain('--read-only');
+    expect(capturedArgs).toContain('none');
+  });
 });

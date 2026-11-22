@@ -98,6 +98,8 @@ export interface DataRetentionOptions {
   store: RetentionStore;
   policy: RetentionPolicy;
   attachmentsDir?: string;
+  /** 沙盒与文档生成的临时产物目录（按 attachmentsHours 同步清理） */
+  generatedArtifactsDir?: string;
   transcriptArchive?: TranscriptArchivePruner;
   logger?: DataRetentionLogger;
   now?: () => number;
@@ -198,6 +200,7 @@ export class DataRetentionService implements DataGovernancePort {
   private policy: RetentionPolicy;
   private readonly store: RetentionStore;
   private readonly attachmentsDir?: string;
+  private readonly generatedArtifactsDir?: string;
   private readonly transcriptArchive?: TranscriptArchivePruner;
   private readonly logger?: DataRetentionLogger;
   private readonly now: () => number;
@@ -210,6 +213,7 @@ export class DataRetentionService implements DataGovernancePort {
     this.policy = normalizeRetentionPolicy(options.policy);
     this.store = options.store;
     this.attachmentsDir = options.attachmentsDir;
+    this.generatedArtifactsDir = options.generatedArtifactsDir;
     this.transcriptArchive = options.transcriptArchive;
     this.logger = options.logger;
     this.now = options.now ?? Date.now;
@@ -281,7 +285,7 @@ export class DataRetentionService implements DataGovernancePort {
         ? (dryRunCounts?.expired[kind] ?? 0)
         : await this.store.purge(kind, cutoff, this.batchSize);
     }
-    if (this.attachmentsDir) {
+    if (this.attachmentsDir || this.generatedArtifactsDir) {
       const attachment = await this.scanAttachments();
       const expired = attachment.expiredDirs;
       deleted.attachments = expired.length;
@@ -373,29 +377,36 @@ export class DataRetentionService implements DataGovernancePort {
     expiredDirs: Array<{ path: string; mtimeMs: number }>;
     bytes: number;
   }> {
-    if (!this.attachmentsDir) {
+    const roots = [this.attachmentsDir, this.generatedArtifactsDir].filter(
+      (dir): dir is string => Boolean(dir),
+    );
+    if (roots.length === 0) {
       return { dirs: [], expiredDirs: [], bytes: 0 };
     }
     const cutoff = this.now() - this.policy.attachmentsHours * 3_600_000;
-    let entries: Array<{ name: string; isDirectory: () => boolean }>;
-    try {
-      entries = await readdir(this.attachmentsDir, { withFileTypes: true });
-    } catch {
-      return { dirs: [], expiredDirs: [], bytes: 0 };
-    }
     const dirs: string[] = [];
     const expiredDirs: Array<{ path: string; mtimeMs: number }> = [];
     let bytes = 0;
-    for (const entry of entries) {
-      if (!entry.isDirectory()) continue;
-      const path = join(this.attachmentsDir, entry.name);
-      dirs.push(path);
+    for (const root of roots) {
+      let entries: Array<{ name: string; isDirectory: () => boolean }>;
       try {
-        const info = await stat(path);
-        if (info.mtimeMs < cutoff) expiredDirs.push({ path, mtimeMs: info.mtimeMs });
-        bytes += await this.directoryBytes(path);
+        entries = await readdir(root, { withFileTypes: true });
       } catch {
         continue;
+      }
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+        const path = join(root, entry.name);
+        dirs.push(path);
+        try {
+          const info = await stat(path);
+          if (info.mtimeMs < cutoff) {
+            expiredDirs.push({ path, mtimeMs: info.mtimeMs });
+          }
+          bytes += await this.directoryBytes(path);
+        } catch {
+          continue;
+        }
       }
     }
     return { dirs, expiredDirs, bytes };
@@ -403,18 +414,22 @@ export class DataRetentionService implements DataGovernancePort {
 
   private async directoryBytes(dir: string): Promise<number> {
     let total = 0;
-    let entries: Array<{ name: string; isFile: () => boolean }>;
+    let entries: Array<{ name: string; isFile: () => boolean; isDirectory: () => boolean }>;
     try {
       entries = await readdir(dir, { withFileTypes: true });
     } catch {
       return 0;
     }
     for (const entry of entries) {
-      if (!entry.isFile()) continue;
-      try {
-        total += (await stat(join(dir, entry.name))).size;
-      } catch {
-        continue;
+      const fullPath = join(dir, entry.name);
+      if (entry.isFile()) {
+        try {
+          total += (await stat(fullPath)).size;
+        } catch {
+          continue;
+        }
+      } else if (entry.isDirectory()) {
+        total += await this.directoryBytes(fullPath);
       }
     }
     return total;

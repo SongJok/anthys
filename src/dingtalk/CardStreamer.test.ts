@@ -870,5 +870,28 @@ describe('CardStreamer', () => {
       expect(streamer.takeOverflowAnswer()).toBe('答'.repeat(223));
       expect(streamer.takeOverflowAnswer()).toBe('');
     });
+
+    it('overflowMode=document 时标注附件已发送并可通过 fullAnswerText 获取完整正文', async () => {
+      const fake = fakeApi();
+      const streamer = new CardStreamer({
+        api: fake.api,
+        message: inbound(),
+        cardTemplateId: 'tpl-ai',
+        robotCode: 'robot-1',
+        layout: 'ai',
+        maxContentChars: 400,
+        overflowMode: 'document',
+      });
+      await streamer.start();
+
+      const fullText = '长'.repeat(600);
+      streamer.handle({ type: 'answer_delta', content: fullText });
+      await streamer.finish();
+
+      const final = fake.updates.find((update) => update.isFinalize);
+      expect(final?.content).toContain('完整版已作为文档附件发送');
+      expect(streamer.fullAnswerText()).toBe(fullText);
+      expect(streamer.takeOverflowAnswer().length).toBeGreaterThan(0);
+    });
   });
 });

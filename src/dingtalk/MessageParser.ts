@@ -1,4 +1,8 @@
-import type { InboundAttachment, InboundMessage } from '../types/core.js';
+import type {
+  InboundAttachment,
+  InboundMessage,
+  QuotedMessageContext,
+} from '../types/core.js';
 
 interface RawRobotPayload {
   msgId?: unknown;
@@ -15,6 +19,8 @@ interface RawRobotPayload {
   atUsers?: unknown;
   text?: unknown;
   content?: unknown;
+  repliedMsg?: unknown;
+  originalMsgId?: unknown;
 }
 
 const ATTACHMENT_TYPES = ['picture', 'file', 'audio', 'video'] as const;
@@ -60,6 +66,85 @@ function asPositiveNumber(value: unknown): number | undefined {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
 }
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function extractTextFromRichText(richText: unknown): string | null {
+  if (!Array.isArray(richText)) return null;
+  const parts: string[] = [];
+  for (const item of richText) {
+    const block = asRecord(item);
+    if (!block) continue;
+    if (block.type === undefined || block.type === 'text') {
+      const part = asNonEmptyString(block.text);
+      if (part) parts.push(part);
+    }
+  }
+  const joined = parts.join('').trim();
+  return joined || null;
+}
+
+function parseQuotedMessage(payload: RawRobotPayload): QuotedMessageContext | undefined {
+  const textBlock = asRecord(payload.text);
+  const contentBlock = asRecord(payload.content);
+  const repliedRaw =
+    asRecord(textBlock?.repliedMsg) ??
+    asRecord(contentBlock?.repliedMsg) ??
+    asRecord(payload.repliedMsg);
+
+  const originalMsgId =
+    asNonEmptyString(repliedRaw?.msgId) ??
+    asNonEmptyString(textBlock?.originalMsgId) ??
+    asNonEmptyString(contentBlock?.originalMsgId) ??
+    asNonEmptyString(payload.originalMsgId);
+
+  const quoteContent =
+    asNonEmptyString(contentBlock?.quoteContent) ??
+    asNonEmptyString(textBlock?.quoteContent);
+
+  if (!repliedRaw && !originalMsgId && !quoteContent) return undefined;
+
+  let quotedText: string | undefined = quoteContent ?? undefined;
+  let quotedMsgType: string | undefined;
+  if (repliedRaw) {
+    quotedMsgType =
+      asNonEmptyString(repliedRaw.msgType) ??
+      asNonEmptyString(repliedRaw.msgtype) ??
+      undefined;
+    const repliedContent = asRecord(repliedRaw.content);
+    quotedText =
+      quotedText ??
+      asNonEmptyString(repliedContent?.text) ??
+      asNonEmptyString(asRecord(repliedContent?.text)?.content) ??
+      extractTextFromRichText(repliedContent?.richText) ??
+      asNonEmptyString(repliedContent?.recognition) ??
+      asNonEmptyString(repliedRaw.text) ??
+      asNonEmptyString(repliedRaw.content) ??
+      undefined;
+  }
+
+  const senderStaffId =
+    asNonEmptyString(repliedRaw?.senderStaffId) ??
+    asNonEmptyString(repliedRaw?.senderId) ??
+    undefined;
+  const senderNick =
+    asNonEmptyString(repliedRaw?.senderNick) ??
+    asNonEmptyString(repliedRaw?.senderName) ??
+    undefined;
+
+  if (!originalMsgId && !quotedText) return undefined;
+  return {
+    ...(originalMsgId ? { messageId: originalMsgId } : {}),
+    ...(senderStaffId ? { senderStaffId } : {}),
+    ...(senderNick ? { senderNick } : {}),
+    ...(quotedText ? { text: quotedText } : {}),
+    ...(quotedMsgType ? { msgtype: quotedMsgType } : {}),
+  };
+}
+
 function parseAttachment(
   msgtype: AttachmentMsgType,
   content: Record<string, unknown>,
@@ -79,6 +164,10 @@ function parseAttachment(
   if (fileSize !== undefined) attachment.fileSize = fileSize;
   const durationMs = asPositiveNumber(content.duration);
   if (durationMs !== undefined) attachment.durationMs = durationMs;
+  if (msgtype === 'audio') {
+    const recognition = asNonEmptyString(content.recognition);
+    if (recognition) attachment.nativeRecognition = recognition;
+  }
   return attachment;
 }
 
@@ -173,9 +262,14 @@ export function parseStreamMessage(
   }
 
   const createdAt = Number(payload.createAt);
+  const quotedMessage = parseQuotedMessage(payload);
 
   if (!text && attachments.length > 0) {
-    text = attachmentPlaceholder(attachments[0]!);
+    const first = attachments[0]!;
+    text =
+      first.type === 'audio' && first.nativeRecognition
+        ? stripLeadingMentions(first.nativeRecognition) || first.nativeRecognition
+        : attachmentPlaceholder(first);
   }
 
   return {
@@ -188,6 +282,7 @@ export function parseStreamMessage(
     text,
     ...(mentionOnly ? { mentionOnly: true } : {}),
     ...(attachments.length > 0 ? { attachments } : {}),
+    ...(quotedMessage ? { quotedMessage } : {}),
     ...(asNonEmptyString(payload.conversationTitle)
       ? { conversationTitle: asNonEmptyString(payload.conversationTitle)! }
       : {}),

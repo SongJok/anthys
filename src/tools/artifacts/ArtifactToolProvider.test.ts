@@ -119,4 +119,77 @@ describe('ArtifactToolProvider', () => {
       deliver.execute({ path: 'report.csv' }, context()),
     ).rejects.toThrow('HTTP 500');
   });
+
+  it('artifact_generate 生成 xlsx 并自动投递到当前会话', async () => {
+    const send = vi.fn().mockResolvedValue({
+      ok: true,
+      fileName: '指标.xlsx',
+      fileSize: 1200,
+      mediaId: 'm-xlsx',
+    } satisfies ArtifactSendResult);
+    const provider = new ArtifactToolProvider({
+      sender: { send },
+      allowedRoots: [root],
+      maxBytes: 1024 * 1024,
+    });
+    const tools = await provider.getTools(context());
+    const gen = tools.find((t) => t.name === 'artifact_generate');
+    expect(gen).toBeDefined();
+
+    const output = JSON.parse(
+      await gen!.execute(
+        {
+          format: 'xlsx',
+          fileName: '指标.xlsx',
+          sheets: [{ name: '汇总', headers: ['项', '值'], rows: [['PV', 42]] }],
+        },
+        context(),
+      ),
+    ) as Record<string, unknown>;
+    expect(output).toMatchObject({
+      ok: true,
+      delivered: true,
+      fileName: '指标.xlsx',
+      format: 'xlsx',
+    });
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  it('artifact_generate 支持 deliver=false 仅落盘，随后由 deliver_artifact 发送', async () => {
+    const send = vi.fn().mockResolvedValue({
+      ok: true,
+      fileName: 'note.md',
+      fileSize: 10,
+      mediaId: 'm-md',
+    } satisfies ArtifactSendResult);
+    const provider = new ArtifactToolProvider({
+      sender: { send },
+      allowedRoots: [root],
+      maxBytes: 1024 * 1024,
+    });
+    const tools = await provider.getTools(context());
+    const gen = tools.find((t) => t.name === 'artifact_generate')!;
+    const deliver = tools.find((t) => t.name === 'deliver_artifact')!;
+
+    const genOut = JSON.parse(
+      await gen.execute(
+        {
+          format: 'md',
+          fileName: 'note.md',
+          content: '# 标题\n正文',
+          deliver: false,
+        },
+        context(),
+      ),
+    ) as { ok: boolean; delivered: boolean; path: string };
+    expect(genOut.ok).toBe(true);
+    expect(genOut.delivered).toBe(false);
+    expect(send).not.toHaveBeenCalled();
+
+    const deliverOut = JSON.parse(
+      await deliver.execute({ path: genOut.path }, context()),
+    ) as { ok: boolean };
+    expect(deliverOut.ok).toBe(true);
+    expect(send).toHaveBeenCalledTimes(1);
+  });
 });

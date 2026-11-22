@@ -460,4 +460,76 @@ describe('TaskService', () => {
     });
     expect(afterClose.matchedTasks).toHaveLength(0);
   });
+
+  it('外部事件命中活跃任务时唤醒 Worker 增量续跑，并遵守冷却与 /task follow off 开关', async () => {
+    const store = new MemoryTaskStore();
+    let nowMs = 1_700_000_000_000;
+    const continuations: Array<{ taskId: string; prompt: string }> = [];
+    let seq = 100;
+    const service = new TaskService({
+      store,
+      enqueue: async (_msg, _prompt, taskId) => job(taskId, `job-base-${++seq}`),
+      isAdmin: () => false,
+      continuationCooldownMs: 60_000,
+      now: () => nowMs,
+      enqueueContinuation: async ({ task, prompt }) => {
+        continuations.push({ taskId: task.id, prompt });
+        return job(task.id, `job-cont-${++seq}`);
+      },
+    });
+
+    await service.handleCommand(message(), ['new', '跟进 PR #99']);
+    await service.handleCommand(message(), [
+      'link',
+      'task-0001',
+      'issue',
+      'SongJok/anthys#99',
+    ]);
+
+    const first = await service.routeExternalEvent({
+      source: 'github',
+      eventType: 'issue_comment.created',
+      deliveryId: 'd-1',
+      summary: 'CI 失败：unit test timeout',
+      refs: [{ kind: 'issue', ref: 'SongJok/anthys#99' }],
+    });
+    expect(first.continuationsEnqueued).toBe(1);
+    expect(continuations).toHaveLength(1);
+    expect(continuations[0]?.prompt).toContain('CI 失败：unit test timeout');
+
+    // 冷却期内只记录不重复派生续跑作业
+    nowMs += 10_000;
+    const cooling = await service.routeExternalEvent({
+      source: 'github',
+      eventType: 'issue_comment.created',
+      deliveryId: 'd-2',
+      summary: '再次评论',
+      refs: [{ kind: 'issue', ref: 'SongJok/anthys#99' }],
+    });
+    expect(cooling.matchedTasks).toHaveLength(1);
+    expect(cooling.continuationsEnqueued).toBe(0);
+
+    // 冷却结束后关闭自动跟进，则不再触发续跑
+    nowMs += 70_000;
+    const offReply = await service.handleCommand(message(), [
+      'follow',
+      'task-0001',
+      'off',
+    ]);
+    expect(offReply).toContain('关闭外部事件自动跟进');
+    const disabled = await service.routeExternalEvent({
+      source: 'github',
+      eventType: 'check_run.completed',
+      deliveryId: 'd-3',
+      summary: 'lint failed',
+      refs: [{ kind: 'issue', ref: 'SongJok/anthys#99' }],
+    });
+    expect(disabled.continuationsEnqueued).toBe(0);
+
+    // 群消息提及关联 issue 时能命中活跃任务
+    const matched = await service.matchConversationTask(
+      message({ text: '大家看下 SongJok/anthys#99 刚刚的报错' }),
+    );
+    expect(matched?.id).toMatch(/^task-0001/);
+  });
 });

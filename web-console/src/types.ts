@@ -968,7 +968,7 @@ export interface PersonIdentityBindResult {
 
 export type SemanticMemoryScope = 'global' | 'group' | 'user';
 export type SemanticMemoryKind = 'terminology' | 'profile';
-export type SemanticMemoryStatus = 'active' | 'retired';
+export type SemanticMemoryStatus = 'active' | 'retired' | 'superseded';
 export type SemanticMemorySensitivity = 'normal' | 'private' | 'sensitive';
 
 export interface SemanticMemory {

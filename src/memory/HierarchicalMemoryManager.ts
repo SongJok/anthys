@@ -317,6 +317,15 @@ export interface AssembleMemoryInput {
   userGroupSharing?: 'off' | 'shareable' | 'all';
 }
 
+export interface TerminologyPromotionCandidate {
+  standardName: string;
+  aliases: string[];
+  definition: string;
+  evidence: string;
+  sourceConversationId: string;
+  reinforcementCount: number;
+}
+
 export interface HierarchicalMemoryManagerOptions {
   summaryStore: EpisodicSummaryStore;
   semanticStore: SemanticMemoryStore;
@@ -333,6 +342,14 @@ export interface HierarchicalMemoryManagerOptions {
   estimateTokens?: (text: string) => number;
   /** 配置后语义召回与写入都带向量，失败时自动回退关键词 */
   embedding?: EmbeddingClient;
+  /** 语义记忆冲突消解余弦相似度阈值，默认 0.86 */
+  conflictSimilarityThreshold?: number;
+  /** 高频术语记忆自动晋升候选的最小强化次数，默认 3 */
+  terminologyPromotionThreshold?: number;
+  /** 高频术语达标时提交到术语候选审核池（不直接入库正式术语） */
+  onTerminologyCandidate?: (
+    candidate: TerminologyPromotionCandidate,
+  ) => Promise<void> | void;
   logger?: MemoryLogger;
 }
 
@@ -357,6 +374,10 @@ export class HierarchicalMemoryManager {
   private readonly semanticLimit: number;
   private readonly estimate: (text: string) => number;
   private readonly embedding?: EmbeddingClient;
+  private readonly conflictSimilarityThreshold: number;
+  private readonly terminologyPromotionThreshold: number;
+  private readonly onTerminologyCandidate?: HierarchicalMemoryManagerOptions['onTerminologyCandidate'];
+  private readonly promotedTerms = new Set<string>();
   private readonly logger?: MemoryLogger;
   private readonly compressing = new Set<string>();
 
@@ -382,6 +403,15 @@ export class HierarchicalMemoryManager {
     this.estimate =
       options.estimateTokens ?? ((text) => Math.ceil(text.length / 2));
     this.embedding = options.embedding;
+    this.conflictSimilarityThreshold = Math.min(
+      0.99,
+      Math.max(0.6, options.conflictSimilarityThreshold ?? 0.86),
+    );
+    this.terminologyPromotionThreshold = Math.max(
+      1,
+      Math.floor(options.terminologyPromotionThreshold ?? 3),
+    );
+    this.onTerminologyCandidate = options.onTerminologyCandidate;
     this.logger = options.logger;
   }
 
@@ -517,37 +547,139 @@ export class HierarchicalMemoryManager {
     const vectors = await this.embedTexts(facts.map((fact) => fact.content));
     const saved: SemanticMemoryRecord[] = [];
     for (const [index, fact] of facts.entries()) {
-      saved.push(
-        await this.semanticStore.upsert({
-          scope: fact.scope,
-          subjectKey: fact.subjectKey,
-          kind: fact.kind,
-          content: fact.content,
-          keywords: fact.keywords ?? [],
-          embedding: fact.embedding ?? vectors?.[index] ?? null,
-          ...(fact.shareableInGroup !== undefined
-            ? { shareableInGroup: fact.shareableInGroup }
-            : {}),
-          ...(fact.sensitivity ? { sensitivity: fact.sensitivity } : {}),
-          ...(fact.confidence !== undefined
-            ? { confidence: fact.confidence }
-            : {}),
-          ...(fact.expiresAt !== undefined
-            ? { expiresAt: fact.expiresAt }
-            : {}),
-          ...(fact.sourceConversationId !== undefined
-            ? { sourceConversationId: fact.sourceConversationId }
-            : {}),
-          ...(fact.sourceConversationType !== undefined
-            ? { sourceConversationType: fact.sourceConversationType }
-            : {}),
-          ...(fact.sourceMessageId !== undefined
-            ? { sourceMessageId: fact.sourceMessageId }
-            : {}),
-        }),
-      );
+      const record = await this.semanticStore.upsert({
+        scope: fact.scope,
+        subjectKey: fact.subjectKey,
+        kind: fact.kind,
+        content: fact.content,
+        keywords: fact.keywords ?? [],
+        embedding: fact.embedding ?? vectors?.[index] ?? null,
+        ...(fact.shareableInGroup !== undefined
+          ? { shareableInGroup: fact.shareableInGroup }
+          : {}),
+        ...(fact.sensitivity ? { sensitivity: fact.sensitivity } : {}),
+        ...(fact.confidence !== undefined
+          ? { confidence: fact.confidence }
+          : {}),
+        ...(fact.expiresAt !== undefined
+          ? { expiresAt: fact.expiresAt }
+          : {}),
+        ...(fact.sourceConversationId !== undefined
+          ? { sourceConversationId: fact.sourceConversationId }
+          : {}),
+        ...(fact.sourceConversationType !== undefined
+          ? { sourceConversationType: fact.sourceConversationType }
+          : {}),
+        ...(fact.sourceMessageId !== undefined
+          ? { sourceMessageId: fact.sourceMessageId }
+          : {}),
+      });
+      saved.push(record);
+      await this.resolveMemoryConflicts(record);
+      await this.maybePromoteTerminology(record);
     }
     return saved;
+  }
+
+  /** 检测并替代同作用域下与新事实冲突/过时的旧语义记忆 */
+  private async resolveMemoryConflicts(
+    incoming: SemanticMemoryRecord,
+  ): Promise<void> {
+    if (!this.semanticStore.supersede || incoming.status !== 'active') return;
+    try {
+      const candidates = this.semanticStore.listActiveBySubject
+        ? await this.semanticStore.listActiveBySubject({
+            scope: incoming.scope,
+            subjectKey: incoming.subjectKey,
+            kind: incoming.kind,
+            limit: 50,
+          })
+        : await this.semanticStore.search({
+            query: incoming.content,
+            scope: incoming.scope,
+            subjectKey: incoming.subjectKey,
+            ...(incoming.embedding ? { embedding: incoming.embedding } : {}),
+            limit: 20,
+          });
+      const conflictingIds = candidates
+        .filter((existing) =>
+          isConflictingMemory(
+            existing,
+            incoming,
+            this.conflictSimilarityThreshold,
+          ),
+        )
+        .map((existing) => existing.id);
+      if (conflictingIds.length === 0) return;
+      const supersededCount = await this.semanticStore.supersede(
+        conflictingIds,
+        incoming.id,
+      );
+      if (supersededCount > 0) {
+        this.logger?.info(
+          {
+            newId: incoming.id,
+            scope: incoming.scope,
+            subjectKey: incoming.subjectKey,
+            supersededCount,
+          },
+          'semantic memory conflict resolved via superseding',
+        );
+      }
+    } catch (error) {
+      this.logger?.warn(
+        {
+          memoryId: incoming.id,
+          error: error instanceof Error ? error.message : String(error),
+        },
+        'semantic memory conflict resolution failed',
+      );
+    }
+  }
+
+  /** 高频强化的 terminology 记忆自动提审到企业术语候选池 */
+  private async maybePromoteTerminology(
+    record: SemanticMemoryRecord,
+  ): Promise<void> {
+    if (
+      !this.onTerminologyCandidate ||
+      record.kind !== 'terminology' ||
+      record.status !== 'active'
+    ) {
+      return;
+    }
+    const count = record.reinforcementCount ?? 1;
+    if (count < this.terminologyPromotionThreshold) return;
+    const draft = parseTerminologyDraft(record);
+    if (!draft) return;
+    const dedupeKey = draft.standardName.toLowerCase();
+    if (this.promotedTerms.has(dedupeKey)) return;
+    this.promotedTerms.add(dedupeKey);
+    try {
+      await this.onTerminologyCandidate({
+        ...draft,
+        evidence: `语义记忆重复出现 ${count} 次：${record.content}`,
+        sourceConversationId: record.sourceConversationId ?? '',
+        reinforcementCount: count,
+      });
+      this.logger?.info(
+        {
+          term: draft.standardName,
+          reinforcementCount: count,
+          memoryId: record.id,
+        },
+        'promoted frequent semantic terminology to glossary candidate',
+      );
+    } catch (error) {
+      this.promotedTerms.delete(dedupeKey);
+      this.logger?.warn(
+        {
+          term: draft.standardName,
+          error: error instanceof Error ? error.message : String(error),
+        },
+        'failed to promote semantic terminology to glossary candidate',
+      );
+    }
   }
 
   public async recall(
@@ -736,4 +868,110 @@ export class HierarchicalMemoryManager {
       }),
     );
   }
+}
+
+export function cosineSimilarity(a: number[], b: number[]): number {
+  if (a.length === 0 || a.length !== b.length) return 0;
+  let dot = 0;
+  let normA = 0;
+  let normB = 0;
+  for (let i = 0; i < a.length; i += 1) {
+    const x = a[i]!;
+    const y = b[i]!;
+    dot += x * y;
+    normA += x * x;
+    normB += y * y;
+  }
+  if (normA === 0 || normB === 0) return 0;
+  return dot / (Math.sqrt(normA) * Math.sqrt(normB));
+}
+
+const PREDICATE_RULES: Array<{ pattern: RegExp; group: string }> = [
+  {
+    pattern:
+      /^(.{1,24}?)(?:目前|现在|当前|已经|改为|更新为)?(?:负责|担任|主管|维护|对接|oncall)\s*(.+)$/iu,
+    group: 'responsibility',
+  },
+  {
+    pattern: /^(.{1,24}?)(?:负责人|owner|对接人)(?:目前|现在)?(?:是|为|改为|[:：=])\s*(.+)$/iu,
+    group: 'owner',
+  },
+  {
+    pattern:
+      /^(.{1,24}?)(?:目前|现在)?(?:偏好|习惯|要求|位于|所在部门是|属于)\s*(.+)$/iu,
+    group: 'attribute',
+  },
+  {
+    pattern:
+      /^[「『"']?([^\s「」『』"'：:=]{1,30})[」』"']?\s*(?:是指|指的是|指代|简称|定义为|意思是|[:：=])\s*(.+)$/iu,
+    group: 'definition',
+  },
+];
+
+export function extractSubjectPredicateKey(content: string): string | null {
+  const normalized = content.replace(/\s+/gu, ' ').trim();
+  for (const rule of PREDICATE_RULES) {
+    const match = rule.pattern.exec(normalized);
+    if (match?.[1] && match[2]) {
+      const subject = match[1].trim().toLowerCase();
+      if (subject.length >= 1) {
+        return `${subject}|${rule.group}`;
+      }
+    }
+  }
+  return null;
+}
+
+export function isConflictingMemory(
+  existing: SemanticMemoryRecord,
+  incoming: SemanticMemoryRecord,
+  similarityThreshold = 0.86,
+): boolean {
+  if (existing.id === incoming.id) return false;
+  if (existing.status !== 'active') return false;
+  if (
+    existing.scope !== incoming.scope ||
+    existing.subjectKey !== incoming.subjectKey ||
+    existing.kind !== incoming.kind
+  ) {
+    return false;
+  }
+  if (existing.content.trim() === incoming.content.trim()) return false;
+  // 低置信度抽取不允许覆盖明显更高置信度的人工/权威记忆
+  if (existing.confidence > incoming.confidence + 0.05) return false;
+
+  if (
+    existing.embedding &&
+    incoming.embedding &&
+    existing.embedding.length === incoming.embedding.length &&
+    cosineSimilarity(existing.embedding, incoming.embedding) >= similarityThreshold
+  ) {
+    return true;
+  }
+
+  const existingKey = extractSubjectPredicateKey(existing.content);
+  const incomingKey = extractSubjectPredicateKey(incoming.content);
+  if (existingKey && incomingKey && existingKey === incomingKey) {
+    return true;
+  }
+  return false;
+}
+
+export function parseTerminologyDraft(
+  record: SemanticMemoryRecord,
+): { standardName: string; aliases: string[]; definition: string } | null {
+  const content = record.content.trim();
+  if (!content) return null;
+  const match =
+    /^[「『"']?([^\s「」『』"'：:=]{1,30})[」』"']?\s*(?:是指|指的是|指代|简称|定义为|意思是|[:：=])\s*(.+)$/iu.exec(
+      content,
+    );
+  const standardName = (match?.[1] ?? record.keywords[0] ?? '').trim();
+  const definition = (match?.[2] ?? content).trim();
+  if (!standardName || standardName.length > 40 || !definition) return null;
+  const aliases = record.keywords
+    .map((kw) => kw.trim())
+    .filter((kw) => kw && kw.toLowerCase() !== standardName.toLowerCase())
+    .slice(0, 6);
+  return { standardName, aliases, definition };
 }

@@ -17,6 +17,7 @@ import type {
   ExecutionContext,
   IToolProvider,
   PlanItem,
+  ReActCheckpointHooks,
   RunResult,
   StreamCitation,
   ToolApprovalDecision,
@@ -350,8 +351,11 @@ export class ReActRunner implements AgentEngine {
     context: ExecutionContext;
     emit: (event: AgentStreamEvent) => void;
     signal?: AbortSignal;
+    checkpoint?: ReActCheckpointHooks;
   }): Promise<RunResult> {
-    const { emit, signal } = input;
+    const { emit, signal, checkpoint } = input;
+    const initialCheckpoint = checkpoint?.initial;
+    const stepOffset = initialCheckpoint?.stepIndex ?? 0;
     const startedAt = this.now();
     const policy = this.options.policy;
     const deadlineAt = Number.isFinite(input.context.deadlineAt)
@@ -433,10 +437,62 @@ export class ReActRunner implements AgentEngine {
       }
       const toolMap = new Map(tools.map((tool) => [tool.name, tool]));
       const toolSchemas = tools.map(toToolSchema);
-      const messages: ChatMessage[] = input.messages.map((message) => ({
-        ...message,
-      }));
-      if (suiteCatalog) injectSuiteCatalog(messages, suiteCatalog);
+      const activatedSuiteIds = new Set<string>();
+      const activateSuite = (suiteId: string): void => {
+        const suiteTools = gatedSuites.get(suiteId);
+        if (!suiteTools) return;
+        gatedSuites.delete(suiteId);
+        activatedSuiteIds.add(suiteId);
+        for (const tool of suiteTools) {
+          if (toolMap.has(tool.name)) continue;
+          toolMap.set(tool.name, tool);
+          toolSchemas.push(toToolSchema(tool));
+        }
+      };
+
+      const messages: ChatMessage[] =
+        initialCheckpoint && initialCheckpoint.messages.length > 0
+          ? initialCheckpoint.messages.map((message) => ({ ...message }))
+          : input.messages.map((message) => ({ ...message }));
+
+      if (initialCheckpoint) {
+        for (const suiteId of initialCheckpoint.activatedSuites) {
+          activateSuite(suiteId);
+        }
+        const guidance = checkpoint?.resumeGuidance?.trim();
+        if (guidance) {
+          messages.push({
+            role: 'user',
+            content: `[人工恢复补充要求] ${guidance}`,
+          });
+        }
+      } else if (suiteCatalog) {
+        injectSuiteCatalog(messages, suiteCatalog);
+      }
+
+      const emitCheckpoint = async (): Promise<void> => {
+        if (!checkpoint?.onCheckpoint) return;
+        try {
+          await checkpoint.onCheckpoint({
+            stepIndex: stepOffset + steps,
+            messages: messages.map((message) => ({ ...message })),
+            accumulatedTokens:
+              (initialCheckpoint?.accumulatedTokens ?? 0) + totalTokens,
+            accumulatedInputTokens:
+              (initialCheckpoint?.accumulatedInputTokens ?? 0) + inputTokens,
+            accumulatedOutputTokens:
+              (initialCheckpoint?.accumulatedOutputTokens ?? 0) + outputTokens,
+            accumulatedCachedTokens:
+              (initialCheckpoint?.accumulatedCachedTokens ?? 0) + cachedTokens,
+            accumulatedWallMs:
+              (initialCheckpoint?.accumulatedWallMs ?? 0) +
+              (this.now() - startedAt),
+            activatedSuites: [...activatedSuiteIds],
+          });
+        } catch {
+          // 检查点写入失败不阻塞主推理链路
+        }
+      };
       const addCitations = (items: StreamCitation[] | undefined): void => {
         if (!items?.length) return;
         const fresh: StreamCitation[] = [];
@@ -546,6 +602,9 @@ export class ReActRunner implements AgentEngine {
             watchdog?.observeBudget(this.now() - startedAt, totalTokens) ?? null,
           )
         ) {
+          if (!executedMutatingTool && watchdogOutcome?.action === 'pause') {
+            await emitCheckpoint();
+          }
           stopForWatchdog();
           break;
         }
@@ -656,6 +715,7 @@ export class ReActRunner implements AgentEngine {
             ? { reasoningSignature: turn.reasoningSignature }
             : {}),
         });
+        let stepHadMutation = false;
         for (const execution of executions) {
           if (execution.usage) {
             totalTokens += execution.usage.totalTokens;
@@ -667,6 +727,7 @@ export class ReActRunner implements AgentEngine {
             const executedTool = toolMap.get(execution.name);
             if (executedTool && !isReadOnlyTool(executedTool)) {
               executedMutatingTool = true;
+              stepHadMutation = true;
             }
           }
           if (execution.citations?.length) addCitations(execution.citations);
@@ -683,14 +744,7 @@ export class ReActRunner implements AgentEngine {
         for (const execution of executions) {
           if (execution.isError || execution.denied) continue;
           for (const suiteId of execution.activateTools ?? []) {
-            const suiteTools = gatedSuites.get(suiteId);
-            if (!suiteTools) continue;
-            gatedSuites.delete(suiteId);
-            for (const tool of suiteTools) {
-              if (toolMap.has(tool.name)) continue;
-              toolMap.set(tool.name, tool);
-              toolSchemas.push(toToolSchema(tool));
-            }
+            activateSuite(suiteId);
           }
         }
 
@@ -787,8 +841,14 @@ export class ReActRunner implements AgentEngine {
             }),
           }) ?? null;
         if (applyWatchdog(watchdogDecision)) {
+          if (!stepHadMutation && watchdogOutcome?.action === 'pause') {
+            await emitCheckpoint();
+          }
           stopForWatchdog();
           break;
+        }
+        if (!stepHadMutation) {
+          await emitCheckpoint();
         }
         for (const warning of warnings) {
           pushSystemOnce(messages, warning);

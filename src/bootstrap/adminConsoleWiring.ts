@@ -6,6 +6,7 @@ import {
 } from '../admin-api/metrics.js';
 import { formatTraceSenderNick, TraceCollector } from '../admin-api/runtime.js';
 import { startAdminServer } from '../admin-api/server.js';
+import type { SharedStateStore } from '../cluster/SharedStateStore.js';
 import type { CardStreamer } from '../dingtalk/CardStreamer.js';
 import type { DynamicConfigCenter } from '../config/DynamicConfigCenter.js';
 import type {
@@ -136,6 +137,7 @@ export interface AdminConsoleWiringDeps {
     proactive: boolean,
   ) => Promise<void>;
   checkDbReady: () => Promise<void>;
+  sharedState?: SharedStateStore;
   clusterEnabled: boolean;
   isLeader: () => boolean;
 }
@@ -166,6 +168,7 @@ export function startConfiguredAdminServer(
     createStreamer,
     recordTrace,
     checkDbReady,
+    sharedState,
     clusterEnabled,
     isLeader,
   } = deps;
@@ -316,6 +319,7 @@ export function startConfiguredAdminServer(
     },
     governance: tools.retentionService,
     metrics,
+    ...(sharedState ? { sharedState } : {}),
     githubWebhook: {
       ...(process.env.GITHUB_WEBHOOK_SECRET !== undefined
         ? { secret: process.env.GITHUB_WEBHOOK_SECRET }

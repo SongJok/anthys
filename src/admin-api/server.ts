@@ -71,6 +71,7 @@ import {
 } from './chatStream.js';
 import type { MetricsRegistry } from './metrics.js';
 import { LoginAttemptLimiter } from './loginRateLimit.js';
+import type { SharedStateStore } from '../cluster/SharedStateStore.js';
 
 export interface AdminApiLogger {
   info(obj: Record<string, unknown>, msg: string): void;
@@ -122,6 +123,8 @@ export interface AdminApiOptions {
     | Promise<{ ready: boolean; detail?: string }>;
   metrics?: MetricsRegistry;
   ticketTtlMs?: number;
+  /** 集群共享状态存储：启用后一次性 SSE 票据跨实例共享 */
+  sharedState?: SharedStateStore;
   feedback?: {
     list(limit?: number): Promise<unknown[]>;
   };
@@ -342,7 +345,11 @@ export function createAdminApp(options: AdminApiOptions): Hono {
     ...(options.loginRateLimit ?? {}),
     now,
   });
-  const tickets = new OneTimeTicketStore(options.ticketTtlMs ?? 60_000, now);
+  const tickets = new OneTimeTicketStore(
+    options.ticketTtlMs ?? 60_000,
+    now,
+    options.sharedState,
+  );
   const chatDeps: ChatStreamDeps = {
     tickets,
     ...(options.chatStream ? { chatStream: options.chatStream } : {}),
@@ -668,11 +675,11 @@ export function createAdminApp(options: AdminApiOptions): Hono {
     return c.json({ ok: true });
   });
 
-  admin.post('/chat/tickets', (c) => {
+  admin.post('/chat/tickets', async (c) => {
     if (!options.chatStream) {
       return c.json({ ok: false, error: '在线对话未启用' }, 503);
     }
-    const ticket = tickets.issue();
+    const ticket = await tickets.issueAsync();
     options.metrics?.inc('console_ticket_total');
     return c.json({ ok: true, ...ticket });
   });

@@ -43,6 +43,13 @@
       "when": 1794992722933,
       "tag": "0005_orange_ken_ellis",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1795352140228,
+      "tag": "0006_wise_firelord",
+      "breakpoints": true
     }
   ]
 }

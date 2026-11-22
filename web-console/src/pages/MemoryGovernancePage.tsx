@@ -42,6 +42,7 @@ const KIND_OPTIONS: Array<{ value: SemanticMemoryKind; label: string }> = [
 const STATUS_OPTIONS: Array<{ value: SemanticMemoryStatus; label: string }> = [
   { value: 'active', label: '生效' },
   { value: 'retired', label: '停用' },
+  { value: 'superseded', label: '已替代' },
 ];
 
 const SENSITIVITY_OPTIONS: Array<{
@@ -391,6 +392,8 @@ export default function MemoryGovernancePage() {
               render: (value: SemanticMemoryStatus) =>
                 value === 'active' ? (
                   <Tag color="green">生效</Tag>
+                ) : value === 'superseded' ? (
+                  <Tag color="orange">已替代</Tag>
                 ) : (
                   <Tag>停用</Tag>
                 ),

@@ -10,8 +10,7 @@ export interface ToolSuite {
 }
 
 /**
- * 低频的项目手册 / 代码仓库套件。DWS、沙盒数据分析等高频或通用能力保持常驻，
- * 只把明显属于「查项目代码 / 读 GitHub 仓库」的工具收纳进来，避免召回回归。
+ * 低频的项目手册 / 代码仓库套件。
  */
 export const PROJECT_CODE_SUITE: ToolSuite = {
   id: 'project_code',
@@ -20,6 +19,68 @@ export const PROJECT_CODE_SUITE: ToolSuite = {
     '项目手册、项目代号、代码/符号检索、项目历史、GitHub 仓库目录/文件/搜索/PR 读取。触发词：项目手册、项目代号、代码、源码、仓库、github、符号、commit、PR。',
   matches: (tool) => tool.source === 'projects' || tool.source === 'github',
 };
+
+/** 钉钉办公写操作套件（只读查询保持常驻，写操作按需激活） */
+export const DWS_OFFICE_WRITE_SUITE: ToolSuite = {
+  id: 'dws_office_write',
+  label: '钉钉办公写操作',
+  description:
+    '创建/修改/取消钉钉日程、创建/完成待办、发起/同意/拒绝审批、创建/编辑钉钉文档、提交日报周报、通讯录维护。触发词：建日程、约会、取消会议、建待办、完成待办、发审批、同意审批、写文档、提交日志。',
+  matches: (tool) => tool.source === 'dws' && tool.risk !== 'read',
+};
+
+/** 浏览器自动化套件（Playwright MCP 暴露 25+ 工具，按需加载避免撑大提示词） */
+export const BROWSER_AUTOMATION_SUITE: ToolSuite = {
+  id: 'browser_automation',
+  label: '浏览器自动化',
+  description:
+    'Playwright 无头浏览器导航、页面截图、点击填表与端到端页面验证。触发词：打开网页截图、模拟点击、浏览器测试、playwright、前端页面验证。',
+  matches: (tool) =>
+    tool.name.startsWith('mcp__playwright__') ||
+    tool.name.startsWith('browser_'),
+};
+
+/** 高德地图与出行生活套件 */
+export const LBS_AND_TRAVEL_SUITE: ToolSuite = {
+  id: 'lbs_and_travel',
+  label: '高德地图与出行',
+  description:
+    '地点周边检索、地理编码、路线规划（驾车/公交/步行/骑行）与城市天气查询。触发词：附近、周边、地图、导航、路线、高德、怎么去、天气、酒店、餐厅。',
+  matches: (tool) => tool.name.startsWith('mcp__amap__'),
+};
+
+/** 公开证券行情套件 */
+export const FINANCE_MARKET_SUITE: ToolSuite = {
+  id: 'finance_market',
+  label: '公开证券行情',
+  description:
+    'A股/港股/美股实时快照与前复权历史日线取数。触发词：股价、行情、K线、日线、涨跌幅、市值、A股、港股、美股。',
+  matches: (tool) =>
+    tool.source === 'market' || tool.name === 'market_data_fetch',
+};
+
+export const DEFAULT_TOOL_SUITES: readonly ToolSuite[] = [
+  PROJECT_CODE_SUITE,
+  DWS_OFFICE_WRITE_SUITE,
+  BROWSER_AUTOMATION_SUITE,
+  LBS_AND_TRAVEL_SUITE,
+  FINANCE_MARKET_SUITE,
+];
+
+/** 按环境变量解析启用的套件列表；未设置 TOOL_SUITES_LIST 时返回全部默认套件 */
+export function resolveToolSuites(
+  env: NodeJS.ProcessEnv = process.env,
+): ToolSuite[] {
+  const raw = env.TOOL_SUITES_LIST?.trim();
+  if (!raw) return [...DEFAULT_TOOL_SUITES];
+  const wanted = new Set(
+    raw
+      .split(',')
+      .map((item) => item.trim().toLowerCase())
+      .filter(Boolean),
+  );
+  return DEFAULT_TOOL_SUITES.filter((suite) => wanted.has(suite.id));
+}
 
 export interface SuitePartition {
   resident: ToolDefinition[];
@@ -57,15 +118,32 @@ export function buildActivateToolsTool(suites: ToolSuite[]): ToolDefinition {
   const ids = suites.map((suite) => suite.id);
   const activate = async (
     args: Record<string, unknown>,
-  ): Promise<{ text: string; suiteId?: string }> => {
+  ): Promise<{ text: string; suiteIds?: string[] }> => {
     const suiteId = typeof args.suite === 'string' ? args.suite.trim() : '';
-    const suite = suites.find((candidate) => candidate.id === suiteId);
-    if (!suite) {
+    const extraRaw = Array.isArray(args.extraSuites) ? args.extraSuites : [];
+    const requestedIds = [
+      suiteId,
+      ...extraRaw
+        .filter((item): item is string => typeof item === 'string')
+        .map((item) => item.trim())
+        .filter(Boolean),
+    ];
+    const matched: ToolSuite[] = [];
+    const unknown: string[] = [];
+    for (const id of new Set(requestedIds)) {
+      const found = suites.find((candidate) => candidate.id === id);
+      if (found) matched.push(found);
+      else unknown.push(id);
+    }
+    if (matched.length === 0) {
       return { text: `Error: 未知套件 "${suiteId}"，可选：${ids.join('、')}` };
     }
+    const labels = matched.map((item) => `「${item.label}」`).join('、');
+    const warnUnknown =
+      unknown.length > 0 ? `（忽略未知套件：${unknown.join('、')}）` : '';
     return {
-      text: `已激活套件「${suite.label}」，现在可以调用其工具。`,
-      suiteId: suite.id,
+      text: `已激活套件${labels}${warnUnknown}，现在可以调用其工具。`,
+      suiteIds: matched.map((item) => item.id),
     };
   };
   return {
@@ -80,7 +158,12 @@ export function buildActivateToolsTool(suites: ToolSuite[]): ToolDefinition {
         suite: {
           type: 'string',
           enum: ids,
-          description: '要激活的套件 ID',
+          description: '要激活的主套件 ID',
+        },
+        extraSuites: {
+          type: 'array',
+          items: { type: 'string', enum: ids },
+          description: '可选：同一轮需要一并激活的其他套件 ID',
         },
       },
       required: ['suite'],
@@ -91,8 +174,10 @@ export function buildActivateToolsTool(suites: ToolSuite[]): ToolDefinition {
       const result = await activate(args);
       return {
         text: result.text,
-        summary: result.suiteId ? `激活套件 ${result.suiteId}` : result.text,
-        ...(result.suiteId ? { activateTools: [result.suiteId] } : {}),
+        summary: result.suiteIds
+          ? `激活套件 ${result.suiteIds.join(', ')}`
+          : result.text,
+        ...(result.suiteIds ? { activateTools: result.suiteIds } : {}),
       };
     },
   };

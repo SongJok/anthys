@@ -1,12 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import type { Context } from 'hono';
 import { streamSSE } from 'hono/streaming';
+import type { SharedStateStore } from '../cluster/SharedStateStore.js';
 import type { AgentStreamEvent } from '../types/core.js';
 import type { MetricsRegistry } from './metrics.js';
 
 /**
  * 一次性 SSE 票据：EventSource 无法携带 Authorization 头，
  * 控制台先用 Bearer 换取短时票据，再凭票据订阅流。
+ * 集群模式下通过 SharedStateStore 跨实例共享并原子核销。
  */
 export class OneTimeTicketStore {
   private readonly tickets = new Map<string, number>();
@@ -14,6 +16,7 @@ export class OneTimeTicketStore {
   constructor(
     private readonly ttlMs = 60_000,
     private readonly now: () => number = Date.now,
+    private readonly sharedState?: SharedStateStore,
   ) {}
 
   public issue(): { ticket: string; expiresAt: number } {
@@ -24,11 +27,58 @@ export class OneTimeTicketStore {
     return { ticket, expiresAt };
   }
 
+  public async issueAsync(): Promise<{ ticket: string; expiresAt: number }> {
+    const issued = this.issue();
+    if (this.sharedState) {
+      const ttlSeconds = Math.max(1, Math.ceil(this.ttlMs / 1_000));
+      try {
+        await this.sharedState.setJson(
+          `sse_ticket:${issued.ticket}`,
+          { expiresAt: issued.expiresAt },
+          ttlSeconds,
+        );
+      } catch {
+        // 共享存储失败时回退本进程票据
+      }
+    }
+    return issued;
+  }
+
   public consume(ticket: string): boolean {
     const expiresAt = this.tickets.get(ticket);
     if (expiresAt === undefined) return false;
     this.tickets.delete(ticket);
     return expiresAt > this.now();
+  }
+
+  public async consumeAsync(ticket: string): Promise<boolean> {
+    if (!ticket) return false;
+    if (this.sharedState) {
+      const key = `sse_ticket:${ticket}`;
+      try {
+        const entry = this.sharedState.takeJson
+          ? await this.sharedState.takeJson<{ expiresAt?: number }>(key)
+          : await (async () => {
+              const found = await this.sharedState!.getJson<{
+                expiresAt?: number;
+              }>(key);
+              if (found) await this.sharedState!.delete(key);
+              return found;
+            })();
+        if (entry) {
+          this.tickets.delete(ticket);
+          return typeof entry.expiresAt === 'number'
+            ? entry.expiresAt > this.now()
+            : true;
+        }
+        // 共享存储已权威确认不存在或已被其他实例消费，本地同样清理防重放
+        this.tickets.delete(ticket);
+        return false;
+      } catch {
+        // 共享存储故障时回退本进程消费
+      }
+    }
+    return this.consume(ticket);
   }
 
   public get size(): number {
@@ -71,7 +121,7 @@ export async function handleChatStream(
   deps: ChatStreamDeps,
 ): Promise<Response> {
   const ticket = c.req.query('ticket') ?? '';
-  if (!ticket || !deps.tickets.consume(ticket)) {
+  if (!ticket || !(await deps.tickets.consumeAsync(ticket))) {
     return c.json({ ok: false, error: '票据无效或已过期，请重新获取' }, 401);
   }
   const handler = deps.chatStream;

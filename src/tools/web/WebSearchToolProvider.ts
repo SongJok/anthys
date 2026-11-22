@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+import type { SharedStateStore } from '../../cluster/SharedStateStore.js';
 import type {
   ExecutionContext,
   IToolProvider,
@@ -40,6 +42,8 @@ export interface WebSearchToolProviderOptions {
   /** 进程内每日真实调用上限，默认 500；0 不限制 */
   dailyLimit?: number;
   maxCacheEntries?: number;
+  /** 集群模式下跨实例共享缓存与小时/日配额 */
+  sharedState?: SharedStateStore;
 }
 
 interface CacheEntry {
@@ -306,12 +310,12 @@ export class WebSearchToolProvider implements IToolProvider {
       site ?? '',
       count ?? '',
     ]);
-    const cached = this.readCache(cacheKey);
-    if (cached) {
+    const localCached = this.readCache(cacheKey);
+    if (localCached) {
       this.options.metrics?.inc('web_search_requests_total', {
         result: 'cache_hit',
       });
-      return this.respond(query, cached);
+      return this.respond(query, localCached);
     }
 
     const pending = this.inflight.get(cacheKey);
@@ -322,12 +326,39 @@ export class WebSearchToolProvider implements IToolProvider {
       return this.respond(query, await pending);
     }
 
-    const denial = this.reserveCall(ctx.conversationId);
+    if (this.options.sharedState) {
+      const remoteCached = await this.readRemoteCache(cacheKey);
+      if (remoteCached) {
+        this.options.metrics?.inc('web_search_requests_total', {
+          result: 'cache_hit',
+        });
+        return this.respond(query, remoteCached);
+      }
+      const joined = this.inflight.get(cacheKey);
+      if (joined) {
+        this.options.metrics?.inc('web_search_requests_total', {
+          result: 'inflight_join',
+        });
+        return this.respond(query, await joined);
+      }
+    }
+
+    const denial = this.options.sharedState
+      ? await this.reserveCallAsync(ctx.conversationId)
+      : this.reserveCall(ctx.conversationId);
     if (denial) {
       this.options.metrics?.inc('web_search_requests_total', {
         result: denial.reason === 'hour' ? 'rate_limited' : 'daily_limited',
       });
       return denial.output;
+    }
+
+    const joinedAfterReserve = this.inflight.get(cacheKey);
+    if (joinedAfterReserve) {
+      this.options.metrics?.inc('web_search_requests_total', {
+        result: 'inflight_join',
+      });
+      return this.respond(query, await joinedAfterReserve);
     }
 
     const startedAt = this.now();
@@ -460,6 +491,27 @@ export class WebSearchToolProvider implements IToolProvider {
     return safe.length === 0 ? emptyOutput() : formatOutput(query, safe);
   }
 
+  private sharedCacheKey(key: string): string {
+    return `web_search:cache:${createHash('sha256').update(key).digest('hex').slice(0, 32)}`;
+  }
+
+  private async readRemoteCache(key: string): Promise<WebSearchResult[] | null> {
+    const shared = this.options.sharedState;
+    if (!shared || this.cacheTtlSeconds <= 0) return null;
+    try {
+      const remote = await shared.getJson<WebSearchResult[]>(
+        this.sharedCacheKey(key),
+      );
+      if (Array.isArray(remote) && remote.length > 0) {
+        this.writeLocalCache(key, remote);
+        return remote;
+      }
+    } catch {
+      // 共享缓存不可达时静默回退本地
+    }
+    return null;
+  }
+
   private readCache(key: string): WebSearchResult[] | null {
     if (this.cacheTtlSeconds <= 0) return null;
     const entry = this.cache.get(key);
@@ -471,8 +523,7 @@ export class WebSearchToolProvider implements IToolProvider {
     return entry.results;
   }
 
-  private writeCache(key: string, results: WebSearchResult[]): void {
-    if (this.cacheTtlSeconds <= 0) return;
+  private writeLocalCache(key: string, results: WebSearchResult[]): void {
     this.cache.delete(key);
     this.cache.set(key, {
       expiresAt: this.now() + this.cacheTtlSeconds * 1_000,
@@ -482,6 +533,74 @@ export class WebSearchToolProvider implements IToolProvider {
       const oldest = this.cache.keys().next().value;
       if (oldest === undefined) break;
       this.cache.delete(oldest);
+    }
+  }
+
+  private writeCache(key: string, results: WebSearchResult[]): void {
+    if (this.cacheTtlSeconds <= 0) return;
+    this.writeLocalCache(key, results);
+    const shared = this.options.sharedState;
+    if (shared) {
+      void shared
+        .setJson(this.sharedCacheKey(key), results, this.cacheTtlSeconds)
+        .catch(() => undefined);
+    }
+  }
+
+  private async reserveCallAsync(
+    conversationId: string,
+  ): Promise<ReserveDenial | null> {
+    const shared = this.options.sharedState;
+    if (!shared?.incrementWindow) {
+      return this.reserveCall(conversationId);
+    }
+    const now = this.now();
+    const dayKey = `web_search:day:${localDayStamp(now)}`;
+    try {
+      if (this.dailyLimit > 0) {
+        const currentDay = await shared.getJson<{ count?: number }>(dayKey);
+        if ((currentDay?.count ?? 0) >= this.dailyLimit) {
+          return {
+            reason: 'day',
+            output: {
+              text: '今日联网搜索总额度已用完。请基于已有信息直接回答，并说明该结论未继续联网核实；不要重复调用 web_search。',
+              summary: '联网搜索达到每日上限',
+              citations: [],
+            },
+          };
+        }
+      }
+      if (this.maxCallsPerHour > 0) {
+        const hourBucket = Math.floor(now / HOUR_MS);
+        const hourKey = `web_search:hour:${conversationId}:${hourBucket}`;
+        const count = await shared.incrementWindow(hourKey, 3_700, 1);
+        if (count > this.maxCallsPerHour) {
+          return {
+            reason: 'hour',
+            output: {
+              text: `本会话联网搜索已达 ${this.maxCallsPerHour} 次/小时上限。请基于已有信息直接回答，并说明该结论未继续联网核实；不要重复调用 web_search。`,
+              summary: '联网搜索达到会话上限',
+              citations: [],
+            },
+          };
+        }
+      }
+      if (this.dailyLimit > 0) {
+        const count = await shared.incrementWindow(dayKey, 90_000, 1);
+        if (count > this.dailyLimit) {
+          return {
+            reason: 'day',
+            output: {
+              text: '今日联网搜索总额度已用完。请基于已有信息直接回答，并说明该结论未继续联网核实；不要重复调用 web_search。',
+              summary: '联网搜索达到每日上限',
+              citations: [],
+            },
+          };
+        }
+      }
+      return null;
+    } catch {
+      return this.reserveCall(conversationId);
     }
   }
 

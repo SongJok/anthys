@@ -68,6 +68,7 @@ class InMemorySemanticStore implements SemanticMemoryStore {
     if (existing) {
       existing.keywords = input.keywords;
       existing.embedding = input.embedding ?? null;
+      existing.reinforcementCount = (existing.reinforcementCount ?? 1) + 1;
       if (input.shareableInGroup !== undefined) {
         existing.shareableInGroup = input.shareableInGroup;
       }
@@ -107,12 +108,44 @@ class InMemorySemanticStore implements SemanticMemoryStore {
       sourceConversationType: input.sourceConversationType ?? null,
       sourceMessageId: input.sourceMessageId ?? null,
       confidence: input.confidence ?? 0.8,
+      reinforcementCount: 1,
+      supersededBy: null,
       expiresAt: input.expiresAt ?? null,
       createdAt: this.records.length + 1,
       updatedAt: this.records.length + 1,
     };
     this.records.push(record);
     return { ...record };
+  }
+
+  public async listActiveBySubject(input: {
+    scope: SemanticMemoryRecord['scope'];
+    subjectKey: string;
+    kind: SemanticMemoryRecord['kind'];
+    limit?: number;
+  }): Promise<SemanticMemoryRecord[]> {
+    return this.records
+      .filter(
+        (record) =>
+          record.scope === input.scope &&
+          record.subjectKey === input.subjectKey &&
+          record.kind === input.kind &&
+          record.status === 'active' &&
+          record.reviewStatus === 'approved',
+      )
+      .slice(0, input.limit ?? 50);
+  }
+
+  public async supersede(oldIds: string[], newId: string): Promise<number> {
+    let count = 0;
+    for (const record of this.records) {
+      if (oldIds.includes(record.id) && record.id !== newId && record.status === 'active') {
+        record.status = 'superseded';
+        record.supersededBy = newId;
+        count += 1;
+      }
+    }
+    return count;
   }
 
   public async search(
@@ -1042,5 +1075,121 @@ describe('后台维护 LLM 用量入账', () => {
         assistantText: '收到',
       }),
     ).resolves.toEqual([]);
+  });
+});
+
+describe('语义记忆冲突消解与高频术语自动晋升', () => {
+  it('同主体同关系的更新记忆将旧记忆标记为 superseded 且不再被召回', async () => {
+    const summaryStore = new InMemorySummaryStore();
+    const semanticStore = new InMemorySemanticStore();
+    const manager = new HierarchicalMemoryManager({
+      summaryStore,
+      semanticStore,
+    });
+
+    await manager.remember([
+      {
+        scope: 'user',
+        subjectKey: 'staff:u1',
+        kind: 'profile',
+        content: '张三负责支付网关',
+        keywords: ['张三', '支付网关'],
+        confidence: 0.8,
+      },
+    ]);
+    await manager.remember([
+      {
+        scope: 'user',
+        subjectKey: 'staff:u1',
+        kind: 'profile',
+        content: '张三负责订单中心',
+        keywords: ['张三', '订单中心'],
+        confidence: 0.85,
+      },
+    ]);
+
+    expect(semanticStore.records).toHaveLength(2);
+    expect(semanticStore.records[0]?.status).toBe('superseded');
+    expect(semanticStore.records[0]?.supersededBy).toBe(
+      semanticStore.records[1]?.id,
+    );
+    expect(semanticStore.records[1]?.status).toBe('active');
+
+    const recalled = await manager.recall({
+      query: '张三负责什么',
+      scope: 'user',
+      subjectKey: 'staff:u1',
+    });
+    expect(recalled.profileLines).toEqual(['- 张三负责订单中心']);
+  });
+
+  it('高置信度权威记忆不会被明显更低置信度的猜测覆盖', async () => {
+    const summaryStore = new InMemorySummaryStore();
+    const semanticStore = new InMemorySemanticStore();
+    const manager = new HierarchicalMemoryManager({
+      summaryStore,
+      semanticStore,
+    });
+
+    await manager.remember([
+      {
+        scope: 'group',
+        subjectKey: 'cid-1',
+        kind: 'terminology',
+        content: '「星河」是指核心风控引擎',
+        keywords: ['星河'],
+        confidence: 0.95,
+      },
+    ]);
+    await manager.remember([
+      {
+        scope: 'group',
+        subjectKey: 'cid-1',
+        kind: 'terminology',
+        content: '「星河」是指某个临时测试库',
+        keywords: ['星河'],
+        confidence: 0.6,
+      },
+    ]);
+
+    expect(semanticStore.records[0]?.status).toBe('active');
+  });
+
+  it('高频强化达到阈值的 terminology 记忆自动提交到术语候选池（去重不重复提交）', async () => {
+    const summaryStore = new InMemorySummaryStore();
+    const semanticStore = new InMemorySemanticStore();
+    const promoted: Array<{ standardName: string; definition: string }> = [];
+    const manager = new HierarchicalMemoryManager({
+      summaryStore,
+      semanticStore,
+      terminologyPromotionThreshold: 3,
+      onTerminologyCandidate: (candidate) => {
+        promoted.push({
+          standardName: candidate.standardName,
+          definition: candidate.definition,
+        });
+      },
+    });
+
+    const fact = {
+      scope: 'group' as const,
+      subjectKey: 'cid-9',
+      kind: 'terminology' as const,
+      content: '「青鸾」是指内部灰度和发布编排平台',
+      keywords: ['青鸾', '发布平台'],
+      sourceConversationId: 'cid-9',
+    };
+    await manager.remember([fact]);
+    await manager.remember([fact]);
+    expect(promoted).toHaveLength(0);
+
+    await manager.remember([fact]);
+    expect(promoted).toEqual([
+      { standardName: '青鸾', definition: '内部灰度和发布编排平台' },
+    ]);
+
+    // 第 4 次强化不再重复提交同一术语
+    await manager.remember([fact]);
+    expect(promoted).toHaveLength(1);
   });
 });

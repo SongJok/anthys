@@ -20,7 +20,11 @@ export {
   groupWorkspaces,
 } from './groupSchema.js';
 export { silentInvestigations } from './investigationSchema.js';
-export { agentJobEvents, agentJobs } from './jobSchema.js';
+export {
+  agentJobCheckpoints,
+  agentJobEvents,
+  agentJobs,
+} from './jobSchema.js';
 export {
   bystanderPolicies,
   conversationSummaries,

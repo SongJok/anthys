@@ -98,4 +98,55 @@ describe('enrichInboundMessage', () => {
     );
     expect(result.message.text).toContain('「a.pdf」下载失败：HTTP 404');
   });
+
+  it('语音附件通过 ASR 转写并替换 [语音] 占位正文', async () => {
+    const store = {
+      store: vi.fn().mockResolvedValue({
+        stored: [
+          {
+            type: 'audio',
+            fileName: 'voice.amr',
+            localPath: '/tmp/voice.amr',
+            size: 1200,
+          },
+        ],
+        failed: [],
+      } satisfies AttachmentStoreResult),
+    };
+    const audio = {
+      transcribe: vi.fn().mockResolvedValue('明天上午十点提醒我开评审会'),
+    };
+    const result = await enrichInboundMessage(
+      message({
+        text: '[语音]',
+        attachments: [{ type: 'audio', downloadCode: 'code-audio' }],
+      }),
+      { store, audio },
+    );
+    expect(audio.transcribe).toHaveBeenCalledTimes(1);
+    expect(result.message.text).toContain('明天上午十点提醒我开评审会');
+    expect(result.message.text).not.toMatch(/^\[语音\]/);
+    expect(result.message.text).toContain('语音转写：明天上午十点提醒我开评审会');
+  });
+
+  it('无附件但存在引用回复时反查并注入【引用消息】上下文', async () => {
+    const store = { store: vi.fn() };
+    const resolveQuotedMessage = vi.fn().mockResolvedValue({
+      messageId: 'orig-1',
+      senderNick: '王五',
+      text: '数据库连接超时 5000ms',
+    });
+    const result = await enrichInboundMessage(
+      message({
+        text: '帮我定位一下根因',
+        quotedMessage: { messageId: 'orig-1' },
+      }),
+      { store, resolveQuotedMessage },
+    );
+    expect(store.store).not.toHaveBeenCalled();
+    expect(resolveQuotedMessage).toHaveBeenCalledWith('orig-1', 'cid-1');
+    expect(result.message.text).toContain('【引用消息（王五）】');
+    expect(result.message.text).toContain('数据库连接超时 5000ms');
+    expect(result.message.text).toContain('帮我定位一下根因');
+  });
 });

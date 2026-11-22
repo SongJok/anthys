@@ -218,4 +218,54 @@ describe('parseStreamMessage', () => {
     expect(stripLeadingMentions('@小钉 @助手 你好 @同事')).toBe('你好 @同事');
     expect(stripLeadingMentions('没有 @ 前缀')).toBe('没有 @ 前缀');
   });
+
+  it('语音消息提取钉钉原生 recognition 文本作为正文与 nativeRecognition', () => {
+    const message = parseStreamMessage(
+      payload({
+        conversationType: '1',
+        msgtype: 'audio',
+        content: {
+          downloadCode: 'code-audio',
+          duration: 3200,
+          recognition: '帮我查一下明天的日程',
+        },
+      }),
+    );
+    expect(message?.text).toBe('帮我查一下明天的日程');
+    expect(message?.attachments).toEqual([
+      {
+        type: 'audio',
+        downloadCode: 'code-audio',
+        durationMs: 3200,
+        nativeRecognition: '帮我查一下明天的日程',
+      },
+    ]);
+  });
+
+  it('解析群聊引用回复（repliedMsg / quoteContent）上下文', () => {
+    const message = parseStreamMessage(
+      payload({
+        isInAtList: true,
+        text: {
+          content: '@小钉 帮我看看这条报错原因',
+          isReplyMsg: true,
+          repliedMsg: {
+            msgId: 'orig-msg-99',
+            senderStaffId: 'staff-2',
+            senderNick: '李四',
+            msgType: 'text',
+            content: { text: 'Error: ECONNRESET 10.0.1.5:5432' },
+          },
+        },
+      }),
+    );
+    expect(message?.text).toBe('帮我看看这条报错原因');
+    expect(message?.quotedMessage).toEqual({
+      messageId: 'orig-msg-99',
+      senderStaffId: 'staff-2',
+      senderNick: '李四',
+      msgtype: 'text',
+      text: 'Error: ECONNRESET 10.0.1.5:5432',
+    });
+  });
 });

@@ -15,6 +15,9 @@ import { formatShanghaiDateTime } from '../time/shanghaiTime.js';
 const TASK_TITLE_LIMIT = 60;
 const TASK_SUMMARY_LIMIT = 2_000;
 const MAX_EXTERNAL_EVENTS = 20;
+const DEFAULT_CONTINUATION_COOLDOWN_MS = 60_000;
+const URL_REF_PATTERN = /https?:\/\/[^\s"'<>）)]+/gi;
+const ISSUE_REF_PATTERN = /\b([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+#\d+)\b/g;
 
 const TASK_STATUS_LABELS: Record<AgentTaskStatus, string> = {
   active: '进行中',
@@ -48,9 +51,16 @@ export interface ExternalTaskMatch {
   subscribers: AgentTaskSubscription[];
 }
 
+export interface TaskContinuationInput {
+  task: AgentTask;
+  event: ExternalTaskEvent;
+  prompt: string;
+}
+
 export interface RouteExternalEventResult {
   matchedTasks: ExternalTaskMatch[];
   notificationsSent: number;
+  continuationsEnqueued: number;
 }
 
 export interface TaskServiceOptions {
@@ -65,6 +75,12 @@ export interface TaskServiceOptions {
     event: ExternalTaskEvent,
     match: ExternalTaskMatch,
   ) => Promise<void> | void;
+  /** 外部事件命中活跃任务线程时自动派生后台 Worker 增量续跑任务 */
+  enqueueContinuation?: (
+    input: TaskContinuationInput,
+  ) => Promise<AgentJob | null>;
+  /** 同一任务线程两次自动续跑的最小冷却间隔，默认 60s，防 Webhook 风暴 */
+  continuationCooldownMs?: number;
   now?: () => number;
 }
 
@@ -96,6 +112,7 @@ const TASK_USAGE = [
   '- `/task show <ID>` 查看详情（ID 支持前缀）',
   `- \`/task link <ID> <${AGENT_TASK_LINK_KINDS.join('|')}> <引用> [说明]\` 关联外部实体`,
   '- `/task subscribe <ID>` 订阅更新；`/task unsubscribe <ID>` 取消订阅',
+  '- `/task follow <ID> <on|off>` 开启或关闭外部事件自动跟进续跑',
   '- `/task close <ID>` 关闭线程（不会自动取消后台任务）',
 ].join('\n');
 
@@ -117,6 +134,8 @@ export class TaskService {
   private readonly enqueue: TaskServiceOptions['enqueue'];
   private readonly isAdmin: (staffId: string) => boolean;
   private readonly onExternalEvent: TaskServiceOptions['onExternalEvent'];
+  private readonly enqueueContinuation: TaskServiceOptions['enqueueContinuation'];
+  private readonly continuationCooldownMs: number;
   private readonly now: () => number;
 
   constructor(options: TaskServiceOptions) {
@@ -124,6 +143,11 @@ export class TaskService {
     this.enqueue = options.enqueue;
     this.isAdmin = options.isAdmin;
     this.onExternalEvent = options.onExternalEvent;
+    this.enqueueContinuation = options.enqueueContinuation;
+    this.continuationCooldownMs = Math.max(
+      0,
+      options.continuationCooldownMs ?? DEFAULT_CONTINUATION_COOLDOWN_MS,
+    );
     this.now = options.now ?? Date.now;
   }
 
@@ -215,6 +239,8 @@ export class TaskService {
         return this.subscribe(message, rest[0] ?? '');
       case 'unsubscribe':
         return this.unsubscribe(message, rest[0] ?? '');
+      case 'follow':
+        return this.setAutoFollowUp(message, rest[0] ?? '', rest[1] ?? '');
       case 'close':
         return this.close(message, rest[0] ?? '');
       default:
@@ -248,20 +274,21 @@ export class TaskService {
     return this.store.update(taskId, { status, summary: clipped });
   }
 
-  /** 将外部系统事件（如 GitHub PR/Issue Webhook）按关联链接路由至活跃任务线程并通知订阅者 */
+  /** 将外部系统事件（如 GitHub PR/Issue Webhook）按关联链接路由至活跃任务线程，通知订阅者并按需唤醒 Worker 增量续跑 */
   public async routeExternalEvent(
     event: ExternalTaskEvent,
   ): Promise<RouteExternalEventResult> {
     if (!this.store.findActiveByLinks) {
-      return { matchedTasks: [], notificationsSent: 0 };
+      return { matchedTasks: [], notificationsSent: 0, continuationsEnqueued: 0 };
     }
     const candidates = await this.store.findActiveByLinks(event.refs);
     if (candidates.length === 0) {
-      return { matchedTasks: [], notificationsSent: 0 };
+      return { matchedTasks: [], notificationsSent: 0, continuationsEnqueued: 0 };
     }
 
     const matchedTasks: ExternalTaskMatch[] = [];
     let notificationsSent = 0;
+    let continuationsEnqueued = 0;
     const timestamp = this.now();
     const noteLine = `[${event.source}:${event.eventType}] ${event.summary}`.trim();
 
@@ -294,7 +321,16 @@ export class TaskService {
         .join('\n')
         .slice(-TASK_SUMMARY_LIMIT);
 
-      const updated =
+      const lastContinuationAt =
+        typeof task.metadata.lastContinuationAt === 'number'
+          ? task.metadata.lastContinuationAt
+          : 0;
+      const canAutoFollowUp =
+        Boolean(this.enqueueContinuation) &&
+        task.metadata.autoFollowUp !== false &&
+        timestamp - lastContinuationAt >= this.continuationCooldownMs;
+
+      let updated =
         (await this.store.update(task.id, {
           summary: nextSummary,
           metadata: {
@@ -303,6 +339,45 @@ export class TaskService {
             lastExternalEventAt: timestamp,
           },
         })) ?? task;
+
+      if (canAutoFollowUp && this.enqueueContinuation) {
+        const continuationPrompt = [
+          `你正在增量跟进已有任务线程「${updated.title}」（ID: ${updated.id.slice(0, 8)}）。`,
+          `原始需求：${updated.prompt}`,
+          updated.summary ? `此前进展摘要：\n${updated.summary}` : '',
+          `最新到达的外部事件：\n来源：${event.source}\n事件类型：${event.eventType}\n摘要：${event.summary}`,
+          event.payload
+            ? `事件载荷：${JSON.stringify(event.payload).slice(0, 1_500)}`
+            : '',
+          '请基于新事件与既有进展做只读查证与增量分析，直接给出最新结论、风险变化与下一步建议。',
+        ]
+          .filter(Boolean)
+          .join('\n\n');
+        const continuationJob = await this.enqueueContinuation({
+          task: updated,
+          event,
+          prompt: continuationPrompt,
+        });
+        if (continuationJob) {
+          continuationsEnqueued += 1;
+          await this.store
+            .addLink({
+              taskId: updated.id,
+              kind: 'job',
+              ref: continuationJob.id,
+              label: `事件续跑:${event.eventType}`,
+            })
+            .catch(() => undefined);
+          updated =
+            (await this.store.update(updated.id, {
+              metadata: {
+                ...updated.metadata,
+                lastContinuationAt: timestamp,
+                lastContinuationJobId: continuationJob.id,
+              },
+            })) ?? updated;
+        }
+      }
 
       const subscribers = await this.store.listSubscribers(task.id);
       const match: ExternalTaskMatch = { task: updated, subscribers };
@@ -314,7 +389,31 @@ export class TaskService {
       }
     }
 
-    return { matchedTasks, notificationsSent };
+    return { matchedTasks, notificationsSent, continuationsEnqueued };
+  }
+
+  /** 检查群/单聊新消息是否显式提及了本会话活跃任务线程关联的外部引用（URL / owner/repo#num） */
+  public async matchConversationTask(
+    message: InboundMessage,
+  ): Promise<AgentTask | null> {
+    if (!this.store.findActiveByLinks) return null;
+    const refs: ExternalTaskLinkRef[] = [];
+    for (const match of message.text.matchAll(URL_REF_PATTERN)) {
+      const ref = match[0].replace(/[.,;，。；]+$/u, '');
+      if (ref) refs.push({ kind: 'url', ref });
+    }
+    for (const match of message.text.matchAll(ISSUE_REF_PATTERN)) {
+      if (match[1]) refs.push({ kind: 'issue', ref: match[1] });
+    }
+    if (refs.length === 0) return null;
+    const matched = await this.store.findActiveByLinks(refs);
+    return (
+      matched.find(
+        (task) =>
+          task.status === 'active' &&
+          task.conversationId === message.conversationId,
+      ) ?? null
+    );
   }
 
   public async subscribers(taskId: string): Promise<AgentTaskSubscription[]> {
@@ -429,6 +528,33 @@ export class TaskService {
     return removed
       ? `已取消订阅任务 ${shortId(task.id)}。`
       : `你尚未订阅任务 ${shortId(task.id)}。`;
+  }
+
+  private async setAutoFollowUp(
+    message: InboundMessage,
+    id: string,
+    flag: string,
+  ): Promise<string> {
+    const resolved = await this.resolve(message, id);
+    if ('error' in resolved) return resolved.error;
+    const { task } = resolved;
+    if (!this.canManage(task, message)) {
+      return '只有任务发起人或管理员可以调整外部事件自动跟进开关。';
+    }
+    const normalized = flag.trim().toLowerCase();
+    if (!['on', 'off', 'true', 'false'].includes(normalized)) {
+      return '用法：`/task follow <ID> <on|off>`';
+    }
+    const enabled = normalized === 'on' || normalized === 'true';
+    await this.store.update(task.id, {
+      metadata: {
+        ...task.metadata,
+        autoFollowUp: enabled,
+      },
+    });
+    return enabled
+      ? `已为任务 ${shortId(task.id)} 开启外部事件自动跟进续跑。`
+      : `已为任务 ${shortId(task.id)} 关闭外部事件自动跟进续跑（仍会保留事件通知）。`;
   }
 
   private async close(message: InboundMessage, id: string): Promise<string> {

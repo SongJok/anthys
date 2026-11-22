@@ -1,4 +1,5 @@
 import { CooldownLimiter } from '../bystander/CooldownLimiter.js';
+import type { SharedStateStore } from '../cluster/SharedStateStore.js';
 import { formatShanghaiDate } from '../time/shanghaiTime.js';
 
 export interface GroupNotifyAllDeliverInput {
@@ -38,6 +39,8 @@ export interface GroupNotifyAllServiceOptions {
   /** 通知正文最大字符数，默认 1000 */
   maxTextChars?: number;
   now?: () => number;
+  /** 集群模式下跨实例共享群冷却、并发防重与每日配额 */
+  sharedState?: SharedStateStore;
   audit?: (record: GroupNotifyAllAuditRecord) => Promise<void> | void;
   logger?: {
     info?(obj: Record<string, unknown>, msg: string): void;
@@ -67,6 +70,7 @@ export class GroupNotifyAllService {
   private readonly dailyQuota: number;
   private readonly maxTextChars: number;
   private readonly now: () => number;
+  private readonly sharedState?: SharedStateStore;
   private readonly audit?: GroupNotifyAllServiceOptions['audit'];
   private readonly logger?: GroupNotifyAllServiceOptions['logger'];
   private readonly cooldown: CooldownLimiter;
@@ -80,6 +84,7 @@ export class GroupNotifyAllService {
     this.dailyQuota = Math.max(1, options.dailyQuota ?? 10);
     this.maxTextChars = Math.max(1, options.maxTextChars ?? 1_000);
     this.now = options.now ?? Date.now;
+    this.sharedState = options.sharedState;
     this.audit = options.audit;
     this.logger = options.logger;
     this.cooldown = new CooldownLimiter({ now: this.now });
@@ -108,20 +113,67 @@ export class GroupNotifyAllService {
     if (this.inFlight.has(conversationId)) {
       return '本群正在发送一条全员通知，请勿重复操作。';
     }
-    const remaining = this.cooldown.remainingSeconds(
+    const inflightKey = `group_notify_all:inflight:${conversationId}`;
+    const cooldownKey = `group_notify_all:cooldown:${conversationId}`;
+    const dayStamp = formatShanghaiDate(this.now());
+    const dayKey = `${conversationId}:${dayStamp}`;
+    const sharedDayKey = `group_notify_all:daily:${conversationId}:${dayStamp}`;
+
+    let remaining = this.cooldown.remainingSeconds(
       conversationId,
       this.cooldownSeconds,
     );
+    if (remaining <= 0 && this.sharedState && this.cooldownSeconds > 0) {
+      try {
+        const remote = await this.sharedState.getJson<{ lastAt?: number }>(
+          cooldownKey,
+        );
+        if (typeof remote?.lastAt === 'number') {
+          this.cooldown.restore(conversationId, remote.lastAt);
+          remaining = this.cooldown.remainingSeconds(
+            conversationId,
+            this.cooldownSeconds,
+          );
+        }
+      } catch {
+        // 共享状态不可用时沿用本地冷却
+      }
+    }
     if (remaining > 0) {
       return `本群 ${this.cooldownSeconds} 秒内已发送过全员通知，请 ${remaining} 秒后再试。`;
     }
-    const dayKey = `${conversationId}:${formatShanghaiDate(this.now())}`;
-    const usedToday = this.dailyCounts.get(dayKey) ?? 0;
+
+    let usedToday = this.dailyCounts.get(dayKey) ?? 0;
+    if (this.sharedState) {
+      try {
+        const remote = await this.sharedState.getJson<{ count?: number }>(
+          sharedDayKey,
+        );
+        if (typeof remote?.count === 'number') {
+          usedToday = Math.max(usedToday, remote.count);
+        }
+      } catch {
+        // 共享状态不可用时沿用本地计数
+      }
+    }
     if (usedToday >= this.dailyQuota) {
       return `本群今日全员通知次数已达上限（${this.dailyQuota} 次），请明天再试。`;
     }
     const deliver = this.deliver;
     if (!deliver) return '全员通知投递通道未就绪，请稍后重试。';
+
+    let claimedRemote = false;
+    if (this.sharedState) {
+      try {
+        const ok = await this.sharedState.claim(inflightKey, 60);
+        if (!ok) {
+          return '本群正在发送一条全员通知，请勿重复操作。';
+        }
+        claimedRemote = true;
+      } catch {
+        // 共享状态不可用时仅靠本进程 inFlight
+      }
+    }
 
     this.inFlight.add(conversationId);
     this.logger?.info?.(
@@ -140,9 +192,26 @@ export class GroupNotifyAllService {
           ? { requesterMessageId: input.requesterMessageId }
           : {}),
       });
-      this.cooldown.markReplied(conversationId);
+      const sentAt = this.now();
+      this.cooldown.markReplied(conversationId, sentAt);
       this.dailyCounts.set(dayKey, usedToday + 1);
       this.pruneDailyCounts(dayKey);
+      if (this.sharedState) {
+        if (this.cooldownSeconds > 0) {
+          await this.sharedState
+            .setJson(cooldownKey, { lastAt: sentAt }, this.cooldownSeconds + 10)
+            .catch(() => undefined);
+        }
+        if (this.sharedState.incrementWindow) {
+          await this.sharedState
+            .incrementWindow(sharedDayKey, 90_000, 1)
+            .catch(() => undefined);
+        } else {
+          await this.sharedState
+            .setJson(sharedDayKey, { count: usedToday + 1 }, 90_000)
+            .catch(() => undefined);
+        }
+      }
       await this.recordAudit({
         conversationId,
         actorStaffId: input.actorStaffId,
@@ -173,6 +242,9 @@ export class GroupNotifyAllService {
       return `全员通知发送失败：${message}。请勿声称已通知所有人；如仍需通知，可稍后重试或改用普通群消息。`;
     } finally {
       this.inFlight.delete(conversationId);
+      if (claimedRemote && this.sharedState) {
+        await this.sharedState.delete(inflightKey).catch(() => undefined);
+      }
     }
   }
 

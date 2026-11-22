@@ -1,4 +1,9 @@
-import type { RunUsage } from './core.js';
+import type { ReActCheckpointState, RunUsage } from './core.js';
+
+export interface AgentJobCheckpoint extends ReActCheckpointState {
+  jobId: string;
+  updatedAt: number;
+}
 
 export type AgentJobStatus =
   | 'queued'
@@ -108,10 +113,10 @@ export interface AgentJobStore {
     fencingToken: number,
     reason: string,
   ): Promise<AgentJob | null>;
-  /** 恢复已暂停的任务；可追加补充要求后重新执行 */
+  /** 恢复已暂停的任务；可追加补充要求后重新执行（带断点续跑时按 resumeGuidance 注入） */
   resume(
     jobId: string,
-    patch?: { prompt?: string },
+    patch?: { prompt?: string; resumeGuidance?: string },
   ): Promise<AgentJob | null>;
   cancel(jobId: string): Promise<AgentJob | null>;
   get(jobId: string): Promise<AgentJob | null>;
@@ -122,4 +127,10 @@ export interface AgentJobStore {
     payload: Record<string, unknown>;
   }): Promise<void>;
   listEvents(jobId: string, limit?: number): Promise<AgentJobEvent[]>;
+  /** 持久化或覆盖任务的最新只读步骤检查点 */
+  saveCheckpoint?(checkpoint: AgentJobCheckpoint): Promise<void>;
+  /** 读取任务的最新步骤检查点；不存在时返回 null */
+  loadCheckpoint?(jobId: string): Promise<AgentJobCheckpoint | null>;
+  /** 任务完成或取消后清理检查点 */
+  deleteCheckpoint?(jobId: string): Promise<void>;
 }

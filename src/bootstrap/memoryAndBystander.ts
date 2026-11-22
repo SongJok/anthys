@@ -55,6 +55,7 @@ import { PersonSettingsToolProvider } from '../tools/personal/PersonSettingsTool
 import { groupMemberSubjectKey } from '../types/bystander-and-memory.js';
 import type { IToolProvider } from '../types/core.js';
 import type { GlossaryService } from '../glossary/GlossaryService.js';
+import type { GlossaryCandidateService } from '../glossary/GlossaryCandidateService.js';
 import type { AgentRuntimesContext } from './agentRuntimes.js';
 import type { WorkspaceAndExtensionsContext } from './workspaceAndExtensions.js';
 import { envCount, envEnabled, envSeconds, errorText } from './envHelpers.js';
@@ -68,6 +69,7 @@ export interface MemoryAndBystanderDeps {
   embeddingClient?: OpenAIEmbeddingClient;
   scheduledStore: DrizzleScheduledTaskStore;
   glossary: GlossaryService;
+  glossaryCandidates?: GlossaryCandidateService;
   groupTranscriptArchive: GroupTranscriptArchive;
   transcriptArchiveEnabled: boolean;
   toolProviders: IToolProvider[];
@@ -110,6 +112,7 @@ export async function setupMemoryAndBystander(
     embeddingClient,
     scheduledStore,
     glossary,
+    glossaryCandidates,
     groupTranscriptArchive,
     transcriptArchiveEnabled,
     toolProviders,
@@ -227,6 +230,25 @@ export async function setupMemoryAndBystander(
     compressionRatio: memoryConfig.compressionRatio,
     semanticLimit: memoryConfig.semanticLimit,
     ...(embeddingClient ? { embedding: embeddingClient } : {}),
+    ...(glossaryCandidates
+      ? {
+          terminologyPromotionThreshold: envCount(
+            process.env.MEMORY_TERMINOLOGY_PROMOTION_THRESHOLD,
+            3,
+          ),
+          onTerminologyCandidate: async (candidate) => {
+            await glossaryCandidates.submit({
+              standardName: candidate.standardName,
+              aliases: candidate.aliases,
+              definition: candidate.definition,
+              sourceConversationId: candidate.sourceConversationId,
+              evidence: candidate.evidence,
+              submittedBy: 'semantic_memory_auto_promote',
+            });
+            metrics.inc('glossary_candidates_auto_promoted_total');
+          },
+        }
+      : {}),
     logger,
   });
 
@@ -321,6 +343,7 @@ export async function setupMemoryAndBystander(
       60,
     ),
     dailyQuota: envCount(process.env.GROUP_NOTIFY_ALL_DAILY_QUOTA, 10),
+    ...(sharedState ? { sharedState } : {}),
     audit: async (record) => {
       metrics.inc('group_notify_all_total', { result: record.result });
       await configCenter.recordAudit({

@@ -46,3 +46,23 @@ END $$;
 
 CREATE INDEX IF NOT EXISTS pending_actions_conv_idx
   ON pending_actions (conversation_id);
+
+-- 后台任务步骤级断点续跑表（幂等创建）
+CREATE TABLE IF NOT EXISTS agent_job_checkpoints (
+  job_id uuid PRIMARY KEY REFERENCES agent_jobs(id) ON DELETE CASCADE,
+  step_index integer NOT NULL,
+  messages_json jsonb NOT NULL,
+  accumulated_tokens integer NOT NULL DEFAULT 0,
+  accumulated_input_tokens integer NOT NULL DEFAULT 0,
+  accumulated_output_tokens integer NOT NULL DEFAULT 0,
+  accumulated_cached_tokens integer NOT NULL DEFAULT 0,
+  accumulated_wall_ms integer NOT NULL DEFAULT 0,
+  activated_suites jsonb NOT NULL DEFAULT '[]'::jsonb,
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+-- 语义记忆冲突消解与强化计数列（幂等补齐）
+ALTER TABLE IF EXISTS semantic_memories
+  ADD COLUMN IF NOT EXISTS superseded_by uuid;
+ALTER TABLE IF EXISTS semantic_memories
+  ADD COLUMN IF NOT EXISTS reinforcement_count integer NOT NULL DEFAULT 1;

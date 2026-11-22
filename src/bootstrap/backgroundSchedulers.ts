@@ -128,6 +128,32 @@ export function setupBackgroundSchedulers(
           requestedAt: Date.now(),
         },
       }),
+    enqueueContinuation: async ({ task, event, prompt }) => {
+      metrics.inc('task_event_continuation_total', {
+        source: event.source,
+        eventType: event.eventType,
+      });
+      return jobStore.enqueue({
+        conversationId: task.conversationId,
+        conversationType: task.conversationType,
+        messageId: `task_evt_${task.id.slice(0, 8)}_${event.deliveryId || randomUUID()}`,
+        senderStaffId: task.ownerStaffId,
+        senderNick: task.ownerNick || '任务续跑',
+        kind: 'worker',
+        prompt,
+        metadata: {
+          source: 'task_continuation',
+          taskId: task.id,
+          worker: 'research',
+          eventSource: event.source,
+          eventType: event.eventType,
+          ...(event.deliveryId ? { deliveryId: event.deliveryId } : {}),
+          requestedAt: Date.now(),
+        },
+      });
+    },
+    continuationCooldownMs:
+      envSeconds(process.env.TASK_CONTINUATION_COOLDOWN_SECONDS, 60) * 1_000,
     onExternalEvent: async (event, match) => {
       const targets = [
         ...new Set(
@@ -345,10 +371,33 @@ export function setupBackgroundSchedulers(
         isWorkerName(job.metadata.worker)
           ? job.metadata.worker
           : undefined;
+      const savedCheckpoint = await jobStore
+        .loadCheckpoint?.(job.id)
+        .catch(() => null);
+      const resumeGuidance =
+        typeof job.metadata.resumeGuidance === 'string' &&
+        job.metadata.resumeGuidance.trim()
+          ? job.metadata.resumeGuidance.trim()
+          : undefined;
       const result = await harness.runJob(job, {
         emit: context.emit,
         signal: context.signal,
         ...(worker ? { worker } : {}),
+        ...(jobStore.saveCheckpoint
+          ? {
+              checkpoint: {
+                ...(savedCheckpoint ? { initial: savedCheckpoint } : {}),
+                ...(resumeGuidance ? { resumeGuidance } : {}),
+                onCheckpoint: async (state) => {
+                  await jobStore.saveCheckpoint?.({
+                    jobId: job.id,
+                    ...state,
+                    updatedAt: Date.now(),
+                  });
+                },
+              },
+            }
+          : {}),
       });
       if (result.watchdog?.action === 'pause') {
         throw new JobPauseError(result.watchdog.reason, result.watchdog.code);
@@ -374,6 +423,7 @@ export function setupBackgroundSchedulers(
         status: 'succeeded',
         ...(worker ? { worker } : {}),
       });
+      await jobStore.deleteCheckpoint?.(job.id).catch(() => undefined);
       if (taskMemory) {
         try {
           await taskMemory.rememberJob(job);

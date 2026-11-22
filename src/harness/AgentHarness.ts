@@ -22,6 +22,7 @@ import type {
   AgentStreamEvent,
   DynamicLoopPolicy,
   InboundMessage,
+  ReActCheckpointHooks,
   RunResult,
   RunUsage,
 } from '../types/core.js';
@@ -167,6 +168,8 @@ export interface JobHandleOptions {
   notify?: (text: string) => Promise<void> | void;
   /** Worker 名称，用于用量归因、预算与结构化输出 */
   worker?: string;
+  /** 步骤级断点续跑钩子：恢复时注入上次只读步骤快照，运行中持续落盘 */
+  checkpoint?: ReActCheckpointHooks;
 }
 
 export interface WorkerRuntime {
@@ -803,6 +806,7 @@ export class AgentHarness {
       },
       emit: handle.emit,
       signal: handle.signal,
+      ...(handle.checkpoint ? { checkpoint: handle.checkpoint } : {}),
     });
     await this.recordUsage(
       message,

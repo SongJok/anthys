@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildChunks,
   buildRepoMap,
+  extractFileDependencies,
   extractSymbols,
   renderRepoMap,
 } from './CodeIndexer.js';
@@ -191,5 +192,51 @@ describe('CodeIndexer 仓库地图', () => {
     expect(result.totalFiles).toBe(2);
     expect(renderRepoMap(result)).toBe(result.text);
     expect(result.text.length).toBeLessThanOrEqual(500 * 4 + 20);
+  });
+});
+
+describe('CodeIndexer TypeScript AST 深度符号与依赖提取', () => {
+  it('AST 精确解析多行泛型、类箭头方法、Getter 与调用关系', () => {
+    const code = [
+      "import { fetchOrder } from './orders.js';",
+      "import type { Config } from './config.js';",
+      '',
+      'export class OrderProcessor<',
+      '  T extends { id: string }',
+      '> {',
+      '  get ready(): boolean {',
+      '    return checkHealth();',
+      '  }',
+      '  handle = async (item: T): Promise<void> => {',
+      '    await fetchOrder(item.id);',
+      '    await notifyOwner(item.id);',
+      '  };',
+      '}',
+    ].join('\n');
+
+    const symbols = extractSymbols('src/processor.ts', 'typescript', code);
+    const byName = new Map(symbols.map((s) => [s.name, s]));
+    expect(byName.get('OrderProcessor')).toMatchObject({
+      kind: 'class',
+      startLine: 4,
+      endLine: 14,
+      exported: true,
+    });
+    expect(byName.get('ready')).toMatchObject({
+      kind: 'method',
+      parent: 'OrderProcessor',
+    });
+    expect(byName.get('ready')?.signature).toContain('checkHealth');
+    expect(byName.get('handle')).toMatchObject({
+      kind: 'method',
+      parent: 'OrderProcessor',
+    });
+    expect(byName.get('handle')?.signature).toContain('fetchOrder');
+    expect(byName.get('handle')?.signature).toContain('notifyOwner');
+
+    const deps = extractFileDependencies('src/processor.ts', 'typescript', code);
+    expect(deps.imports).toEqual(['./orders.js', './config.js']);
+    expect(deps.calls).toContain('fetchOrder');
+    expect(deps.calls).toContain('notifyOwner');
   });
 });

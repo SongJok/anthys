@@ -1897,3 +1897,127 @@ describe('ReActRunner 工具两级加载', () => {
     expect(model.headPerTurn[0]).not.toContain('按需工具套件');
   });
 });
+
+describe('ReActRunner 步骤级断点续跑（Step Checkpointing）', () => {
+  class CheckpointCapturingModel implements ChatModel {
+    public readonly modelName = 'cp-capturing';
+    public toolNamesPerTurn: string[][] = [];
+    public messagesPerTurn: Array<
+      Array<{ role: string; content: string; toolName?: string }>
+    > = [];
+    constructor(private readonly script: ChatStreamChunk[][]) {}
+    public async *streamChat(
+      request: ChatCompletionRequest,
+    ): AsyncIterable<ChatStreamChunk> {
+      this.toolNamesPerTurn.push(
+        request.tools.map((tool) => tool.function.name).sort(),
+      );
+      this.messagesPerTurn.push(
+        request.messages.map((m) => ({
+          role: m.role,
+          content: m.content,
+          ...(m.toolName ? { toolName: m.toolName } : {}),
+        })),
+      );
+      const chunks = this.script.shift() ?? [];
+      for (const chunk of chunks) yield chunk;
+    }
+  }
+
+  it('在只读工具轮后落盘检查点，并支持带补充要求从断点续跑与恢复已激活套件', async () => {
+    const saved: Array<import('../types/core.js').ReActCheckpointState> = [];
+    const suiteToolsProvider: IToolProvider = {
+      providerName: 'suite-cp',
+      getTools: async () => [
+        {
+          name: 'project_search',
+          description: '搜索代码',
+          risk: 'read',
+          source: 'projects',
+          parametersJsonSchema: { type: 'object', properties: {} },
+          execute: async () => '找到定位文件 src/a.ts:10',
+        },
+      ],
+    };
+
+    // 第一次运行：激活套件 + 只读查询后命中看门狗暂停
+    const model1 = new CheckpointCapturingModel([
+      toolTurn([
+        { index: 0, id: 'c1', name: 'activate_tools', args: { suite: 'project_code' } },
+      ]),
+      toolTurn([
+        { index: 0, id: 'c2', name: 'project_search', args: {} },
+      ]),
+    ]);
+    const runner1 = new ReActRunner({
+      model: model1,
+      toolProviders: [suiteToolsProvider],
+      policy: { ...policy, maxTotalTokens: 100 },
+      suiteGate: { enabled: true, suites: [PROJECT_CODE_SUITE] },
+      watchdog: {
+        enabled: true,
+        policy: { warnRatio: 0.5, hardRatio: 0.9 },
+        budget: { maxTotalTokens: 20, maxWallTimeMs: 60_000 },
+      },
+    });
+
+    const first = await runner1.run({
+      messages: [{ role: 'system', content: '系统提示' }, ...userMessages],
+      context: { ...makeContext(), jobId: 'job-cp-1' },
+      emit: () => undefined,
+      checkpoint: {
+        onCheckpoint: (state) => {
+          saved.push(state);
+        },
+      },
+    });
+    expect(first.watchdog?.action).toBe('pause');
+    expect(saved.length).toBeGreaterThanOrEqual(2);
+    const latest = saved.at(-1)!;
+    expect(latest.stepIndex).toBeGreaterThanOrEqual(2);
+    expect(latest.activatedSuites).toContain('project_code');
+    expect(
+      latest.messages.some(
+        (m) => m.role === 'tool' && m.content.includes('src/a.ts:10'),
+      ),
+    ).toBe(true);
+
+    // 第二次运行：从断点恢复并追加人工补充要求，直接复用上次工具输出且已激活 project_search
+    const model2 = new CheckpointCapturingModel([
+      [
+        {
+          contentDelta: '基于已有检索结果 src/a.ts:10，结论如下。',
+          finishReason: 'stop',
+          usage: { totalTokens: 8 },
+        },
+      ],
+    ]);
+    const runner2 = new ReActRunner({
+      model: model2,
+      toolProviders: [suiteToolsProvider],
+      policy,
+      suiteGate: { enabled: true, suites: [PROJECT_CODE_SUITE] },
+    });
+    const resumed = await runner2.run({
+      messages: [{ role: 'system', content: '不应覆盖断点的初始消息' }],
+      context: { ...makeContext(), jobId: 'job-cp-1' },
+      emit: () => undefined,
+      checkpoint: {
+        initial: latest,
+        resumeGuidance: '只基于已有信息作答',
+      },
+    });
+
+    expect(resumed.answer).toContain('src/a.ts:10');
+    expect(model2.toolNamesPerTurn[0]).toContain('project_search');
+    const sentMessages = model2.messagesPerTurn[0] ?? [];
+    expect(
+      sentMessages.some((m) => m.content.includes('找到定位文件 src/a.ts:10')),
+    ).toBe(true);
+    expect(
+      sentMessages.some((m) =>
+        m.content.includes('[人工恢复补充要求] 只基于已有信息作答'),
+      ),
+    ).toBe(true);
+  });
+});

@@ -1,4 +1,7 @@
+import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { formatShanghaiDate } from '../../time/shanghaiTime.js';
 import type {
   ExecutionContext,
   IToolProvider,
@@ -116,9 +119,9 @@ export class SandboxToolProvider implements IToolProvider {
       risk: 'read',
       source: 'sandbox',
       description:
-        '在隔离沙盒中执行分析脚本，用于日志正则提取、异常堆栈聚类、多表 Join、同比/环比与统计汇总。' +
-        'javascript 模式（默认）无需任何依赖，脚本可直接使用全局变量 datasets 与 loadDataset(key)，把最终结果赋值给 result，console.log 的内容会一并返回；' +
-        'python/bash 会进入无网络、只读文件系统的受限 Docker 容器，脚本可读取 /workspace/datasets.json，python 额外提供 datasets 与 load_dataset(key)。' +
+        '在隔离沙盒中执行分析脚本，用于日志正则提取、异常堆栈聚类、多表 Join、同比/环比、图表生成与统计汇总。' +
+        'javascript 模式（默认）无需任何依赖，脚本可直接使用全局变量 datasets、loadDataset(key) 与 emitArtifact(fileName, content, { encoding?: "utf8"|"base64" }) 导出文件，把最终结果赋值给 result，console.log 的内容会一并返回；' +
+        'python/bash 会进入无网络、只读文件系统的受限 Docker 容器，脚本可读取 /workspace/datasets.json 并把需要交付给用户的图表/Excel/CSV 写入 /workspace/out/<文件名>（python 提供 datasets、load_dataset(key) 与 output_path(file_name)）。' +
         'MCP 大结果被卸载后，用 datasetKeys 传入返回的 datasetKey 即可加载完整数据；用户上传的 csv / json / txt 附件也可以直接用其工作区路径作为 datasetKeys。',
       parametersJsonSchema: {
         type: 'object',
@@ -186,6 +189,16 @@ export class SandboxToolProvider implements IToolProvider {
           remaining,
         );
 
+        const artifactOutput = this.workspace
+          ? {
+              workspaceRoot: this.workspace.hostDir,
+              subdir: join(
+                'generated',
+                formatShanghaiDate(ctx.now()).replaceAll('-', ''),
+                `run_${randomUUID().slice(0, 12)}`,
+              ),
+            }
+          : undefined;
         const request: SandboxExecRequest = {
           language,
           code,
@@ -193,12 +206,17 @@ export class SandboxToolProvider implements IToolProvider {
             ? { inputDatasets: datasets }
             : {}),
           timeoutMs,
+          ...(artifactOutput ? { artifactOutput } : {}),
         };
         const result = await this.sandbox.execute(request);
         const hint =
-          result.exitCode === 0
-            ? undefined
-            : '脚本执行失败，请根据 stderr 修正后重试；不要臆测未成功计算的数据。';
+          result.exitCode !== 0
+            ? '脚本执行失败，请根据 stderr 修正后重试；不要臆测未成功计算的数据。'
+            : result.generatedArtifacts && result.generatedArtifacts.length > 0
+              ? `已导出 ${result.generatedArtifacts.length} 个工作区文件（${result.generatedArtifacts
+                  .map((item) => item.workspaceRelativePath)
+                  .join('、')}），可直接调用 deliver_artifact 发送给用户。`
+              : undefined;
         return JSON.stringify({
           language,
           ...result,

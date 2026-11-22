@@ -1,7 +1,17 @@
 import { execFile } from 'node:child_process';
-import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import {
+  chmod,
+  copyFile,
+  lstat,
+  mkdir,
+  mkdtemp,
+  readdir,
+  realpath,
+  rm,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, extname, join, relative, resolve, sep } from 'node:path';
 import type ivmType from 'isolated-vm';
 import { runJavascriptInWorker } from './WorkerJsSandbox.js';
 
@@ -19,8 +29,10 @@ async function loadIvmModule(): Promise<IvmModule | null> {
   return cachedIvmModule;
 }
 import type {
+  SandboxArtifactOutputOptions,
   SandboxExecRequest,
   SandboxExecResult,
+  SandboxGeneratedArtifact,
 } from '../../types/mcp-and-sandbox.js';
 
 export type SandboxLanguage = SandboxExecRequest['language'];
@@ -63,10 +75,38 @@ const MAX_CODE_CHARS = 200_000;
 const MAX_DATASET_JSON_CHARS = 32 * 1024 * 1024;
 const DOCKER_STARTUP_GRACE_MS = 5_000;
 
+const DEFAULT_MAX_ARTIFACT_FILE_BYTES = 20 * 1024 * 1024;
+const DEFAULT_MAX_ARTIFACT_TOTAL_BYTES = 30 * 1024 * 1024;
+const DEFAULT_MAX_ARTIFACT_FILES = 10;
+
+const ALLOWED_ARTIFACT_EXTENSIONS: Readonly<Record<string, string>> = {
+  '.csv': 'text/csv; charset=utf-8',
+  '.tsv': 'text/tab-separated-values; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.md': 'text/markdown; charset=utf-8',
+  '.txt': 'text/plain; charset=utf-8',
+  '.html': 'text/html; charset=utf-8',
+  '.xml': 'application/xml; charset=utf-8',
+  '.yaml': 'application/yaml; charset=utf-8',
+  '.yml': 'application/yaml; charset=utf-8',
+  '.xlsx':
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  '.docx':
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  '.pptx':
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  '.pdf': 'application/pdf',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.svg': 'image/svg+xml',
+  '.zip': 'application/zip',
+};
+
 const DEFAULT_IMAGES: Record<SandboxLanguage, string> = {
-  javascript: 'node:24-alpine',
-  python: 'python:3.12-alpine',
-  bash: 'alpine:3.20',
+  javascript: process.env.SANDBOX_NODE_IMAGE?.trim() || 'node:24-alpine',
+  python: process.env.SANDBOX_PYTHON_IMAGE?.trim() || 'python:3.12-alpine',
+  bash: process.env.SANDBOX_BASH_IMAGE?.trim() || 'alpine:3.20',
 };
 
 const CODE_FILES: Record<SandboxLanguage, string> = {
@@ -81,6 +121,33 @@ const RUN_COMMANDS: Record<SandboxLanguage, string[]> = {
   bash: ['sh', '/workspace/script.sh'],
 };
 
+interface RawJsArtifact {
+  fileName?: unknown;
+  content?: unknown;
+  encoding?: unknown;
+}
+
+export function sanitizeArtifactFileName(raw: string): string | null {
+  const base = basename(raw.trim());
+  if (!base || base === '.' || base === '..' || base.startsWith('.')) {
+    return null;
+  }
+  const ext = extname(base).toLowerCase();
+  if (!(ext in ALLOWED_ARTIFACT_EXTENSIONS)) return null;
+  const stem = base
+    .slice(0, base.length - ext.length)
+    .replace(/[^\p{L}\p{N}._-]+/gu, '_')
+    .replace(/^[._-]+/u, '')
+    .slice(0, 80);
+  if (!stem) return null;
+  return `${stem}${ext}`;
+}
+
+export function mimeTypeForArtifact(fileName: string): string {
+  const ext = extname(fileName).toLowerCase();
+  return ALLOWED_ARTIFACT_EXTENSIONS[ext] ?? 'application/octet-stream';
+}
+
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
 }
@@ -91,11 +158,12 @@ function errorMessage(error: unknown): string {
   return String(error);
 }
 
-/** 沙盒 JS 脚本包装：从隔离上下文的 __DATASETS_JSON__ 注入 datasets/console，并收集 result 与日志。 */
+/** 沙盒 JS 脚本包装：从隔离上下文的 __DATASETS_JSON__ 注入 datasets/console/emitArtifact，并收集 result、日志与产物。 */
 function wrapJavascript(code: string): string {
   return `(function () {
   'use strict';
   var __logs = [];
+  var __artifacts = [];
   function __stringify(value) {
     try {
       return typeof value === 'string' ? value : JSON.stringify(value);
@@ -111,6 +179,18 @@ function wrapJavascript(code: string): string {
   };
   var datasets = JSON.parse(typeof __DATASETS_JSON__ === 'string' ? __DATASETS_JSON__ : '{}');
   function loadDataset(key) { return datasets[key]; }
+  function emitArtifact(fileName, content, options) {
+    if (typeof fileName !== 'string' || !fileName.trim()) {
+      throw new Error('emitArtifact 需要非空文件名');
+    }
+    if (__artifacts.length >= 10) {
+      throw new Error('单次执行最多导出 10 个产物文件');
+    }
+    var encoding = options && options.encoding === 'base64' ? 'base64' : 'utf8';
+    var text = typeof content === 'string' ? content : JSON.stringify(content, null, 2);
+    __artifacts.push({ fileName: fileName.trim(), content: text, encoding: encoding });
+    return { fileName: fileName.trim(), queued: true };
+  }
   var result;
   try {
     ${code}
@@ -125,7 +205,8 @@ function wrapJavascript(code: string): string {
     return JSON.stringify({
       ok: true,
       result: result === undefined ? null : result,
-      logs: __logs
+      logs: __logs,
+      artifacts: __artifacts
     });
   } catch (error) {
     return JSON.stringify({
@@ -139,17 +220,28 @@ function wrapJavascript(code: string): string {
 
 function dockerJavascriptPrelude(): string {
   return `const fs = require('node:fs');
+const path = require('node:path');
 const datasets = JSON.parse(fs.readFileSync('/workspace/datasets.json', 'utf8'));
 function loadDataset(key) { return datasets[key]; }
+function outputPath(fileName) { return path.join('/workspace/out', path.basename(String(fileName))); }
+function emitArtifact(fileName, content, options) {
+  const target = outputPath(fileName);
+  const encoding = options && options.encoding === 'base64' ? 'base64' : 'utf8';
+  const payload = typeof content === 'string' ? content : JSON.stringify(content, null, 2);
+  fs.writeFileSync(target, encoding === 'base64' ? Buffer.from(payload, 'base64') : payload);
+  return { fileName: path.basename(String(fileName)), path: target };
+}
 `;
 }
 
 function dockerPythonPrelude(): string {
-  return `import json
+  return `import json, os
 with open('/workspace/datasets.json', 'r', encoding='utf-8') as __f:
     datasets = json.load(__f)
 def load_dataset(key):
     return datasets.get(key)
+def output_path(file_name):
+    return os.path.join('/workspace/out', os.path.basename(str(file_name)))
 `;
 }
 
@@ -327,6 +419,10 @@ export class IsolatedSandbox {
 
     const parsed = safeParse(execution.raw);
     const isOk = parsed?.ok !== false;
+    const generatedArtifacts =
+      isOk && request.artifactOutput && Array.isArray(parsed?.artifacts)
+        ? await this.persistJsArtifacts(parsed.artifacts, request.artifactOutput)
+        : [];
     const stdout = isOk
       ? JSON.stringify({ result: parsed?.result ?? null, logs: parsed?.logs ?? [] })
       : JSON.stringify({
@@ -340,6 +436,7 @@ export class IsolatedSandbox {
         stderr: isOk ? '' : String(parsed?.error ?? '沙盒脚本执行失败'),
         executionTimeMs: Date.now() - startedAt,
         truncated: false,
+        ...(generatedArtifacts.length > 0 ? { generatedArtifacts } : {}),
       },
       this.maxOutputChars,
     );
@@ -367,6 +464,13 @@ export class IsolatedSandbox {
       await chmod(codeFile, 0o644);
       await chmod(join(workDir, 'datasets.json'), 0o644);
 
+      let outDir: string | undefined;
+      if (request.artifactOutput) {
+        outDir = join(workDir, 'out');
+        await mkdir(outDir, { recursive: true });
+        await chmod(outDir, 0o777);
+      }
+
       const image = this.dockerImages[request.language];
       const args = [
         'run',
@@ -390,6 +494,7 @@ export class IsolatedSandbox {
         '/tmp:rw,size=64m',
         '-v',
         `${workDir}:/workspace:ro`,
+        ...(outDir ? ['-v', `${outDir}:/workspace/out:rw`] : []),
         '-w',
         '/workspace',
         image,
@@ -400,6 +505,10 @@ export class IsolatedSandbox {
         args,
         timeoutMs: timeoutMs + DOCKER_STARTUP_GRACE_MS,
       });
+      const generatedArtifacts =
+        outcome.exitCode === 0 && outDir && request.artifactOutput
+          ? await this.collectDockerArtifacts(outDir, request.artifactOutput)
+          : [];
       return this.finalize(
         {
           exitCode: outcome.exitCode,
@@ -409,6 +518,7 @@ export class IsolatedSandbox {
             : outcome.stderr,
           executionTimeMs: Date.now() - startedAt,
           truncated: false,
+          ...(generatedArtifacts.length > 0 ? { generatedArtifacts } : {}),
         },
         this.maxOutputChars,
       );
@@ -423,6 +533,117 @@ export class IsolatedSandbox {
     } finally {
       await rm(workDir, { recursive: true, force: true });
     }
+  }
+
+  private async resolveOutputTargetDir(
+    output: SandboxArtifactOutputOptions,
+  ): Promise<{ workspaceRoot: string; targetDir: string }> {
+    const workspaceRoot = await realpath(output.workspaceRoot).catch(() =>
+      resolve(output.workspaceRoot),
+    );
+    const targetDir = resolve(workspaceRoot, output.subdir);
+    if (
+      targetDir !== workspaceRoot &&
+      !targetDir.startsWith(`${workspaceRoot}${sep}`)
+    ) {
+      throw new Error('沙盒产物目录越界');
+    }
+    await mkdir(targetDir, { recursive: true });
+    const resolvedTarget = await realpath(targetDir);
+    if (
+      resolvedTarget !== workspaceRoot &&
+      !resolvedTarget.startsWith(`${workspaceRoot}${sep}`)
+    ) {
+      throw new Error('沙盒产物目录符号链接越界');
+    }
+    return { workspaceRoot, targetDir: resolvedTarget };
+  }
+
+  private async persistJsArtifacts(
+    rawArtifacts: RawJsArtifact[],
+    output: SandboxArtifactOutputOptions,
+  ): Promise<SandboxGeneratedArtifact[]> {
+    if (rawArtifacts.length === 0) return [];
+    const maxFileBytes = output.maxFileBytes ?? DEFAULT_MAX_ARTIFACT_FILE_BYTES;
+    const maxTotalBytes =
+      output.maxTotalBytes ?? DEFAULT_MAX_ARTIFACT_TOTAL_BYTES;
+    const maxFiles = Math.max(1, output.maxFiles ?? DEFAULT_MAX_ARTIFACT_FILES);
+    const { workspaceRoot, targetDir } = await this.resolveOutputTargetDir(output);
+    const saved: SandboxGeneratedArtifact[] = [];
+    let totalBytes = 0;
+
+    for (const item of rawArtifacts) {
+      if (saved.length >= maxFiles) break;
+      if (typeof item.fileName !== 'string' || typeof item.content !== 'string') {
+        continue;
+      }
+      const safeName = sanitizeArtifactFileName(item.fileName);
+      if (!safeName) continue;
+      const data =
+        item.encoding === 'base64'
+          ? Buffer.from(item.content, 'base64')
+          : Buffer.from(item.content, 'utf8');
+      if (data.length > maxFileBytes || totalBytes + data.length > maxTotalBytes) {
+        continue;
+      }
+      const dest = join(targetDir, safeName);
+      await writeFile(dest, data);
+      await chmod(dest, 0o644);
+      totalBytes += data.length;
+      saved.push({
+        workspaceRelativePath: relative(workspaceRoot, dest).replaceAll('\\', '/'),
+        absolutePath: dest,
+        fileName: safeName,
+        sizeBytes: data.length,
+        mimeType: mimeTypeForArtifact(safeName),
+      });
+    }
+    return saved;
+  }
+
+  private async collectDockerArtifacts(
+    outDir: string,
+    output: SandboxArtifactOutputOptions,
+  ): Promise<SandboxGeneratedArtifact[]> {
+    const entries = await readdir(outDir).catch(() => [] as string[]);
+    if (entries.length === 0) return [];
+    const maxFileBytes = output.maxFileBytes ?? DEFAULT_MAX_ARTIFACT_FILE_BYTES;
+    const maxTotalBytes =
+      output.maxTotalBytes ?? DEFAULT_MAX_ARTIFACT_TOTAL_BYTES;
+    const maxFiles = Math.max(1, output.maxFiles ?? DEFAULT_MAX_ARTIFACT_FILES);
+    let resolvedTarget: { workspaceRoot: string; targetDir: string } | null = null;
+    const saved: SandboxGeneratedArtifact[] = [];
+    let totalBytes = 0;
+
+    for (const entry of entries) {
+      if (saved.length >= maxFiles) break;
+      const safeName = sanitizeArtifactFileName(entry);
+      if (!safeName) continue;
+      const src = join(outDir, entry);
+      const info = await lstat(src).catch(() => null);
+      if (!info || info.isSymbolicLink() || !info.isFile()) continue;
+      if (info.size > maxFileBytes || totalBytes + info.size > maxTotalBytes) {
+        continue;
+      }
+      if (!resolvedTarget) {
+        resolvedTarget = await this.resolveOutputTargetDir(output);
+      }
+      const dest = join(resolvedTarget.targetDir, safeName);
+      await copyFile(src, dest);
+      await chmod(dest, 0o644);
+      totalBytes += info.size;
+      saved.push({
+        workspaceRelativePath: relative(resolvedTarget.workspaceRoot, dest).replaceAll(
+          '\\',
+          '/',
+        ),
+        absolutePath: dest,
+        fileName: safeName,
+        sizeBytes: info.size,
+        mimeType: mimeTypeForArtifact(safeName),
+      });
+    }
+    return saved;
   }
 
   private execDocker(
@@ -494,6 +715,7 @@ function safeParse(value: string): {
   result?: unknown;
   logs?: unknown;
   error?: unknown;
+  artifacts?: RawJsArtifact[];
 } | null {
   try {
     return JSON.parse(value) as {
@@ -501,6 +723,7 @@ function safeParse(value: string): {
       result?: unknown;
       logs?: unknown;
       error?: unknown;
+      artifacts?: RawJsArtifact[];
     };
   } catch {
     return null;

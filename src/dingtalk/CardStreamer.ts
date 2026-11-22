@@ -127,8 +127,10 @@ export interface CardStreamerOptions {
   layout?: CardLayout;
   /** ai 布局下流式写入的模板变量名，默认 content */
   contentKey?: string;
-  /** ai 布局下卡片正文上限字符数，超出部分留给文本兜底，默认 2400 */
+  /** ai 布局下卡片正文上限字符数，超出部分留给文本兜底或文档附件，默认 2400 */
   maxContentChars?: number;
+  /** 超出卡片正文上限时的提示模式：text（默认，续发文本）或 document（自动导出文档附件） */
+  overflowMode?: 'text' | 'document';
   /** ai 布局下思考过程最多展示的字符数（保留最新的尾部），默认 600 */
   thinkingChars?: number;
   /** ai 布局是否展示具体思维链，默认关闭，只保留状态角标 */
@@ -274,6 +276,7 @@ export class CardStreamer {
   private readonly layout: CardLayout;
   private readonly contentKey: string;
   private readonly maxContentChars: number;
+  private readonly overflowMode: 'text' | 'document';
   private readonly thinkingChars: number;
   private readonly showThinking: boolean;
   private readonly updateTimeoutMs: number;
@@ -309,6 +312,7 @@ export class CardStreamer {
     this.layout = options.layout ?? 'v1';
     this.contentKey = options.contentKey?.trim() || 'content';
     this.maxContentChars = Math.max(400, options.maxContentChars ?? 2_400);
+    this.overflowMode = options.overflowMode ?? 'text';
     this.thinkingChars = Math.max(80, options.thinkingChars ?? 600);
     this.showThinking = options.showThinking ?? this.layout !== 'ai';
     this.updateTimeoutMs = options.updateTimeoutMs ?? 5_000;
@@ -588,7 +592,10 @@ export class CardStreamer {
       (finalize
         ? `${this.mention}（本次没有生成正文，请重新提问或稍后再试）`
         : '');
-    const marker = '…（内容较长，剩余部分随后发送）';
+    const marker =
+      this.overflowMode === 'document'
+        ? '…（内容较长，完整版已作为文档附件发送）'
+        : '…（内容较长，剩余部分随后发送）';
     const separators =
       (prefix && answer ? 2 : 0) + (answer && sources ? 2 : 0);
     const budget =
@@ -632,6 +639,11 @@ export class CardStreamer {
     const overflow = this.overflowAnswer;
     this.overflowAnswer = '';
     return overflow;
+  }
+
+  /** 本次回答的完整原始正文（未截断，用于超长内容自动转文档交付） */
+  public fullAnswerText(): string {
+    return this.answer;
   }
 
   private toolsText(): string {

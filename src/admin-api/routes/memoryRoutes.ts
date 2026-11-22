@@ -32,7 +32,7 @@ const SCOPES: SemanticMemoryScope[] = [
   'user',
 ];
 const KINDS: SemanticMemoryKind[] = ['terminology', 'profile'];
-const STATUSES: SemanticMemoryStatus[] = ['active', 'retired'];
+const STATUSES: SemanticMemoryStatus[] = ['active', 'retired', 'superseded'];
 const SENSITIVITIES: SemanticMemorySensitivity[] = [
   'normal',
   'private',

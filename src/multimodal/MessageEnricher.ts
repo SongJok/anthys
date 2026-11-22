@@ -1,4 +1,4 @@
-import type { InboundMessage } from '../types/core.js';
+import type { InboundMessage, QuotedMessageContext } from '../types/core.js';
 import type {
   AttachmentFailure,
   AttachmentStoreResult,
@@ -6,6 +6,8 @@ import type {
 } from './AttachmentStore.js';
 import type { VisionDescriber } from './VisionDescriber.js';
 import { digestAttachment, type AttachmentDigest } from './AttachmentDigest.js';
+import { isAudioFileName, type AudioTranscriber } from './AudioTranscriber.js';
+import { isVideoFileName, type VideoAnalyzer } from './VideoAnalyzer.js';
 
 export interface MessageEnricherLogger {
   info?(obj: Record<string, unknown>, msg: string): void;
@@ -25,6 +27,15 @@ export interface MessageEnricherDeps {
       options?: { signal?: AbortSignal },
     ): Promise<string | null>;
   };
+  /** 语音/音频转文字（当钉钉未自带 recognition 或用户上传音频文件时触发） */
+  audio?: AudioTranscriber;
+  /** 短视频/录屏关键帧与音轨摘要（需要宿主安装 ffmpeg 且配置视觉/语音能力） */
+  video?: VideoAnalyzer;
+  /** 当引用回复仅携带 messageId 时，从会话历史/旁听缓冲反查原消息上下文 */
+  resolveQuotedMessage?: (
+    messageId: string,
+    conversationId: string,
+  ) => Promise<QuotedMessageContext | null>;
   logger?: MessageEnricherLogger;
   /** 是否对 pptx/docx/xlsx/csv 做文本提取，默认开启 */
   documents?: boolean;
@@ -32,6 +43,8 @@ export interface MessageEnricherDeps {
   signal?: AbortSignal;
   /** 文档解析结果回调（用于指标） */
   onDocument?(info: { format?: string; ok: boolean; reason?: string; fileName: string }): void;
+  /** 音频转写结果回调（用于指标） */
+  onAudio?(info: { source: 'native' | 'asr'; ok: boolean; fileName: string }): void;
 }
 
 export interface EnrichmentResult {
@@ -59,12 +72,24 @@ function typeLabel(type: StoredAttachment['type']): string {
   }
 }
 
-/** 把落盘附件与图片识别结果渲染为提示词片段 */
+/** 把引用消息渲染为结构化提示词片段 */
+export function renderQuotedSection(quoted?: QuotedMessageContext): string {
+  if (!quoted) return '';
+  const text = quoted.text?.trim();
+  if (!text) return '';
+  const speaker = quoted.senderNick?.trim() || quoted.senderStaffId?.trim() || '群成员';
+  const clipped = text.length > 2_000 ? `${text.slice(0, 2_000)}…` : text;
+  return `【引用消息（${speaker}）】\n${clipped}`;
+}
+
+/** 把落盘附件与图片/语音/视频识别结果渲染为提示词片段 */
 export function renderAttachmentSection(
   stored: StoredAttachment[],
   descriptions: ReadonlyMap<string, string | null>,
   failed: AttachmentFailure[],
   digests: ReadonlyMap<string, AttachmentDigest | null> = new Map(),
+  transcripts: ReadonlyMap<string, string | null> = new Map(),
+  videoSummaries: ReadonlyMap<string, string | null> = new Map(),
 ): string {
   if (stored.length === 0 && failed.length === 0) return '';
   const lines: string[] = ['【用户附件】'];
@@ -77,6 +102,16 @@ export function renderAttachmentSection(
       lines.push(`  识别内容：${description}`);
     } else if (item.type === 'image') {
       lines.push('  识别内容：（视觉模型未启用或识别失败，仅保留本地路径）');
+    }
+    const transcript = transcripts.get(item.localPath);
+    if (transcript) {
+      lines.push(`  语音转写：${transcript}`);
+    } else if (item.type === 'audio' || isAudioFileName(item.fileName)) {
+      lines.push('  语音转写：（语音识别未启用或转写失败，仅保留本地路径）');
+    }
+    const videoSummary = videoSummaries.get(item.localPath);
+    if (videoSummary) {
+      lines.push(`  视频摘要：\n  ${videoSummary.replaceAll('\n', '\n  ')}`);
     }
     const digest = digests.get(item.localPath);
     if (digest?.ok) {
@@ -108,8 +143,10 @@ export function renderAttachmentSection(
 }
 
 /**
- * 入站增强：下载附件、识别图片并拼进用户文本，
- * 让纯文本主模型也能拿到「图片讲了什么」。
+ * 入站增强：
+ * 1) 补齐引用回复（quotedMessage）上下文；
+ * 2) 下载附件，执行视觉识图、语音转写（原生/ASR）、视频关键帧提取与文档解析，
+ *    让纯文本主模型完整感知多模态上下文。
  */
 export async function enrichInboundMessage(
   message: InboundMessage,
@@ -118,12 +155,62 @@ export async function enrichInboundMessage(
   if (deps.signal?.aborted) {
     return { message, attachments: [], failed: [] };
   }
-  if (!message.attachments || message.attachments.length === 0) {
-    return { message, attachments: [], failed: [] };
+
+  let quoted = message.quotedMessage;
+  if (
+    quoted &&
+    !quoted.text?.trim() &&
+    quoted.messageId &&
+    deps.resolveQuotedMessage
+  ) {
+    try {
+      const resolved = await deps.resolveQuotedMessage(
+        quoted.messageId,
+        message.conversationId,
+      );
+      if (resolved) {
+        quoted = {
+          ...quoted,
+          ...(resolved.senderStaffId && !quoted.senderStaffId
+            ? { senderStaffId: resolved.senderStaffId }
+            : {}),
+          ...(resolved.senderNick && !quoted.senderNick
+            ? { senderNick: resolved.senderNick }
+            : {}),
+          ...(resolved.text ? { text: resolved.text } : {}),
+        };
+      }
+    } catch (error) {
+      deps.logger?.warn(
+        { messageId: quoted.messageId, err: String(error) },
+        'failed to resolve quoted message context',
+      );
+    }
   }
+  const quotedSection = renderQuotedSection(quoted);
+
+  const hasAttachments = Boolean(
+    message.attachments && message.attachments.length > 0,
+  );
+  if (!hasAttachments) {
+    if (!quotedSection) return { message, attachments: [], failed: [] };
+    return {
+      message: {
+        ...message,
+        ...(quoted ? { quotedMessage: quoted } : {}),
+        text: message.text.trim()
+          ? `${quotedSection}\n\n${message.text}`
+          : quotedSection,
+      },
+      attachments: [],
+      failed: [],
+    };
+  }
+
   const { stored, failed } = deps.signal
     ? await deps.store.store(message, { signal: deps.signal })
     : await deps.store.store(message);
+
   const descriptions = new Map<string, string | null>();
   if (deps.vision) {
     for (const attachment of stored) {
@@ -137,6 +224,60 @@ export async function enrichInboundMessage(
       );
     }
   }
+
+  const transcripts = new Map<string, string | null>();
+  const inboundAudios = (message.attachments ?? []).filter(
+    (item) => item.type === 'audio',
+  );
+  let audioCursor = 0;
+  let primaryVoiceTranscript: string | null = null;
+  for (const attachment of stored) {
+    if (deps.signal?.aborted) break;
+    const isAudio =
+      attachment.type === 'audio' || isAudioFileName(attachment.fileName);
+    if (!isAudio) continue;
+    const nativeText =
+      attachment.type === 'audio'
+        ? inboundAudios[audioCursor++]?.nativeRecognition?.trim() || null
+        : null;
+    if (nativeText) {
+      transcripts.set(attachment.localPath, nativeText);
+      deps.onAudio?.({ source: 'native', ok: true, fileName: attachment.fileName });
+      if (!primaryVoiceTranscript) primaryVoiceTranscript = nativeText;
+      continue;
+    }
+    if (deps.audio) {
+      const transcribed = deps.signal
+        ? await deps.audio.transcribe(attachment, { signal: deps.signal })
+        : await deps.audio.transcribe(attachment);
+      transcripts.set(attachment.localPath, transcribed);
+      deps.onAudio?.({
+        source: 'asr',
+        ok: Boolean(transcribed),
+        fileName: attachment.fileName,
+      });
+      if (transcribed && !primaryVoiceTranscript) {
+        primaryVoiceTranscript = transcribed;
+      }
+    }
+  }
+
+  const videoSummaries = new Map<string, string | null>();
+  if (deps.video) {
+    for (const attachment of stored) {
+      if (deps.signal?.aborted) break;
+      const isVideo =
+        attachment.type === 'video' || isVideoFileName(attachment.fileName);
+      if (!isVideo) continue;
+      videoSummaries.set(
+        attachment.localPath,
+        deps.signal
+          ? await deps.video.analyze(attachment, { signal: deps.signal })
+          : await deps.video.analyze(attachment),
+      );
+    }
+  }
+
   const digests = new Map<string, AttachmentDigest | null>();
   if (deps.documents !== false) {
     for (const attachment of stored) {
@@ -165,12 +306,28 @@ export async function enrichInboundMessage(
       }
     }
   }
-  const section = renderAttachmentSection(stored, descriptions, failed, digests);
-  if (!section) return { message, attachments: stored, failed };
+
+  const section = renderAttachmentSection(
+    stored,
+    descriptions,
+    failed,
+    digests,
+    transcripts,
+    videoSummaries,
+  );
+
+  let baseText = message.text.trim();
+  if (baseText === '[语音]' && primaryVoiceTranscript) {
+    baseText = primaryVoiceTranscript;
+  }
+
+  const parts = [quotedSection, baseText, section].filter(Boolean);
+  if (parts.length === 0) return { message, attachments: stored, failed };
   return {
     message: {
       ...message,
-      text: message.text.trim() ? `${message.text}\n\n${section}` : section,
+      ...(quoted ? { quotedMessage: quoted } : {}),
+      text: parts.join('\n\n'),
     },
     attachments: stored,
     failed,

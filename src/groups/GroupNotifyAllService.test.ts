@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { MemorySharedStateStore } from '../cluster/SharedStateStore.js';
 import {
   GroupNotifyAllService,
   type GroupNotifyAllAuditRecord,
@@ -202,5 +203,67 @@ describe('GroupNotifyAllService', () => {
       deliver: async () => ({ channel: 'text' }),
     });
     expect(await service.notify(request())).toContain('文本消息');
+  });
+
+  it('集群共享状态开启时跨实例共享冷却、每日配额与并发锁', async () => {
+    let clock = NOW;
+    const sharedState = new MemorySharedStateStore(() => clock);
+    let releaseFirst!: () => void;
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const delivered: string[] = [];
+
+    const makeNode = (
+      deliver: GroupNotifyAllDeliver,
+      cooldownSeconds = 60,
+      dailyQuota = 2,
+    ) => {
+      const svc = new GroupNotifyAllService({
+        isAdmin: (staffId) => staffId === 'staff-admin',
+        enabled: true,
+        cooldownSeconds,
+        dailyQuota,
+        now: () => clock,
+        sharedState,
+      });
+      svc.deliver = deliver;
+      return svc;
+    };
+
+    const nodeA = makeNode(async (input) => {
+      delivered.push(`A:${input.text}`);
+      await firstGate;
+      return { channel: 'card' };
+    });
+    const nodeB = makeNode(async (input) => {
+      delivered.push(`B:${input.text}`);
+      return { channel: 'card' };
+    });
+
+    const req = (text: string) => ({
+      conversationId: 'cid-shared',
+      text,
+      actorStaffId: 'staff-admin',
+      actorNick: '管理员',
+    });
+
+    // 1. 跨实例并发锁：nodeA 投递进行中，nodeB 立即拒绝
+    const inflightA = nodeA.notify(req('第一条'));
+    await Promise.resolve();
+    expect(await nodeB.notify(req('并发重复'))).toContain('正在发送');
+    releaseFirst();
+    expect(await inflightA).toContain('已向本群发送');
+
+    // 2. 跨实例冷却：30 秒后 nodeB 仍被冷却拦截
+    clock += 30_000;
+    expect(await nodeB.notify(req('冷却中'))).toContain('30 秒后再试');
+
+    // 3. 冷却结束后 nodeB 发送第 2 条，随后 nodeA 触发共享每日配额上限（2 次）
+    clock += 31_000;
+    expect(await nodeB.notify(req('第二条'))).toContain('已向本群发送');
+    clock += 61_000;
+    expect(await nodeA.notify(req('第三条'))).toContain('已达上限');
+    expect(delivered).toEqual(['A:第一条', 'B:第二条']);
   });
 });

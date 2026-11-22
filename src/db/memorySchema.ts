@@ -5,6 +5,7 @@ import {
   eq,
   gt,
   ilike,
+  inArray,
   isNull,
   ne,
   or,
@@ -91,6 +92,8 @@ export const semanticMemories = pgTable(
     sourceConversationType: varchar('source_conversation_type', { length: 2 }),
     sourceMessageId: text('source_message_id'),
     confidence: real('confidence').notNull().default(0.8),
+    supersededBy: uuid('superseded_by'),
+    reinforcementCount: integer('reinforcement_count').notNull().default(1),
     expiresAt: timestamp('expires_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true })
       .notNull()
@@ -149,6 +152,15 @@ export interface EpisodicSummaryStore {
 export interface SemanticMemoryStore {
   upsert(input: SemanticMemoryUpsertInput): Promise<SemanticMemoryRecord>;
   search(query: SemanticRecallQuery): Promise<SemanticMemoryRecord[]>;
+  /** 读取同作用域与同类型下当前生效的语义记忆（用于冲突消解） */
+  listActiveBySubject?(input: {
+    scope: SemanticMemoryRecord['scope'];
+    subjectKey: string;
+    kind: SemanticMemoryRecord['kind'];
+    limit?: number;
+  }): Promise<SemanticMemoryRecord[]>;
+  /** 将旧记忆标记为 superseded 并指向替代它的新记忆 ID */
+  supersede?(oldIds: string[], newId: string): Promise<number>;
 }
 
 export interface BystanderPolicyStore {
@@ -190,6 +202,8 @@ function toSemanticRecord(row: {
   sourceConversationType: string | null;
   sourceMessageId: string | null;
   confidence: number;
+  supersededBy?: string | null;
+  reinforcementCount?: number;
   expiresAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
@@ -213,6 +227,10 @@ function toSemanticRecord(row: {
         : null,
     sourceMessageId: row.sourceMessageId,
     confidence: row.confidence,
+    ...(row.supersededBy !== undefined ? { supersededBy: row.supersededBy } : {}),
+    ...(row.reinforcementCount !== undefined
+      ? { reinforcementCount: row.reinforcementCount }
+      : {}),
     expiresAt: row.expiresAt ? row.expiresAt.getTime() : null,
     createdAt: row.createdAt.getTime(),
     updatedAt: row.updatedAt.getTime(),
@@ -301,6 +319,7 @@ export class DrizzleMemoryStore
         set: {
           keywords: input.keywords,
           embedding: input.embedding ?? null,
+          reinforcementCount: sql`${semanticMemories.reinforcementCount} + 1`,
           updatedAt: new Date(),
           ...(input.shareableInGroup !== undefined
             ? { shareableInGroup }
@@ -580,6 +599,49 @@ export class DrizzleMemoryStore
       RETURNING id
     `);
     return rows.length + memberRows.rows.length;
+  }
+
+  public async listActiveBySubject(input: {
+    scope: SemanticMemoryRecord['scope'];
+    subjectKey: string;
+    kind: SemanticMemoryRecord['kind'];
+    limit?: number;
+  }): Promise<SemanticMemoryRecord[]> {
+    const rows = await this.db
+      .select()
+      .from(semanticMemories)
+      .where(
+        and(
+          eq(semanticMemories.scope, input.scope),
+          eq(semanticMemories.subjectKey, input.subjectKey),
+          eq(semanticMemories.kind, input.kind),
+          eq(semanticMemories.status, 'active'),
+          eq(semanticMemories.reviewStatus, 'approved'),
+        ),
+      )
+      .orderBy(desc(semanticMemories.updatedAt))
+      .limit(Math.max(1, Math.min(input.limit ?? 50, 200)));
+    return rows.map(toSemanticRecord);
+  }
+
+  public async supersede(oldIds: string[], newId: string): Promise<number> {
+    const ids = [...new Set(oldIds.filter((id) => id && id !== newId))];
+    if (ids.length === 0) return 0;
+    const rows = await this.db
+      .update(semanticMemories)
+      .set({
+        status: 'superseded',
+        supersededBy: newId,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          inArray(semanticMemories.id, ids),
+          eq(semanticMemories.status, 'active'),
+        ),
+      )
+      .returning({ id: semanticMemories.id });
+    return rows.length;
   }
 
   public async getPolicy(

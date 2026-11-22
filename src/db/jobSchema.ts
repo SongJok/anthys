@@ -24,8 +24,10 @@ import {
   varchar,
 } from 'drizzle-orm/pg-core';
 import type { Database } from './client.js';
+import type { ChatMessage } from '../types/core.js';
 import type {
   AgentJob,
+  AgentJobCheckpoint,
   AgentJobEvent,
   AgentJobKind,
   AgentJobResult,
@@ -112,6 +114,24 @@ export const agentJobEvents = pgTable(
   },
   (table) => [index('agent_job_events_job_seq_idx').on(table.jobId, table.seq)],
 );
+
+/** 后台任务步骤级检查点：用于看门狗暂停或重启后断点续跑 */
+export const agentJobCheckpoints = pgTable('agent_job_checkpoints', {
+  jobId: uuid('job_id')
+    .primaryKey()
+    .references(() => agentJobs.id, { onDelete: 'cascade' }),
+  stepIndex: integer('step_index').notNull(),
+  messagesJson: jsonb('messages_json').$type<ChatMessage[]>().notNull(),
+  accumulatedTokens: integer('accumulated_tokens').notNull().default(0),
+  accumulatedInputTokens: integer('accumulated_input_tokens').notNull().default(0),
+  accumulatedOutputTokens: integer('accumulated_output_tokens').notNull().default(0),
+  accumulatedCachedTokens: integer('accumulated_cached_tokens').notNull().default(0),
+  accumulatedWallMs: integer('accumulated_wall_ms').notNull().default(0),
+  activatedSuites: jsonb('activated_suites').$type<string[]>().notNull().default([]),
+  updatedAt: timestamp('updated_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
 
 function normalizeStatus(value: string): AgentJobStatus {
   switch (value) {
@@ -403,7 +423,7 @@ export class DrizzleAgentJobStore implements AgentJobStore {
 
   public async resume(
     jobId: string,
-    patch: { prompt?: string } = {},
+    patch: { prompt?: string; resumeGuidance?: string } = {},
   ): Promise<AgentJob | null> {
     const row = await this.db.transaction(async (tx) => {
       const currentRows = await tx
@@ -414,11 +434,18 @@ export class DrizzleAgentJobStore implements AgentJobStore {
       const current = currentRows[0];
       if (!current || current.status !== 'paused') return null;
       const now = new Date();
+      const nextMetadata = {
+        ...(current.metadata ?? {}),
+        ...(patch.resumeGuidance?.trim()
+          ? { resumeGuidance: patch.resumeGuidance.trim() }
+          : {}),
+      };
       const updated = await tx
         .update(agentJobs)
         .set({
           status: 'queued',
           prompt: patch.prompt ?? current.prompt,
+          metadata: nextMetadata,
           error: null,
           leaseOwner: null,
           leaseExpiresAt: null,
@@ -492,5 +519,65 @@ export class DrizzleAgentJobStore implements AgentJobStore {
         payload: row.payload ?? {},
         createdAt: row.createdAt.getTime(),
       }));
+  }
+
+  public async saveCheckpoint(checkpoint: AgentJobCheckpoint): Promise<void> {
+    const updatedAt = new Date(checkpoint.updatedAt);
+    await this.db
+      .insert(agentJobCheckpoints)
+      .values({
+        jobId: checkpoint.jobId,
+        stepIndex: checkpoint.stepIndex,
+        messagesJson: checkpoint.messages,
+        accumulatedTokens: checkpoint.accumulatedTokens,
+        accumulatedInputTokens: checkpoint.accumulatedInputTokens,
+        accumulatedOutputTokens: checkpoint.accumulatedOutputTokens,
+        accumulatedCachedTokens: checkpoint.accumulatedCachedTokens,
+        accumulatedWallMs: checkpoint.accumulatedWallMs,
+        activatedSuites: checkpoint.activatedSuites,
+        updatedAt,
+      })
+      .onConflictDoUpdate({
+        target: agentJobCheckpoints.jobId,
+        set: {
+          stepIndex: checkpoint.stepIndex,
+          messagesJson: checkpoint.messages,
+          accumulatedTokens: checkpoint.accumulatedTokens,
+          accumulatedInputTokens: checkpoint.accumulatedInputTokens,
+          accumulatedOutputTokens: checkpoint.accumulatedOutputTokens,
+          accumulatedCachedTokens: checkpoint.accumulatedCachedTokens,
+          accumulatedWallMs: checkpoint.accumulatedWallMs,
+          activatedSuites: checkpoint.activatedSuites,
+          updatedAt,
+        },
+      });
+  }
+
+  public async loadCheckpoint(jobId: string): Promise<AgentJobCheckpoint | null> {
+    const rows = await this.db
+      .select()
+      .from(agentJobCheckpoints)
+      .where(eq(agentJobCheckpoints.jobId, jobId))
+      .limit(1);
+    const row = rows[0];
+    if (!row) return null;
+    return {
+      jobId: row.jobId,
+      stepIndex: row.stepIndex,
+      messages: Array.isArray(row.messagesJson) ? row.messagesJson : [],
+      accumulatedTokens: row.accumulatedTokens,
+      accumulatedInputTokens: row.accumulatedInputTokens,
+      accumulatedOutputTokens: row.accumulatedOutputTokens,
+      accumulatedCachedTokens: row.accumulatedCachedTokens,
+      accumulatedWallMs: row.accumulatedWallMs,
+      activatedSuites: Array.isArray(row.activatedSuites) ? row.activatedSuites : [],
+      updatedAt: row.updatedAt.getTime(),
+    };
+  }
+
+  public async deleteCheckpoint(jobId: string): Promise<void> {
+    await this.db
+      .delete(agentJobCheckpoints)
+      .where(eq(agentJobCheckpoints.jobId, jobId));
   }
 }

@@ -62,7 +62,7 @@ export interface EpisodicSummaryRecord {
 
 export type SemanticMemoryScope = 'global' | 'group' | 'group_member' | 'user';
 export type SemanticMemoryKind = 'terminology' | 'profile';
-export type SemanticMemoryStatus = 'active' | 'retired';
+export type SemanticMemoryStatus = 'active' | 'retired' | 'superseded';
 export type SemanticMemorySensitivity = 'normal' | 'private' | 'sensitive';
 /** 审核状态：只有 approved 的记忆会被召回；pending/rejected 对模型不可见 */
 export type SemanticMemoryReviewStatus = 'approved' | 'pending' | 'rejected';
@@ -105,6 +105,10 @@ export interface SemanticMemoryRecord {
   sourceConversationType: '1' | '2' | null;
   sourceMessageId: string | null;
   confidence: number;
+  /** 被更新的新记忆 ID（status=superseded 时记录） */
+  supersededBy?: string | null;
+  /** 同一事实被重复抽取/强化的次数，用于术语自动晋升候选 */
+  reinforcementCount?: number;
   /** epoch ms；null 表示长期有效 */
   expiresAt: number | null;
   createdAt: number;

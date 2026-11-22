@@ -18,6 +18,14 @@ export interface SharedStateStore {
   getJson<T>(key: string): Promise<T | null>;
   setJson(key: string, value: unknown, ttlSeconds?: number): Promise<void>;
   delete(key: string): Promise<void>;
+  /** 原子递增固定时间窗口计数器并返回最新值；首次写入或过期后重置为 delta */
+  incrementWindow?(
+    key: string,
+    ttlSeconds: number,
+    delta?: number,
+  ): Promise<number>;
+  /** 原子读取并删除未过期的值（用于跨实例一次性票据消费） */
+  takeJson?<T>(key: string): Promise<T | null>;
 }
 
 const TABLE = 'cluster_shared_state';
@@ -79,6 +87,51 @@ export class PgSharedStateStore implements SharedStateStore {
   public async delete(key: string): Promise<void> {
     await this.db.query(`DELETE FROM ${TABLE} WHERE key = $1`, [key]);
   }
+
+  public async incrementWindow(
+    key: string,
+    ttlSeconds: number,
+    delta = 1,
+  ): Promise<number> {
+    const step = Math.max(1, Math.trunc(delta));
+    const result = await this.db.query<{ count: string | number }>(
+      `INSERT INTO ${TABLE} (key, value, expires_at)
+       VALUES (
+         $1,
+         jsonb_build_object('count', $2::bigint),
+         now() + ($3::double precision * interval '1 second')
+       )
+       ON CONFLICT (key) DO UPDATE
+         SET value = CASE
+               WHEN ${TABLE}.expires_at IS NOT NULL AND ${TABLE}.expires_at <= now()
+                 THEN jsonb_build_object('count', $2::bigint)
+               ELSE jsonb_build_object(
+                 'count',
+                 COALESCE((${TABLE}.value->>'count')::bigint, 0) + $2::bigint
+               )
+             END,
+             expires_at = CASE
+               WHEN ${TABLE}.expires_at IS NOT NULL AND ${TABLE}.expires_at <= now()
+                 THEN EXCLUDED.expires_at
+               ELSE ${TABLE}.expires_at
+             END,
+             updated_at = now()
+       RETURNING (value->>'count')::bigint AS count`,
+      [key, step, ttlSeconds],
+    );
+    return Number(result.rows[0]?.count ?? step);
+  }
+
+  public async takeJson<T>(key: string): Promise<T | null> {
+    const result = await this.db.query<{ value: T }>(
+      `DELETE FROM ${TABLE}
+       WHERE key = $1
+         AND (expires_at IS NULL OR expires_at > now())
+       RETURNING value`,
+      [key],
+    );
+    return result.rows[0]?.value ?? null;
+  }
 }
 
 /** 单实例或测试用的内存实现，行为与 PG 版保持一致 */
@@ -117,6 +170,36 @@ export class MemorySharedStateStore implements SharedStateStore {
 
   public async delete(key: string): Promise<void> {
     this.entries.delete(key);
+  }
+
+  public async incrementWindow(
+    key: string,
+    ttlSeconds: number,
+    delta = 1,
+  ): Promise<number> {
+    const step = Math.max(1, Math.trunc(delta));
+    const current = this.read(key);
+    if (!current) {
+      this.entries.set(key, {
+        value: { count: step },
+        expiresAt: this.now() + ttlSeconds * 1000,
+      });
+      return step;
+    }
+    const existing =
+      typeof (current.value as { count?: unknown })?.count === 'number'
+        ? (current.value as { count: number }).count
+        : 0;
+    const next = existing + step;
+    current.value = { count: next };
+    return next;
+  }
+
+  public async takeJson<T>(key: string): Promise<T | null> {
+    const entry = this.read(key);
+    if (!entry) return null;
+    this.entries.delete(key);
+    return entry.value as T;
   }
 
   private read(

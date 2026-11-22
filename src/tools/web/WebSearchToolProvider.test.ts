@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { MemorySharedStateStore } from '../../cluster/SharedStateStore.js';
 import type { ExecutionContext, ToolDefinition } from '../../types/core.js';
 import {
   WebSearchError,
@@ -394,5 +395,61 @@ describe('WebSearchToolProvider', () => {
     await expect(
       tool.executeStructured!({ query: '今日要闻' }, context()),
     ).rejects.toThrow('备用引擎鉴权失败');
+  });
+
+  it('集群共享状态开启时跨实例共享搜索缓存与小时/日配额', async () => {
+    const sharedState = new MemorySharedStateStore();
+    const searchA = vi.fn(async (_input: WebSearchRequest) => [SAMPLE]);
+    const searchB = vi.fn(async (_input: WebSearchRequest) => [SAMPLE]);
+
+    const toolA = await toolOf(
+      makeProvider(searchA, {
+        sharedState,
+        cacheTtlSeconds: 600,
+        maxCallsPerHour: 1,
+        dailyLimit: 2,
+      }),
+    );
+    const toolB = await toolOf(
+      makeProvider(searchB, {
+        sharedState,
+        cacheTtlSeconds: 600,
+        maxCallsPerHour: 1,
+        dailyLimit: 2,
+      }),
+    );
+
+    // 实例 A 搜索后写入共享缓存，实例 B 查同一 query 直接命中缓存不再调用上游
+    await toolA.executeStructured!(
+      { query: '跨节点缓存查询' },
+      context('conv-shared-1'),
+    );
+    await toolB.executeStructured!(
+      { query: '跨节点缓存查询' },
+      context('conv-shared-1'),
+    );
+    expect(searchA).toHaveBeenCalledTimes(1);
+    expect(searchB).toHaveBeenCalledTimes(0);
+
+    // 同一会话在实例 B 查新词，受共享小时配额（上限 1）约束直接拦截
+    const hourLimited = await toolB.executeStructured!(
+      { query: '跨节点新词' },
+      context('conv-shared-1'),
+    );
+    expect(hourLimited.text).toContain('次/小时上限');
+    expect(searchB).toHaveBeenCalledTimes(0);
+
+    // 换新会话用掉第 2 次日配额，再用第三个会话在实例 A 被共享日配额（上限 2）拦截
+    await toolB.executeStructured!(
+      { query: '日配额词二' },
+      context('conv-shared-2'),
+    );
+    expect(searchB).toHaveBeenCalledTimes(1);
+    const dayLimited = await toolA.executeStructured!(
+      { query: '日配额词三' },
+      context('conv-shared-3'),
+    );
+    expect(dayLimited.text).toContain('今日联网搜索总额度已用完');
+    expect(searchA).toHaveBeenCalledTimes(1);
   });
 });

@@ -215,6 +215,7 @@ async function main(): Promise<void> {
       harnessLogger,
       getAccessToken,
       extensions,
+      ...(sharedState ? { sharedState } : {}),
       clusterEnabled,
       isLeader,
       redactionEnabled,
@@ -249,6 +250,7 @@ async function main(): Promise<void> {
         : {}),
       scheduledStore: tools.scheduledStore,
       glossary: tools.glossary,
+      glossaryCandidates: tools.glossaryCandidates,
       groupTranscriptArchive: tools.groupTranscriptArchive,
       transcriptArchiveEnabled: tools.transcriptArchiveEnabled,
       toolProviders: tools.toolRegistry.providers,
@@ -448,6 +450,7 @@ async function main(): Promise<void> {
       checkDbReady: async () => {
         await dbHandle.pool.query('select 1');
       },
+      ...(sharedState ? { sharedState } : {}),
       clusterEnabled,
       isLeader,
     });

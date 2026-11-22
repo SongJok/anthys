@@ -1,8 +1,24 @@
 import { createHash } from 'node:crypto';
+import { createRequire } from 'node:module';
+import type tsType from 'typescript';
 import type {
   ProjectDocumentKind,
   ProjectMapResult,
 } from '../types/skills-plugins-projects.js';
+
+type TsModule = typeof tsType;
+let cachedTs: TsModule | null | undefined;
+
+function loadTypescript(): TsModule | null {
+  if (cachedTs !== undefined) return cachedTs;
+  try {
+    const req = createRequire(import.meta.url);
+    cachedTs = req('typescript') as TsModule;
+  } catch {
+    cachedTs = null;
+  }
+  return cachedTs;
+}
 
 export interface IndexedSymbol {
   path: string;
@@ -557,6 +573,337 @@ function normalizeSymbols(
   return symbols;
 }
 
+const AST_CALL_NOISE = new Set([
+  'log',
+  'info',
+  'warn',
+  'error',
+  'debug',
+  'push',
+  'pop',
+  'map',
+  'filter',
+  'forEach',
+  'reduce',
+  'slice',
+  'join',
+  'trim',
+  'split',
+  'toString',
+  'keys',
+  'values',
+  'entries',
+  'has',
+  'get',
+  'set',
+  'delete',
+  'String',
+  'Number',
+  'Boolean',
+  'Array',
+  'Object',
+  'Promise',
+  'Date',
+  'Math',
+  'JSON',
+]);
+
+function collectAstCalls(ts: TsModule, node: tsType.Node, limit = 6): string[] {
+  const calls: string[] = [];
+  const seen = new Set<string>();
+  const visit = (current: tsType.Node): void => {
+    if (calls.length >= limit) return;
+    if (ts.isCallExpression(current)) {
+      let name = '';
+      if (ts.isIdentifier(current.expression)) {
+        name = current.expression.text;
+      } else if (ts.isPropertyAccessExpression(current.expression)) {
+        name = current.expression.name.text;
+      }
+      if (name && !AST_CALL_NOISE.has(name) && !seen.has(name)) {
+        seen.add(name);
+        calls.push(name);
+      }
+    }
+    ts.forEachChild(current, visit);
+  };
+  ts.forEachChild(node, visit);
+  return calls;
+}
+
+function hasExportModifier(ts: TsModule, node: tsType.Node): boolean {
+  if (!ts.canHaveModifiers(node)) return false;
+  const mods = ts.getModifiers(node);
+  return Boolean(
+    mods?.some(
+      (mod) =>
+        mod.kind === ts.SyntaxKind.ExportKeyword ||
+        mod.kind === ts.SyntaxKind.DefaultKeyword,
+    ),
+  );
+}
+
+function extractTypescriptAst(
+  path: string,
+  language: string,
+  text: string,
+  lines: string[],
+): RawSymbol[] | null {
+  const ts = loadTypescript();
+  if (!ts) return null;
+  const scriptKind =
+    language === 'tsx'
+      ? ts.ScriptKind.TSX
+      : language === 'javascript'
+        ? path.endsWith('.jsx')
+          ? ts.ScriptKind.JSX
+          : ts.ScriptKind.JS
+        : ts.ScriptKind.TS;
+  const sourceFile = ts.createSourceFile(
+    path,
+    text,
+    ts.ScriptTarget.Latest,
+    true,
+    scriptKind,
+  );
+  const symbols: RawSymbol[] = [];
+
+  const lineSpan = (node: tsType.Node): { startIndex: number; endIndex: number } => {
+    const start = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));
+    const end = sourceFile.getLineAndCharacterOfPosition(node.getEnd());
+    return { startIndex: start.line, endIndex: end.line + 1 };
+  };
+
+  const makeSignature = (startIndex: number, calls: string[]): string => {
+    const base = (lines[startIndex] ?? '').trim().slice(0, 160);
+    if (calls.length === 0) return base.slice(0, 200);
+    const suffix = ` /* calls: ${calls.join(', ')} */`;
+    return `${base}${suffix}`.slice(0, 200);
+  };
+
+  const visit = (node: tsType.Node, parentClass?: string): void => {
+    if (ts.isClassDeclaration(node) && node.name?.text) {
+      const span = lineSpan(node);
+      const className = node.name.text;
+      symbols.push({
+        name: className,
+        kind: 'class',
+        startIndex: span.startIndex,
+        endIndex: span.endIndex,
+        signature: (lines[span.startIndex] ?? '').trim().slice(0, 200),
+        exported: hasExportModifier(ts, node),
+      });
+      for (const member of node.members) {
+        if (
+          (ts.isMethodDeclaration(member) ||
+            ts.isGetAccessorDeclaration(member) ||
+            ts.isSetAccessorDeclaration(member)) &&
+          member.name &&
+          ts.isIdentifier(member.name)
+        ) {
+          const mSpan = lineSpan(member);
+          const calls = member.body ? collectAstCalls(ts, member.body) : [];
+          symbols.push({
+            name: member.name.text,
+            kind: 'method',
+            startIndex: mSpan.startIndex,
+            endIndex: mSpan.endIndex,
+            signature: makeSignature(mSpan.startIndex, calls),
+            parent: className,
+            exported: false,
+          });
+        } else if (
+          ts.isPropertyDeclaration(member) &&
+          member.name &&
+          ts.isIdentifier(member.name) &&
+          member.initializer &&
+          (ts.isArrowFunction(member.initializer) ||
+            ts.isFunctionExpression(member.initializer))
+        ) {
+          const mSpan = lineSpan(member);
+          const calls = collectAstCalls(ts, member.initializer);
+          symbols.push({
+            name: member.name.text,
+            kind: 'method',
+            startIndex: mSpan.startIndex,
+            endIndex: mSpan.endIndex,
+            signature: makeSignature(mSpan.startIndex, calls),
+            parent: className,
+            exported: false,
+          });
+        }
+      }
+      return;
+    }
+
+    if (ts.isInterfaceDeclaration(node) && node.name.text) {
+      const span = lineSpan(node);
+      symbols.push({
+        name: node.name.text,
+        kind: 'interface',
+        startIndex: span.startIndex,
+        endIndex: span.endIndex,
+        signature: (lines[span.startIndex] ?? '').trim().slice(0, 200),
+        exported: hasExportModifier(ts, node),
+      });
+      return;
+    }
+
+    if (ts.isTypeAliasDeclaration(node) && node.name.text) {
+      const span = lineSpan(node);
+      symbols.push({
+        name: node.name.text,
+        kind: 'type',
+        startIndex: span.startIndex,
+        endIndex: span.endIndex,
+        signature: (lines[span.startIndex] ?? '').trim().slice(0, 200),
+        exported: hasExportModifier(ts, node),
+      });
+      return;
+    }
+
+    if (ts.isEnumDeclaration(node) && node.name.text) {
+      const span = lineSpan(node);
+      symbols.push({
+        name: node.name.text,
+        kind: 'enum',
+        startIndex: span.startIndex,
+        endIndex: span.endIndex,
+        signature: (lines[span.startIndex] ?? '').trim().slice(0, 200),
+        exported: hasExportModifier(ts, node),
+      });
+      return;
+    }
+
+    if (ts.isFunctionDeclaration(node) && node.name?.text) {
+      const span = lineSpan(node);
+      const calls = node.body ? collectAstCalls(ts, node.body) : [];
+      symbols.push({
+        name: node.name.text,
+        kind: 'function',
+        startIndex: span.startIndex,
+        endIndex: span.endIndex,
+        signature: makeSignature(span.startIndex, calls),
+        ...(parentClass ? { parent: parentClass } : {}),
+        exported: hasExportModifier(ts, node),
+      });
+      return;
+    }
+
+    if (ts.isVariableStatement(node)) {
+      const exported = hasExportModifier(ts, node);
+      for (const decl of node.declarationList.declarations) {
+        if (!ts.isIdentifier(decl.name) || !decl.initializer) continue;
+        if (
+          ts.isArrowFunction(decl.initializer) ||
+          ts.isFunctionExpression(decl.initializer)
+        ) {
+          const span = lineSpan(node);
+          const calls = collectAstCalls(ts, decl.initializer);
+          symbols.push({
+            name: decl.name.text,
+            kind: 'function',
+            startIndex: span.startIndex,
+            endIndex: span.endIndex,
+            signature: makeSignature(span.startIndex, calls),
+            exported,
+          });
+        }
+      }
+      return;
+    }
+
+    if (
+      ts.isCallExpression(node) &&
+      node.arguments.length >= 1 &&
+      ts.isStringLiteralLike(node.arguments[0]!)
+    ) {
+      let callee = '';
+      if (ts.isIdentifier(node.expression)) {
+        callee = node.expression.text;
+      } else if (
+        ts.isPropertyAccessExpression(node.expression) &&
+        ts.isIdentifier(node.expression.expression)
+      ) {
+        callee = node.expression.expression.text;
+      }
+      if (callee === 'describe' || callee === 'it' || callee === 'test') {
+        const span = lineSpan(node);
+        symbols.push({
+          name: node.arguments[0]!.text,
+          kind: 'test',
+          startIndex: span.startIndex,
+          endIndex: span.endIndex,
+          signature: (lines[span.startIndex] ?? '').trim().slice(0, 200),
+          exported: false,
+        });
+      }
+    }
+
+    ts.forEachChild(node, (child) => visit(child, parentClass));
+  };
+
+  visit(sourceFile);
+  return symbols;
+}
+
+/** 提取单文件的导入模块列表与顶层调用目标（TS/JS 走 AST，其余走静态正则） */
+export function extractFileDependencies(
+  path: string,
+  language: string,
+  text: string,
+): { imports: string[]; calls: string[] } {
+  const imports = new Set<string>();
+  const calls = new Set<string>();
+  if (
+    language === 'typescript' ||
+    language === 'tsx' ||
+    language === 'javascript'
+  ) {
+    const ts = loadTypescript();
+    if (ts) {
+      const sf = ts.createSourceFile(
+        path,
+        text,
+        ts.ScriptTarget.Latest,
+        true,
+        language === 'tsx'
+          ? ts.ScriptKind.TSX
+          : language === 'javascript'
+            ? ts.ScriptKind.JS
+            : ts.ScriptKind.TS,
+      );
+      const walk = (node: tsType.Node): void => {
+        if (
+          (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) &&
+          node.moduleSpecifier &&
+          ts.isStringLiteral(node.moduleSpecifier)
+        ) {
+          imports.add(node.moduleSpecifier.text);
+        }
+        if (ts.isCallExpression(node)) {
+          if (ts.isIdentifier(node.expression)) {
+            if (!AST_CALL_NOISE.has(node.expression.text)) {
+              calls.add(node.expression.text);
+            }
+          } else if (ts.isPropertyAccessExpression(node.expression)) {
+            if (!AST_CALL_NOISE.has(node.expression.name.text)) {
+              calls.add(node.expression.name.text);
+            }
+          }
+        }
+        ts.forEachChild(node, walk);
+      };
+      walk(sf);
+      return { imports: [...imports], calls: [...calls].slice(0, 40) };
+    }
+  }
+  for (const match of text.matchAll(/(?:from|import)\s+['"]([^'"]+)['"]/gu)) {
+    if (match[1]) imports.add(match[1]);
+  }
+  return { imports: [...imports], calls: [...calls] };
+}
+
 export function extractSymbols(
   path: string,
   language: string,
@@ -568,7 +915,9 @@ export function extractSymbols(
     case 'typescript':
     case 'tsx':
     case 'javascript':
-      raw = extractTypescript(lines);
+      raw =
+        extractTypescriptAst(path, language, text, lines) ??
+        extractTypescript(lines);
       break;
     case 'python':
       raw = extractPython(lines);

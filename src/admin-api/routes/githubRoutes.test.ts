@@ -193,6 +193,7 @@ describe('GitHub Webhook 验签与事件路由', () => {
     const onEvent = vi.fn(async () => ({
       matchedTasks: [{ task: { id: 'task-1' } as never, subscribers: [] }],
       notificationsSent: 1,
+      continuationsEnqueued: 0,
     }));
     const app = new Hono().route(
       '/api/v1/webhooks',

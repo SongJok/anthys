@@ -1,5 +1,6 @@
 import { resolve } from 'node:path';
 import type { MetricsRegistry } from '../admin-api/metrics.js';
+import type { SharedStateStore } from '../cluster/SharedStateStore.js';
 import type { DynamicConfigCenter } from '../config/DynamicConfigCenter.js';
 import { DrizzlePendingActionPersistence } from '../db/approvalSchema.js';
 import { DrizzleToolExecutionLedgerPersistence } from '../db/executionLedgerSchema.js';
@@ -42,6 +43,15 @@ import {
 import { ToolRegistry } from '../harness/ToolRegistry.js';
 import { TaskResultMemory } from '../memory/TaskResultMemory.js';
 import { AttachmentStore } from '../multimodal/AttachmentStore.js';
+import {
+  OpenAiAudioTranscriber,
+  resolveAudioAsrConfig,
+  type AudioTranscriber,
+} from '../multimodal/AudioTranscriber.js';
+import {
+  FfmpegVideoAnalyzer,
+  type VideoAnalyzer,
+} from '../multimodal/VideoAnalyzer.js';
 import { OpenAiVisionDescriber } from '../multimodal/VisionDescriber.js';
 import { PersonalAssistantService } from '../personal/PersonalAssistantService.js';
 import { PersonalReportBuilder } from '../personal/PersonalReportBuilder.js';
@@ -94,6 +104,7 @@ export interface ToolsAndGovernanceDeps {
   harnessLogger: HarnessLogger;
   getAccessToken: () => Promise<string>;
   extensions: WorkspaceAndExtensionsContext;
+  sharedState?: SharedStateStore;
   clusterEnabled: boolean;
   isLeader: () => boolean;
   redactionEnabled: boolean;
@@ -123,6 +134,8 @@ export interface ToolsAndGovernanceContext {
   applyExecutionPolicy: (providers: () => IToolProvider[]) => IToolProvider[];
   attachmentStore: AttachmentStore;
   visionDescriber?: OpenAiVisionDescriber;
+  audioTranscriber?: AudioTranscriber;
+  videoAnalyzer?: VideoAnalyzer;
   retentionService: DataRetentionService;
 }
 
@@ -141,6 +154,7 @@ export async function setupToolsAndGovernance(
     harnessLogger,
     getAccessToken,
     extensions,
+    sharedState,
     clusterEnabled,
     isLeader,
     redactionEnabled,
@@ -221,8 +235,11 @@ export async function setupToolsAndGovernance(
     if (request.toolName === 'glossary_candidate_submit') {
       return { approved: true };
     }
-    // 产物投递只发往当前会话，是回答的预期输出通道，免二次确认
-    if (request.toolName === 'deliver_artifact') {
+    // 产物生成与投递仅写入受控工作区或发往当前会话，是回答的预期输出通道，免二次确认
+    if (
+      request.toolName === 'deliver_artifact' ||
+      request.toolName === 'artifact_generate'
+    ) {
       return { approved: true };
     }
     if (
@@ -393,6 +410,7 @@ export async function setupToolsAndGovernance(
           cacheTtlSeconds: webSearchConfig.cacheTtlSeconds,
           maxCallsPerHour: webSearchConfig.maxCallsPerHour,
           dailyLimit: webSearchConfig.dailyLimit,
+          ...(sharedState ? { sharedState } : {}),
         })
       : undefined;
   if (webSearchConfig?.enabled && !webSearchConfig.apiKey) {
@@ -436,6 +454,7 @@ export async function setupToolsAndGovernance(
         maxCallsPerHour: envCount(process.env.WEB_FETCH_MAX_CALLS_PER_HOUR, 20),
         dailyLimit: envCount(process.env.WEB_FETCH_DAILY_LIMIT, 300),
         defaultMaxChars: envCount(process.env.WEB_FETCH_MAX_CHARS, 2_500),
+        ...(sharedState ? { sharedState } : {}),
       })
     : undefined;
   logger.info(
@@ -628,6 +647,7 @@ export async function setupToolsAndGovernance(
     ),
     policy: resolveRetentionPolicy(process.env),
     attachmentsDir: attachmentDir,
+    generatedArtifactsDir: resolve(toolRegistry.workspace.hostDir, 'generated'),
     transcriptArchive: groupTranscriptArchive,
     logger,
     canRun: () => !clusterEnabled || isLeader(),
@@ -676,6 +696,46 @@ export async function setupToolsAndGovernance(
     );
   }
 
+  const audioAsrConfig = resolveAudioAsrConfig(process.env);
+  const audioTranscriber =
+    audioAsrConfig.enabled && audioAsrConfig.apiKey
+      ? new OpenAiAudioTranscriber({
+          baseUrl: audioAsrConfig.baseUrl,
+          apiKey: audioAsrConfig.apiKey,
+          model: audioAsrConfig.model,
+          timeoutMs: audioAsrConfig.timeoutMs,
+          maxAudioBytes: audioAsrConfig.maxAudioBytes,
+          ...(audioAsrConfig.language ? { language: audioAsrConfig.language } : {}),
+          logger,
+        })
+      : undefined;
+  logger.info(
+    {
+      enabled: audioAsrConfig.enabled,
+      ready: Boolean(audioTranscriber),
+      model: audioAsrConfig.model,
+      apiKeyConfigured: Boolean(audioAsrConfig.apiKey),
+    },
+    'audio ASR configuration resolved',
+  );
+  if (audioAsrConfig.enabled && !audioAsrConfig.apiKey) {
+    logger.warn(
+      { model: audioAsrConfig.model },
+      'AUDIO_ASR_ENABLED 已开启但缺少 API Key，外部音频附件仅落盘不转写（钉钉原生语音识别字段仍可用）',
+    );
+  }
+
+  const videoAnalysisEnabled = envEnabled(process.env.VIDEO_ANALYSIS_ENABLED, true);
+  const videoAnalyzer =
+    videoAnalysisEnabled && (visionDescriber || audioTranscriber)
+      ? new FfmpegVideoAnalyzer({
+          ...(visionDescriber ? { vision: visionDescriber } : {}),
+          ...(audioTranscriber ? { audio: audioTranscriber } : {}),
+          maxFrames: envCount(process.env.VIDEO_MAX_FRAMES, 4),
+          logger,
+        })
+      : undefined;
+
   return {
     pendingActions,
     writeLedger,
@@ -696,6 +756,8 @@ export async function setupToolsAndGovernance(
     applyExecutionPolicy,
     attachmentStore,
     ...(visionDescriber ? { visionDescriber } : {}),
+    ...(audioTranscriber ? { audioTranscriber } : {}),
+    ...(videoAnalyzer ? { videoAnalyzer } : {}),
     retentionService,
   };
 }

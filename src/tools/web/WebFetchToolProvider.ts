@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+import type { SharedStateStore } from '../../cluster/SharedStateStore.js';
 import type {
   ExecutionContext,
   IToolProvider,
@@ -34,6 +36,8 @@ export interface WebFetchToolProviderOptions {
   maxCacheEntries?: number;
   /** 默认正文长度 */
   defaultMaxChars?: number;
+  /** 集群模式下跨实例共享缓存与小时/日配额 */
+  sharedState?: SharedStateStore;
 }
 
 interface CacheEntry {
@@ -227,12 +231,12 @@ export class WebFetchToolProvider implements IToolProvider {
         : this.defaultMaxChars;
     const cacheKey = `${url}\u0000${maxChars}`;
 
-    const cached = this.readCache(cacheKey);
-    if (cached) {
+    const localCached = this.readCache(cacheKey);
+    if (localCached) {
       this.options.metrics?.inc('web_fetch_requests_total', {
         result: 'cache_hit',
       });
-      return formatOutput(cached, maxChars);
+      return formatOutput(localCached, maxChars);
     }
 
     const pending = this.inflight.get(cacheKey);
@@ -243,12 +247,39 @@ export class WebFetchToolProvider implements IToolProvider {
       return formatOutput(await pending, maxChars);
     }
 
-    const denial = this.reserveCall(ctx.conversationId);
+    if (this.options.sharedState) {
+      const remoteCached = await this.readRemoteCache(cacheKey);
+      if (remoteCached) {
+        this.options.metrics?.inc('web_fetch_requests_total', {
+          result: 'cache_hit',
+        });
+        return formatOutput(remoteCached, maxChars);
+      }
+      const joined = this.inflight.get(cacheKey);
+      if (joined) {
+        this.options.metrics?.inc('web_fetch_requests_total', {
+          result: 'inflight_join',
+        });
+        return formatOutput(await joined, maxChars);
+      }
+    }
+
+    const denial = this.options.sharedState
+      ? await this.reserveCallAsync(ctx.conversationId)
+      : this.reserveCall(ctx.conversationId);
     if (denial) {
       this.options.metrics?.inc('web_fetch_requests_total', {
         result: denial.reason === 'hour' ? 'rate_limited' : 'daily_limited',
       });
       return denial.output;
+    }
+
+    const joinedAfterReserve = this.inflight.get(cacheKey);
+    if (joinedAfterReserve) {
+      this.options.metrics?.inc('web_fetch_requests_total', {
+        result: 'inflight_join',
+      });
+      return formatOutput(await joinedAfterReserve, maxChars);
     }
 
     const startedAt = this.now();
@@ -296,6 +327,25 @@ export class WebFetchToolProvider implements IToolProvider {
     return formatOutput(page, maxChars);
   }
 
+  private sharedCacheKey(key: string): string {
+    return `web_fetch:cache:${createHash('sha256').update(key).digest('hex').slice(0, 32)}`;
+  }
+
+  private async readRemoteCache(key: string): Promise<FetchedPage | null> {
+    const shared = this.options.sharedState;
+    if (!shared || this.cacheTtlSeconds <= 0) return null;
+    try {
+      const remote = await shared.getJson<FetchedPage>(this.sharedCacheKey(key));
+      if (remote && typeof remote.text === 'string') {
+        this.writeLocalCache(key, remote);
+        return remote;
+      }
+    } catch {
+      // 共享缓存不可达时静默回退本地
+    }
+    return null;
+  }
+
   private readCache(key: string): FetchedPage | null {
     if (this.cacheTtlSeconds <= 0) return null;
     const entry = this.cache.get(key);
@@ -307,8 +357,7 @@ export class WebFetchToolProvider implements IToolProvider {
     return entry.page;
   }
 
-  private writeCache(key: string, page: FetchedPage): void {
-    if (this.cacheTtlSeconds <= 0) return;
+  private writeLocalCache(key: string, page: FetchedPage): void {
     this.cache.delete(key);
     this.cache.set(key, {
       expiresAt: this.now() + this.cacheTtlSeconds * 1_000,
@@ -318,6 +367,74 @@ export class WebFetchToolProvider implements IToolProvider {
       const oldest = this.cache.keys().next().value;
       if (oldest === undefined) break;
       this.cache.delete(oldest);
+    }
+  }
+
+  private writeCache(key: string, page: FetchedPage): void {
+    if (this.cacheTtlSeconds <= 0) return;
+    this.writeLocalCache(key, page);
+    const shared = this.options.sharedState;
+    if (shared) {
+      void shared
+        .setJson(this.sharedCacheKey(key), page, this.cacheTtlSeconds)
+        .catch(() => undefined);
+    }
+  }
+
+  private async reserveCallAsync(
+    conversationId: string,
+  ): Promise<ReserveDenial | null> {
+    const shared = this.options.sharedState;
+    if (!shared?.incrementWindow) {
+      return this.reserveCall(conversationId);
+    }
+    const now = this.now();
+    const dayKey = `web_fetch:day:${localDayStamp(now)}`;
+    try {
+      if (this.dailyLimit > 0) {
+        const currentDay = await shared.getJson<{ count?: number }>(dayKey);
+        if ((currentDay?.count ?? 0) >= this.dailyLimit) {
+          return {
+            reason: 'day',
+            output: {
+              text: '今日网页读取总额度已用完。请基于已有信息回答，并说明无法继续打开新链接；不要重复调用 web_fetch。',
+              summary: '网页读取达到每日上限',
+              citations: [],
+            },
+          };
+        }
+      }
+      if (this.maxCallsPerHour > 0) {
+        const hourBucket = Math.floor(now / HOUR_MS);
+        const hourKey = `web_fetch:hour:${conversationId}:${hourBucket}`;
+        const count = await shared.incrementWindow(hourKey, 3_700, 1);
+        if (count > this.maxCallsPerHour) {
+          return {
+            reason: 'hour',
+            output: {
+              text: `本会话网页读取已达 ${this.maxCallsPerHour} 次/小时上限。请先总结已读页面，稍后再打开新链接；不要重复调用 web_fetch。`,
+              summary: '网页读取达到会话上限',
+              citations: [],
+            },
+          };
+        }
+      }
+      if (this.dailyLimit > 0) {
+        const count = await shared.incrementWindow(dayKey, 90_000, 1);
+        if (count > this.dailyLimit) {
+          return {
+            reason: 'day',
+            output: {
+              text: '今日网页读取总额度已用完。请基于已有信息回答，并说明无法继续打开新链接；不要重复调用 web_fetch。',
+              summary: '网页读取达到每日上限',
+              citations: [],
+            },
+          };
+        }
+      }
+      return null;
+    } catch {
+      return this.reserveCall(conversationId);
     }
   }
 

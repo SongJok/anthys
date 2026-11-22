@@ -63,6 +63,7 @@ import {
   normalizeIdentityAlias,
 } from '../identity/PersonIdentityService.js';
 import { enrichInboundMessage } from '../multimodal/MessageEnricher.js';
+import { generateWorkspaceArtifact } from '../tools/artifacts/ArtifactGenerator.js';
 import { formatShanghaiDateTime } from '../time/shanghaiTime.js';
 import {
   DWS_CONSENT_VERSION,
@@ -208,6 +209,10 @@ export async function setupDingTalkIngress(
     process.env.BACKPRESSURE_TO_BACKGROUND,
     true,
   );
+  // 超长回答自动导出为完整 Markdown 文档附件，避免多条纯文本分片刷屏；投递失败仍自动回退文本分片
+  const cardOverflowToDocument =
+    envEnabled(process.env.ARTIFACT_DELIVERY_ENABLED, true) &&
+    envEnabled(process.env.CARD_OVERFLOW_TO_DOCUMENT, true);
 
   const cardApiRef: { current: OpenApiCardApi } = {
     current: new OpenApiCardApi({
@@ -232,6 +237,7 @@ export async function setupDingTalkIngress(
       logger: cardLogger,
       layout:
         layout === 'v1' || layout === 'v2' || layout === 'ai' ? layout : 'ai',
+      overflowMode: cardOverflowToDocument ? 'document' : 'text',
       ...(process.env.DINGTALK_CARD_CONTENT_KEY?.trim()
         ? { contentKey: process.env.DINGTALK_CARD_CONTENT_KEY.trim() }
         : {}),
@@ -1132,6 +1138,7 @@ export async function setupDingTalkIngress(
       }
       const cancelled = await jobStore.cancel(job.id);
       if (!cancelled) return '任务状态已变化，请发送 /jobs 重新查看。';
+      await jobStore.deleteCheckpoint?.(job.id).catch(() => undefined);
       metrics.inc('agent_jobs_total', {
         kind: cancelled.kind,
         status: 'cancelled',
@@ -1168,7 +1175,12 @@ export async function setupDingTalkIngress(
       const prompt = trimmedNote
         ? `${job.prompt}\n\n恢复时补充要求：${trimmedNote}`
         : undefined;
-      const resumed = await jobStore.resume(job.id, prompt ? { prompt } : {});
+      const resumed = await jobStore.resume(
+        job.id,
+        prompt
+          ? { prompt, ...(trimmedNote ? { resumeGuidance: trimmedNote } : {}) }
+          : {},
+      );
       if (!resumed) return '任务状态已变化，请发送 /jobs 重新查看。';
       metrics.inc('agent_jobs_total', { kind: resumed.kind, status: 'queued' });
       logger.info(
@@ -1229,13 +1241,41 @@ export async function setupDingTalkIngress(
     message: InboundMessage,
     signal: AbortSignal,
   ): Promise<InboundMessage> {
-    if (!message.attachments || message.attachments.length === 0) {
+    const hasAttachments = Boolean(
+      message.attachments && message.attachments.length > 0,
+    );
+    if (!hasAttachments && !message.quotedMessage) {
       return message;
     }
     try {
       const enriched = await enrichInboundMessage(message, {
         store: tools.attachmentStore,
         ...(tools.visionDescriber ? { vision: tools.visionDescriber } : {}),
+        ...(tools.audioTranscriber ? { audio: tools.audioTranscriber } : {}),
+        ...(tools.videoAnalyzer ? { video: tools.videoAnalyzer } : {}),
+        resolveQuotedMessage: async (quotedMsgId, conversationId) => {
+          const fromControl = runControl.messageById(quotedMsgId);
+          if (fromControl && fromControl.text.trim()) {
+            return {
+              messageId: fromControl.messageId,
+              senderStaffId: fromControl.senderStaffId,
+              senderNick: fromControl.senderNick,
+              text: fromControl.text,
+            };
+          }
+          const fromBuffer = memory.transcriptBuffer
+            .recent(conversationId)
+            .find((entry) => entry.messageId === quotedMsgId);
+          if (fromBuffer && fromBuffer.text.trim()) {
+            return {
+              messageId: fromBuffer.messageId,
+              senderStaffId: fromBuffer.senderStaffId,
+              senderNick: fromBuffer.senderNick,
+              text: fromBuffer.text,
+            };
+          }
+          return null;
+        },
         logger,
         signal,
         onDocument: (info) =>
@@ -1244,6 +1284,11 @@ export async function setupDingTalkIngress(
               info.format ??
               (extname(info.fileName).slice(1).toLowerCase() || 'unknown'),
             result: info.ok ? 'ok' : (info.reason ?? 'failed'),
+          }),
+        onAudio: (info) =>
+          metrics.inc('agent_audio_transcribe_total', {
+            source: info.source,
+            result: info.ok ? 'ok' : 'failed',
           }),
       });
       if (enriched.attachments.length > 0) {
@@ -1268,6 +1313,47 @@ export async function setupDingTalkIngress(
         'attachment enrichment failed, continue with raw message',
       );
       return message;
+    }
+  }
+
+  async function tryDeliverOverflowDocument(
+    message: InboundMessage,
+    fullAnswer: string,
+  ): Promise<boolean> {
+    if (!cardOverflowToDocument || !fullAnswer.trim()) return false;
+    try {
+      const generated = await generateWorkspaceArtifact(
+        tools.toolRegistry.workspace.hostDir,
+        {
+          format: 'md',
+          fileName: `完整回答_${message.messageId.replace(/[^\w-]/gu, '').slice(0, 12) || 'report'}.md`,
+          content: fullAnswer,
+        },
+      );
+      const sent = await tools.mediaSender.send({
+        conversationId: message.conversationId,
+        conversationType: message.conversationType,
+        senderStaffId: message.senderStaffId,
+        filePath: generated.absolutePath,
+        fileName: generated.fileName,
+      });
+      if (!sent.ok) {
+        metrics.inc('agent_card_overflow_document_total', { result: 'failed' });
+        logger.warn(
+          { messageId: message.messageId, error: sent.error },
+          'overflow document delivery failed, falling back to text chunks',
+        );
+        return false;
+      }
+      metrics.inc('agent_card_overflow_document_total', { result: 'ok' });
+      return true;
+    } catch (error) {
+      metrics.inc('agent_card_overflow_document_total', { result: 'error' });
+      logger.warn(
+        { messageId: message.messageId, error: errorText(error) },
+        'overflow document generation failed, falling back to text chunks',
+      );
+      return false;
     }
   }
 
@@ -1371,7 +1457,13 @@ export async function setupDingTalkIngress(
       await streamer.finish();
       const overflow = streamer.takeOverflowAnswer();
       if (overflow) {
-        await deliverFallbackText(effective, overflow, proactive);
+        const sentAsDoc = await tryDeliverOverflowDocument(
+          effective,
+          streamer.fullAnswerText(),
+        );
+        if (!sentAsDoc) {
+          await deliverFallbackText(effective, overflow, proactive);
+        }
       }
       await recordTrace(collector, effective, result, proactive);
       if (result && !streamer.isAvailable && result.answer) {
@@ -1509,7 +1601,13 @@ export async function setupDingTalkIngress(
       await streamer.finish();
       const overflow = streamer.takeOverflowAnswer();
       if (overflow) {
-        await sendSessionWebhook(message, overflow, cardLogger);
+        const sentAsDoc = await tryDeliverOverflowDocument(
+          message,
+          streamer.fullAnswerText(),
+        );
+        if (!sentAsDoc) {
+          await sendSessionWebhook(message, overflow, cardLogger);
+        }
       }
       await recordTrace(collector, message, result, true);
       if (result && !streamer.isAvailable && result.answer) {
@@ -1746,22 +1844,63 @@ export async function setupDingTalkIngress(
       }
       const cardUserName =
         action.nick?.trim() || (await resolveEmployeeDisplayName(action.userId));
+      const senderStaffId = action.userId || `card_user_${action.conversationId}`;
+      const senderNick = formatTraceSenderNick({
+        senderNick: '卡片用户',
+        source: 'card_action',
+        ...(cardUserName ? { employeeName: cardUserName } : {}),
+      });
+
+      if (action.actionKind === 'feedback' && action.rating) {
+        const ratingLabel = action.rating === 'up' ? '👍 有用' : '👎 有误/需改进';
+        const content = [
+          `[卡片反馈:${action.rating}]`,
+          action.command.replace(/^\/feedback\s*/u, '').trim() || ratingLabel,
+          ...(action.traceId ? [`trace=${action.traceId}`] : []),
+          ...(action.outTrackId ? [`card=${action.outTrackId}`] : []),
+        ].join(' ');
+        await feedbackStore.append({
+          conversationId: action.conversationId,
+          messageId:
+            action.targetMessageId ||
+            action.outTrackId ||
+            `card_fb_${Date.now()}`,
+          senderStaffId,
+          senderNick,
+          content,
+        });
+        metrics.inc('agent_feedback_total');
+        metrics.inc('agent_card_feedback_total', { rating: action.rating });
+        return;
+      }
+
+      let resolvedCommand = action.command;
+      if (action.actionKind === 'convert_to_job' && resolvedCommand === '/job') {
+        const prev =
+          (action.targetMessageId
+            ? runControl.messageById(action.targetMessageId)
+            : null) ?? runControl.lastMessage(action.conversationId);
+        if (prev?.text.trim()) {
+          resolvedCommand = `/job ${prev.text.trim()}`;
+        }
+      }
+
       const message: InboundMessage = {
         messageId: `card_${action.actionId}_${action.outTrackId || action.conversationId}_${Date.now()}`,
         conversationId: action.conversationId,
         conversationType: action.conversationType,
-        senderStaffId: action.userId || `card_user_${action.conversationId}`,
-        senderNick: formatTraceSenderNick({
-          senderNick: '卡片用户',
-          source: 'card_action',
-          ...(cardUserName ? { employeeName: cardUserName } : {}),
-        }),
+        senderStaffId,
+        senderNick,
         isAtBot: true,
-        text: action.command,
+        text: resolvedCommand,
         rawPayload: {
           source: 'card_action',
           actionId: action.actionId,
+          actionKind: action.actionKind,
           outTrackId: action.outTrackId,
+          ...(action.pendingActionId
+            ? { pendingActionId: action.pendingActionId }
+            : {}),
         },
         timestamp: Date.now(),
       };

@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { MemorySharedStateStore } from '../../cluster/SharedStateStore.js';
 import type { ExecutionContext, ToolDefinition } from '../../types/core.js';
 import type { FetchedPage, WebFetchExecutor } from './WebFetchClient.js';
 import { WebFetchError } from './WebFetchClient.js';
@@ -173,5 +174,51 @@ describe('WebFetchToolProvider', () => {
     await expect(
       tool.executeStructured!({ url: '   ' }, context()),
     ).rejects.toThrow('url 必须是非空字符串');
+  });
+
+  it('集群共享状态开启时跨实例共享网页缓存与小时/日配额', async () => {
+    const sharedState = new MemorySharedStateStore();
+    const fetchA = vi.fn(async () => page());
+    const fetchB = vi.fn(async () => page());
+
+    const toolA = await toolOf(
+      makeProvider(fetchA, {
+        sharedState,
+        cacheTtlSeconds: 600,
+        maxCallsPerHour: 1,
+        dailyLimit: 2,
+      }),
+    );
+    const toolB = await toolOf(
+      makeProvider(fetchB, {
+        sharedState,
+        cacheTtlSeconds: 600,
+        maxCallsPerHour: 1,
+        dailyLimit: 2,
+      }),
+    );
+
+    // 实例 A 抓取后写入共享缓存，实例 B 读取同一 URL 直接命中缓存
+    await toolA.executeStructured!({ url: 'https://example.com/shared' }, context('conv-1'));
+    await toolB.executeStructured!({ url: 'https://example.com/shared' }, context('conv-1'));
+    expect(fetchA).toHaveBeenCalledTimes(1);
+    expect(fetchB).toHaveBeenCalledTimes(0);
+
+    // 同一会话在实例 B 抓新 URL 受共享小时配额拦截
+    const hourLimited = await toolB.executeStructured!(
+      { url: 'https://example.com/new-1' },
+      context('conv-1'),
+    );
+    expect(hourLimited.summary).toBe('网页读取达到会话上限');
+
+    // 另一会话用掉第 2 次日配额，第三个会话在实例 A 被共享日配额拦截
+    await toolB.executeStructured!({ url: 'https://example.com/new-2' }, context('conv-2'));
+    expect(fetchB).toHaveBeenCalledTimes(1);
+    const dayLimited = await toolA.executeStructured!(
+      { url: 'https://example.com/new-3' },
+      context('conv-3'),
+    );
+    expect(dayLimited.summary).toBe('网页读取达到每日上限');
+    expect(fetchA).toHaveBeenCalledTimes(1);
   });
 });

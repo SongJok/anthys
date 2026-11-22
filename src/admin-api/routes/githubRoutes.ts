@@ -255,6 +255,7 @@ export function createGithubWebhookRoutes(deps: GithubWebhookDeps): Hono {
       ...(deliveryId ? { deliveryId } : {}),
       matchedTaskIds,
       notificationsSent: result?.notificationsSent ?? 0,
+      continuationsEnqueued: result?.continuationsEnqueued ?? 0,
     });
   });
 

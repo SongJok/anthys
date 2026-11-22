@@ -41,12 +41,39 @@ export interface DwsCommandRequest {
   operatorStaffId: string;
 }
 
+/** 沙盒产物受控导出配置（仅允许落盘到工作区指定子目录） */
+export interface SandboxArtifactOutputOptions {
+  /** 宿主机工作区根目录，最终产物写入 workspaceRoot/subdir/<fileName> */
+  workspaceRoot: string;
+  /** 相对工作区根目录的子目录，例如 generated/20261122/run_xxx */
+  subdir: string;
+  /** 单个产物大小上限（字节），默认 20MB */
+  maxFileBytes?: number;
+  /** 单次执行全部产物总大小上限（字节），默认 30MB */
+  maxTotalBytes?: number;
+  /** 单次执行最多导出文件数，默认 10 */
+  maxFiles?: number;
+}
+
+/** 沙盒通过安全校验后导出的工作区产物 */
+export interface SandboxGeneratedArtifact {
+  /** 相对工作区的路径，可直接传给 deliver_artifact */
+  workspaceRelativePath: string;
+  /** 宿主机绝对路径 */
+  absolutePath: string;
+  fileName: string;
+  sizeBytes: number;
+  mimeType: string;
+}
+
 /** 3. 安全沙盒执行契约 */
 export interface SandboxExecRequest {
   language: 'javascript' | 'python' | 'bash';
   code: string;
   inputDatasets?: Record<string, unknown>;
   timeoutMs?: number;
+  /** 开启后允许脚本把生成的图表/报表导出到工作区受控目录 */
+  artifactOutput?: SandboxArtifactOutputOptions;
 }
 
 export interface SandboxExecResult {
@@ -55,6 +82,8 @@ export interface SandboxExecResult {
   stderr: string;
   executionTimeMs: number;
   truncated: boolean;
+  /** 本次执行导出并通过安全校验的产物清单 */
+  generatedArtifacts?: SandboxGeneratedArtifact[];
 }
 
 /** 沙盒工作区：hostDir 供宿主读写，sandboxDir 是脚本内看到的路径 */

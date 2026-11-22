@@ -1,19 +1,29 @@
 import { describe, expect, it } from 'vitest';
 import {
+  BROWSER_AUTOMATION_SUITE,
+  DEFAULT_TOOL_SUITES,
+  DWS_OFFICE_WRITE_SUITE,
+  FINANCE_MARKET_SUITE,
+  LBS_AND_TRAVEL_SUITE,
   PROJECT_CODE_SUITE,
   buildActivateToolsTool,
   buildSuiteCatalog,
   injectSuiteCatalog,
   partitionSuites,
+  resolveToolSuites,
 } from './ToolSuiteGate.js';
 import type { ToolDefinition } from '../types/core.js';
 
-function tool(name: string, source: string): ToolDefinition {
+function tool(
+  name: string,
+  source: string,
+  risk: 'read' | 'write' | 'destructive' = 'read',
+): ToolDefinition {
   return {
     name,
     description: name,
     source,
-    risk: 'read',
+    risk,
     parametersJsonSchema: { type: 'object', properties: {} },
     execute: async () => name,
   };
@@ -102,5 +112,52 @@ describe('injectSuiteCatalog', () => {
     injectSuiteCatalog(messages, '目录');
     expect(messages[0]).toEqual({ role: 'system', content: '目录' });
     expect(messages[1]).toEqual({ role: 'user', content: '问题' });
+  });
+});
+
+describe('多域工具套件与批量激活', () => {
+  it('DEFAULT_TOOL_SUITES 按域切分工具，保持高频只读工具常驻', () => {
+    const tools = [
+      tool('current_time', 'builtin', 'read'),
+      tool('dws_org_and_schedule', 'dws', 'read'),
+      tool('dws_calendar_manage', 'dws', 'write'),
+      tool('dws_calendar_cancel', 'dws', 'destructive'),
+      tool('mcp__playwright__browser_click', 'mcp', 'write'),
+      tool('mcp__amap__maps_geo', 'mcp', 'read'),
+      tool('market_data_fetch', 'market', 'read'),
+      tool('project_search', 'projects', 'read'),
+    ];
+    const { resident, gated } = partitionSuites(tools, [...DEFAULT_TOOL_SUITES]);
+    expect(resident.map((t) => t.name)).toEqual([
+      'current_time',
+      'dws_org_and_schedule',
+    ]);
+    expect(gated.get(DWS_OFFICE_WRITE_SUITE.id)?.map((t) => t.name)).toEqual([
+      'dws_calendar_manage',
+      'dws_calendar_cancel',
+    ]);
+    expect(gated.get(BROWSER_AUTOMATION_SUITE.id)?.map((t) => t.name)).toEqual([
+      'mcp__playwright__browser_click',
+    ]);
+    expect(gated.get(LBS_AND_TRAVEL_SUITE.id)?.map((t) => t.name)).toEqual([
+      'mcp__amap__maps_geo',
+    ]);
+    expect(gated.get(FINANCE_MARKET_SUITE.id)?.map((t) => t.name)).toEqual([
+      'market_data_fetch',
+    ]);
+  });
+
+  it('activate_tools 支持 extraSuites 单轮激活多个套件且 resolveToolSuites 支持环境变量过滤', async () => {
+    const selected = resolveToolSuites({
+      TOOL_SUITES_LIST: 'project_code,lbs_and_travel',
+    });
+    expect(selected.map((s) => s.id)).toEqual(['project_code', 'lbs_and_travel']);
+
+    const meta = buildActivateToolsTool(selected);
+    const res = await meta.executeStructured?.(
+      { suite: 'project_code', extraSuites: ['lbs_and_travel'] },
+      {} as never,
+    );
+    expect(res?.activateTools).toEqual(['project_code', 'lbs_and_travel']);
   });
 });
