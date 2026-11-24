@@ -278,7 +278,7 @@ describe('parseStreamMessage', () => {
         msgtype: 'interactiveCard',
         interactiveCard: {
           cardData: JSON.stringify({
-            header: { title: { type: 'text', text: '私聊转游戏或者一起看等' } },
+            header: { title: { type: 'text', text: '示例文档标题' } },
             contents: [
               {
                 type: 'markdown',
@@ -291,7 +291,7 @@ describe('parseStreamMessage', () => {
     );
     expect(message).toMatchObject({
       text: '[钉钉文档]',
-      documentReferences: [{ url, title: '私聊转游戏或者一起看等' }],
+      documentReferences: [{ url, title: '示例文档标题' }],
     });
   });
 

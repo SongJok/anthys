@@ -59,11 +59,11 @@ describe('renderDocumentSection', () => {
   it('渲染文档标题、链接和按提问人权限读取的约束', () => {
     const section = renderDocumentSection([
       {
-        title: '私聊转游戏或者一起看等',
+        title: '示例文档标题',
         url: 'https://alidocs.dingtalk.com/i/nodes/doc-1',
       },
     ]);
-    expect(section).toContain('「私聊转游戏或者一起看等」');
+    expect(section).toContain('「示例文档标题」');
     expect(section).toContain('https://alidocs.dingtalk.com/i/nodes/doc-1');
     expect(section).toContain('documentId');
     expect(section).toContain('提问人本人有权限');
