@@ -1,5 +1,6 @@
 import type {
   InboundAttachment,
+  InboundDocumentReference,
   InboundMessage,
   QuotedMessageContext,
 } from '../types/core.js';
@@ -24,6 +25,10 @@ interface RawRobotPayload {
 }
 
 const ATTACHMENT_TYPES = ['picture', 'file', 'audio', 'video'] as const;
+const DOCUMENT_HOSTS = new Set(['alidocs.dingtalk.com', 'docs.dingtalk.com']);
+const DOCUMENT_MAX_DEPTH = 10;
+const DOCUMENT_MAX_NODES = 400;
+const DOCUMENT_MAX_REFERENCES = 5;
 
 type AttachmentMsgType = (typeof ATTACHMENT_TYPES)[number];
 
@@ -85,6 +90,147 @@ function extractTextFromRichText(richText: unknown): string | null {
   }
   const joined = parts.join('').trim();
   return joined || null;
+}
+
+function documentUrl(value: string): string | null {
+  if (value.length > 2_048) return null;
+  const candidate = value.replace(/[),.;!?，。；！？）】》]+$/g, '');
+  try {
+    const url = new URL(candidate);
+    if (
+      url.protocol !== 'https:' ||
+      !DOCUMENT_HOSTS.has(url.hostname) ||
+      url.username ||
+      url.password ||
+      (url.port && url.port !== '443') ||
+      url.pathname === '/'
+    ) {
+      return null;
+    }
+    url.hash = '';
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+function documentTitle(value: unknown): string | undefined {
+  const direct = asNonEmptyString(value);
+  if (direct) return direct.replace(/\s+/g, ' ').slice(0, 200);
+  const record = asRecord(value);
+  if (!record) return undefined;
+  return (
+    asNonEmptyString(record.text) ??
+    asNonEmptyString(record.content) ??
+    asNonEmptyString(record.value)
+  )?.replace(/\s+/g, ' ').slice(0, 200);
+}
+
+/** 卡片结构未公开且可能随客户端变化，只提取白名单域名并限制遍历规模。 */
+export function extractDocumentReferences(
+  value: unknown,
+): InboundDocumentReference[] {
+  const references = new Map<string, InboundDocumentReference>();
+  const visited = new WeakSet<object>();
+  let nodes = 0;
+
+  const add = (raw: string, title?: string): void => {
+    if (references.size >= DOCUMENT_MAX_REFERENCES) return;
+    const url = documentUrl(raw);
+    if (!url || references.has(url)) return;
+    references.set(url, { url, ...(title ? { title } : {}) });
+  };
+
+  const visitString = (raw: string, depth: number, siblingTitle?: string): void => {
+    if (depth > DOCUMENT_MAX_DEPTH || raw.length > 64_000) return;
+    const trimmed = raw.trim();
+    if (
+      (trimmed.startsWith('{') && trimmed.endsWith('}')) ||
+      (trimmed.startsWith('[') && trimmed.endsWith(']'))
+    ) {
+      try {
+        visit(JSON.parse(trimmed), siblingTitle, depth + 1);
+        return;
+      } catch {
+        return;
+      }
+    }
+    for (const match of raw.matchAll(/\[([^\]\n]{1,200})\]\((https?:\/\/[^\s)]+)\)/g)) {
+      add(match[2]!, siblingTitle ?? match[1]!.trim());
+    }
+    for (const match of raw.matchAll(/https?:\/\/[^\s<>"'\\]+/gi)) {
+      add(match[0], siblingTitle);
+    }
+  };
+
+  const visit = (current: unknown, siblingTitle?: string, depth = 0): void => {
+    if (depth > DOCUMENT_MAX_DEPTH || nodes >= DOCUMENT_MAX_NODES) return;
+    nodes += 1;
+    if (typeof current === 'string') {
+      visitString(current, depth, siblingTitle);
+      return;
+    }
+    if (current === null || typeof current !== 'object') return;
+    if (visited.has(current)) return;
+    visited.add(current);
+    if (Array.isArray(current)) {
+      for (const item of current) visit(item, siblingTitle, depth + 1);
+      return;
+    }
+    const record = current as Record<string, unknown>;
+    const title = ['title', 'name', 'documentTitle']
+      .map((key) => documentTitle(record[key]))
+      .find((item): item is string => Boolean(item));
+    for (const [key, item] of Object.entries(record)) {
+      visit(item, title ?? siblingTitle, depth + 1);
+    }
+  };
+
+  visit(value);
+  return [...references.values()];
+}
+
+function extractCardTitle(
+  value: unknown,
+  depth = 0,
+  budget: { remaining: number } = { remaining: DOCUMENT_MAX_NODES },
+): string | undefined {
+  if (depth > DOCUMENT_MAX_DEPTH || value === null || budget.remaining-- <= 0) {
+    return undefined;
+  }
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (trimmed.length > 64_000) return undefined;
+    if (
+      (trimmed.startsWith('{') && trimmed.endsWith('}')) ||
+      (trimmed.startsWith('[') && trimmed.endsWith(']'))
+    ) {
+      try {
+        return extractCardTitle(JSON.parse(trimmed), depth + 1, budget);
+      } catch {
+        return undefined;
+      }
+    }
+    return undefined;
+  }
+  if (typeof value !== 'object') return undefined;
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const title = extractCardTitle(item, depth + 1, budget);
+      if (title) return title;
+    }
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  const ownTitle = ['title', 'name', 'documentTitle']
+    .map((key) => documentTitle(record[key]))
+    .find((item): item is string => Boolean(item));
+  if (ownTitle) return ownTitle;
+  for (const item of Object.values(record)) {
+    const title = extractCardTitle(item, depth + 1, budget);
+    if (title) return title;
+  }
+  return undefined;
 }
 
 function parseQuotedMessage(payload: RawRobotPayload): QuotedMessageContext | undefined {
@@ -209,56 +355,99 @@ export function parseStreamMessage(
 
   let text = '';
   let mentionOnly = false;
+  let supported = true;
   const attachments: InboundAttachment[] = [];
+  const rawRecord = raw as Record<string, unknown>;
+  const cardLike =
+    /card|forward|mixed/i.test(asNonEmptyString(payload.msgtype) ?? '') ||
+    ['interactiveCard', 'actionCard', 'action_card', 'cardData', 'forwardMessages'].some(
+      (key) => key in rawRecord,
+    );
+  const cardTitle = cardLike ? extractCardTitle(rawRecord) : undefined;
+  const extractedDocuments = extractDocumentReferences(raw);
+  const documentReferences =
+    extractedDocuments.length === 1 && cardTitle
+      ? [{ ...extractedDocuments[0]!, title: cardTitle }]
+      : extractedDocuments;
   if (payload.msgtype === 'text') {
     const textBlock = payload.text;
-    if (textBlock === null || typeof textBlock !== 'object') return null;
-    const content = asNonEmptyString(
-      (textBlock as { content?: unknown }).content,
-    );
-    if (!content) return null;
-    text = stripLeadingMentions(content);
-    if (!text) {
-      if (!hasLeadingMention(content)) return null;
-      mentionOnly = true;
+    if (textBlock === null || typeof textBlock !== 'object') {
+      supported = false;
+    } else {
+      const content = asNonEmptyString(
+        (textBlock as { content?: unknown }).content,
+      );
+      if (!content) {
+        supported = false;
+      } else {
+        text = stripLeadingMentions(content);
+        if (!text) {
+          if (!hasLeadingMention(content)) {
+            supported = false;
+          } else {
+            mentionOnly = true;
+          }
+        }
+      }
     }
   } else if (payload.msgtype === 'richText') {
     const content = payload.content;
-    if (content === null || typeof content !== 'object') return null;
-    const richText = (content as { richText?: unknown }).richText;
-    if (!Array.isArray(richText)) return null;
-    const textParts: string[] = [];
-    for (const item of richText) {
-      if (item === null || typeof item !== 'object') continue;
-      const block = item as Record<string, unknown>;
-      if (block.type === 'picture') {
-        const attachment = parseAttachment('picture', block);
-        if (attachment) attachments.push(attachment);
-      } else if (block.type === undefined || block.type === 'text') {
-        const part = asNonEmptyString(block.text);
-        if (part) textParts.push(part);
+    if (content === null || typeof content !== 'object') {
+      supported = false;
+    } else {
+      const richText = (content as { richText?: unknown }).richText;
+      if (!Array.isArray(richText)) {
+        supported = false;
+      } else {
+        const textParts: string[] = [];
+        for (const item of richText) {
+          if (item === null || typeof item !== 'object') continue;
+          const block = item as Record<string, unknown>;
+          if (block.type === 'picture') {
+            const attachment = parseAttachment('picture', block);
+            if (attachment) attachments.push(attachment);
+          } else if (block.type === undefined || block.type === 'text') {
+            const part = asNonEmptyString(block.text);
+            if (part) textParts.push(part);
+          }
+        }
+        const rawText = textParts.join('');
+        text = stripLeadingMentions(rawText);
+        if (!text && attachments.length === 0) {
+          if (!hasLeadingMention(rawText)) {
+            supported = false;
+          } else {
+            mentionOnly = true;
+          }
+        }
       }
-    }
-    const rawText = textParts.join('');
-    text = stripLeadingMentions(rawText);
-    if (!text && attachments.length === 0) {
-      if (!hasLeadingMention(rawText)) return null;
-      mentionOnly = true;
     }
   } else if (
     typeof payload.msgtype === 'string' &&
     (ATTACHMENT_TYPES as readonly string[]).includes(payload.msgtype)
   ) {
     const content = payload.content;
-    if (content === null || typeof content !== 'object') return null;
-    const attachment = parseAttachment(
-      payload.msgtype as AttachmentMsgType,
-      content as Record<string, unknown>,
-    );
-    if (!attachment) return null;
-    attachments.push(attachment);
+    if (content === null || typeof content !== 'object') {
+      supported = false;
+    } else {
+      const attachment = parseAttachment(
+        payload.msgtype as AttachmentMsgType,
+        content as Record<string, unknown>,
+      );
+      if (attachment) {
+        attachments.push(attachment);
+      } else {
+        supported = false;
+      }
+    }
   } else {
-    return null;
+    supported = false;
+  }
+
+  if (!supported) {
+    if (documentReferences.length === 0 && !cardTitle) return null;
+    text = documentReferences.length > 0 ? '[钉钉文档]' : `[卡片] ${cardTitle}`;
+    mentionOnly = false;
   }
 
   const createdAt = Number(payload.createAt);
@@ -283,6 +472,7 @@ export function parseStreamMessage(
     ...(mentionOnly ? { mentionOnly: true } : {}),
     ...(attachments.length > 0 ? { attachments } : {}),
     ...(quotedMessage ? { quotedMessage } : {}),
+    ...(documentReferences.length > 0 ? { documentReferences } : {}),
     ...(asNonEmptyString(payload.conversationTitle)
       ? { conversationTitle: asNonEmptyString(payload.conversationTitle)! }
       : {}),

@@ -1,4 +1,8 @@
-import type { InboundMessage, QuotedMessageContext } from '../types/core.js';
+import type {
+  InboundDocumentReference,
+  InboundMessage,
+  QuotedMessageContext,
+} from '../types/core.js';
 import type {
   AttachmentFailure,
   AttachmentStoreResult,
@@ -80,6 +84,21 @@ export function renderQuotedSection(quoted?: QuotedMessageContext): string {
   const speaker = quoted.senderNick?.trim() || quoted.senderStaffId?.trim() || '群成员';
   const clipped = text.length > 2_000 ? `${text.slice(0, 2_000)}…` : text;
   return `【引用消息（${speaker}）】\n${clipped}`;
+}
+
+export function renderDocumentSection(
+  references?: readonly InboundDocumentReference[],
+): string {
+  if (!references?.length) return '';
+  const lines = ['【用户消息中的钉钉文档】'];
+  for (const reference of references) {
+    const title = reference.title?.replace(/\s+/g, ' ').slice(0, 200);
+    lines.push(`- ${title ? `「${title}」` : '文档'}：${reference.url}`);
+  }
+  lines.push(
+    '用户要求查看、总结或依据这些文档处理时，使用 dws_doc_search_and_read 并将链接作为 documentId 读取；只使用提问人本人有权限的内容，卡片显示“无权查看”不代表 DWS 无权限。',
+  );
+  return lines.join('\n');
 }
 
 /** 把落盘附件与图片/语音/视频识别结果渲染为提示词片段 */
@@ -188,19 +207,21 @@ export async function enrichInboundMessage(
     }
   }
   const quotedSection = renderQuotedSection(quoted);
+  const documentSection = renderDocumentSection(message.documentReferences);
 
   const hasAttachments = Boolean(
     message.attachments && message.attachments.length > 0,
   );
   if (!hasAttachments) {
-    if (!quotedSection) return { message, attachments: [], failed: [] };
+    if (!quotedSection && !documentSection) {
+      return { message, attachments: [], failed: [] };
+    }
+    const baseText = message.text.trim();
     return {
       message: {
         ...message,
         ...(quoted ? { quotedMessage: quoted } : {}),
-        text: message.text.trim()
-          ? `${quotedSection}\n\n${message.text}`
-          : quotedSection,
+        text: [quotedSection, documentSection, baseText].filter(Boolean).join('\n\n'),
       },
       attachments: [],
       failed: [],
@@ -321,7 +342,7 @@ export async function enrichInboundMessage(
     baseText = primaryVoiceTranscript;
   }
 
-  const parts = [quotedSection, baseText, section].filter(Boolean);
+  const parts = [quotedSection, documentSection, baseText, section].filter(Boolean);
   if (parts.length === 0) return { message, attachments: stored, failed };
   return {
     message: {

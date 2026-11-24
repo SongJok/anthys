@@ -1244,7 +1244,8 @@ export async function setupDingTalkIngress(
     const hasAttachments = Boolean(
       message.attachments && message.attachments.length > 0,
     );
-    if (!hasAttachments && !message.quotedMessage) {
+    const hasDocumentReferences = Boolean(message.documentReferences?.length);
+    if (!hasAttachments && !message.quotedMessage && !hasDocumentReferences) {
       return message;
     }
     try {

@@ -15,6 +15,11 @@ export interface QuotedMessageContext {
   msgtype?: string;
 }
 
+export interface InboundDocumentReference {
+  url: string;
+  title?: string;
+}
+
 export interface InboundAttachment {
   type: 'image' | 'file' | 'audio' | 'video';
   /** 钉钉机器人消息附件下载码，需换取 downloadUrl 后才能下载 */
@@ -46,6 +51,8 @@ export interface InboundMessage {
   attachments?: InboundAttachment[];
   /** 用户在群聊或单聊中引用回复的历史消息上下文 */
   quotedMessage?: QuotedMessageContext;
+  /** 消息、引用或卡片/转发内容中携带的钉钉官方文档链接 */
+  documentReferences?: InboundDocumentReference[];
   rawPayload: Record<string, unknown>;
   timestamp: number;
 }

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  extractDocumentReferences,
   parseStreamMessage,
   stripLeadingMentions,
 } from './MessageParser.js';
@@ -267,5 +268,160 @@ describe('parseStreamMessage', () => {
       msgtype: 'text',
       text: 'Error: ECONNRESET 10.0.1.5:5432',
     });
+  });
+
+  it('解析互动卡片中的 JSON cardData 与官方文档链接', () => {
+    const url = 'https://alidocs.dingtalk.com/i/nodes/doc-card-1';
+    const message = parseStreamMessage(
+      payload({
+        conversationType: '1',
+        msgtype: 'interactiveCard',
+        interactiveCard: {
+          cardData: JSON.stringify({
+            header: { title: { type: 'text', text: '私聊转游戏或者一起看等' } },
+            contents: [
+              {
+                type: 'markdown',
+                text: `[打开需求文档](${url})`,
+              },
+            ],
+          }),
+        },
+      }),
+    );
+    expect(message).toMatchObject({
+      text: '[钉钉文档]',
+      documentReferences: [{ url, title: '私聊转游戏或者一起看等' }],
+    });
+  });
+
+  it('解析 action_card 的 singleURL 与标题', () => {
+    const message = parseStreamMessage(
+      payload({
+        conversationType: '1',
+        msgtype: 'action_card',
+        action_card: {
+          title: '项目需求说明',
+          singleURL: 'https://alidocs.dingtalk.com/i/nodes/action-doc',
+        },
+      }),
+    );
+    expect(message?.documentReferences).toEqual([
+      {
+        url: 'https://alidocs.dingtalk.com/i/nodes/action-doc',
+        title: '项目需求说明',
+      },
+    ]);
+  });
+
+  it('解析多层转发消息中的文档卡片', () => {
+    const url = 'https://alidocs.dingtalk.com/i/nodes/forward-doc';
+    const message = parseStreamMessage(
+      payload({
+        conversationType: '1',
+        msgtype: 'mixed',
+        forwardMessages: [
+          {
+            msgtype: 'markdown',
+            markdown: {
+              title: '转发的需求文档',
+              text: `[查看文档](${url})`,
+            },
+          },
+        ],
+      }),
+    );
+    expect(message?.documentReferences).toEqual([
+      { url, title: '转发的需求文档' },
+    ]);
+  });
+
+  it('普通文本引用文档卡片时保留指令并提取引用链接', () => {
+    const url = 'https://alidocs.dingtalk.com/i/nodes/quoted-doc';
+    const message = parseStreamMessage(
+      payload({
+        conversationType: '1',
+        text: {
+          content: '帮我生成一份测试用例',
+          repliedMsg: {
+            msgId: 'quoted-card-msg',
+            msgType: 'interactiveCard',
+            cardData: {
+              title: '需求文档',
+              url,
+            },
+          },
+        },
+      }),
+    );
+    expect(message?.text).toBe('帮我生成一份测试用例');
+    expect(message?.documentReferences).toEqual([
+      { url, title: '需求文档' },
+    ]);
+    expect(message?.quotedMessage).toMatchObject({
+      messageId: 'quoted-card-msg',
+      msgtype: 'interactiveCard',
+    });
+  });
+
+  it('未知卡片没有链接时降级为标题，不伪造文档引用', () => {
+    const message = parseStreamMessage(
+      payload({
+        conversationType: '1',
+        msgtype: 'interactiveCard',
+        cardData: { header: { title: { text: '系统通知' } } },
+      }),
+    );
+    expect(message?.text).toBe('[卡片] 系统通知');
+    expect(message).not.toHaveProperty('documentReferences');
+  });
+
+  it('没有文档链接或卡片标题的未知消息仍被忽略', () => {
+    expect(
+      parseStreamMessage(
+        payload({ conversationType: '1', msgtype: 'interactiveCard', cardData: {} }),
+      ),
+    ).toBeNull();
+  });
+});
+
+describe('extractDocumentReferences', () => {
+  it('只接受官方 HTTPS 文档域名并拒绝凭据、端口及伪装域名', () => {
+    const references = extractDocumentReferences({
+      links: [
+        'https://alidocs.dingtalk.com/i/nodes/ok',
+        'http://alidocs.dingtalk.com/i/nodes/insecure',
+        'https://alidocs.dingtalk.com.evil.example/i/nodes/fake',
+        'https://evil.example@alidocs.dingtalk.com/i/nodes/credentials',
+        'https://alidocs.dingtalk.com:444/i/nodes/port',
+        'https://example.com/i/nodes/other',
+      ],
+    });
+    expect(references).toEqual([
+      { url: 'https://alidocs.dingtalk.com/i/nodes/ok' },
+    ]);
+  });
+
+  it('兼容 docs.dingtalk.com、 Markdown 标题、JSON 字符串与去重', () => {
+    const url = 'https://docs.dingtalk.com/d/doc-2';
+    const references = extractDocumentReferences({
+      cardData: JSON.stringify({
+        title: '嵌套文档',
+        text: `[读取](${url})`,
+        duplicate: url,
+      }),
+    });
+    expect(references).toEqual([{ url, title: '嵌套文档' }]);
+  });
+
+  it('限制引用数量并安全处理循环对象', () => {
+    const record: Record<string, unknown> = {
+      links: Array.from(
+        { length: 10 },
+        (_, index) => `https://alidocs.dingtalk.com/i/nodes/doc-${index}`,
+      ),
+    };
+    record.self = record;
+    expect(extractDocumentReferences(record)).toHaveLength(5);
   });
 });

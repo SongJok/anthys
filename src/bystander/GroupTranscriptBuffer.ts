@@ -53,12 +53,17 @@ function normalizeText(text: string): string {
 }
 
 export function toTranscriptEntry(message: InboundMessage): TranscriptEntry {
+  const documents = (message.documentReferences ?? [])
+    .filter((reference) => !message.text.includes(reference.url))
+    .map((reference) =>
+      `${reference.title ? `《${reference.title}》` : '钉钉文档'} ${reference.url}`,
+    );
   return {
     conversationId: message.conversationId,
     messageId: message.messageId,
     senderStaffId: message.senderStaffId,
     senderNick: message.senderNick,
-    text: message.text,
+    text: [message.text, ...documents].filter(Boolean).join('\n'),
     isAtBot: message.isAtBot,
     timestamp: message.timestamp,
   };

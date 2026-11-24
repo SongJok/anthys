@@ -232,6 +232,69 @@ describe('StreamGateway', () => {
     expect(handler).not.toHaveBeenCalled();
   });
 
+  it('单聊文档分享卡片进入主处理链路且先执行白名单', async () => {
+    const client = new FakeClient();
+    const handler = vi.fn(async (_message: InboundMessage) => undefined);
+    const isStaffAllowed = vi.fn(async () => true);
+    const gateway = new StreamGateway({
+      client,
+      handler,
+      whitelist: { isStaffAllowed },
+    });
+    const url = 'https://alidocs.dingtalk.com/i/nodes/gateway-doc';
+
+    await gateway.dispatch(
+      payload({
+        msgtype: 'interactiveCard',
+        interactiveCard: {
+          cardData: JSON.stringify({
+            title: '需求文档',
+            url,
+          }),
+        },
+      }),
+      'msg-doc-card',
+    );
+
+    expect(isStaffAllowed).toHaveBeenCalledWith('staff-1', '张三');
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(handler.mock.calls[0]?.[0]).toMatchObject({
+      text: '[钉钉文档]',
+      documentReferences: [{ url, title: '需求文档' }],
+    });
+  });
+
+  it('群聊文档卡片未 @ 机器人时仍交给旁听链路', async () => {
+    const client = new FakeClient();
+    const handler = vi.fn(async (_message: InboundMessage) => undefined);
+    const bystanderHandler = vi.fn(async (_message: InboundMessage) => undefined);
+    const transcriptBuffer = new GroupTranscriptBuffer();
+    const gateway = new StreamGateway({
+      client,
+      handler,
+      bystanderHandler,
+      transcriptBuffer,
+    });
+    const url = 'https://alidocs.dingtalk.com/i/nodes/group-doc';
+
+    await gateway.dispatch(
+      payload({
+        conversationType: '2',
+        atUsers: [],
+        msgtype: 'interactiveCard',
+        interactiveCard: {
+          title: '群内需求文档',
+          url,
+        },
+      }),
+      'msg-group-doc',
+    );
+
+    expect(handler).not.toHaveBeenCalled();
+    expect(bystanderHandler).toHaveBeenCalledTimes(1);
+    expect(transcriptBuffer.snapshot('cid-1')?.entries[0]?.text).toContain(url);
+  });
+
   it('缺少 messageId 时不 ACK 也不处理', async () => {
     const client = new FakeClient();
     const handler = vi.fn(async () => undefined);
