@@ -503,14 +503,25 @@ const CURATION: SkillSpec[] = [
     name: 'auto-gen-testcase-from-req',
     module: 'testing',
     description:
-      '从需求文档生成标准 Markdown 功能测试用例：七列固定结构、具体输入值、真实数据占位符、UI 路径、可观察断言与模块级数据准备清单。',
+      '自主生成和修订可追溯的功能测试用例：按需取证、增量保存、确定性合稿，输出七列用例、数据占位符、统计与需求追溯。',
     whenToUse:
-      '用户要求根据 PRD、需求文档、模块说明或截图生成、设计、修改功能测试用例时使用。',
-    version: '1.0.0',
+      '用户要求生成、设计、修改、汇总或导出功能测试用例，或持续补充需求、证据与用例草稿时使用。',
+    version: '2.0.0',
     risk: 'read',
     visibility: 'public',
     maxInstructionChars: 8000,
-    allowedTools: ['project_read', 'project_search', 'workspace_read_file', 'deliver_artifact'],
+    allowedTools: [
+      'project_read',
+      'project_search',
+      'workspace_read_file',
+      'testcase_workspace_list',
+      'testcase_workspace_get',
+      'testcase_workspace_select',
+      'testcase_workspace_create',
+      'testcase_workspace_update',
+      'testcase_compile',
+      'deliver_artifact',
+    ],
     tags: ['origin:qoder-market', 'test-case', 'prd', 'qa'],
     grade: 'B',
     blockers: [
@@ -518,7 +529,8 @@ const CURATION: SkillSpec[] = [
     ],
     notes: [
       '本项目没有自动执行器：输出是功能测试用例文档，执行由人或外部测试平台完成，不要承诺"可直接执行"。',
-      '`📷` 只是截图节点标记，本项目不会真的截图；文档产出用 `deliver_artifact` 交付，正文文本直接回复。',
+      '`📷` 只是截图节点标记，本项目不会真的截图；需要文件时使用 testcase_compile 或 deliver_artifact 交付。',
+      '技能只约束质量与领域规范，不设置固定流程；MCP/DWS/Web 取证按需使用，跨批次草稿通过 testcase_workspace_* 增量保存。',
     ].join('\n'),
     market: {
       title: '需求自动生成测试用例',

@@ -725,7 +725,11 @@ export class ReActRunner implements AgentEngine {
           }
           if (!execution.isError && !execution.denied) {
             const executedTool = toolMap.get(execution.name);
-            if (executedTool && !isReadOnlyTool(executedTool)) {
+            if (
+              executedTool &&
+              !isReadOnlyTool(executedTool) &&
+              !executedTool.internalWrite
+            ) {
               executedMutatingTool = true;
               stepHadMutation = true;
             }
@@ -1048,6 +1052,7 @@ export class ReActRunner implements AgentEngine {
         toolName: item.call.function.name,
         args: item.args,
         ...(startedTool?.risk ? { risk: startedTool.risk } : {}),
+        ...(startedTool?.internalWrite ? { internalWrite: true } : {}),
         stepId: item.stepId,
         turnId,
       });

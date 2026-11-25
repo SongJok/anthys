@@ -2,6 +2,7 @@ import type { MetricsRegistry } from '../admin-api/metrics.js';
 import type { BeginRunResult } from '../harness/RunControlRegistry.js';
 import type { AgentStreamEvent, InboundMessage } from '../types/core.js';
 import type { AgentJobStore } from '../types/jobs.js';
+import type { TestcaseWorkspaceSnapshot } from '../types/testcase-workspace.js';
 
 export interface BackpressureNotice {
   handle(event: AgentStreamEvent): void;
@@ -41,6 +42,7 @@ export async function divertTurnToBackground(
   message: InboundMessage,
   streamer: BackpressureNotice,
   deps: ConcurrencyBackpressureDeps,
+  testcaseWorkspace?: TestcaseWorkspaceSnapshot | null,
 ): Promise<void> {
   const job = await deps.jobStore.enqueue({
     conversationId: message.conversationId,
@@ -54,6 +56,12 @@ export async function divertTurnToBackground(
       source: 'backpressure',
       originalMessageId: message.messageId,
       requestedAt: Date.now(),
+      ...(testcaseWorkspace
+        ? {
+            workspaceId: testcaseWorkspace.workspaceId,
+            baseRevision: testcaseWorkspace.baseRevision,
+          }
+        : {}),
     },
   });
   deps.metrics.inc('agent_backpressure_total');

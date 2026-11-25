@@ -80,8 +80,10 @@ import type {
   ExecutionContext,
   InboundMessage,
   RunResult,
+  TestcaseWorkspaceBinding,
 } from '../types/core.js';
 import type { AgentJobStore } from '../types/jobs.js';
+import type { TestcaseWorkspaceSnapshot } from '../types/testcase-workspace.js';
 import { isWorkerName } from '../types/workers.js';
 import {
   divertTurnToBackground,
@@ -1237,6 +1239,25 @@ export async function setupDingTalkIngress(
     logger,
   };
 
+  async function snapshotTestcaseWorkspace(
+    message: InboundMessage,
+  ): Promise<TestcaseWorkspaceSnapshot | null> {
+    try {
+      return await tools.testcaseWorkspaces.snapshot({
+        senderStaffId: message.senderStaffId,
+        conversationId: message.conversationId,
+        conversationType: message.conversationType,
+        isAdmin: configCenter.isAdmin(message.senderStaffId),
+      });
+    } catch (error) {
+      logger.warn(
+        { messageId: message.messageId, error: errorText(error) },
+        'failed to snapshot testcase workspace, continuing without it',
+      );
+      return null;
+    }
+  }
+
   async function enrichMessageInTurn(
     message: InboundMessage,
     signal: AbortSignal,
@@ -1399,12 +1420,24 @@ export async function setupDingTalkIngress(
       const trackingEmit = (event: AgentStreamEvent): void => {
         if (
           event.type === 'tool_start' &&
+          !event.internalWrite &&
           !isReadOnlyToolName(event.toolName, event.risk)
         ) {
           sawMutatingTool = true;
         }
         emit(event);
       };
+
+      const initialTestcaseWorkspace = await snapshotTestcaseWorkspace(effective);
+      const testcaseWorkspaceBinding: TestcaseWorkspaceBinding = {
+        current: initialTestcaseWorkspace
+          ? {
+              workspaceId: initialTestcaseWorkspace.workspaceId,
+              baseRevision: initialTestcaseWorkspace.baseRevision,
+            }
+          : null,
+      };
+      const testcaseWorkspace = initialTestcaseWorkspace;
 
       const outcome = await runTurnWithAsyncHandoff({
         handoffAfterMs: !proactive ? asyncHandoffMs : 0,
@@ -1416,9 +1449,29 @@ export async function setupDingTalkIngress(
             signal: fgSignal,
             proactive,
             notify: async (text) => replyTo(effective, text, proactive),
+            ...(testcaseWorkspace ? { testcaseWorkspace } : {}),
+            testcaseWorkspaceBinding,
           }),
-        enqueueBackground: () =>
-          jobStore.enqueue({
+        enqueueBackground: async () => {
+          const current = testcaseWorkspaceBinding.current;
+          if (current) {
+            const restored = await tools.testcaseWorkspaces.restoreSnapshot(
+              {
+                senderStaffId: effective.senderStaffId,
+                conversationId: effective.conversationId,
+                conversationType: effective.conversationType,
+                isAdmin: configCenter.isAdmin(effective.senderStaffId),
+              },
+              current.workspaceId,
+              current.baseRevision,
+            );
+            testcaseWorkspaceBinding.current = {
+              workspaceId: restored.workspaceId,
+              baseRevision: restored.baseRevision,
+            };
+          }
+          const handoffWorkspace = testcaseWorkspaceBinding.current;
+          return jobStore.enqueue({
             conversationId: effective.conversationId,
             conversationType: effective.conversationType,
             messageId: `async_${effective.messageId}_${Date.now()}`,
@@ -1430,8 +1483,15 @@ export async function setupDingTalkIngress(
               source: 'async_handoff',
               originalMessageId: effective.messageId,
               requestedAt: Date.now(),
+              ...(handoffWorkspace
+                ? {
+                    workspaceId: handoffWorkspace.workspaceId,
+                    baseRevision: handoffWorkspace.baseRevision,
+                  }
+                : {}),
             },
-          }),
+          });
+        },
         cancelBackground: async (job) => {
           await jobStore.cancel(job.id);
         },
@@ -1557,7 +1617,13 @@ export async function setupDingTalkIngress(
       await streamer.start();
       if (shouldDivertForBackpressure(run, message, backpressureToBackground)) {
         try {
-          await divertTurnToBackground(message, streamer, backpressureDeps);
+          const testcaseWorkspace = await snapshotTestcaseWorkspace(message);
+          await divertTurnToBackground(
+            message,
+            streamer,
+            backpressureDeps,
+            testcaseWorkspace,
+          );
           return;
         } catch (error) {
           logger.warn(

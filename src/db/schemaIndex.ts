@@ -55,6 +55,10 @@ export { agentConfigs, conversations, messages } from './schema.js';
 export { skills, skillUsage } from './skillSchema.js';
 export { taskResults } from './taskMemorySchema.js';
 export {
+  testcaseWorkspaces,
+  testcaseWorkspaceVersions,
+} from './testcaseWorkspaceSchema.js';
+export {
   agentTaskLinks,
   agentTasks,
   agentTaskSubscriptions,

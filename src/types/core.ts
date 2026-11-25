@@ -173,6 +173,7 @@ export type AgentStreamEvent =
       toolName: string;
       args: Record<string, unknown>;
       risk?: 'read' | 'write' | 'destructive';
+      internalWrite?: boolean;
       stepId?: string;
       turnId?: string;
     }
@@ -216,6 +217,10 @@ export type AgentStreamEvent =
     }
   | { type: 'error'; message: string; retryable?: boolean };
 
+export interface TestcaseWorkspaceBinding {
+  current: { workspaceId: string; baseRevision: number } | null;
+}
+
 /**
  * 工具执行上下文
  */
@@ -238,6 +243,10 @@ export interface ExecutionContext {
   jobId?: string;
   jobKind?: string;
   worker?: string;
+  /** 本次运行已鉴权的测试用例工作区快照；工具不得据此跳过归属校验 */
+  workspaceId?: string;
+  /** 前台显式选择或内部写入后共享给异步转交的最新工作区绑定 */
+  testcaseWorkspaceBinding?: TestcaseWorkspaceBinding;
   /** 运行中向当前会话追加一条文本提醒（工具需要用户干预时使用） */
   notify?: (text: string) => Promise<void> | void;
 }
@@ -316,6 +325,8 @@ export interface ToolDefinition {
   risk?: 'read' | 'write' | 'destructive';
   /** 工具来源，例如 builtin / mcp:code / dws / sandbox */
   source?: string;
+  /** 仅写入当前用户可控的草稿或内部记录，无外部副作用；仍按 write 审计 */
+  internalWrite?: boolean;
   execute: (
     args: Record<string, unknown>,
     ctx: ExecutionContext,

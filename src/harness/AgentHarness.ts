@@ -25,8 +25,10 @@ import type {
   ReActCheckpointHooks,
   RunResult,
   RunUsage,
+  TestcaseWorkspaceBinding,
 } from '../types/core.js';
 import type { AgentJob } from '../types/jobs.js';
+import type { TestcaseWorkspaceSnapshot } from '../types/testcase-workspace.js';
 import {
   isWorkerName,
   type WorkerName,
@@ -65,6 +67,7 @@ export interface ExtensionPromptInput {
   message: InboundMessage;
   text: string;
   proactive: boolean;
+  testcaseWorkspace?: TestcaseWorkspaceSnapshot;
 }
 
 /** 技能目录、项目简报等随会话动态生成的系统提示词片段 */
@@ -100,6 +103,11 @@ export interface AgentHarnessOptions {
   glossary?: GlossaryContextProvider;
   /** 技能目录 / 项目手册简报等扩展系统提示词 */
   extensions?: ExtensionPromptProvider;
+  /** 解析当前会话可继续的测试用例工作区；后台任务只恢复 metadata 指定的快照 */
+  resolveTestcaseWorkspace?: (input: {
+    message: InboundMessage;
+    requestedWorkspace?: { workspaceId: string; baseRevision: number };
+  }) => Promise<TestcaseWorkspaceSnapshot | null>;
   /** 个人表达偏好与跨群记忆授权；缺省时按既有默认行为处理 */
   personSettings?: {
     buildPrompt(
@@ -153,6 +161,10 @@ export interface HandleMessageOptions {
   notify?: (text: string) => Promise<void> | void;
   /** 控制台等场景附带的临时系统提示词覆盖 */
   systemPromptOverride?: string;
+  /** 入站层已解析并鉴权的工作区快照；避免运行中再次切换到其他工作区 */
+  testcaseWorkspace?: TestcaseWorkspaceSnapshot;
+  /** 与入站层共享的工作区绑定，内部写入和显式选择会同步到这里 */
+  testcaseWorkspaceBinding?: TestcaseWorkspaceBinding;
 }
 
 export interface ProactiveHandleOptions {
@@ -199,6 +211,27 @@ export function conversationKeyFor(message: InboundMessage): string {
   return message.conversationType === '1'
     ? `single:${message.senderStaffId}`
     : `group:${message.conversationId}`;
+}
+
+function requestedWorkspaceFromMetadata(
+  metadata: Record<string, unknown> | undefined,
+): { workspaceId: string; baseRevision: number } | null {
+  if (!metadata || (!('workspaceId' in metadata) && !('baseRevision' in metadata))) {
+    return null;
+  }
+  const workspaceId = metadata.workspaceId;
+  const baseRevision = metadata.baseRevision;
+  if (
+    typeof workspaceId !== 'string' ||
+    !workspaceId.trim() ||
+    workspaceId.length > 300 ||
+    typeof baseRevision !== 'number' ||
+    !Number.isSafeInteger(baseRevision) ||
+    baseRevision < 1
+  ) {
+    return null;
+  }
+  return { workspaceId: workspaceId.trim(), baseRevision };
 }
 
 /**
@@ -289,11 +322,17 @@ export class AgentHarness {
       audience: message.conversationType === '2' ? 'group' : 'single',
       excludeMessageId: message.messageId,
     });
+    const testcaseWorkspace = await this.loadTestcaseWorkspace(
+      message,
+      undefined,
+      handle.testcaseWorkspace,
+    );
     const baseExtraPrompt = await this.buildExtraSystemPrompt(
       message,
       text,
       handle.proactive ?? false,
       personKey,
+      testcaseWorkspace,
     );
     const extraSystemPrompt = [
       baseExtraPrompt,
@@ -331,6 +370,14 @@ export class AgentHarness {
     }
 
     const startedAt = this.now();
+    const testcaseWorkspaceBinding = handle.testcaseWorkspaceBinding ?? {
+      current: testcaseWorkspace
+        ? {
+            workspaceId: testcaseWorkspace.workspaceId,
+            baseRevision: testcaseWorkspace.baseRevision,
+          }
+        : null,
+    };
     let result: RunResult;
     try {
       result = await engine.run({
@@ -345,6 +392,10 @@ export class AgentHarness {
           deadlineAt: startedAt + policy.maxWallTimeMs,
           now: this.now,
           proactive: handle.proactive ?? false,
+          ...(testcaseWorkspaceBinding.current
+            ? { workspaceId: testcaseWorkspaceBinding.current.workspaceId }
+            : {}),
+          testcaseWorkspaceBinding,
           ...(handle.notify ? { notify: handle.notify } : {}),
         },
         emit: handle.emit,
@@ -472,6 +523,7 @@ export class AgentHarness {
       audience: 'group',
     });
     const glossaryPrompt = await this.buildGlossaryPrompt(message, text);
+    const testcaseWorkspace = await this.loadTestcaseWorkspace(message);
     const proactiveInstruction = [
       '你正在钉钉群里主动提供帮助（并非被 @）。',
       '请结合群聊旁听记录核实问题，直接给出结论、关键依据与下一步建议。',
@@ -482,6 +534,7 @@ export class AgentHarness {
       message,
       text,
       true,
+      testcaseWorkspace,
     );
     const extraSystemPrompt = [extensionPrompt, glossaryPrompt]
       .filter((section): section is string => Boolean(section))
@@ -514,6 +567,14 @@ export class AgentHarness {
     });
 
     const startedAt = this.now();
+    const testcaseWorkspaceBinding: TestcaseWorkspaceBinding = {
+      current: testcaseWorkspace
+        ? {
+            workspaceId: testcaseWorkspace.workspaceId,
+            baseRevision: testcaseWorkspace.baseRevision,
+          }
+        : null,
+    };
     const result = await engine.run({
       messages,
       context: {
@@ -526,6 +587,10 @@ export class AgentHarness {
         deadlineAt: startedAt + policy.maxWallTimeMs,
         now: this.now,
         proactive: true,
+        ...(testcaseWorkspaceBinding.current
+          ? { workspaceId: testcaseWorkspaceBinding.current.workspaceId }
+          : {}),
+        testcaseWorkspaceBinding,
         ...(handle.notify ? { notify: handle.notify } : {}),
       },
       emit: handle.emit,
@@ -602,7 +667,13 @@ export class AgentHarness {
       audience: 'group',
       excludeMessageId: message.messageId,
     });
-    const extensionPrompt = await this.buildExtensionPrompt(message, query, true);
+    const testcaseWorkspace = await this.loadTestcaseWorkspace(message);
+    const extensionPrompt = await this.buildExtensionPrompt(
+      message,
+      query,
+      true,
+      testcaseWorkspace,
+    );
     const instruction = [
       '你正在钉钉群里做静默调查（只读），群成员看不到调查过程。',
       '只使用只读工具（检索、读取、查询）核实事实；不要声称已执行任何写操作，不要编造数据。',
@@ -624,6 +695,14 @@ export class AgentHarness {
 
     const startedAt = this.now();
     const deadlineMs = input.maxWallTimeMs ?? policy.maxWallTimeMs;
+    const testcaseWorkspaceBinding: TestcaseWorkspaceBinding = {
+      current: testcaseWorkspace
+        ? {
+            workspaceId: testcaseWorkspace.workspaceId,
+            baseRevision: testcaseWorkspace.baseRevision,
+          }
+        : null,
+    };
     const emit = input.emit ?? ((): void => {});
     const result = await engine.run({
       messages,
@@ -639,6 +718,10 @@ export class AgentHarness {
         proactive: true,
         jobKind: 'investigation',
         worker: 'research',
+        ...(testcaseWorkspaceBinding.current
+          ? { workspaceId: testcaseWorkspaceBinding.current.workspaceId }
+          : {}),
+        testcaseWorkspaceBinding,
       },
       emit,
       ...(input.signal ? { signal: input.signal } : {}),
@@ -703,6 +786,18 @@ export class AgentHarness {
       timestamp: job.createdAt,
     };
     const proactive = job.metadata.proactive === true;
+    const requestedWorkspace = requestedWorkspaceFromMetadata(job.metadata);
+    const hasWorkspaceMetadata =
+      'workspaceId' in job.metadata || 'baseRevision' in job.metadata;
+    if (hasWorkspaceMetadata && !requestedWorkspace) {
+      throw new Error('后台任务的测试用例工作区元数据无效');
+    }
+    const testcaseWorkspace = requestedWorkspace
+      ? await this.loadTestcaseWorkspace(message, requestedWorkspace)
+      : null;
+    if (requestedWorkspace && !testcaseWorkspace) {
+      throw new Error('后台任务无法恢复指定的测试用例工作区快照');
+    }
 
     const quota = await this.enforceQuota(
       message,
@@ -743,6 +838,7 @@ export class AgentHarness {
       text,
       proactive,
       personKey,
+      testcaseWorkspace,
     );
     const jobInstruction = [
       `这是一个后台任务（${job.kind}），用户不会实时查看执行过程。`,
@@ -787,6 +883,14 @@ export class AgentHarness {
     });
 
     const startedAt = this.now();
+    const testcaseWorkspaceBinding: TestcaseWorkspaceBinding = {
+      current: testcaseWorkspace
+        ? {
+            workspaceId: testcaseWorkspace.workspaceId,
+            baseRevision: testcaseWorkspace.baseRevision,
+          }
+        : null,
+    };
     const result = await engine.run({
       messages,
       context: {
@@ -801,6 +905,10 @@ export class AgentHarness {
         proactive,
         jobId: job.id,
         jobKind: job.kind,
+        ...(testcaseWorkspaceBinding.current
+          ? { workspaceId: testcaseWorkspaceBinding.current.workspaceId }
+          : {}),
+        testcaseWorkspaceBinding,
         ...(workerName ? { worker: workerName } : {}),
         ...(handle.notify ? { notify: handle.notify } : {}),
       },
@@ -1039,16 +1147,45 @@ export class AgentHarness {
     }
   }
 
+  private async loadTestcaseWorkspace(
+    message: InboundMessage,
+    requestedWorkspace?: { workspaceId: string; baseRevision: number },
+    supplied?: TestcaseWorkspaceSnapshot,
+  ): Promise<TestcaseWorkspaceSnapshot | null> {
+    if (supplied) return supplied;
+    const resolver = this.options.resolveTestcaseWorkspace;
+    if (!resolver) return null;
+    try {
+      return await resolver({
+        message,
+        ...(requestedWorkspace ? { requestedWorkspace } : {}),
+      });
+    } catch (error) {
+      this.options.logger?.warn(
+        {
+          conversationId: message.conversationId,
+          messageId: message.messageId,
+          workspaceId: requestedWorkspace?.workspaceId,
+          error: error instanceof Error ? error.message : String(error),
+        },
+        'failed to resolve testcase workspace, continuing without it',
+      );
+      return null;
+    }
+  }
+
   private async buildExtraSystemPrompt(
     message: InboundMessage,
     text: string,
     proactive: boolean,
     personKey?: string,
+    testcaseWorkspace?: TestcaseWorkspaceSnapshot | null,
   ): Promise<string | undefined> {
     const extensionPrompt = await this.buildExtensionPrompt(
       message,
       text,
       proactive,
+      testcaseWorkspace,
     );
     const glossaryPrompt = await this.buildGlossaryPrompt(message, text);
     const personPrompt = personKey
@@ -1092,12 +1229,17 @@ export class AgentHarness {
     message: InboundMessage,
     text: string,
     proactive: boolean,
+    testcaseWorkspace?: TestcaseWorkspaceSnapshot | null,
   ): Promise<string | undefined> {
     const extensions = this.options.extensions;
     if (!extensions) return undefined;
     try {
-      const prompt = (await extensions.build({ message, text, proactive }))
-        ?.trim();
+      const prompt = (await extensions.build({
+        message,
+        text,
+        proactive,
+        ...(testcaseWorkspace ? { testcaseWorkspace } : {}),
+      }))?.trim();
       return prompt || undefined;
     } catch (error) {
       this.options.logger?.warn(

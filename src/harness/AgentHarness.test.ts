@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
-import { AgentHarness, conversationTitleFor } from './AgentHarness.js';
+import {
+  AgentHarness,
+  conversationTitleFor,
+  type ExtensionPromptProvider,
+} from './AgentHarness.js';
 import { ContextAssembler, HISTORY_TRIM_SLACK } from '../memory/ContextAssembler.js';
 import { PersonaResolver } from '../persona/PersonaResolver.js';
 import type { HierarchicalMemoryManager } from '../memory/HierarchicalMemoryManager.js';
@@ -18,6 +22,8 @@ import type {
   StoredMessage,
 } from '../types/core.js';
 import type { AgentJob } from '../types/jobs.js';
+import type { TestcaseWorkspaceSnapshot } from '../types/testcase-workspace.js';
+import { emptyTestcaseWorkspaceState } from '../testcase/TestcaseWorkspaceStore.js';
 
 interface StoredRow extends AppendMessageInput {
   conversationId: string;
@@ -101,6 +107,21 @@ const persona = {
   speakingStyle: '简洁',
 };
 
+function testcaseSnapshot(): TestcaseWorkspaceSnapshot {
+  const workspace = {
+    id: 'ws-1',
+    title: '测试用例工作区',
+    conversationId: 'cid-1',
+    conversationType: '1' as const,
+    ownerStaffId: 'staff-1',
+    revision: 3,
+    state: emptyTestcaseWorkspaceState(),
+    createdAt: 0,
+    updatedAt: 0,
+  };
+  return { workspaceId: workspace.id, baseRevision: 3, workspace };
+}
+
 function createHarness(
   engine: AgentEngine,
   usageGuard?: ConstructorParameters<typeof AgentHarness>[0]['usageGuard'],
@@ -116,6 +137,10 @@ function createHarness(
     personSettings?: ConstructorParameters<
       typeof AgentHarness
     >[0]['personSettings'];
+    extensions?: ExtensionPromptProvider;
+    resolveTestcaseWorkspace?: ConstructorParameters<
+      typeof AgentHarness
+    >[0]['resolveTestcaseWorkspace'];
   },
 ) {
   const { repository, conversations, rows } = createRepository();
@@ -130,6 +155,10 @@ function createHarness(
     ...(extras?.identity ? { identity: extras.identity } : {}),
     ...(extras?.personSettings
       ? { personSettings: extras.personSettings }
+      : {}),
+    ...(extras?.extensions ? { extensions: extras.extensions } : {}),
+    ...(extras?.resolveTestcaseWorkspace
+      ? { resolveTestcaseWorkspace: extras.resolveTestcaseWorkspace }
       : {}),
     repository,
     assembler: new ContextAssembler({ windowMessages: 20, now: () => 0 }),
@@ -542,6 +571,161 @@ describe('AgentHarness', () => {
     expect(result?.answer).toBe('现在是十点。');
     expect(calls).toHaveLength(1);
     expect(memoryInputs.at(-1)?.userGroupSharing).toBe('off');
+  });
+
+  it('前台运行复用已鉴权工作区快照并注入工具上下文', async () => {
+    const contexts: Array<{ workspaceId?: string }> = [];
+    const engine: AgentEngine = {
+      async run(input) {
+        contexts.push({
+          ...(input.context.workspaceId
+            ? { workspaceId: input.context.workspaceId }
+            : {}),
+        });
+        input.emit({
+          type: 'completed',
+          usage: { totalTokens: 1, steps: 0, durationMs: 1 },
+        });
+        return {
+          answer: 'ok',
+          reasoning: '',
+          usage: { totalTokens: 1, steps: 0, durationMs: 1 },
+        };
+      },
+    };
+    const { harness } = createHarness(engine, undefined, undefined, undefined, undefined, {
+      extensions: {
+        build: ({ testcaseWorkspace }) =>
+          testcaseWorkspace
+            ? `工作区 ${testcaseWorkspace.workspaceId} r${testcaseWorkspace.baseRevision}`
+            : undefined,
+      },
+    });
+
+    await harness.handleMessage(inbound(), {
+      emit: () => undefined,
+      testcaseWorkspace: testcaseSnapshot(),
+    });
+    expect(contexts).toEqual([{ workspaceId: 'ws-1' }]);
+  });
+
+  it('后台任务只恢复 metadata 指定的工作区快照', async () => {
+    const contexts: Array<{ workspaceId?: string }> = [];
+    const engine: AgentEngine = {
+      async run(input) {
+        contexts.push({
+          ...(input.context.workspaceId
+            ? { workspaceId: input.context.workspaceId }
+            : {}),
+        });
+        input.emit({
+          type: 'completed',
+          usage: { totalTokens: 1, steps: 0, durationMs: 1 },
+        });
+        return {
+          answer: 'ok',
+          reasoning: '',
+          usage: { totalTokens: 1, steps: 0, durationMs: 1 },
+        };
+      },
+    };
+    const resolver = vi.fn(async () => testcaseSnapshot());
+    const { harness } = createHarness(
+      engine,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { resolveTestcaseWorkspace: resolver },
+    );
+    const baseJob: AgentJob = {
+      id: 'job-ws-1',
+      conversationId: 'cid-1',
+      conversationType: '1',
+      messageId: 'job_msg_ws',
+      senderStaffId: 'staff-1',
+      senderNick: '张三',
+      kind: 'task',
+      status: 'running',
+      prompt: '继续编写测试用例',
+      metadata: { workspaceId: 'ws-1', baseRevision: 3 },
+      result: null,
+      error: null,
+      priority: 0,
+      attempts: 1,
+      maxAttempts: 2,
+      fencingToken: 1,
+      leaseOwner: 'runner',
+      leaseExpiresAt: 0,
+      createdAt: 0,
+      updatedAt: 0,
+      startedAt: 0,
+      finishedAt: null,
+    };
+
+    await harness.runJob(baseJob, { emit: () => undefined });
+    await expect(
+      harness.runJob(
+        {
+          ...baseJob,
+          id: 'job-ws-invalid',
+          metadata: { workspaceId: 'ws-1', baseRevision: '3' },
+        },
+        { emit: () => undefined },
+      ),
+    ).rejects.toThrow('工作区元数据无效');
+
+    expect(resolver).toHaveBeenCalledTimes(1);
+    expect(resolver).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestedWorkspace: { workspaceId: 'ws-1', baseRevision: 3 },
+      }),
+    );
+    expect(contexts).toEqual([{ workspaceId: 'ws-1' }]);
+  });
+
+  it('后台工作区恢复失败时终止任务且不调用模型', async () => {
+    const run = vi.fn(async () => ({
+      answer: '不应执行',
+      reasoning: '',
+      usage: { totalTokens: 1, steps: 0, durationMs: 1 },
+    }));
+    const engine: AgentEngine = { run };
+    const resolver = vi.fn(async () => {
+      throw new Error('revision conflict');
+    });
+    const { harness } = createHarness(engine, undefined, undefined, undefined, undefined, {
+      resolveTestcaseWorkspace: resolver,
+    });
+    const job = {
+      id: 'job-ws-conflict',
+      conversationId: 'cid-1',
+      conversationType: '1' as const,
+      messageId: 'job_msg_ws_conflict',
+      senderStaffId: 'staff-1',
+      senderNick: '张三',
+      kind: 'task' as const,
+      status: 'running' as const,
+      prompt: '继续编写测试用例',
+      metadata: { workspaceId: 'ws-1', baseRevision: 3 },
+      result: null,
+      error: null,
+      priority: 0,
+      attempts: 1,
+      maxAttempts: 2,
+      fencingToken: 1,
+      leaseOwner: 'runner',
+      leaseExpiresAt: 0,
+      createdAt: 0,
+      updatedAt: 0,
+      startedAt: 0,
+      finishedAt: null,
+    };
+
+    await expect(harness.runJob(job, { emit: () => undefined })).rejects.toThrow(
+      '无法恢复指定的测试用例工作区快照',
+    );
+    expect(run).not.toHaveBeenCalled();
   });
 
   it('后台任务复用会话链路执行并带任务归因', async () => {

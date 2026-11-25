@@ -41,6 +41,14 @@ describe('版本化迁移完整性', () => {
     }
   });
 
+  it('0007 创建测试用例工作区及版本表', () => {
+    const migration = migrationSql('0007_moaning_the_hunter');
+    expect(migration).toContain('CREATE TABLE "testcase_workspaces"');
+    expect(migration).toContain('CREATE TABLE "testcase_workspace_versions"');
+    expect(migration).toContain('"workspace_id","version"');
+    expect(migration).toContain('ON DELETE cascade');
+  });
+
   it('0000 基线前置 vector / pg_trgm 扩展，保证空库可直接 migrate', () => {
     const baseline = migrationSql(journal.entries[0]!.tag);
     const firstStatements = baseline.split('--> statement-breakpoint').slice(0, 2);

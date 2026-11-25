@@ -19,6 +19,7 @@ import {
 } from '../db/governanceSchema.js';
 import { DrizzleScheduledTaskStore } from '../db/schedulerSchema.js';
 import { DrizzleTaskResultStore } from '../db/taskMemorySchema.js';
+import { DrizzleTestcaseWorkspaceStore } from '../db/DrizzleTestcaseWorkspaceStore.js';
 import { DingTalkAdminTextSender } from '../dingtalk/AdminTextSender.js';
 import { DingTalkMediaSender } from '../dingtalk/MediaSender.js';
 import { GroupTranscriptArchive } from '../bystander/GroupTranscriptArchive.js';
@@ -55,6 +56,7 @@ import {
 import { OpenAiVisionDescriber } from '../multimodal/VisionDescriber.js';
 import { PersonalAssistantService } from '../personal/PersonalAssistantService.js';
 import { PersonalReportBuilder } from '../personal/PersonalReportBuilder.js';
+import { TestcaseWorkspaceService } from '../testcase/TestcaseWorkspaceService.js';
 import { AdminChatOpsToolProvider } from '../tools/admin/AdminChatOpsToolProvider.js';
 import { ArtifactToolProvider } from '../tools/artifacts/ArtifactToolProvider.js';
 import { DwsAuthManager } from '../tools/dws/DwsAuthManager.js';
@@ -69,6 +71,7 @@ import { PersonalAssistantToolProvider } from '../tools/personal/PersonalAssista
 import { ProjectToolProvider } from '../tools/projects/ProjectToolProvider.js';
 import { SkillToolProvider } from '../tools/skills/SkillToolProvider.js';
 import { TaskMemoryToolProvider } from '../tools/taskMemory/TaskMemoryToolProvider.js';
+import { TestcaseWorkspaceToolProvider } from '../tools/testcase/TestcaseWorkspaceToolProvider.js';
 import { WebFetchClient } from '../tools/web/WebFetchClient.js';
 import { WebFetchToolProvider } from '../tools/web/WebFetchToolProvider.js';
 import { WebSearchClient } from '../tools/web/WebSearchClient.js';
@@ -131,6 +134,7 @@ export interface ToolsAndGovernanceContext {
   taskMemory: TaskResultMemory | null;
   executionPolicy: ReturnType<typeof parseToolExecutionPolicy>;
   toolRegistry: ToolRegistry;
+  testcaseWorkspaces: TestcaseWorkspaceService;
   applyExecutionPolicy: (providers: () => IToolProvider[]) => IToolProvider[];
   attachmentStore: AttachmentStore;
   visionDescriber?: OpenAiVisionDescriber;
@@ -235,6 +239,9 @@ export async function setupToolsAndGovernance(
     if (request.toolName === 'glossary_candidate_submit') {
       return { approved: true };
     }
+    if (request.source === 'testcase-workspace') {
+      return { approved: true };
+    }
     // 产物生成与投递仅写入受控工作区或发往当前会话，是回答的预期输出通道，免二次确认
     if (
       request.toolName === 'deliver_artifact' ||
@@ -309,6 +316,18 @@ export async function setupToolsAndGovernance(
     true,
   );
   const artifactMaxBytes = envMegabytes(process.env.ARTIFACT_MAX_MB, 20);
+  const artifactExtraRoots = (process.env.ARTIFACT_ROOTS ?? '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .map((item) => resolve(process.cwd(), item));
+  const testcaseArtifactRoots = [
+    process.env.AGENT_WORKSPACE_DIR?.trim() || resolve(process.cwd(), '.workspace'),
+    ...artifactExtraRoots,
+  ];
+  const testcaseWorkspaces = new TestcaseWorkspaceService(
+    new DrizzleTestcaseWorkspaceStore(dbHandle.db),
+  );
   const mediaSender = new DingTalkMediaSender({
     robotCode: () => configCenter.getDingTalkConfig().robotCode,
     getAccessToken,
@@ -569,20 +588,27 @@ export async function setupToolsAndGovernance(
       new WorkspaceReadToolProvider({ workspace }),
     ...(artifactDeliveryEnabled
       ? {
-          artifactProvider: (workspace) => {
-            const extraRoots = (process.env.ARTIFACT_ROOTS ?? '')
-              .split(',')
-              .map((item) => item.trim())
-              .filter(Boolean)
-              .map((item) => resolve(process.cwd(), item));
-            return new ArtifactToolProvider({
+          artifactProvider: (workspace) =>
+            new ArtifactToolProvider({
               sender: mediaSender,
-              allowedRoots: [workspace.hostDir, ...extraRoots],
+              allowedRoots: [workspace.hostDir, ...artifactExtraRoots],
               maxBytes: artifactMaxBytes,
-            });
-          },
+            }),
         }
       : {}),
+    testcaseWorkspaceProvider: new TestcaseWorkspaceToolProvider({
+      service: testcaseWorkspaces,
+      isAdmin: (staffId) => configCenter.isAdmin(staffId),
+      ...(artifactDeliveryEnabled
+        ? {
+            artifact: {
+              sender: mediaSender,
+              allowedRoots: testcaseArtifactRoots,
+              maxBytes: artifactMaxBytes,
+            },
+          }
+        : {}),
+    }),
     toolAccess: {
       policies: () => configCenter.getMcpAccessPolicies(),
       isAdmin: (staffId) => configCenter.isAdmin(staffId),
@@ -753,6 +779,7 @@ export async function setupToolsAndGovernance(
     taskMemory,
     executionPolicy,
     toolRegistry,
+    testcaseWorkspaces,
     applyExecutionPolicy,
     attachmentStore,
     ...(visionDescriber ? { visionDescriber } : {}),

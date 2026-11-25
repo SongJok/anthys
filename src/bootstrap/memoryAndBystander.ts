@@ -52,6 +52,7 @@ import { PersonaResolver } from '../persona/PersonaResolver.js';
 import { GroupWorkspaceToolProvider } from '../tools/groups/GroupWorkspaceToolProvider.js';
 import { PersonalMemoryToolProvider } from '../tools/personal/PersonalMemoryToolProvider.js';
 import { PersonSettingsToolProvider } from '../tools/personal/PersonSettingsToolProvider.js';
+import type { TestcaseWorkspaceService } from '../testcase/TestcaseWorkspaceService.js';
 import { groupMemberSubjectKey } from '../types/bystander-and-memory.js';
 import type { IToolProvider } from '../types/core.js';
 import type { GlossaryService } from '../glossary/GlossaryService.js';
@@ -75,6 +76,7 @@ export interface MemoryAndBystanderDeps {
   toolProviders: IToolProvider[];
   runtimes: AgentRuntimesContext;
   extensions: WorkspaceAndExtensionsContext;
+  testcaseWorkspaces: TestcaseWorkspaceService;
 }
 
 export interface MemoryAndBystanderContext {
@@ -118,6 +120,7 @@ export async function setupMemoryAndBystander(
     toolProviders,
     runtimes,
     extensions,
+    testcaseWorkspaces,
   } = deps;
   const memoryConfig = configCenter.getMemoryConfig();
   const bystanderConfig = configCenter.getBystanderConfig();
@@ -394,6 +397,21 @@ export async function setupMemoryAndBystander(
     logger,
     memory: hierarchicalMemory,
     glossary,
+    resolveTestcaseWorkspace: async ({ message, requestedWorkspace }) => {
+      const actor = {
+        senderStaffId: message.senderStaffId,
+        conversationId: message.conversationId,
+        conversationType: message.conversationType,
+        isAdmin: configCenter.isAdmin(message.senderStaffId),
+      };
+      return requestedWorkspace
+        ? testcaseWorkspaces.restoreSnapshot(
+            actor,
+            requestedWorkspace.workspaceId,
+            requestedWorkspace.baseRevision,
+          )
+        : testcaseWorkspaces.snapshot(actor);
+    },
     personSettings: {
       buildPrompt: (personKey, conversationType) =>
         personSettings.buildPrompt(personKey, conversationType),
@@ -401,10 +419,15 @@ export async function setupMemoryAndBystander(
         personSettings.resolveGroupMode(personKey, conversationId),
     },
     extensions: {
-      build: async ({ message, text }) => {
+      build: async ({ message, text, testcaseWorkspace }) => {
         const config = configCenter.getExtensionsConfig();
         const isAdmin = configCenter.isAdmin(message.senderStaffId);
         const sections: string[] = [];
+        if (testcaseWorkspace) {
+          sections.push(
+            testcaseWorkspaces.buildPromptSummary(testcaseWorkspace.workspace),
+          );
+        }
         if (message.conversationType === '2') {
           try {
             const brief = await groupWorkspace.buildBrief(

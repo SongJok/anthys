@@ -256,6 +256,7 @@ async function main(): Promise<void> {
       toolProviders: tools.toolRegistry.providers,
       runtimes,
       extensions,
+      testcaseWorkspaces: tools.testcaseWorkspaces,
     });
 
     const runtimeRegistry = runtimes.createRuntimeRegistry(

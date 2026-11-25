@@ -20,14 +20,13 @@
 
 ## 转换改动
 
-- description：重写为 69 字符（上限 160）
-- when_to_use：上游全部缺失，按需补写为 41 字符（上限 200）
-- version：取市场版本 1.0.0（市场版本 1.0.0）
-- allowed_tools：按本项目真实工具名映射，共 4 个
+- description：本地重写为 55 字符（上限 160）
+- when_to_use：本地重写为 44 字符（上限 200）
+- version：市场来源 1.0.0；本地升级为 2.0.0
+- allowed_tools：按本项目真实工具名映射，共 10 个
 - risk=read，visibility=public，max_instruction_chars=8000
-- 正文替换 1 处（上游引用的不可用工具、缺失文件与商业定价内容）
-- 未删除章节
-- 正文未超上限，未拆分
+- 本地升级：按自主编写目标重组正文，移除固定流程与强制参考阅读，MCP/DWS/Web 改为按需取证，接入测试用例工作区与确定性编译工具
+- 保留三个 references 资源，正文 3029 字符，未超过 8000 上限
 - 保留资源：references/test-methods.md、references/testcase-splitting-rules.md、references/output-example.md
 - 未导入：agents/openai.yaml
 

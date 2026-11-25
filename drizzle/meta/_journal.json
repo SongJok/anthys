@@ -50,6 +50,13 @@
       "when": 1795352140228,
       "tag": "0006_wise_firelord",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1795573634762,
+      "tag": "0007_moaning_the_hunter",
+      "breakpoints": true
     }
   ]
 }

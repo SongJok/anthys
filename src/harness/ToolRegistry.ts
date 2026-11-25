@@ -96,6 +96,8 @@ export interface ToolRegistryOptions {
   webFetchProvider?: IToolProvider;
   /** 产物投递等额外工具提供方，按工作区路径构造 */
   artifactProvider?: (workspace: WorkspacePaths) => IToolProvider;
+  /** 测试用例自主编写工作区 */
+  testcaseWorkspaceProvider?: IToolProvider;
   /** 工作区文本文件读取工具，按工作区路径构造 */
   workspaceReadProvider?: (workspace: WorkspacePaths) => IToolProvider;
   /** MCP 工具按群/角色授权（实时读取，支持热更新） */
@@ -426,6 +428,9 @@ export class ToolRegistry {
     }
     if (options.artifactProvider) {
       providers.push(options.artifactProvider(workspace));
+    }
+    if (options.testcaseWorkspaceProvider) {
+      providers.push(options.testcaseWorkspaceProvider);
     }
 
     return new ToolRegistry(

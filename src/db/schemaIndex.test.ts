@@ -12,6 +12,8 @@ describe('schemaIndex and database index definitions', () => {
     expect(schemaIndex.pendingActions).toBeDefined();
     expect(schemaIndex.agentTasks).toBeDefined();
     expect(schemaIndex.agentTaskLinks).toBeDefined();
+    expect(schemaIndex.testcaseWorkspaces).toBeDefined();
+    expect(schemaIndex.testcaseWorkspaceVersions).toBeDefined();
   });
 
   it('declares HNSW vector indexes on semantic_memories and glossary_terms', () => {
