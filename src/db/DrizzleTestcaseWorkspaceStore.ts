@@ -1,4 +1,4 @@
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, ilike, or, sql } from 'drizzle-orm';
 import type { Database } from './client.js';
 import {
   testcaseWorkspaces,
@@ -38,6 +38,9 @@ function toSummary(row: typeof testcaseWorkspaces.$inferSelect): TestcaseWorkspa
   return {
     id: row.id,
     title: row.title,
+    conversationId: row.conversationId,
+    conversationType: row.conversationType === '1' ? '1' : '2',
+    ownerStaffId: row.ownerStaffId,
     ...(row.projectId ? { projectId: row.projectId } : {}),
     revision: row.revision,
     requirementCount: row.stateJson.requirements.filter(
@@ -45,9 +48,12 @@ function toSummary(row: typeof testcaseWorkspaces.$inferSelect): TestcaseWorkspa
     ).length,
     caseCount: row.stateJson.cases.filter((item) => item.status !== 'superseded')
       .length,
+    evidenceCount: row.stateJson.evidence.length,
+    decisionCount: row.stateJson.decisions.length,
     openQuestionCount: row.stateJson.openQuestions.filter(
       (item) => item.status === 'open',
     ).length,
+    archived: Boolean(row.stateJson.archived),
     updatedAt: row.updatedAt.getTime(),
   };
 }
@@ -108,6 +114,26 @@ export class DrizzleTestcaseWorkspaceStore implements TestcaseWorkspaceStore {
     if (input.ownerStaffId) {
       conditions.push(eq(testcaseWorkspaces.ownerStaffId, input.ownerStaffId));
     }
+    if (input.projectId) {
+      conditions.push(eq(testcaseWorkspaces.projectId, input.projectId));
+    }
+    if (input.includeArchived === false) {
+      conditions.push(
+        sql`coalesce((${testcaseWorkspaces.stateJson}->>'archived')::boolean, false) = false`,
+      );
+    }
+    const query = input.query?.trim();
+    if (query) {
+      const pattern = `%${query}%`;
+      conditions.push(
+        or(
+          ilike(testcaseWorkspaces.title, pattern),
+          ilike(testcaseWorkspaces.conversationId, pattern),
+          ilike(testcaseWorkspaces.ownerStaffId, pattern),
+          ilike(sql`coalesce(${testcaseWorkspaces.projectId}, '')`, pattern),
+        )!,
+      );
+    }
     const rows = await this.db
       .select()
       .from(testcaseWorkspaces)
@@ -115,6 +141,14 @@ export class DrizzleTestcaseWorkspaceStore implements TestcaseWorkspaceStore {
       .orderBy(desc(testcaseWorkspaces.updatedAt))
       .limit(Math.max(1, Math.min(input.limit ?? 20, 100)));
     return rows.map(toSummary);
+  }
+
+  public async delete(workspaceId: string): Promise<boolean> {
+    const rows = await this.db
+      .delete(testcaseWorkspaces)
+      .where(eq(testcaseWorkspaces.id, workspaceId))
+      .returning({ id: testcaseWorkspaces.id });
+    return rows.length > 0;
   }
 
   public async update(

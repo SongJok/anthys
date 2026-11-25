@@ -241,4 +241,155 @@ describe('TestcaseWorkspaceToolProvider', () => {
     expect(delivered.delivered).toBe(true);
     expect(sent).toEqual(['用例.md']);
   });
+
+  it('无 $defs/$ref 且支持多 Sheet xlsx、历史版本读取、冲突自愈提示与控制台保护', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'anthys-testcase-'));
+    tempDirs.push(root);
+    let nextId = 0;
+    const store = new InMemoryTestcaseWorkspaceStore(
+      () => 1_000,
+      () => `ws-${++nextId}`,
+    );
+    const service = new TestcaseWorkspaceService(store, () => 1_000, () => 'unused');
+    const sent: string[] = [];
+    const provider = new TestcaseWorkspaceToolProvider({
+      service,
+      isAdmin: () => false,
+      artifact: {
+        allowedRoots: [root],
+        sender: {
+          send: async (input) => {
+            sent.push(input.fileName ?? '');
+            return { ok: true, fileName: input.fileName ?? '', fileSize: 10 };
+          },
+        },
+      },
+    });
+    const tools = await provider.getTools(context());
+    const updateSchema = JSON.stringify(
+      tools.find((item) => item.name === 'testcase_workspace_update')
+        ?.parametersJsonSchema,
+    );
+    expect(updateSchema).not.toContain('$defs');
+    expect(updateSchema).not.toContain('$ref');
+    expect(updateSchema).not.toContain('"null"');
+
+    const binding = {
+      current: null as { workspaceId: string; baseRevision: number } | null,
+      autoSnapshotted: true,
+    };
+    const jobCtx = context({ jobId: 'job-1', testcaseWorkspaceBinding: binding });
+    // autoSnapshotted 即使有旧绑定，在没有 activeWorkspaceId 时可创建；有 autoSnapshotted 也可创建新工作区
+    await service.create(context(), { title: '旧工作区' });
+    binding.current = { workspaceId: 'ws-1', baseRevision: 1 };
+    const created = JSON.parse(
+      await tool(provider, jobCtx, 'testcase_workspace_create', { title: '新需求用例' }),
+    );
+    expect(created.id).toBe('ws-2');
+    expect(binding.autoSnapshotted).toBe(false);
+
+    await tool(provider, jobCtx, 'testcase_workspace_update', {
+      workspaceId: 'ws-2',
+      baseRevision: 1,
+      patch: {
+        requirements: {
+          upsert: [
+            { id: 'req-1', title: '下单', module: '订单', sourceRef: 'PRD 1.1' },
+          ],
+        },
+        cases: {
+          upsert: [
+            {
+              id: 'draft-1',
+              module: '订单',
+              title: '正常下单',
+              steps: ['1. 输入 {{DATA: 商品}}', '2. 提交'],
+              expectedResults: ['1. 成功'],
+              testMethod: '需求分析法+场景法',
+              requirementIds: ['req-1'],
+            },
+          ],
+        },
+      },
+    });
+
+    await expect(
+      tool(provider, jobCtx, 'testcase_workspace_update', {
+        workspaceId: 'ws-2',
+        baseRevision: 1,
+        patch: { title: '过期更新' },
+      }),
+    ).rejects.toThrow('已同步到最新 revision=2');
+
+    const consoleCtx = context({
+      conversationId: 'console:admin',
+      senderStaffId: 'admin-console',
+    });
+    const consoleStore = new InMemoryTestcaseWorkspaceStore(() => 1_000, () => 'ws-console');
+    const consoleService = new TestcaseWorkspaceService(consoleStore, () => 1_000, () => 'u');
+    const wsConsole = await consoleService.create(
+      { senderStaffId: 'admin-console', conversationId: 'console:admin', conversationType: '1' },
+      { title: '控制台导出' },
+    );
+    await consoleService.update(
+      { senderStaffId: 'admin-console', conversationId: 'console:admin', conversationType: '1' },
+      wsConsole.id,
+      1,
+      {
+        requirements: {
+          upsert: [{ id: 'req-c', title: 'R', description: '', module: 'M', sourceRef: 'S', rules: [], constraints: [], status: 'active' }],
+        },
+        cases: {
+          upsert: [{
+            id: 'c1',
+            module: 'M',
+            title: 'T',
+            preconditions: ['已登录'],
+            steps: ['使用 {{DATA: 账号}} 点击'],
+            expectedResults: ['通过'],
+            priority: '高',
+            testMethod: '需求分析法+场景法',
+            scenarioType: 'normal',
+            requirementIds: ['req-c'],
+            evidenceIds: [],
+            assumptions: [],
+            status: 'ready',
+          }],
+        },
+      },
+    );
+    const consoleProvider = new TestcaseWorkspaceToolProvider({
+      service: consoleService,
+      isAdmin: () => true,
+      artifact: {
+        allowedRoots: [root],
+        sender: {
+          send: async () => {
+            sent.push('should-not-send');
+            return { ok: true, fileName: 'x', fileSize: 1 };
+          },
+        },
+      },
+    });
+    const xlsxResult = JSON.parse(
+      await tool(consoleProvider, consoleCtx, 'testcase_compile', {
+        workspaceId: wsConsole.id,
+        baseRevision: 2,
+        format: 'xlsx',
+        deliver: true,
+      }),
+    );
+    expect(xlsxResult.delivered).toBe(false);
+    expect(xlsxResult.message).toContain('管理控制台会话');
+    expect(sent).toEqual([]);
+
+    const versionsPayload = JSON.parse(
+      await tool(consoleProvider, consoleCtx, 'testcase_workspace_get', {
+        workspaceId: wsConsole.id,
+        section: 'versions',
+      }),
+    );
+    expect(versionsPayload.items).toHaveLength(1);
+    expect(versionsPayload.items[0].version).toBe(1);
+  });
 });

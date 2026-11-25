@@ -1,6 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import App from './App';
+import TestcaseWorkspacesPage from './pages/TestcaseWorkspacesPage';
 import TracesPage, { renderStep } from './pages/TracesPage';
 
 describe('web-console React components', () => {
@@ -41,5 +42,12 @@ describe('web-console React components', () => {
     expect(html).toContain('子代理协作');
     expect(html).toContain('delegate_research');
     expect(html).toContain('subagent:delegate_research (2步 / 180t / 440ms)');
+  });
+
+  it('renders TestcaseWorkspacesPage shell cleanly', () => {
+    vi.stubGlobal('fetch', vi.fn());
+    const html = renderToStaticMarkup(<TestcaseWorkspacesPage />);
+    expect(html).toContain('测试用例工作区');
+    expect(html).toContain('显示已归档');
   });
 });

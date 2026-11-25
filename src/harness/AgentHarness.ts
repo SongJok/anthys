@@ -182,6 +182,11 @@ export interface JobHandleOptions {
   worker?: string;
   /** 步骤级断点续跑钩子：恢复时注入上次只读步骤快照，运行中持续落盘 */
   checkpoint?: ReActCheckpointHooks;
+  /** 任务运行期间测试用例工作区绑定新建或版本推进时的持久化回调 */
+  onWorkspaceBindingChange?: (binding: {
+    workspaceId: string;
+    baseRevision: number;
+  }) => Promise<void> | void;
 }
 
 export interface WorkerRuntime {
@@ -890,32 +895,60 @@ export class AgentHarness {
             baseRevision: testcaseWorkspace.baseRevision,
           }
         : null,
+      ...(job.metadata.workspaceAutoSnapshotted === true
+        ? { autoSnapshotted: true }
+        : {}),
     };
-    const result = await engine.run({
-      messages,
-      context: {
-        conversationId: message.conversationId,
-        messageId: message.messageId,
-        senderStaffId: message.senderStaffId,
-        senderNick: message.senderNick,
-        conversationType: message.conversationType,
-        personKey,
-        deadlineAt: startedAt + policy.maxWallTimeMs,
-        now: this.now,
-        proactive,
-        jobId: job.id,
-        jobKind: job.kind,
-        ...(testcaseWorkspaceBinding.current
-          ? { workspaceId: testcaseWorkspaceBinding.current.workspaceId }
-          : {}),
-        testcaseWorkspaceBinding,
-        ...(workerName ? { worker: workerName } : {}),
-        ...(handle.notify ? { notify: handle.notify } : {}),
-      },
-      emit: handle.emit,
-      signal: handle.signal,
-      ...(handle.checkpoint ? { checkpoint: handle.checkpoint } : {}),
-    });
+    let result: RunResult;
+    try {
+      result = await engine.run({
+        messages,
+        context: {
+          conversationId: message.conversationId,
+          messageId: message.messageId,
+          senderStaffId: message.senderStaffId,
+          senderNick: message.senderNick,
+          conversationType: message.conversationType,
+          personKey,
+          deadlineAt: startedAt + policy.maxWallTimeMs,
+          now: this.now,
+          proactive,
+          jobId: job.id,
+          jobKind: job.kind,
+          ...(testcaseWorkspaceBinding.current
+            ? { workspaceId: testcaseWorkspaceBinding.current.workspaceId }
+            : {}),
+          testcaseWorkspaceBinding,
+          ...(workerName ? { worker: workerName } : {}),
+          ...(handle.notify ? { notify: handle.notify } : {}),
+        },
+        emit: handle.emit,
+        signal: handle.signal,
+        ...(handle.checkpoint ? { checkpoint: handle.checkpoint } : {}),
+      });
+    } finally {
+      const updatedBinding = testcaseWorkspaceBinding.current;
+      const bindingChanged =
+        updatedBinding &&
+        (!requestedWorkspace ||
+          updatedBinding.workspaceId !== requestedWorkspace.workspaceId ||
+          updatedBinding.baseRevision !== requestedWorkspace.baseRevision);
+      if (bindingChanged && handle.onWorkspaceBindingChange) {
+        try {
+          await handle.onWorkspaceBindingChange(updatedBinding);
+        } catch (error) {
+          this.options.logger?.warn(
+            {
+              jobId: job.id,
+              workspaceId: updatedBinding.workspaceId,
+              baseRevision: updatedBinding.baseRevision,
+              error: error instanceof Error ? error.message : String(error),
+            },
+            'failed to persist updated testcase workspace binding for job',
+          );
+        }
+      }
+    }
     await this.recordUsage(
       message,
       result,

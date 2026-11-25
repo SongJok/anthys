@@ -3,7 +3,10 @@ import type {
   TestcaseDraft,
   TestcaseWorkspace,
 } from '../types/testcase-workspace.js';
-import { compileTestcaseWorkspace } from './TestcaseCompiler.js';
+import {
+  compileTestcaseWorkspace,
+  toPlainTestcaseRows,
+} from './TestcaseCompiler.js';
 import { emptyTestcaseWorkspaceState } from './TestcaseWorkspaceStore.js';
 
 function draft(overrides: Partial<TestcaseDraft> = {}): TestcaseDraft {
@@ -213,5 +216,80 @@ describe('compileTestcaseWorkspace', () => {
     expect(JSON.parse(JSON.stringify(result.statistics.byModule))).toEqual({
       ['__proto__']: 1,
     });
+  });
+
+  it('支持组合测试方法、剥离双重序号并清理禁用后的截图标记', () => {
+    const input = workspace();
+    input.state.outputPreferences.screenshotMarkers = false;
+    input.state.cases = [
+      draft({
+        id: 'case_combo',
+        preconditions: ['1. 账号 {{DATA: 有效账号}} 已启用'],
+        steps: ['1. 打开登录页 📷', '2. 点击登录 📷'],
+        expectedResults: ['1. 进入工作台'],
+        testMethod: '需求分析法 + 场景法',
+      }),
+    ];
+
+    const result = compileTestcaseWorkspace(input, { now: 10 });
+
+    expect(result.cases[0]?.testMethod).toBe('需求分析法+场景法');
+    expect(result.statistics.byMethod).toEqual({ '需求分析法+场景法': 1 });
+    expect(result.issues.filter((item) => item.code === 'unsupported_method')).toHaveLength(0);
+    expect(result.rows[0]?.[2]).toBe('1. 账号 {{DATA: 有效账号}} 已启用');
+    expect(result.rows[0]?.[3]).toBe('1. 打开登录页<br>2. 点击登录');
+    expect(result.rows[0]?.[4]).toBe('1. 进入工作台');
+    expect(toPlainTestcaseRows(result)[0]?.[3]).toBe('1. 打开登录页\n2. 点击登录');
+  });
+
+  it('中段步骤已有截图标记时末步不重复添加，且区分三档自动化可行性与证据冲突', () => {
+    const input = workspace();
+    input.state.evidence = [
+      {
+        id: 'ev_1',
+        type: 'document',
+        sourceRef: 'PRD 3.1',
+        collectedAt: 1,
+        scope: '登录',
+        summary: 'PRD 要求密码至少 8 位',
+        confidence: 'medium',
+        requirementIds: ['req_login'],
+        conflictsWith: ['ev_2'],
+      },
+      {
+        id: 'ev_2',
+        type: 'ui',
+        sourceRef: '页面截图',
+        collectedAt: 2,
+        scope: '登录',
+        summary: '线上允许 6 位密码',
+        confidence: 'high',
+        requirementIds: ['req_login'],
+        conflictsWith: ['ev_1'],
+      },
+    ];
+    input.state.decisions = [
+      {
+        id: 'dec_1',
+        topic: '密码最小长度',
+        value: '以线上 6 位为准',
+        createdAt: 3,
+      },
+    ];
+    input.state.cases = [
+      draft({
+        id: 'case_mid_marker',
+        steps: ['打开支付页', '调起指纹硬件校验 📷', '返回结果页'],
+        expectedResults: ['完成真实支付扣款'],
+      }),
+    ];
+
+    const result = compileTestcaseWorkspace(input, { now: 10 });
+
+    expect(result.rows[0]?.[3]).toBe('1. 打开支付页<br>2. 调起指纹硬件校验 📷<br>3. 返回结果页');
+    expect(result.issues.filter((item) => item.code === 'evidence_conflict')).toHaveLength(1);
+    expect(result.markdown).toContain('## 已确认口径与决策');
+    expect(result.markdown).toContain('密码最小长度：以线上 6 位为准');
+    expect(result.markdown).toContain('自动化可行性：暂不可自动化');
   });
 });

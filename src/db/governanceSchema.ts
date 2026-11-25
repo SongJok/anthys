@@ -185,6 +185,10 @@ export class PgRetentionStore implements RetentionStore {
       "DELETE FROM persona_profiles WHERE scope = 'group' AND subject_key = $1",
       [conversationId],
     );
+    deleted.testcaseWorkspaces = await this.optionalDelete(
+      'DELETE FROM testcase_workspaces WHERE conversation_id = $1',
+      [conversationId],
+    );
     return { deleted, messageIds };
   }
 
@@ -291,6 +295,10 @@ export class PgRetentionStore implements RetentionStore {
     deleted.personIdentities = await this.optionalDelete(
       'DELETE FROM person_identities WHERE person_key = ANY($1)',
       [keys],
+    );
+    deleted.testcaseWorkspaces = await this.optionalDelete(
+      'DELETE FROM testcase_workspaces WHERE owner_staff_id = $1',
+      [staffId],
     );
     return { deleted, messageIds };
   }

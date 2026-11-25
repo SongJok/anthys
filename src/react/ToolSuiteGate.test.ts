@@ -6,6 +6,7 @@ import {
   FINANCE_MARKET_SUITE,
   LBS_AND_TRAVEL_SUITE,
   PROJECT_CODE_SUITE,
+  TESTCASE_WORKSPACE_SUITE,
   buildActivateToolsTool,
   buildSuiteCatalog,
   injectSuiteCatalog,
@@ -126,6 +127,7 @@ describe('多域工具套件与批量激活', () => {
       tool('mcp__amap__maps_geo', 'mcp', 'read'),
       tool('market_data_fetch', 'market', 'read'),
       tool('project_search', 'projects', 'read'),
+      tool('testcase_workspace_create', 'testcase-workspace', 'write'),
     ];
     const { resident, gated } = partitionSuites(tools, [...DEFAULT_TOOL_SUITES]);
     expect(resident.map((t) => t.name)).toEqual([
@@ -144,6 +146,9 @@ describe('多域工具套件与批量激活', () => {
     ]);
     expect(gated.get(FINANCE_MARKET_SUITE.id)?.map((t) => t.name)).toEqual([
       'market_data_fetch',
+    ]);
+    expect(gated.get(TESTCASE_WORKSPACE_SUITE.id)?.map((t) => t.name)).toEqual([
+      'testcase_workspace_create',
     ]);
   });
 

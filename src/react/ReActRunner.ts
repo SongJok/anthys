@@ -450,6 +450,13 @@ export class ReActRunner implements AgentEngine {
         }
       };
 
+      if (
+        gate?.enabled &&
+        (context.workspaceId || context.testcaseWorkspaceBinding?.current)
+      ) {
+        activateSuite('testcase_workspace');
+      }
+
       const messages: ChatMessage[] =
         initialCheckpoint && initialCheckpoint.messages.length > 0
           ? initialCheckpoint.messages.map((message) => ({ ...message }))
@@ -488,6 +495,9 @@ export class ReActRunner implements AgentEngine {
               (initialCheckpoint?.accumulatedWallMs ?? 0) +
               (this.now() - startedAt),
             activatedSuites: [...activatedSuiteIds],
+            ...(context.testcaseWorkspaceBinding?.current !== undefined
+              ? { testcaseWorkspace: context.testcaseWorkspaceBinding.current }
+              : {}),
           });
         } catch {
           // 检查点写入失败不阻塞主推理链路

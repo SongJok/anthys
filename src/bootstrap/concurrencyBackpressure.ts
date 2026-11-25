@@ -60,6 +60,7 @@ export async function divertTurnToBackground(
         ? {
             workspaceId: testcaseWorkspace.workspaceId,
             baseRevision: testcaseWorkspace.baseRevision,
+            workspaceAutoSnapshotted: true,
           }
         : {}),
     },

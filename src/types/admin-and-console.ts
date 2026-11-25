@@ -118,7 +118,10 @@ export type AdminActionType =
   | 'UPDATE_WHITELIST'
   | 'SYNC_WHITELIST'
   | 'SYNC_GROUP_DIRECTORY'
-  | 'GROUP_NOTIFY_ALL';
+  | 'GROUP_NOTIFY_ALL'
+  | 'UPDATE_TESTCASE_WORKSPACE'
+  | 'COMPILE_TESTCASE_WORKSPACE'
+  | 'DELETE_TESTCASE_WORKSPACE';
 
 /** 2. 管理员单聊管控审计记录契约 */
 export interface AdminAuditLog {

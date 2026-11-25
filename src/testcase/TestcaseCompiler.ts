@@ -8,13 +8,15 @@ import type {
   TestcaseWorkspace,
 } from '../types/testcase-workspace.js';
 
-const TEST_METHODS = new Set<TestcaseMethod>([
+export const CANONICAL_TESTCASE_METHODS: readonly TestcaseMethod[] = [
   '需求分析法',
   '等价类划分法',
   '边界值分析法',
   '场景法',
   '错误猜测法',
-]);
+];
+
+const TEST_METHODS = new Set<TestcaseMethod>(CANONICAL_TESTCASE_METHODS);
 
 const PRIORITY_ORDER = { 高: 0, 中: 1, 低: 2 } as const;
 const SCENARIO_ORDER = { normal: 0, exception: 1, boundary: 2, other: 3 } as const;
@@ -32,13 +34,157 @@ function normalize(value: string): string {
   return value.replace(/\s+/gu, ' ').trim();
 }
 
+export function stripStepPrefix(value: string): string {
+  return value
+    .replace(/^\s*(?:\d+\s*[.、)）]|[(（]\d+[)）])\s*/u, '')
+    .trim();
+}
+
+export function expandStepItems(items: string[]): string[] {
+  const expanded: string[] = [];
+  for (const item of items) {
+    for (const part of item.split(/<br\s*\/?>|\r?\n/giu)) {
+      const cleaned = normalize(stripStepPrefix(part));
+      if (cleaned) expanded.push(cleaned);
+    }
+  }
+  return expanded;
+}
+
+export function parseTestcaseMethods(raw: string): TestcaseMethod[] | null {
+  const parts = raw
+    .split(/[+＋、/,，]+/u)
+    .map((part) => normalize(part))
+    .filter(Boolean);
+  if (parts.length === 0) return null;
+  const result: TestcaseMethod[] = [];
+  const seen = new Set<TestcaseMethod>();
+  for (const part of parts) {
+    if (!TEST_METHODS.has(part as TestcaseMethod)) return null;
+    const method = part as TestcaseMethod;
+    if (!seen.has(method)) {
+      seen.add(method);
+      result.push(method);
+    }
+  }
+  return result.length > 3 ? null : result;
+}
+
+export function normalizeTestcaseMethod(raw: string): string {
+  const parsed = parseTestcaseMethods(raw);
+  if (!parsed) {
+    throw new Error(`case.testMethod 非法：${String(raw)}`);
+  }
+  return parsed.join('+');
+}
+
+export function toPlainTestcaseRows(document: CompiledTestcaseDocument): string[][] {
+  return document.rows.map((row) =>
+    row.map((cell) => cell.replace(/<br\s*\/?>/giu, '\n')),
+  );
+}
+
+export interface TestcaseXlsxSheet {
+  name: string;
+  headers: string[];
+  rows: Array<Array<string | number | boolean | null | undefined>>;
+}
+
+export function buildTestcaseXlsxSheets(
+  document: CompiledTestcaseDocument,
+  workspace?: TestcaseWorkspace,
+): TestcaseXlsxSheet[] {
+  const prefs = workspace?.state.outputPreferences;
+  const sheets: TestcaseXlsxSheet[] = [
+    {
+      name: '功能测试用例',
+      headers: [...HEADERS],
+      rows: toPlainTestcaseRows(document),
+    },
+  ];
+  if ((prefs?.includeDataChecklist ?? true) && document.dataItems.length > 0) {
+    sheets.push({
+      name: '数据准备清单',
+      headers: ['模块', '数据占位符', '关联用例编号'],
+      rows: document.dataItems.map((item) => [
+        item.module,
+        item.placeholder,
+        item.caseNumbers.join('、'),
+      ]),
+    });
+  }
+  if ((prefs?.includeTraceability ?? true) && document.traceability.length > 0) {
+    const reqById = new Map(
+      (workspace?.state.requirements ?? []).map((req) => [req.id, req]),
+    );
+    sheets.push({
+      name: '需求覆盖追溯',
+      headers: ['需求 ID', '模块', '需求标题', '来源章节', '已覆盖', '覆盖用例编号'],
+      rows: document.traceability.map((item) => {
+        const req = reqById.get(item.requirementId);
+        return [
+          item.requirementId,
+          req?.module ?? '',
+          item.title,
+          req?.sourceRef ?? '',
+          item.covered ? '是' : '否',
+          item.caseNumbers.join('、'),
+        ];
+      }),
+    });
+  }
+  const summaryRows: Array<[string, string]> = [
+    ['工作区标题', document.title],
+    ['工作区 ID', document.workspaceId],
+    ['合稿版本', `v${document.version}（来源 r${document.sourceRevision}）`],
+    ['总用例数', String(document.statistics.total)],
+    [
+      '优先级分布',
+      `高 ${document.statistics.byPriority.高} / 中 ${document.statistics.byPriority.中} / 低 ${document.statistics.byPriority.低}`,
+    ],
+    [
+      '模块分布',
+      Object.entries(document.statistics.byModule)
+        .map(([k, v]) => `${k}: ${v}`)
+        .join('；') || '无',
+    ],
+    [
+      '测试方法分布',
+      Object.entries(document.statistics.byMethod)
+        .map(([k, v]) => `${k}: ${v}`)
+        .join('；') || '无',
+    ],
+  ];
+  for (const decision of workspace?.state.decisions ?? []) {
+    summaryRows.push([`已确认口径：${decision.topic}`, decision.value]);
+  }
+  for (const assumption of unique(document.cases.flatMap((c) => c.assumptions))) {
+    summaryRows.push(['编写假设', assumption]);
+  }
+  for (const question of document.openQuestions) {
+    summaryRows.push([
+      question.blocking ? '阻塞待确认' : '非阻塞待确认',
+      question.question,
+    ]);
+  }
+  for (const issue of document.issues) {
+    summaryRows.push([`编译检查：${issue.code}`, issue.message]);
+  }
+  sheets.push({
+    name: '概要统计与检查',
+    headers: ['检查项', '内容'],
+    rows: summaryRows,
+  });
+  return sheets;
+}
+
 function semanticKey(item: TestcaseDraft): string {
   return JSON.stringify([
     normalize(item.module),
     normalize(item.title),
-    item.preconditions.map(normalize),
-    item.steps.map(normalize),
-    item.expectedResults.map(normalize),
+    expandStepItems(item.preconditions),
+    expandStepItems(item.steps),
+    expandStepItems(item.expectedResults),
   ]);
 }
 
@@ -55,7 +201,11 @@ function escapeCell(value: string): string {
 }
 
 function numbered(items: string[]): string {
-  return items.map((item, index) => `${index + 1}. ${item}`).join('<br>');
+  return items
+    .map((item) => normalize(stripStepPrefix(item)))
+    .filter(Boolean)
+    .map((item, index) => `${index + 1}. ${item}`)
+    .join('<br>');
 }
 
 function unique(values: string[]): string[] {
@@ -125,11 +275,14 @@ export function compileTestcaseWorkspace(
   }
 
   for (const item of deduped) {
+    const preconditions = expandStepItems(item.preconditions);
+    const steps = expandStepItems(item.steps);
+    const expectedResults = expandStepItems(item.expectedResults);
     if (
       !normalize(item.title) ||
-      !item.preconditions.some((value) => normalize(value)) ||
-      !item.steps.some((value) => normalize(value)) ||
-      !item.expectedResults.some((value) => normalize(value))
+      preconditions.length === 0 ||
+      steps.length === 0 ||
+      expectedResults.length === 0
     ) {
       issues.push({
         code: 'empty_case',
@@ -137,13 +290,19 @@ export function compileTestcaseWorkspace(
         caseId: item.id,
       });
     }
-    if (!TEST_METHODS.has(item.testMethod)) {
+    const parsedMethods = parseTestcaseMethods(item.testMethod);
+    if (!parsedMethods) {
       issues.push({
         code: 'unsupported_method',
         message: `用例 ${item.id} 使用了不支持的测试方法：${item.testMethod}`,
         caseId: item.id,
       });
+    } else {
+      item.testMethod = parsedMethods.join('+');
     }
+    item.preconditions = preconditions;
+    item.steps = steps;
+    item.expectedResults = expectedResults;
     if (item.requirementIds.length === 0) {
       issues.push({
         code: 'missing_requirement',
@@ -284,6 +443,23 @@ export function compileTestcaseWorkspace(
     }
   }
 
+  const seenConflicts = new Set<string>();
+  for (const evidence of workspace.state.evidence) {
+    for (const conflictId of evidence.conflictsWith) {
+      const pairKey =
+        evidence.id < conflictId
+          ? `${evidence.id}|${conflictId}`
+          : `${conflictId}|${evidence.id}`;
+      if (seenConflicts.has(pairKey)) continue;
+      seenConflicts.add(pairKey);
+      issues.push({
+        code: 'evidence_conflict',
+        message: `证据 ${evidence.id} 与 ${conflictId} 存在冲突，请核实可见行为与文档差异`,
+        evidenceId: evidence.id,
+      });
+    }
+  }
+
   const openQuestions = workspace.state.openQuestions.filter(
     (item) => item.status === 'open',
   );
@@ -295,15 +471,18 @@ export function compileTestcaseWorkspace(
     });
   }
 
-  const rows = cases.map((item) => [
-    item.caseNumber,
-    item.title,
-    numbered(item.preconditions),
-    numbered(item.steps.map(stepWithScreenshot(item, workspace))),
-    numbered(item.expectedResults),
-    item.priority,
-    item.testMethod,
-  ]);
+  const rows = cases.map((item) => {
+    const steps = item.steps.map(stepWithScreenshot(item, workspace));
+    return [
+      item.caseNumber,
+      item.title,
+      numbered(item.preconditions),
+      numbered(steps),
+      numbered(item.expectedResults),
+      item.priority,
+      item.testMethod,
+    ];
+  });
 
   const markdown = renderMarkdown({
     workspace,
@@ -366,6 +545,13 @@ function renderMarkdown(input: {
     }
   }
 
+  if (workspace.state.decisions.length > 0) {
+    lines.push('', '## 已确认口径与决策', '');
+    for (const decision of workspace.state.decisions) {
+      lines.push(`- ${decision.topic}：${decision.value}`);
+    }
+  }
+
   const sources = unique([
     ...workspace.state.requirements.map((item) => item.sourceRef),
     ...workspace.state.evidence.map((item) => item.sourceRef),
@@ -422,14 +608,23 @@ function renderMarkdown(input: {
     }
     if (workspace.state.outputPreferences.includeAutomationFeasibility) {
       const text = moduleCases
-        .flatMap((item) => [...item.steps, ...item.expectedResults])
+        .flatMap((item) => [...item.preconditions, ...item.steps, ...item.expectedResults])
         .join(' ');
-      const partial = /人工|硬件|支付|审批|短信|邮件|通知/u.test(text);
+      const notAutomatable =
+        /真实支付|扣款|打款|硬件|外设|指纹|人脸识别|扫码枪|蓝牙|USB|生产专属|不可逆/u.test(
+          text,
+        );
+      const partial =
+        /验证码|滑块|人机校验|扫码|人工|审批|短信|邮件|企微|钉钉通知|消息推送|第三方回调/u.test(
+          text,
+        );
       lines.push(
         '',
-        partial
-          ? '自动化可行性：部分可自动化。存在人工判断、外部通知或不可逆依赖，需要结合测试平台与真实数据评估。'
-          : '自动化可行性：可自动化（仍需测试平台实现、真实数据准备和环境配置）。',
+        notAutomatable
+          ? '自动化可行性：暂不可自动化。存在真实资金交易、硬件外设、生产专属数据或不可逆操作依赖，建议人工或专项环境验证。'
+          : partial
+            ? '自动化可行性：部分可自动化。存在人机校验、人工审批或外部通知依赖，需要结合测试平台与桩服务评估。'
+            : '自动化可行性：可自动化（仍需测试平台实现、真实数据准备和环境配置）。',
       );
     }
   }
@@ -460,11 +655,15 @@ function stepWithScreenshot(
   item: CompiledTestcaseCase,
   workspace: TestcaseWorkspace,
 ): (step: string, index: number) => string {
+  const hasExistingMarker = item.steps.some((step) => step.includes('📷'));
   return (step, index) => {
-    if (!workspace.state.outputPreferences.screenshotMarkers) return step;
-    if (index === Math.max(0, item.steps.length - 1) && !step.includes('📷')) {
-      return `${step} 📷`;
+    const clean = stripStepPrefix(step);
+    if (!workspace.state.outputPreferences.screenshotMarkers) {
+      return clean.replace(/\s*📷\s*/gu, ' ').replace(/\s+/gu, ' ').trim();
     }
-    return step;
+    if (!hasExistingMarker && index === Math.max(0, item.steps.length - 1)) {
+      return `${clean} 📷`;
+    }
+    return clean;
   };
 }

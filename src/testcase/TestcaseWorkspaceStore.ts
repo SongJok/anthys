@@ -29,6 +29,9 @@ export interface CreateTestcaseWorkspaceInput {
 export interface ListTestcaseWorkspacesInput {
   conversationId?: string;
   ownerStaffId?: string;
+  projectId?: string;
+  query?: string;
+  includeArchived?: boolean;
   limit?: number;
 }
 
@@ -52,6 +55,7 @@ export interface TestcaseWorkspaceStore {
     baseRevision: number,
     mutate: TestcaseWorkspaceMutation,
   ): Promise<TestcaseWorkspace>;
+  delete(workspaceId: string): Promise<boolean>;
   saveVersion(input: SaveTestcaseVersionInput): Promise<TestcaseWorkspaceVersion>;
   listVersions(
     workspaceId: string,
@@ -102,17 +106,47 @@ export class InMemoryTestcaseWorkspaceStore implements TestcaseWorkspaceStore {
     input: ListTestcaseWorkspacesInput = {},
   ): Promise<TestcaseWorkspaceSummary[]> {
     const limit = Math.max(1, Math.min(input.limit ?? 20, 100));
+    const query = input.query?.trim().toLowerCase();
+    const includeArchived = input.includeArchived ?? true;
     return [...this.workspaces.values()]
-      .filter(
-        (workspace) =>
-          (!input.conversationId ||
-            workspace.conversationId === input.conversationId) &&
-          (!input.ownerStaffId ||
-            workspace.ownerStaffId === input.ownerStaffId),
-      )
+      .filter((workspace) => {
+        if (
+          input.conversationId &&
+          workspace.conversationId !== input.conversationId
+        ) {
+          return false;
+        }
+        if (input.ownerStaffId && workspace.ownerStaffId !== input.ownerStaffId) {
+          return false;
+        }
+        if (input.projectId && workspace.projectId !== input.projectId) {
+          return false;
+        }
+        if (!includeArchived && workspace.state.archived) {
+          return false;
+        }
+        if (query) {
+          const hay = [
+            workspace.title,
+            workspace.conversationId,
+            workspace.ownerStaffId,
+            workspace.projectId ?? '',
+          ]
+            .join(' ')
+            .toLowerCase();
+          if (!hay.includes(query)) return false;
+        }
+        return true;
+      })
       .sort((left, right) => right.updatedAt - left.updatedAt)
       .slice(0, limit)
       .map(toSummary);
+  }
+
+  public async delete(workspaceId: string): Promise<boolean> {
+    const existed = this.workspaces.delete(workspaceId);
+    this.versions.delete(workspaceId);
+    return existed;
   }
 
   public async update(
@@ -206,6 +240,9 @@ function toSummary(workspace: TestcaseWorkspace): TestcaseWorkspaceSummary {
   return {
     id: workspace.id,
     title: workspace.title,
+    conversationId: workspace.conversationId,
+    conversationType: workspace.conversationType,
+    ownerStaffId: workspace.ownerStaffId,
     ...(workspace.projectId ? { projectId: workspace.projectId } : {}),
     revision: workspace.revision,
     requirementCount: workspace.state.requirements.filter(
@@ -213,9 +250,12 @@ function toSummary(workspace: TestcaseWorkspace): TestcaseWorkspaceSummary {
     ).length,
     caseCount: workspace.state.cases.filter((item) => item.status !== 'superseded')
       .length,
+    evidenceCount: workspace.state.evidence.length,
+    decisionCount: workspace.state.decisions.length,
     openQuestionCount: workspace.state.openQuestions.filter(
       (item) => item.status === 'open',
     ).length,
+    archived: Boolean(workspace.state.archived),
     updatedAt: workspace.updatedAt,
   };
 }

@@ -123,4 +123,32 @@ describe('runTurnWithAsyncHandoff', () => {
     expect(outcome).toEqual({ mode: 'background', job: { id: 'job-conv' } });
     expect(fgSettled).toBe(true);
   });
+
+  it('等待前台内部写操作完成并更新绑定后再执行 enqueueBackground', async () => {
+    const binding = { revision: 1 };
+    const seenRevisions: number[] = [];
+    const runForeground = async (signal: AbortSignal) =>
+      new Promise<string>((_resolve, reject) => {
+        signal.addEventListener('abort', () => {
+          setTimeout(() => {
+            binding.revision = 2;
+            reject(new Error('fg aborted'));
+          }, 20);
+        });
+      });
+    const enqueueBackground = vi.fn(async () => {
+      seenRevisions.push(binding.revision);
+      return { id: 'job-sync' };
+    });
+
+    const outcome = await runTurnWithAsyncHandoff({
+      handoffAfterMs: 10,
+      hasSideEffects: () => false,
+      runForeground,
+      enqueueBackground,
+    });
+
+    expect(outcome).toEqual({ mode: 'background', job: { id: 'job-sync' } });
+    expect(seenRevisions).toEqual([2]);
+  });
 });

@@ -64,6 +64,12 @@ import type {
   ScheduledTaskInput,
   ScheduledTaskUpdate,
   SystemLoopStatus,
+  TestcaseExportFormat,
+  TestcaseOutputPreferences,
+  TestcaseWorkspace,
+  TestcaseWorkspaceDetail,
+  TestcaseWorkspaceSummary,
+  CompiledTestcaseDocument,
   SemanticMemory,
   SemanticMemoryKind,
   SemanticMemoryPage,
@@ -978,7 +984,105 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+
+  testcaseWorkspaces: (params: {
+    query?: string;
+    conversationId?: string;
+    ownerStaffId?: string;
+    projectId?: string;
+    includeArchived?: boolean;
+    limit?: number;
+  } = {}) => {
+    const search = new URLSearchParams();
+    if (params.query?.trim()) search.set('query', params.query.trim());
+    if (params.conversationId?.trim()) {
+      search.set('conversationId', params.conversationId.trim());
+    }
+    if (params.ownerStaffId?.trim()) {
+      search.set('ownerStaffId', params.ownerStaffId.trim());
+    }
+    if (params.projectId?.trim()) search.set('projectId', params.projectId.trim());
+    if (params.includeArchived !== undefined) {
+      search.set('includeArchived', String(params.includeArchived));
+    }
+    if (params.limit !== undefined) search.set('limit', String(params.limit));
+    const suffix = search.toString();
+    return request<{ ok: boolean; items: TestcaseWorkspaceSummary[] }>(
+      `/testcases/workspaces${suffix ? `?${suffix}` : ''}`,
+    );
+  },
+  testcaseWorkspaceDetail: (id: string) =>
+    request<{ ok: boolean } & TestcaseWorkspaceDetail>(
+      `/testcases/workspaces/${encodeURIComponent(id)}`,
+    ),
+  updateTestcaseWorkspace: (
+    id: string,
+    body: {
+      baseRevision?: number;
+      title?: string;
+      projectId?: string | null;
+      archived?: boolean;
+      outputPreferences?: Partial<TestcaseOutputPreferences>;
+    },
+  ) =>
+    request<{ ok: boolean; workspace: TestcaseWorkspace }>(
+      `/testcases/workspaces/${encodeURIComponent(id)}`,
+      { method: 'PATCH', body: JSON.stringify(body) },
+    ),
+  compileTestcaseWorkspace: (
+    id: string,
+    body: { baseRevision?: number; label?: string } = {},
+  ) =>
+    request<{ ok: boolean; document: CompiledTestcaseDocument }>(
+      `/testcases/workspaces/${encodeURIComponent(id)}/compile`,
+      { method: 'POST', body: JSON.stringify(body) },
+    ),
+  deleteTestcaseWorkspace: (id: string) =>
+    request<{ ok: boolean; removed: boolean }>(
+      `/testcases/workspaces/${encodeURIComponent(id)}`,
+      { method: 'DELETE' },
+    ),
 };
+
+export async function downloadTestcaseExport(params: {
+  workspaceId: string;
+  format: TestcaseExportFormat;
+  version?: number;
+  fallbackName?: string;
+}): Promise<void> {
+  const token = getToken();
+  const search = new URLSearchParams({ format: params.format });
+  if (params.version !== undefined) search.set('version', String(params.version));
+  const response = await fetch(
+    `${BASE}/testcases/workspaces/${encodeURIComponent(params.workspaceId)}/export?${search.toString()}`,
+    {
+      credentials: 'same-origin',
+      headers: token ? { authorization: `Bearer ${token}` } : undefined,
+    },
+  );
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => ({}))) as { error?: string };
+    throw new Error(payload.error ?? `导出失败 (${response.status})`);
+  }
+  const blob = await response.blob();
+  const disposition = response.headers.get('content-disposition') ?? '';
+  const utf8Match = /filename\*=UTF-8''([^;]+)/iu.exec(disposition);
+  const plainMatch = /filename="([^"]+)"/iu.exec(disposition);
+  const fileName = utf8Match?.[1]
+    ? decodeURIComponent(utf8Match[1])
+    : plainMatch?.[1] || `${params.fallbackName || 'testcase'}.${params.format}`;
+  const url = URL.createObjectURL(blob);
+  try {
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = fileName;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
 
 /** EventSource 无法携带 Authorize 头，改用一次性票据订阅 SSE */
 export function chatStreamUrl(

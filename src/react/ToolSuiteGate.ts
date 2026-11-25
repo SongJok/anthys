@@ -59,12 +59,22 @@ export const FINANCE_MARKET_SUITE: ToolSuite = {
     tool.source === 'market' || tool.name === 'market_data_fetch',
 };
 
+/** 测试用例自主编写与合稿套件 */
+export const TESTCASE_WORKSPACE_SUITE: ToolSuite = {
+  id: 'testcase_workspace',
+  label: '测试用例工作区',
+  description:
+    '测试用例增量工作区管理、需求/证据/草稿增删改查及确定性合稿导出。触发词：测试用例、用例草稿、测试点、PRD转用例、功能用例、需求追溯、用例合稿、用例导出。',
+  matches: (tool) => tool.source === 'testcase-workspace',
+};
+
 export const DEFAULT_TOOL_SUITES: readonly ToolSuite[] = [
   PROJECT_CODE_SUITE,
   DWS_OFFICE_WRITE_SUITE,
   BROWSER_AUTOMATION_SUITE,
   LBS_AND_TRAVEL_SUITE,
   FINANCE_MARKET_SUITE,
+  TESTCASE_WORKSPACE_SUITE,
 ];
 
 /** 按环境变量解析启用的套件列表；未设置 TOOL_SUITES_LIST 时返回全部默认套件 */

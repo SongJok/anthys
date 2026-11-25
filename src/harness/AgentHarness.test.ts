@@ -728,6 +728,84 @@ describe('AgentHarness', () => {
     expect(run).not.toHaveBeenCalled();
   });
 
+  it('后台任务推进或新建工作区后通过 onWorkspaceBindingChange 回写最新 revision', async () => {
+    const engine: AgentEngine = {
+      async run(input) {
+        if (input.context.testcaseWorkspaceBinding) {
+          input.context.testcaseWorkspaceBinding.current = {
+            workspaceId: 'ws-1',
+            baseRevision: 5,
+          };
+          input.context.testcaseWorkspaceBinding.autoSnapshotted = false;
+        }
+        input.emit({
+          type: 'completed',
+          usage: { totalTokens: 10, steps: 1, durationMs: 5 },
+        });
+        return {
+          answer: 'paused',
+          reasoning: '',
+          usage: { totalTokens: 10, steps: 1, durationMs: 5 },
+          watchdog: {
+            action: 'pause',
+            code: 'budget',
+            reason: '预算到达',
+            notice: 'paused',
+            escalate: true,
+          },
+        };
+      },
+    };
+    const resolver = vi.fn(async () => testcaseSnapshot());
+    const onWorkspaceBindingChange = vi.fn();
+    const { harness } = createHarness(
+      engine,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { resolveTestcaseWorkspace: resolver },
+    );
+    const job: AgentJob = {
+      id: 'job-ws-progress',
+      conversationId: 'cid-1',
+      conversationType: '1',
+      messageId: 'job_msg_ws_progress',
+      senderStaffId: 'staff-1',
+      senderNick: '张三',
+      kind: 'task',
+      status: 'running',
+      prompt: '继续编写测试用例',
+      metadata: {
+        workspaceId: 'ws-1',
+        baseRevision: 3,
+        workspaceAutoSnapshotted: true,
+      },
+      result: null,
+      error: null,
+      priority: 0,
+      attempts: 1,
+      maxAttempts: 2,
+      fencingToken: 1,
+      leaseOwner: 'runner',
+      leaseExpiresAt: 0,
+      createdAt: 0,
+      updatedAt: 0,
+      startedAt: 0,
+      finishedAt: null,
+    };
+
+    await harness.runJob(job, {
+      emit: () => undefined,
+      onWorkspaceBindingChange,
+    });
+
+    expect(onWorkspaceBindingChange).toHaveBeenCalledWith({
+      workspaceId: 'ws-1',
+      baseRevision: 5,
+    });
+  });
+
   it('后台任务复用会话链路执行并带任务归因', async () => {
     const calls: { messages: unknown[] }[] = [];
     const contexts: Array<{ jobId?: string; jobKind?: string }> = [];

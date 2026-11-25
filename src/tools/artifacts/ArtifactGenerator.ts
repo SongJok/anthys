@@ -188,6 +188,22 @@ function sanitizeSheetName(raw: string | undefined, index: number): string {
   return cleaned || `Sheet${index + 1}`;
 }
 
+function computeColumnWidths(
+  allRows: Array<Array<string | number | boolean | null | undefined>>,
+): number[] {
+  const widths: number[] = [];
+  for (const row of allRows.slice(0, 100)) {
+    row.forEach((cell, colIndex) => {
+      if (cell === null || cell === undefined) return;
+      const lines = String(cell).split(/\r?\n/gu);
+      const longest = lines.reduce((max, line) => Math.max(max, line.length), 0);
+      const estimated = Math.min(54, Math.max(12, Math.ceil(longest * 1.45) + 3));
+      widths[colIndex] = Math.max(widths[colIndex] ?? 12, estimated);
+    });
+  }
+  return widths;
+}
+
 function buildWorksheetXml(sheet: TableSheetInput): string {
   const allRows: Array<Array<string | number | boolean | null | undefined>> = [];
   if (sheet.headers && sheet.headers.length > 0) {
@@ -197,6 +213,17 @@ function buildWorksheetXml(sheet: TableSheetInput): string {
     allRows.push(row);
   }
 
+  const colWidths = computeColumnWidths(allRows);
+  const colsXml =
+    colWidths.length > 0
+      ? `<cols>${colWidths
+          .map(
+            (width, idx) =>
+              `<col min="${idx + 1}" max="${idx + 1}" width="${width}" customWidth="1"/>`,
+          )
+          .join('')}</cols>`
+      : '';
+
   const rowXmls: string[] = [];
   allRows.forEach((row, rIdx) => {
     const rowNum = rIdx + 1;
@@ -205,7 +232,7 @@ function buildWorksheetXml(sheet: TableSheetInput): string {
     row.forEach((cell, cIdx) => {
       if (cell === null || cell === undefined) return;
       const ref = `${columnName(cIdx)}${rowNum}`;
-      const styleAttr = isHeader ? ' s="1"' : '';
+      const styleAttr = isHeader ? ' s="1"' : ' s="0"';
       if (typeof cell === 'number' && Number.isFinite(cell)) {
         cells.push(`<c r="${ref}"${styleAttr}><v>${cell}</v></c>`);
       } else if (typeof cell === 'boolean') {
@@ -224,6 +251,7 @@ function buildWorksheetXml(sheet: TableSheetInput): string {
   return (
     '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
     '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
+    colsXml +
     `<sheetData>${rowXmls.join('')}</sheetData>` +
     '</worksheet>'
   );
@@ -301,12 +329,25 @@ export function buildXlsxBuffer(sheets: TableSheetInput[]): Buffer {
     '<font><sz val="11"/><name val="Calibri"/></font>' +
     '<font><b/><sz val="11"/><name val="Calibri"/></font>' +
     '</fonts>' +
-    '<fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills>' +
-    '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>' +
+    '<fills count="3">' +
+    '<fill><patternFill patternType="none"/></fill>' +
+    '<fill><patternFill patternType="gray125"/></fill>' +
+    '<fill><patternFill patternType="solid"><fgColor rgb="FFF2F4F8"/><bgColor indexed="64"/></patternFill></fill>' +
+    '</fills>' +
+    '<borders count="2">' +
+    '<border><left/><right/><top/><bottom/><diagonal/></border>' +
+    '<border>' +
+    '<left style="thin"><color rgb="FFD9DFE8"/></left>' +
+    '<right style="thin"><color rgb="FFD9DFE8"/></right>' +
+    '<top style="thin"><color rgb="FFD9DFE8"/></top>' +
+    '<bottom style="thin"><color rgb="FFD9DFE8"/></bottom>' +
+    '<diagonal/>' +
+    '</border>' +
+    '</borders>' +
     '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>' +
     '<cellXfs count="2">' +
-    '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>' +
-    '<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/>' +
+    '<xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf>' +
+    '<xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf>' +
     '</cellXfs>' +
     '</styleSheet>';
 
@@ -325,50 +366,160 @@ export function buildXlsxBuffer(sheets: TableSheetInput[]): Buffer {
   return buildZipBuffer(entries);
 }
 
-function paragraphXml(text: string, options: { bold?: boolean; sizeHalfPt?: number } = {}): string {
+function paragraphXml(
+  text: string,
+  options: { bold?: boolean; sizeHalfPt?: number; indentLeft?: number; colorHex?: string } = {},
+): string {
+  const pPr = options.indentLeft
+    ? `<w:pPr><w:ind w:left="${options.indentLeft}"/></w:pPr>`
+    : '';
   const rPrParts: string[] = [];
   if (options.bold) rPrParts.push('<w:b/>');
+  if (options.colorHex) rPrParts.push(`<w:color w:val="${options.colorHex}"/>`);
   if (options.sizeHalfPt) {
     rPrParts.push(`<w:sz w:val="${options.sizeHalfPt}"/><w:szCs w:val="${options.sizeHalfPt}"/>`);
   }
   const rPr = rPrParts.length > 0 ? `<w:rPr>${rPrParts.join('')}</w:rPr>` : '';
-  return `<w:p><w:r>${rPr}<w:t xml:space="preserve">${escapeXml(text)}</w:t></w:r></w:p>`;
+  return `<w:p>${pPr}<w:r>${rPr}<w:t xml:space="preserve">${escapeXml(text)}</w:t></w:r></w:p>`;
 }
 
-/** 构造合法的 OOXML (.docx) Word 文档，将 Markdown 标题、列表与段落转为结构化正文 */
+function isMarkdownTableRow(line: string): boolean {
+  const trimmed = line.trim();
+  return trimmed.startsWith('|') && trimmed.endsWith('|') && trimmed.length >= 2;
+}
+
+function isMarkdownTableSeparator(line: string): boolean {
+  if (!isMarkdownTableRow(line)) return false;
+  const inner = line.trim().slice(1, -1);
+  return inner
+    .split('|')
+    .every((cell) => /^\s*:?-{2,}:?\s*$/u.test(cell));
+}
+
+function parseMarkdownTableCells(line: string): string[] {
+  const trimmed = line.trim().slice(1, -1);
+  const cells: string[] = [];
+  let current = '';
+  for (let index = 0; index < trimmed.length; index += 1) {
+    const ch = trimmed[index]!;
+    if (ch === '\\' && trimmed[index + 1] === '|') {
+      current += '|';
+      index += 1;
+      continue;
+    }
+    if (ch === '|') {
+      cells.push(current.trim());
+      current = '';
+      continue;
+    }
+    current += ch;
+  }
+  cells.push(current.trim());
+  return cells;
+}
+
+function cleanInlineMarkdown(text: string): string {
+  return text.replace(/\*\*([^*]+)\*\*/gu, '$1').replace(/`([^`]+)`/gu, '$1');
+}
+
+function tableXml(rows: string[][]): string {
+  const tblPr =
+    '<w:tblPr>' +
+    '<w:tblW w:w="5000" w:type="pct"/>' +
+    '<w:tblBorders>' +
+    '<w:top w:val="single" w:sz="4" w:space="0" w:color="D0D7DE"/>' +
+    '<w:left w:val="single" w:sz="4" w:space="0" w:color="D0D7DE"/>' +
+    '<w:bottom w:val="single" w:sz="4" w:space="0" w:color="D0D7DE"/>' +
+    '<w:right w:val="single" w:sz="4" w:space="0" w:color="D0D7DE"/>' +
+    '<w:insideH w:val="single" w:sz="4" w:space="0" w:color="D0D7DE"/>' +
+    '<w:insideV w:val="single" w:sz="4" w:space="0" w:color="D0D7DE"/>' +
+    '</w:tblBorders>' +
+    '</w:tblPr>';
+  const trs = rows.map((row, rowIndex) => {
+    const isHeader = rowIndex === 0;
+    const tcs = row.map((cell) => {
+      const shd = isHeader
+        ? '<w:tcPr><w:shd w:val="clear" w:color="auto" w:fill="F2F4F8"/></w:tcPr>'
+        : '';
+      const lines = cleanInlineMarkdown(cell)
+        .split(/<br\s*\/?>|\r?\n/giu)
+        .map((line) => line.trim())
+        .filter((line, idx, arr) => line.length > 0 || (arr.length === 1 && idx === 0));
+      const paras = (lines.length > 0 ? lines : ['']).map((line) =>
+        paragraphXml(line, { bold: isHeader, sizeHalfPt: 18 }),
+      );
+      return `<w:tc>${shd}${paras.join('')}</w:tc>`;
+    });
+    return `<w:tr>${trsHeader(isHeader)}${tcs.join('')}</w:tr>`;
+  });
+  return `<w:tbl>${tblPr}${trs.join('')}</w:tbl>`;
+}
+
+function trsHeader(isHeader: boolean): string {
+  return isHeader ? '<w:trPr><w:tblHeader/></w:trPr>' : '';
+}
+
+/** 构造合法的 OOXML (.docx) Word 文档，将 Markdown 标题、列表、表格与段落转为结构化正文 */
 export function buildDocxBuffer(markdown: string, title?: string): Buffer {
-  const paragraphs: string[] = [];
+  const blocks: string[] = [];
   if (title?.trim()) {
-    paragraphs.push(paragraphXml(title.trim(), { bold: true, sizeHalfPt: 36 }));
+    blocks.push(paragraphXml(title.trim(), { bold: true, sizeHalfPt: 36 }));
   }
 
-  for (const rawLine of markdown.replaceAll('\r\n', '\n').split('\n')) {
-    const line = rawLine.trimEnd();
+  const lines = markdown.replaceAll('\r\n', '\n').split('\n');
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index]!.trimEnd();
     if (!line.trim()) {
-      paragraphs.push('<w:p/>');
+      blocks.push('<w:p/>');
+      continue;
+    }
+    if (
+      isMarkdownTableRow(line) &&
+      index + 1 < lines.length &&
+      isMarkdownTableSeparator(lines[index + 1]!)
+    ) {
+      const tableRows: string[][] = [parseMarkdownTableCells(line)];
+      index += 2;
+      while (index < lines.length && isMarkdownTableRow(lines[index]!)) {
+        tableRows.push(parseMarkdownTableCells(lines[index]!));
+        index += 1;
+      }
+      index -= 1;
+      blocks.push(tableXml(tableRows));
       continue;
     }
     const h1 = /^#\s+(.+)$/u.exec(line);
     if (h1?.[1]) {
-      paragraphs.push(paragraphXml(h1[1].trim(), { bold: true, sizeHalfPt: 32 }));
+      blocks.push(paragraphXml(cleanInlineMarkdown(h1[1].trim()), { bold: true, sizeHalfPt: 32 }));
       continue;
     }
     const h2 = /^##\s+(.+)$/u.exec(line);
     if (h2?.[1]) {
-      paragraphs.push(paragraphXml(h2[1].trim(), { bold: true, sizeHalfPt: 26 }));
+      blocks.push(paragraphXml(cleanInlineMarkdown(h2[1].trim()), { bold: true, sizeHalfPt: 26 }));
       continue;
     }
     const h3 = /^###+\s+(.+)$/u.exec(line);
     if (h3?.[1]) {
-      paragraphs.push(paragraphXml(h3[1].trim(), { bold: true, sizeHalfPt: 22 }));
+      blocks.push(paragraphXml(cleanInlineMarkdown(h3[1].trim()), { bold: true, sizeHalfPt: 22 }));
+      continue;
+    }
+    const quote = /^\s*>\s?(.*)$/u.exec(line);
+    if (quote) {
+      blocks.push(
+        paragraphXml(cleanInlineMarkdown((quote[1] ?? '').trim()), {
+          sizeHalfPt: 20,
+          indentLeft: 360,
+          colorHex: '57606A',
+        }),
+      );
       continue;
     }
     const bullet = /^\s*[-*]\s+(.+)$/u.exec(line);
     if (bullet?.[1]) {
-      paragraphs.push(paragraphXml(`• ${bullet[1].trim()}`, { sizeHalfPt: 21 }));
+      blocks.push(paragraphXml(`• ${cleanInlineMarkdown(bullet[1].trim())}`, { sizeHalfPt: 21 }));
       continue;
     }
-    paragraphs.push(paragraphXml(line, { sizeHalfPt: 21 }));
+    blocks.push(paragraphXml(cleanInlineMarkdown(line), { sizeHalfPt: 21 }));
   }
 
   const contentTypes =
@@ -388,7 +539,7 @@ export function buildDocxBuffer(markdown: string, title?: string): Buffer {
   const documentXml =
     '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
     '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
-    `<w:body>${paragraphs.join('')}<w:sectPr/></w:body>` +
+    `<w:body>${blocks.join('')}<w:sectPr/></w:body>` +
     '</w:document>';
 
   return buildZipBuffer([

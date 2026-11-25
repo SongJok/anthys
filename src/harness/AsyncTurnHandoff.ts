@@ -98,9 +98,15 @@ export async function runTurnWithAsyncHandoff<TResult, TJob>(
         handedOff = true;
         runController.abort('ASYNC_HANDOFF');
         try {
-          const job = await enqueueBackground();
-          // 前台中止是协作式的：等它真正收敛后再释放会话锁，避免同会话并发写历史
+          // 前台中止是协作式的：先等待前台收敛（含内部草稿写完并同步最新 revision）再入队
           await foregroundPromise.catch(() => {});
+          if (signal?.aborted) {
+            settle(() =>
+              reject(signal.reason ?? new Error('Turn aborted during handoff')),
+            );
+            return;
+          }
+          const job = await enqueueBackground();
           if (signal?.aborted) {
             await cancelBackground?.(job);
             settle(() =>

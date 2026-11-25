@@ -7,6 +7,8 @@ export type TestcaseMethod =
   | '场景法'
   | '错误猜测法';
 
+export type TestcaseMethodExpression = string;
+
 export interface TestcaseRequirement {
   id: string;
   title: string;
@@ -39,7 +41,7 @@ export interface TestcaseDraft {
   steps: string[];
   expectedResults: string[];
   priority: '高' | '中' | '低';
-  testMethod: TestcaseMethod;
+  testMethod: TestcaseMethodExpression;
   scenarioType: TestcaseScenarioType;
   requirementIds: string[];
   evidenceIds: string[];
@@ -77,6 +79,7 @@ export interface TestcaseWorkspaceState {
   decisions: TestcaseDecision[];
   openQuestions: TestcaseOpenQuestion[];
   outputPreferences: TestcaseOutputPreferences;
+  archived?: boolean;
 }
 
 export interface TestcaseWorkspace {
@@ -101,6 +104,7 @@ export interface TestcaseWorkspaceSnapshot {
 export interface TestcaseWorkspacePatch {
   title?: string;
   projectId?: string | null;
+  archived?: boolean;
   requirements?: {
     upsert?: TestcaseRequirement[];
     removeIds?: string[];
@@ -127,11 +131,17 @@ export interface TestcaseWorkspacePatch {
 export interface TestcaseWorkspaceSummary {
   id: string;
   title: string;
+  conversationId?: string;
+  conversationType?: '1' | '2';
+  ownerStaffId?: string;
   projectId?: string;
   revision: number;
   requirementCount: number;
   caseCount: number;
+  evidenceCount?: number;
+  decisionCount?: number;
   openQuestionCount: number;
+  archived?: boolean;
   updatedAt: number;
 }
 
@@ -149,6 +159,7 @@ export interface TestcaseCompileIssue {
   code:
     | 'missing_requirement'
     | 'missing_evidence'
+    | 'evidence_conflict'
     | 'uncovered_requirement'
     | 'duplicate_candidate'
     | 'empty_case'

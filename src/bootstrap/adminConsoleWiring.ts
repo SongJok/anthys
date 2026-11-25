@@ -302,6 +302,7 @@ export function startConfiguredAdminServer(
     groupModelRoutes,
     personSettings: memory.personSettings,
     whitelist,
+    testcaseWorkspaces: tools.testcaseWorkspaces,
     mcp: {
       status: () => mcpPort.status(),
       applyServers: (servers) => mcpPort.applyServers(servers),

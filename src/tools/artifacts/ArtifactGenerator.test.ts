@@ -114,4 +114,30 @@ describe('ArtifactGenerator', () => {
     expect(() => buildXlsxBuffer([])).toThrow('工作表');
     expect(buildDocxBuffer('纯文本').length).toBeGreaterThan(100);
   });
+
+  it('xlsx 写入列宽与自动换行样式，docx 将 Markdown 表格转为 OOXML 表格', () => {
+    const xlsx = buildXlsxBuffer([
+      {
+        name: '测试用例',
+        headers: ['用例编号', '操作步骤'],
+        rows: [['TC_ORDER_001', '1. 打开订单页\n2. 点击提交']],
+      },
+    ]);
+    expect(extractDocument(xlsx, 'tc.xlsx').text).toContain('TC_ORDER_001');
+
+    const md = [
+      '# 订单模块',
+      '',
+      '> 对应需求章节：3.1',
+      '',
+      '| 用例编号 | 用例标题 | 步骤 |',
+      '| --- | --- | --- |',
+      '| TC_ORDER_001 | 正常下单\\|主流程 | 1. 选商品<br>2. 提交 |',
+    ].join('\n');
+    const docx = buildDocxBuffer(md, '订单测试');
+    const extracted = extractDocument(docx, 'tc.docx');
+    expect(extracted.text).toContain('| 用例编号 | 用例标题 | 步骤 |');
+    expect(extracted.text).toContain('| --- | --- | --- |');
+    expect(extracted.text).toContain('| TC_ORDER_001 | 正常下单\\|主流程 | 1. 选商品 / 2. 提交 |');
+  });
 });

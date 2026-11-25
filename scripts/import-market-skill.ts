@@ -77,6 +77,8 @@ interface SkillSpec {
   replacements: Array<[string, string]>;
   /** 按标题删除的整节（含其子节） */
   dropSections: string[];
+  /** 本地已深度升级维护的 SKILL.md 相对路径（存在时跳过上游覆盖，保留本地正文） */
+  localBodyFile?: string;
 }
 
 const CURATION: SkillSpec[] = [
@@ -511,6 +513,7 @@ const CURATION: SkillSpec[] = [
     visibility: 'public',
     maxInstructionChars: 8000,
     allowedTools: [
+      'activate_tools',
       'project_read',
       'project_search',
       'workspace_read_file',
@@ -520,9 +523,12 @@ const CURATION: SkillSpec[] = [
       'testcase_workspace_create',
       'testcase_workspace_update',
       'testcase_compile',
+      'artifact_generate',
       'deliver_artifact',
+      'dws_doc',
     ],
     tags: ['origin:qoder-market', 'test-case', 'prd', 'qa'],
+    localBodyFile: 'skills/market/testing/auto-gen-testcase-from-req/SKILL.md',
     grade: 'B',
     blockers: [
       '上游承诺"可由 auto-test-from-testcase 直接执行"，该配套技能不在本项目，输出改为纯用例文档',
@@ -1200,6 +1206,39 @@ interface Converted {
 }
 
 async function convert(spec: SkillSpec, importedAt: string): Promise<Converted> {
+  if (spec.localBodyFile) {
+    const localRaw = await readFile(path.join(REPO_ROOT, spec.localBodyFile), 'utf8');
+    const localBody = stripFrontmatter(localRaw).trim();
+    const skillMd = `${renderFrontmatter(spec)}\n\n${localBody}\n`;
+    const keptRefs: Array<{ path: string; content: string }> = [];
+    for (const resource of spec.keptResources) {
+      const targetPath = path.join(TARGET_ROOT, spec.module, spec.name, resource.to);
+      const sourcePath = path.join(SOURCE_ROOT, spec.packageName, resource.from);
+      const content = await readFile(targetPath, 'utf8').catch(() =>
+        readFile(sourcePath, 'utf8'),
+      );
+      keptRefs.push({ path: resource.to, content });
+    }
+    const changes = [
+      `description：本地重写为 ${spec.description.length} 字符（上限 160）`,
+      `when_to_use：本地重写为 ${spec.whenToUse.length} 字符（上限 200）`,
+      `version：市场来源 ${spec.market.version}；本地升级为 ${spec.version}`,
+      `allowed_tools：按本项目真实工具名映射，共 ${spec.allowedTools.length} 个`,
+      `risk=${spec.risk}，visibility=${spec.visibility}，max_instruction_chars=${spec.maxInstructionChars}`,
+      `保留本地升级正文（${spec.localBodyFile}），防止重跑导入脚本被上游包覆盖`,
+      spec.keptResources.length > 0
+        ? `保留资源：${spec.keptResources.map((item) => item.to).join('、')}`
+        : '未保留资源',
+    ];
+    return {
+      spec,
+      skillMd,
+      importDoc: renderImportDoc(spec, importedAt, changes),
+      refs: keptRefs,
+      changes,
+    };
+  }
+
   const sourceDir = path.join(SOURCE_ROOT, spec.packageName);
   const raw = await readFile(path.join(sourceDir, 'SKILL.md'), 'utf8');
   let body = stripFrontmatter(raw);
@@ -1255,11 +1294,13 @@ async function writeSkill(converted: Converted): Promise<void> {
     await writeFile(refPath, ref.content, 'utf8');
   }
 
-  for (const resource of spec.keptResources) {
-    const from = path.join(SOURCE_ROOT, spec.packageName, resource.from);
-    const to = path.join(targetDir, resource.to);
-    await mkdir(path.dirname(to), { recursive: true });
-    await writeFile(to, await readFile(from, 'utf8'), 'utf8');
+  if (!spec.localBodyFile) {
+    for (const resource of spec.keptResources) {
+      const from = path.join(SOURCE_ROOT, spec.packageName, resource.from);
+      const to = path.join(targetDir, resource.to);
+      await mkdir(path.dirname(to), { recursive: true });
+      await writeFile(to, await readFile(from, 'utf8'), 'utf8');
+    }
   }
 }
 

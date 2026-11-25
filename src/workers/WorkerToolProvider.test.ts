@@ -145,4 +145,30 @@ describe('WorkerToolProvider', () => {
     );
     expect(emptyTask).toContain('非空的 task 描述');
   });
+
+  it('后台派发 Worker 时透传当前上下文的测试用例工作区绑定', async () => {
+    const enqueue = vi.fn(async () => fakeJob('job-ws-1'));
+    const provider = new WorkerToolProvider({ jobStore: { enqueue } });
+    const contextWithWs = ctx({
+      testcaseWorkspaceBinding: {
+        current: { workspaceId: 'ws-9', baseRevision: 4 },
+        autoSnapshotted: true,
+      },
+    });
+    const [tool] = await provider.getTools(contextWithWs);
+    await tool!.executeStructured!(
+      { worker: 'ops', task: '补充测试用例并合稿', background: true },
+      contextWithWs,
+    );
+
+    expect(enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          workspaceId: 'ws-9',
+          baseRevision: 4,
+          workspaceAutoSnapshotted: true,
+        }),
+      }),
+    );
+  });
 });

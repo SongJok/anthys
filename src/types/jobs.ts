@@ -133,4 +133,9 @@ export interface AgentJobStore {
   loadCheckpoint?(jobId: string): Promise<AgentJobCheckpoint | null>;
   /** 任务完成或取消后清理检查点 */
   deleteCheckpoint?(jobId: string): Promise<void>;
+  /** 同步更新后台任务绑定的最新测试用例工作区版本 */
+  updateWorkspaceBinding?(
+    jobId: string,
+    binding: { workspaceId: string; baseRevision: number },
+  ): Promise<void>;
 }

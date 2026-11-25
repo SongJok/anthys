@@ -9,6 +9,7 @@ tags:
   - prd
   - qa
 allowed_tools:
+  - activate_tools
   - project_read
   - project_search
   - workspace_read_file
@@ -18,7 +19,9 @@ allowed_tools:
   - testcase_workspace_create
   - testcase_workspace_update
   - testcase_compile
+  - artifact_generate
   - deliver_artifact
+  - dws_doc
 risk: read
 visibility: public
 max_instruction_chars: 8000
@@ -38,22 +41,24 @@ max_instruction_chars: 8000
 - 用户最新明确要求优先。截图或实测与文档冲突时，以可见行为编写，并记录差异或待确认项。
 - 需求不完整时，只提出会阻塞可靠设计的问题；不阻塞的部分继续完成并标注假设。
 - 每条用例只验证一个清晰目的，前置条件、操作步骤和预期结果必须可观察、可执行。
-- 测试方法只使用：需求分析法、等价类划分法、边界值分析法、场景法、错误猜测法。
+- 测试方法只使用：需求分析法、等价类划分法、边界值分析法、场景法、错误猜测法，或其 `+` 组合（如 `需求分析法+场景法`、`等价类划分法+边界值分析法`）。
 - 最终交付固定为七列，不增加数据列；依赖数据写入实际使用它的步骤。
 - 最终编号、排序、去重、统计、数据清单和追溯由 `testcase_compile` 生成，不手工维护最终编号。
 
 ## 工作区协作
 
-一次性、信息完整的小请求可以直接回答或生成文件，不必创建工作区。需要跨消息、跨批次持续修订，或用户明确要求保存草稿时，使用测试用例工作区。
+一次性、信息完整的小请求可以直接回答或生成文件（可用 `artifact_generate`），不必创建工作区。需要跨消息、跨批次持续修订，或用户明确要求保存草稿时，使用测试用例工作区。
 
-- `testcase_workspace_list`：需要恢复或切换已有工作时列出当前会话工作区。
-- `testcase_workspace_get`：默认读摘要；只有需要细节时再读取 requirements、cases、evidence 等部分。
+若开启了按需工具套件且当前工具列表中未见 `testcase_workspace_*`，先调用 `activate_tools(suite="testcase_workspace")` 激活套件。
+
+- `testcase_workspace_list`：需要恢复或切换已有工作时列出当前或跨会话工作区。
+- `testcase_workspace_get`：默认读摘要；只有需要细节时再读取 requirements、cases、evidence、versions 等部分（支持按模块、状态筛选）。
 - `testcase_workspace_select`：用户明确继续旧工作区或当前绑定不是目标时，先从列表选择，再读取或修改。
 - `testcase_workspace_create`：创建新的独立编写空间。
-- `testcase_workspace_update`：增量提交本次变化，使用最近一次读取的 `baseRevision`；冲突时重新读取，不静默覆盖。
-- `testcase_compile`：生成确定性完成版本；`deliver=true` 时才发送文件。
+- `testcase_workspace_update`：增量提交本次变化，同一轮尽量合并为一次调用并传入最近一次读取的 `baseRevision`；冲突时按返回的最新 revision 合并重试，不静默覆盖。工作区完结后可设 `archived: true` 归档，避免干扰后续新需求。
+- `testcase_compile`：生成确定性完成版本；`deliver=true` 时才发送文件（控制台会话则在工作区生成文件并提示去「测试用例库」下载）。
 
-草稿使用稳定语义 ID，例如 `draft-order-create-valid`。后续补充、修改或作废仍引用该 ID，不依赖会变化的最终编号。需求、证据、决策和待确认问题也使用稳定 ID。
+草稿使用稳定语义 ID，例如 `draft-order-create-valid`。后续补充、修改或作废仍引用该 ID，不依赖会变化的最终编号。需求、证据、决策和待确认问题也使用稳定 ID。传入 `preconditions`、`steps`、`expectedResults` 数组时直接写纯文本原子动作，不要自带 `1.` 序号前缀（编译器会自动编号并避免双重序号）。
 
 ## 决策指引
 
@@ -87,7 +92,7 @@ max_instruction_chars: 8000
 - 前置条件包含账号、权限、依赖数据和必要环境状态，只描述角色与已登录状态，不附登录实现方式。
 - 步骤写明业务页面路径、UI 元素、动作及直接输入值或占位符；不把预期写入步骤。
 - 预期结果描述具体元素、文案、数值或状态变化，禁止“功能正常”“返回成功”“系统正确处理”等模糊表述。
-- 优先级为高 / 中 / 低；测试方法使用上述五种名称。
+- 优先级为高 / 中 / 低；测试方法使用上述五种名称或其 `+` 组合（最多 3 种，主方法在前）。
 
 前置条件、步骤和预期结果从 `1.` 开始，多项用 `<br>` 分隔。每步一个原子 UI 动作；顶部菜单、行内菜单和批量操作按“选择记录 → 点击入口 → 展开或选择菜单项 → 确认”展开。默认在关键断言、失败现场和必要状态处添加 `📷`；用户要求移除时全部删除。
 

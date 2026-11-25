@@ -6,7 +6,10 @@ import {
 } from '../harness/ToolExecutionLedger.js';
 import { BuiltinToolProvider } from './BuiltinTools.js';
 import { ReActRunner } from './ReActRunner.js';
-import { PROJECT_CODE_SUITE } from './ToolSuiteGate.js';
+import {
+  PROJECT_CODE_SUITE,
+  TESTCASE_WORKSPACE_SUITE,
+} from './ToolSuiteGate.js';
 import type {
   AgentStreamEvent,
   ChatCompletionRequest,
@@ -2019,5 +2022,54 @@ describe('ReActRunner 步骤级断点续跑（Step Checkpointing）', () => {
         m.content.includes('[人工恢复补充要求] 只基于已有信息作答'),
       ),
     ).toBe(true);
+  });
+
+  it('当前上下文已绑定测试用例工作区时自动预激活 testcase_workspace 套件', async () => {
+    const model = new ScriptedModel([
+      [
+        { contentDelta: '可直接编辑工作区' },
+        { finishReason: 'stop', usage: { totalTokens: 5 } },
+      ],
+    ]);
+    const provider: IToolProvider = {
+      providerName: 'mixed',
+      async getTools() {
+        return [
+          {
+            name: 'current_time',
+            description: '时间',
+            risk: 'read',
+            source: 'builtin',
+            parametersJsonSchema: { type: 'object', properties: {} },
+            execute: async () => 'now',
+          },
+          {
+            name: 'testcase_workspace_update',
+            description: '更新',
+            risk: 'write',
+            internalWrite: true,
+            source: 'testcase-workspace',
+            parametersJsonSchema: { type: 'object', properties: {} },
+            execute: async () => 'ok',
+          },
+        ];
+      },
+    };
+    const runner = new ReActRunner({
+      model,
+      toolProviders: [provider],
+      policy,
+      suiteGate: { enabled: true, suites: [TESTCASE_WORKSPACE_SUITE] },
+    });
+
+    await runner.run({
+      messages: [{ role: 'user', content: '补充一条异常用例' }],
+      context: { ...makeContext(), workspaceId: 'ws-active-1' },
+      emit: () => undefined,
+    });
+
+    expect(model.requests[0]?.tools.map((t) => t.function.name)).toContain(
+      'testcase_workspace_update',
+    );
   });
 });

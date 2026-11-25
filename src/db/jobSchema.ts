@@ -551,6 +551,30 @@ export class DrizzleAgentJobStore implements AgentJobStore {
           updatedAt,
         },
       });
+    if (checkpoint.testcaseWorkspace) {
+      await this.updateWorkspaceBinding(
+        checkpoint.jobId,
+        checkpoint.testcaseWorkspace,
+      );
+    }
+  }
+
+  public async updateWorkspaceBinding(
+    jobId: string,
+    binding: { workspaceId: string; baseRevision: number },
+  ): Promise<void> {
+    const patch = JSON.stringify({
+      workspaceId: binding.workspaceId,
+      baseRevision: binding.baseRevision,
+      workspaceAutoSnapshotted: false,
+    });
+    await this.db
+      .update(agentJobs)
+      .set({
+        metadata: sql`coalesce(${agentJobs.metadata}, '{}'::jsonb) || ${patch}::jsonb`,
+        updatedAt: new Date(),
+      })
+      .where(eq(agentJobs.id, jobId));
   }
 
   public async loadCheckpoint(jobId: string): Promise<AgentJobCheckpoint | null> {

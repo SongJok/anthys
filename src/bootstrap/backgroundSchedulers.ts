@@ -374,15 +374,39 @@ export function setupBackgroundSchedulers(
       const savedCheckpoint = await jobStore
         .loadCheckpoint?.(job.id)
         .catch(() => null);
+      const cpWorkspace = savedCheckpoint?.testcaseWorkspace;
+      const metaBaseRev =
+        typeof job.metadata.baseRevision === 'number'
+          ? job.metadata.baseRevision
+          : 0;
+      const effectiveJob =
+        cpWorkspace &&
+        cpWorkspace.workspaceId &&
+        (!job.metadata.workspaceId ||
+          job.metadata.workspaceId !== cpWorkspace.workspaceId ||
+          cpWorkspace.baseRevision > metaBaseRev)
+          ? {
+              ...job,
+              metadata: {
+                ...job.metadata,
+                workspaceId: cpWorkspace.workspaceId,
+                baseRevision: cpWorkspace.baseRevision,
+                workspaceAutoSnapshotted: false,
+              },
+            }
+          : job;
       const resumeGuidance =
-        typeof job.metadata.resumeGuidance === 'string' &&
-        job.metadata.resumeGuidance.trim()
-          ? job.metadata.resumeGuidance.trim()
+        typeof effectiveJob.metadata.resumeGuidance === 'string' &&
+        effectiveJob.metadata.resumeGuidance.trim()
+          ? effectiveJob.metadata.resumeGuidance.trim()
           : undefined;
-      const result = await harness.runJob(job, {
+      const result = await harness.runJob(effectiveJob, {
         emit: context.emit,
         signal: context.signal,
         ...(worker ? { worker } : {}),
+        onWorkspaceBindingChange: async (binding) => {
+          await jobStore.updateWorkspaceBinding?.(job.id, binding);
+        },
         ...(jobStore.saveCheckpoint
           ? {
               checkpoint: {

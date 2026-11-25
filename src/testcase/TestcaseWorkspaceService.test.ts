@@ -111,4 +111,62 @@ describe('TestcaseWorkspaceService', () => {
     });
     expect(service.buildPromptSummary(created)).toContain('workspaceId：ws_1');
   });
+
+  it('支持组合测试方法、可选默认字段、未覆盖需求摘要与归档过滤', async () => {
+    let seq = 0;
+    const store = new InMemoryTestcaseWorkspaceStore(() => 100, () => `ws_${++seq}`);
+    const service = new TestcaseWorkspaceService(store, () => 100, () => 'unused');
+    const created = await service.create(actor, { title: '优惠券中心' });
+    const updated = await service.update(actor, created.id, 1, {
+      requirements: {
+        upsert: [
+          {
+            id: 'req_issue',
+            title: '领券',
+            module: '优惠券',
+            sourceRef: 'PRD 2.1',
+          } as never,
+          {
+            id: 'req_redeem',
+            title: '核销',
+            module: '优惠券',
+            sourceRef: 'PRD 2.2',
+          } as never,
+        ],
+      },
+      cases: {
+        upsert: [
+          {
+            id: 'draft_issue_valid',
+            module: '优惠券',
+            title: '正常领券',
+            steps: ['1. 点击领取'],
+            expectedResults: ['1. 领券成功'],
+            testMethod: '需求分析法+场景法',
+            requirementIds: ['req_issue'],
+          } as never,
+        ],
+      },
+      decisions: {
+        upsert: [
+          {
+            id: 'dec_limit',
+            topic: '单人限领',
+            value: '每人最多 3 张',
+          } as never,
+        ],
+      },
+    });
+
+    expect(updated.state.cases[0]?.steps).toEqual(['点击领取']);
+    expect(updated.state.cases[0]?.testMethod).toBe('需求分析法+场景法');
+    const summary = service.buildPromptSummary(updated);
+    expect(summary).toContain('未覆盖需求（1）：req_redeem 核销');
+    expect(summary).toContain('已确认口径：单人限领=每人最多 3 张');
+
+    await service.update(actor, created.id, updated.revision, { archived: true });
+    expect(await service.latest(actor)).toBeNull();
+    expect((await service.latest(actor, created.id))?.state.archived).toBe(true);
+    expect(await service.delete(actor, created.id)).toBe(true);
+  });
 });

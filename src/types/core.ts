@@ -219,6 +219,8 @@ export type AgentStreamEvent =
 
 export interface TestcaseWorkspaceBinding {
   current: { workspaceId: string; baseRevision: number } | null;
+  /** true 表示仅来自会话历史自动快照；允许后台任务为新需求创建新工作区 */
+  autoSnapshotted?: boolean;
 }
 
 /**
@@ -464,6 +466,7 @@ export interface ReActCheckpointState {
   accumulatedCachedTokens: number;
   accumulatedWallMs: number;
   activatedSuites: string[];
+  testcaseWorkspace?: { workspaceId: string; baseRevision: number } | null;
 }
 
 export interface ReActCheckpointHooks {

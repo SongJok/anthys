@@ -138,6 +138,7 @@ export class WorkerToolProvider implements IToolProvider {
       };
     }
 
+    const binding = context.testcaseWorkspaceBinding?.current;
     const job: AgentJob = await this.options.jobStore.enqueue({
       conversationId: context.conversationId,
       conversationType: context.conversationType,
@@ -151,6 +152,15 @@ export class WorkerToolProvider implements IToolProvider {
         worker: rawWorker,
         parentMessageId: context.messageId,
         requestedAt: Date.now(),
+        ...(binding
+          ? {
+              workspaceId: binding.workspaceId,
+              baseRevision: binding.baseRevision,
+              ...(context.testcaseWorkspaceBinding?.autoSnapshotted
+                ? { workspaceAutoSnapshotted: true }
+                : {}),
+            }
+          : {}),
       },
     });
     const shortId = job.id.slice(0, 8);

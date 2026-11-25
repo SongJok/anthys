@@ -1030,6 +1030,7 @@ export async function setupDingTalkIngress(
     reports: (message, args) =>
       tools.personalAssistant.handleReportCommand(message, args),
     submitJob: async (message, prompt) => {
+      const testcaseWorkspace = await snapshotTestcaseWorkspace(message);
       const job = await jobStore.enqueue({
         conversationId: message.conversationId,
         conversationType: message.conversationType,
@@ -1038,7 +1039,17 @@ export async function setupDingTalkIngress(
         senderNick: message.senderNick,
         kind: 'task',
         prompt,
-        metadata: { source: 'command', requestedAt: Date.now() },
+        metadata: {
+          source: 'command',
+          requestedAt: Date.now(),
+          ...(testcaseWorkspace
+            ? {
+                workspaceId: testcaseWorkspace.workspaceId,
+                baseRevision: testcaseWorkspace.baseRevision,
+                workspaceAutoSnapshotted: true,
+              }
+            : {}),
+        },
       });
       metrics.inc('agent_jobs_total', { kind: 'task', status: 'queued' });
       logger.info(
@@ -1055,6 +1066,7 @@ export async function setupDingTalkIngress(
         return '未知 Worker，可选：research、ops、report。';
       }
       const profile = runtimes.workerRegistry.get(worker);
+      const testcaseWorkspace = await snapshotTestcaseWorkspace(message);
       const job = await jobStore.enqueue({
         conversationId: message.conversationId,
         conversationType: message.conversationType,
@@ -1067,6 +1079,13 @@ export async function setupDingTalkIngress(
           source: 'command',
           worker,
           requestedAt: Date.now(),
+          ...(testcaseWorkspace
+            ? {
+                workspaceId: testcaseWorkspace.workspaceId,
+                baseRevision: testcaseWorkspace.baseRevision,
+                workspaceAutoSnapshotted: true,
+              }
+            : {}),
         },
       });
       metrics.inc('agent_jobs_total', {
@@ -1436,6 +1455,7 @@ export async function setupDingTalkIngress(
               baseRevision: initialTestcaseWorkspace.baseRevision,
             }
           : null,
+        ...(initialTestcaseWorkspace ? { autoSnapshotted: true } : {}),
       };
       const testcaseWorkspace = initialTestcaseWorkspace;
 
@@ -1487,6 +1507,9 @@ export async function setupDingTalkIngress(
                 ? {
                     workspaceId: handoffWorkspace.workspaceId,
                     baseRevision: handoffWorkspace.baseRevision,
+                    ...(testcaseWorkspaceBinding.autoSnapshotted
+                      ? { workspaceAutoSnapshotted: true }
+                      : {}),
                   }
                 : {}),
             },

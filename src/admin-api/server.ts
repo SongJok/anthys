@@ -52,6 +52,8 @@ import { createMemoryRoutes } from './routes/memoryRoutes.js';
 import { createGroupRoutes } from './routes/groupRoutes.js';
 import { createPersonSettingsRoutes } from './routes/personSettingsRoutes.js';
 import { createWhitelistRoutes } from './routes/whitelistRoutes.js';
+import { createTestcaseRoutes } from './routes/testcaseRoutes.js';
+import type { TestcaseWorkspaceService } from '../testcase/TestcaseWorkspaceService.js';
 import type { GroupWorkspaceAdminPort } from '../types/group-workspace.js';
 import type { GroupModelRouteService } from '../groups/GroupModelRouteService.js';
 import type { PersonSettingsAdminPort } from '../types/personal-settings.js';
@@ -172,6 +174,8 @@ export interface AdminApiOptions {
   whitelist?: UserWhitelistAdminPort;
   /** GitHub Webhook 签名校验与任务路由回调 */
   githubWebhook?: Pick<GithubWebhookDeps, 'secret' | 'onEvent'>;
+  /** 测试用例自主编写工作区服务 */
+  testcaseWorkspaces?: TestcaseWorkspaceService;
 }
 
 export interface AdminServerOptions extends AdminApiOptions {
@@ -519,6 +523,15 @@ export function createAdminApp(options: AdminApiOptions): Hono {
       '/',
       createWhitelistRoutes({
         whitelist: options.whitelist,
+        configCenter: options.configCenter,
+      }),
+    );
+  }
+  if (options.testcaseWorkspaces) {
+    admin.route(
+      '/',
+      createTestcaseRoutes({
+        workspaces: options.testcaseWorkspaces,
         configCenter: options.configCenter,
       }),
     );

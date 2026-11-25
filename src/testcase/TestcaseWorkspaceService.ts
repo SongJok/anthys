@@ -2,7 +2,6 @@ import type {
   CompiledTestcaseDocument,
   TestcaseDraft,
   TestcaseEvidence,
-  TestcaseMethod,
   TestcaseOpenQuestion,
   TestcaseOutputPreferences,
   TestcaseRequirement,
@@ -13,11 +12,17 @@ import type {
   TestcaseWorkspaceState,
   TestcaseWorkspaceVersion,
 } from '../types/testcase-workspace.js';
-import { compileTestcaseWorkspace } from './TestcaseCompiler.js';
+import {
+  compileTestcaseWorkspace,
+  expandStepItems,
+  normalizeTestcaseMethod,
+} from './TestcaseCompiler.js';
 import {
   emptyTestcaseWorkspaceState,
   TestcaseRevisionConflictError,
   type CreateTestcaseWorkspaceInput,
+  type ListTestcaseWorkspacesInput,
+  type SaveTestcaseVersionInput,
   type TestcaseWorkspaceStore,
 } from './TestcaseWorkspaceStore.js';
 
@@ -47,14 +52,6 @@ export class TestcaseWorkspaceAccessError extends Error {
     this.name = 'TestcaseWorkspaceAccessError';
   }
 }
-
-const METHODS = new Set<TestcaseMethod>([
-  '需求分析法',
-  '等价类划分法',
-  '边界值分析法',
-  '场景法',
-  '错误猜测法',
-]);
 
 export class TestcaseWorkspaceService {
   public constructor(
@@ -101,6 +98,25 @@ export class TestcaseWorkspaceService {
     });
   }
 
+  public async query(
+    actor: TestcaseActor,
+    filter: ListTestcaseWorkspacesInput = {},
+  ): Promise<TestcaseWorkspaceSummary[]> {
+    return this.store.list({
+      ...filter,
+      ...(actor.isAdmin ? {} : { ownerStaffId: actor.senderStaffId }),
+    });
+  }
+
+  public async delete(
+    actor: TestcaseActor,
+    workspaceId: string,
+  ): Promise<boolean> {
+    const id = cleanId(workspaceId, 'workspaceId');
+    await this.get(actor, id);
+    return this.store.delete(id);
+  }
+
   public async get(
     actor: TestcaseActor,
     workspaceId: string,
@@ -122,7 +138,12 @@ export class TestcaseWorkspaceService {
         if (!(error instanceof TestcaseWorkspaceAccessError)) throw error;
       }
     }
-    const items = await this.list(actor, actor.conversationId, 1);
+    const items = await this.store.list({
+      conversationId: actor.conversationId,
+      ...(actor.isAdmin ? {} : { ownerStaffId: actor.senderStaffId }),
+      includeArchived: false,
+      limit: 1,
+    });
     const latest = items[0];
     return latest ? this.get(actor, latest.id) : null;
   }
@@ -216,29 +237,51 @@ export class TestcaseWorkspaceService {
   }
 
   public buildPromptSummary(workspace: TestcaseWorkspace): string {
-    const requirements = workspace.state.requirements
-      .filter((item) => item.status !== 'superseded')
+    const activeRequirements = workspace.state.requirements.filter(
+      (item) => item.status !== 'superseded',
+    );
+    const activeCases = workspace.state.cases.filter(
+      (item) => item.status !== 'superseded',
+    );
+    const coveredRequirementIds = new Set(
+      activeCases.flatMap((item) => item.requirementIds),
+    );
+    const uncoveredRequirements = activeRequirements.filter(
+      (item) => !coveredRequirementIds.has(item.id),
+    );
+    const requirements = activeRequirements
       .slice(0, 12)
       .map((item) => `${item.id} ${item.title}`)
       .join('；');
-    const cases = workspace.state.cases
-      .filter((item) => item.status !== 'superseded')
+    const cases = activeCases
       .slice(0, 12)
       .map((item) => `${item.id} ${item.title}`)
+      .join('；');
+    const uncoveredSummary = uncoveredRequirements
+      .slice(0, 8)
+      .map((item) => `${item.id} ${item.title}`)
+      .join('；');
+    const decisions = workspace.state.decisions
+      .slice(-6)
+      .map((item) => `${item.topic}=${item.value}`)
       .join('；');
     const questions = workspace.state.openQuestions
       .filter((item) => item.status === 'open')
       .slice(0, 5)
-      .map((item) => item.question)
+      .map((item) => `[${item.blocking ? '阻塞' : '非阻塞'}]${item.question}`)
       .join('；');
     return [
       '## 当前测试用例工作区',
       `- workspaceId：${workspace.id}`,
-      `- 标题：${workspace.title}`,
+      `- 标题：${workspace.title}${workspace.state.archived ? '（已归档）' : ''}`,
       `- revision：${workspace.revision}`,
-      `- 需求：${workspace.state.requirements.length}；草稿：${workspace.state.cases.length}；证据：${workspace.state.evidence.length}`,
+      `- 有效需求：${activeRequirements.length}；有效草稿：${activeCases.length}；证据：${workspace.state.evidence.length}`,
       requirements ? `- 需求摘要：${requirements}` : '',
       cases ? `- 草稿摘要：${cases}` : '',
+      uncoveredSummary
+        ? `- 未覆盖需求（${uncoveredRequirements.length}）：${uncoveredSummary}`
+        : '',
+      decisions ? `- 已确认口径：${decisions}` : '',
       questions ? `- 待确认：${questions}` : '',
       '- 这是可继续修改的工作成果，不是固定流程状态。是否取证、继续编写或导出由你根据当前信息自主决定。',
     ]
@@ -305,6 +348,10 @@ function applyPatch(
       ...patch.outputPreferences,
     };
   }
+  if (patch.archived !== undefined) {
+    if (patch.archived) state.archived = true;
+    else delete state.archived;
+  }
   return {
     title: patch.title ?? workspace.title,
     ...(patch.projectId === null
@@ -333,6 +380,7 @@ function sanitizeState(state: TestcaseWorkspaceState): TestcaseWorkspaceState {
     decisions: sanitizeArray(state.decisions, sanitizeDecision, 'decisions'),
     openQuestions: sanitizeArray(state.openQuestions, sanitizeQuestion, 'openQuestions'),
     outputPreferences: sanitizePreferences(state.outputPreferences),
+    ...(state.archived ? { archived: true } : {}),
   };
 }
 
@@ -343,15 +391,19 @@ function sanitizePatch(
   if (!patch || typeof patch !== 'object' || Array.isArray(patch)) {
     throw new Error('patch 必须是对象');
   }
+  if (patch.archived !== undefined && typeof patch.archived !== 'boolean') {
+    throw new Error('archived 必须是布尔值');
+  }
   return {
     ...(patch.title !== undefined
       ? { title: requiredText(patch.title, 'title', 300) }
       : {}),
     ...(patch.projectId !== undefined
-      ? patch.projectId === null
+      ? patch.projectId === null || patch.projectId === ''
         ? { projectId: null }
         : { projectId: cleanText(patch.projectId, 'projectId', 300) }
       : {}),
+    ...(patch.archived !== undefined ? { archived: patch.archived } : {}),
     ...(patch.requirements
       ? {
           requirements: {
@@ -460,9 +512,13 @@ function sanitizeRequirement(item: TestcaseRequirement): TestcaseRequirement {
     description: cleanText(item.description ?? '', 'requirement.description', 8000),
     module: requiredText(item.module, 'requirement.module', 200),
     sourceRef: requiredText(item.sourceRef, 'requirement.sourceRef', 2000),
-    rules: cleanList(item.rules, 'requirement.rules'),
-    constraints: cleanList(item.constraints, 'requirement.constraints'),
-    status: oneOf(item.status, ['active', 'superseded', 'unresolved'] as const, 'requirement.status'),
+    rules: cleanList(item.rules ?? [], 'requirement.rules'),
+    constraints: cleanList(item.constraints ?? [], 'requirement.constraints'),
+    status: oneOf(
+      item.status ?? 'active',
+      ['active', 'superseded', 'unresolved'] as const,
+      'requirement.status',
+    ),
   };
 }
 
@@ -478,9 +534,13 @@ function sanitizeEvidence(item: TestcaseEvidence, now = Date.now()): TestcaseEvi
     collectedAt: finiteNumber(item.collectedAt ?? now, 'evidence.collectedAt'),
     scope: cleanText(item.scope ?? '', 'evidence.scope', 2000),
     summary: requiredText(item.summary, 'evidence.summary', 8000),
-    confidence: oneOf(item.confidence, ['high', 'medium', 'low'] as const, 'evidence.confidence'),
-    requirementIds: sanitizeIds(item.requirementIds, 'evidence.requirementIds'),
-    conflictsWith: sanitizeIds(item.conflictsWith, 'evidence.conflictsWith'),
+    confidence: oneOf(
+      item.confidence ?? 'medium',
+      ['high', 'medium', 'low'] as const,
+      'evidence.confidence',
+    ),
+    requirementIds: sanitizeIds(item.requirementIds ?? [], 'evidence.requirementIds'),
+    conflictsWith: sanitizeIds(item.conflictsWith ?? [], 'evidence.conflictsWith'),
     ...(item.datasetRef ? { datasetRef: cleanText(item.datasetRef, 'evidence.datasetRef', 2000) } : {}),
   };
 }
@@ -490,20 +550,24 @@ function sanitizeCase(item: TestcaseDraft): TestcaseDraft {
     id: cleanId(item.id, 'case.id'),
     module: requiredText(item.module, 'case.module', 200),
     title: requiredText(item.title, 'case.title', 500),
-    preconditions: cleanList(item.preconditions, 'case.preconditions'),
-    steps: cleanList(item.steps, 'case.steps'),
-    expectedResults: cleanList(item.expectedResults, 'case.expectedResults'),
-    priority: oneOf(item.priority, ['高', '中', '低'] as const, 'case.priority'),
-    testMethod: oneOf(item.testMethod, [...METHODS], 'case.testMethod'),
+    preconditions: expandStepItems(cleanList(item.preconditions ?? [], 'case.preconditions')),
+    steps: expandStepItems(cleanList(item.steps ?? [], 'case.steps')),
+    expectedResults: expandStepItems(cleanList(item.expectedResults ?? [], 'case.expectedResults')),
+    priority: oneOf(item.priority ?? '中', ['高', '中', '低'] as const, 'case.priority'),
+    testMethod: normalizeTestcaseMethod(item.testMethod ?? '需求分析法'),
     scenarioType: oneOf(
-      item.scenarioType,
+      item.scenarioType ?? 'normal',
       ['normal', 'exception', 'boundary', 'other'] as const,
       'case.scenarioType',
     ),
-    requirementIds: sanitizeIds(item.requirementIds, 'case.requirementIds'),
-    evidenceIds: sanitizeIds(item.evidenceIds, 'case.evidenceIds'),
-    assumptions: cleanList(item.assumptions, 'case.assumptions'),
-    status: oneOf(item.status, ['draft', 'ready', 'superseded'] as const, 'case.status'),
+    requirementIds: sanitizeIds(item.requirementIds ?? [], 'case.requirementIds'),
+    evidenceIds: sanitizeIds(item.evidenceIds ?? [], 'case.evidenceIds'),
+    assumptions: cleanList(item.assumptions ?? [], 'case.assumptions'),
+    status: oneOf(
+      item.status ?? 'ready',
+      ['draft', 'ready', 'superseded'] as const,
+      'case.status',
+    ),
   };
 }
 
@@ -526,9 +590,13 @@ function sanitizeQuestion(item: TestcaseOpenQuestion): TestcaseOpenQuestion {
   return {
     id: cleanId(item.id, 'question.id'),
     question: requiredText(item.question, 'question.question', 2000),
-    blocking: Boolean(item.blocking),
-    requirementIds: sanitizeIds(item.requirementIds, 'question.requirementIds'),
-    status: oneOf(item.status, ['open', 'resolved'] as const, 'question.status'),
+    blocking: Boolean(item.blocking ?? false),
+    requirementIds: sanitizeIds(item.requirementIds ?? [], 'question.requirementIds'),
+    status: oneOf(
+      item.status ?? 'open',
+      ['open', 'resolved'] as const,
+      'question.status',
+    ),
   };
 }
 
