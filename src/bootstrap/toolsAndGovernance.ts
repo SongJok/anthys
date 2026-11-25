@@ -303,14 +303,6 @@ export async function setupToolsAndGovernance(
     return approvalGate(request, context);
   };
 
-  const adminProvider = new AdminChatOpsToolProvider({
-    configCenter,
-    mcp: mcpPort,
-    traces: traceStore,
-    groups: groupDirectory,
-    logger,
-  });
-
   const artifactDeliveryEnabled = envEnabled(
     process.env.ARTIFACT_DELIVERY_ENABLED,
     true,
@@ -333,6 +325,14 @@ export async function setupToolsAndGovernance(
     getAccessToken,
     logger,
     maxBytes: artifactMaxBytes,
+  });
+  const adminProvider = new AdminChatOpsToolProvider({
+    configCenter,
+    mcp: mcpPort,
+    traces: traceStore,
+    groups: groupDirectory,
+    groupText: mediaSender,
+    logger,
   });
   const adminTextSender = new DingTalkAdminTextSender({
     robotCode: () => configCenter.getDingTalkConfig().robotCode,

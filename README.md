@@ -1200,7 +1200,9 @@ ReAct 循环内置看门狗（`src/watchdog/RunWatchdog.ts`），只观察不执
 | `admin_inspect_system_status` | 在线 MCP 健康状态、今日 Token 与轮次、各群旁听与主动回复统计 |
 | `admin_manage_mcp_server` | 启用 / 禁用 / 重载指定 MCP 节点，并返回最新工具清单 |
 | `admin_update_llm_or_persona` | 切换模型、调整温度与原生思维链、修改人设与 ReAct 预算 |
-| `admin_configure_group_bystander` | 查询群列表、开关旁听与主动回复、调整冷却等策略、一键紧急静音 |
+| `admin_list_groups` | 只读查询已接入群列表与每个群生效的旁听策略（无需确认） |
+| `admin_configure_group_bystander` | 开关旁听与主动回复、调整冷却等策略、一键紧急静音 |
+| `admin_send_group_message` | 以机器人身份在指定群主动发一条消息（按群名或 conversationId，可跨群，需回复「确认」） |
 | `admin_query_traces` | 按耗时或 Token 查询今日轨迹，定位最慢 / 最贵的调用 |
 
 权限边界：

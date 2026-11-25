@@ -6,6 +6,7 @@ import type {
 import type { DynamicConfigCenter } from '../../config/DynamicConfigCenter.js';
 import type {
   GroupDirectory,
+  KnownGroup,
   McpAdminPort,
   ReActTraceRecord,
   ReActTraceStore,
@@ -18,6 +19,14 @@ export interface AdminChatOpsDeps {
   mcp: McpAdminPort;
   traces: ReActTraceStore;
   groups: GroupDirectory;
+  /** 机器人向指定群投递 Markdown 文本的通道 */
+  groupText: {
+    sendGroupText(input: {
+      conversationId: string;
+      title: string;
+      text: string;
+    }): Promise<{ ok: boolean; error?: string }>;
+  };
   now?: () => number;
   logger?: {
     warn(obj: Record<string, unknown>, msg: string): void;
@@ -28,7 +37,9 @@ const ADMIN_TOOL_NAMES = [
   'admin_inspect_system_status',
   'admin_manage_mcp_server',
   'admin_update_llm_or_persona',
+  'admin_list_groups',
   'admin_configure_group_bystander',
+  'admin_send_group_message',
   'admin_query_traces',
 ] as const;
 
@@ -84,6 +95,26 @@ function startOfDay(nowMs: number): number {
   return startOfShanghaiDay(nowMs);
 }
 
+/** 钉钉群标题常带 U+FFFC 占位符与零宽字符，按群名匹配前必须清洗 */
+function normalizeGroupKey(value: string): string {
+  return value
+    .replace(/[\ufffc\ufffd\u200b-\u200d\ufeff\s]/gu, '')
+    .toLowerCase();
+}
+
+function matchGroups(groups: KnownGroup[], query: string): KnownGroup[] {
+  const byId = groups.filter((item) => item.conversationId === query);
+  if (byId.length > 0) return byId;
+  const key = normalizeGroupKey(query);
+  const titled = groups.flatMap((item) =>
+    item.title ? [{ group: item, key: normalizeGroupKey(item.title) }] : [],
+  );
+  const exact = titled.filter((item) => item.key === key);
+  const hits =
+    exact.length > 0 ? exact : titled.filter((item) => item.key.includes(key));
+  return hits.map((item) => item.group);
+}
+
 /**
  * 阶段四：管理员单聊管控工具集。
  *
@@ -104,7 +135,9 @@ export class AdminChatOpsToolProvider implements IToolProvider {
       this.inspectStatusTool(),
       this.manageMcpTool(),
       this.updateLlmTool(),
+      this.listGroupsTool(),
       this.configureGroupTool(),
+      this.sendGroupMessageTool(),
       this.queryTracesTool(),
     ];
   }
@@ -382,18 +415,122 @@ export class AdminChatOpsToolProvider implements IToolProvider {
     };
   }
 
+  private listGroupsTool(): ToolDefinition {
+    return {
+      name: 'admin_list_groups',
+      risk: 'read',
+      source: 'admin',
+      description:
+        '查询已接入的钉钉群列表（conversationId、群名、群内机器人）与每个群生效的旁听/主动回复策略。只读、无需确认；需要群 ID 或核对群名时用本工具。',
+      parametersJsonSchema: {
+        type: 'object',
+        properties: {},
+        additionalProperties: false,
+      },
+      execute: async (_args, ctx) => {
+        this.assertAuthorized(ctx);
+        const groups = await this.deps.groups.listGroups();
+        const policies = await this.deps.configCenter.listGroupPolicies();
+        const policyMap = new Map(
+          policies.map((policy) => [policy.conversationId, policy]),
+        );
+        const defaults =
+          this.deps.configCenter.getSystemConfig().defaultBystanderPolicy;
+        return JSON.stringify({
+          ok: true,
+          groups: groups.map((group) => ({
+            ...group,
+            effectivePolicy: policyMap.get(group.conversationId) ?? {
+              conversationId: group.conversationId,
+              ...defaults,
+            },
+          })),
+        });
+      },
+    };
+  }
+
+  private sendGroupMessageTool(): ToolDefinition {
+    return {
+      name: 'admin_send_group_message',
+      risk: 'write',
+      source: 'admin',
+      description:
+        '以机器人身份在指定钉钉群主动发一条消息（管理员单聊专用，可跨群投递）。用户说「在某某群发一下 / 主动说某句话」时必须调用本工具：group 传群名或 conversationId，text 是原样发出的正文。只在回答正文里写「已发送」不会真的投递，必须以本工具返回结果为准。本工具不 @所有人，也不修改任何群策略。',
+      parametersJsonSchema: {
+        type: 'object',
+        properties: {
+          group: {
+            type: 'string',
+            description: '目标群名称（如「搭伙过日子」）或 conversationId',
+          },
+          text: {
+            type: 'string',
+            description: '要发到群里的消息正文，原样投递',
+          },
+        },
+        required: ['group', 'text'],
+        additionalProperties: false,
+      },
+      execute: async (args, ctx) => {
+        this.assertAuthorized(ctx);
+        const group = requireString(args, 'group');
+        const text = requireString(args, 'text');
+        const groups = (await this.deps.groups.listGroups()).filter(
+          (item) => item.conversationType === '2',
+        );
+        const matched = matchGroups(groups, group);
+        if (matched.length !== 1) {
+          return JSON.stringify({
+            ok: false,
+            error:
+              matched.length === 0
+                ? `未找到群「${group}」，请先用 admin_list_groups 核对群名或 conversationId`
+                : `群名「${group}」匹配到多个群，请改用 conversationId 指定`,
+            candidates: matched.map((item) => ({
+              conversationId: item.conversationId,
+              title: item.title,
+            })),
+          });
+        }
+        const target = matched[0]!;
+        const sent = await this.deps.groupText.sendGroupText({
+          conversationId: target.conversationId,
+          title: '主动播报',
+          text,
+        });
+        if (!sent.ok) {
+          return JSON.stringify({
+            ok: false,
+            conversationId: target.conversationId,
+            title: target.title,
+            error: sent.error ?? '群消息发送失败',
+          });
+        }
+        return JSON.stringify({
+          ok: true,
+          conversationId: target.conversationId,
+          title: target.title,
+          text,
+          message: `已在群「${target.title ?? target.conversationId}」发出消息`,
+        });
+      },
+    };
+  }
+
   private configureGroupTool(): ToolDefinition {
     return {
       name: 'admin_configure_group_bystander',
       risk: 'write',
+      source: 'admin',
       description:
-        '查询已接入群列表，开关指定群的旁听/非@自主回复，调整冷却时间等策略，或一键紧急静音。',
+        '开关指定群的旁听/非@自主回复，调整冷却时间等策略，或一键紧急静音。只查群列表请改用 admin_list_groups；要在群里主动发消息请改用 admin_send_group_message。',
       parametersJsonSchema: {
         type: 'object',
         properties: {
           action: {
             type: 'string',
-            enum: ['list', 'update', 'emergency_mute'],
+            enum: ['update', 'emergency_mute'],
           },
           conversationId: {
             type: 'string',
@@ -415,26 +552,6 @@ export class AdminChatOpsToolProvider implements IToolProvider {
       execute: async (args, ctx) => {
         this.assertAuthorized(ctx);
         const action = requireString(args, 'action');
-        if (action === 'list') {
-          const groups = await this.deps.groups.listGroups();
-          const policies = await this.deps.configCenter.listGroupPolicies();
-          const policyMap = new Map(
-            policies.map((policy) => [policy.conversationId, policy]),
-          );
-          const defaults =
-            this.deps.configCenter.getSystemConfig().defaultBystanderPolicy;
-          return JSON.stringify({
-            ok: true,
-            groups: groups.map((group) => ({
-              ...group,
-              effectivePolicy: policyMap.get(group.conversationId) ?? {
-                conversationId: group.conversationId,
-                ...defaults,
-              },
-            })),
-          });
-        }
-
         if (action === 'emergency_mute') {
           const conversationId = optionalString(args, 'conversationId');
           const muted = await this.deps.configCenter.emergencyMute(
@@ -524,7 +641,9 @@ export class AdminChatOpsToolProvider implements IToolProvider {
           return JSON.stringify({ ok: true, policy });
         }
 
-        throw new Error('action 必须是 list / update / emergency_mute');
+        throw new Error(
+          'action 必须是 update / emergency_mute；查群列表请用 admin_list_groups',
+        );
       },
     };
   }

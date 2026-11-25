@@ -167,6 +167,9 @@ class FakeTraceStore implements ReActTraceStore {
   }
 }
 
+/** 钉钉群标题里真实存在的 U+FFFC 占位符 */
+const OBJECT_REPLACEMENT = String.fromCharCode(0xfffc);
+
 class FakeGroupDirectory implements GroupDirectory {
   async listGroups(): Promise<KnownGroup[]> {
     return [
@@ -178,7 +181,42 @@ class FakeGroupDirectory implements GroupDirectory {
         proactiveReplyEnabled: null,
         lastActiveAt: NOW,
       },
+      {
+        conversationId: 'cid-meal',
+        title: `${OBJECT_REPLACEMENT}搭伙过日子`,
+        conversationType: '2',
+        bystanderEnabled: null,
+        proactiveReplyEnabled: null,
+        lastActiveAt: NOW,
+      },
+      {
+        conversationId: 'cid-meal-2',
+        title: '搭伙过日子二群',
+        conversationType: '2',
+        bystanderEnabled: null,
+        proactiveReplyEnabled: null,
+        lastActiveAt: NOW,
+      },
     ];
+  }
+}
+
+class FakeGroupTextSender {
+  public readonly sent: Array<{
+    conversationId: string;
+    title: string;
+    text: string;
+  }> = [];
+  public failWith: string | undefined;
+
+  async sendGroupText(input: {
+    conversationId: string;
+    title: string;
+    text: string;
+  }): Promise<{ ok: boolean; error?: string }> {
+    if (this.failWith) return { ok: false, error: this.failWith };
+    this.sent.push(input);
+    return { ok: true };
   }
 }
 
@@ -260,6 +298,7 @@ interface Harness {
   traces: FakeTraceStore;
   provider: AdminChatOpsToolProvider;
   registry: ToolRegistry;
+  groupText: FakeGroupTextSender;
 }
 
 async function createHarness(workspaceRoot: string): Promise<Harness> {
@@ -323,11 +362,13 @@ async function createHarness(workspaceRoot: string): Promise<Harness> {
   });
   await center.init();
 
+  const groupText = new FakeGroupTextSender();
   const provider = new AdminChatOpsToolProvider({
     configCenter: center,
     mcp,
     traces,
     groups: new FakeGroupDirectory(),
+    groupText,
     now: () => NOW,
   });
   const registry = await ToolRegistry.create({
@@ -339,7 +380,7 @@ async function createHarness(workspaceRoot: string): Promise<Harness> {
     workspace: { hostDir: workspaceRoot, sandboxDir: '/workspace' },
   });
 
-  return { center, audit, mcp, traces, provider, registry };
+  return { center, audit, mcp, traces, provider, registry, groupText };
 }
 
 let workspaceRoot: string;
@@ -443,17 +484,25 @@ describe('AdminChatOps 热改配置', () => {
     ).rejects.toThrow(/未知 MCP Server/);
   });
 
-  it('admin_configure_group_bystander 调整冷却时间并可一键静音', async () => {
+  it('admin_list_groups 只读返回群列表与生效策略', async () => {
+    const tools = await h.provider.getTools(ctx('1', ADMIN_ID));
+    const tool = tools.find((item) => item.name === 'admin_list_groups')!;
+    expect(tool.risk).toBe('read');
+
+    const listed = JSON.parse(await tool.execute({}, ctx('1', ADMIN_ID)));
+    expect(listed.groups).toHaveLength(3);
+    expect(listed.groups[0].effectivePolicy.cooldownSeconds).toBe(180);
+  });
+
+  it('admin_configure_group_bystander 拒绝只读 list，调整冷却时间并可一键静音', async () => {
     const tools = await h.provider.getTools(ctx('1', ADMIN_ID));
     const tool = tools.find(
       (item) => item.name === 'admin_configure_group_bystander',
     )!;
 
-    const listed = JSON.parse(
-      await tool.execute({ action: 'list' }, ctx('1', ADMIN_ID)),
-    );
-    expect(listed.groups).toHaveLength(1);
-    expect(listed.groups[0].effectivePolicy.cooldownSeconds).toBe(180);
+    await expect(
+      tool.execute({ action: 'list' }, ctx('1', ADMIN_ID)),
+    ).rejects.toThrow(/admin_list_groups/);
 
     const updated = JSON.parse(
       await tool.execute(
@@ -475,6 +524,88 @@ describe('AdminChatOps 热改配置', () => {
       false,
     );
     expect(h.audit.entries[0]?.actionType).toBe('EMERGENCY_MUTE');
+  });
+
+  it('admin_send_group_message 按群名跨群投递，标题占位符不影响匹配', async () => {
+    const tool = (await h.provider.getTools(ctx('1', ADMIN_ID))).find(
+      (item) => item.name === 'admin_send_group_message',
+    )!;
+    expect(tool.risk).toBe('write');
+
+    const result = JSON.parse(
+      await tool.execute(
+        { group: '搭伙过日子', text: '中午吃的是沿河人家' },
+        ctx('1', ADMIN_ID),
+      ),
+    );
+    expect(result.ok).toBe(true);
+    expect(result.conversationId).toBe('cid-meal');
+    expect(h.groupText.sent).toEqual([
+      {
+        conversationId: 'cid-meal',
+        title: '主动播报',
+        text: '中午吃的是沿河人家',
+      },
+    ]);
+  });
+
+  it('admin_send_group_message 支持 conversationId，群名歧义或不存在时不投递', async () => {
+    const tool = (await h.provider.getTools(ctx('1', ADMIN_ID))).find(
+      (item) => item.name === 'admin_send_group_message',
+    )!;
+    const before = h.groupText.sent.length;
+
+    const byId = JSON.parse(
+      await tool.execute(
+        { group: 'cid-meal-2', text: '二楼' },
+        ctx('1', ADMIN_ID),
+      ),
+    );
+    expect(byId.ok).toBe(true);
+    expect(byId.conversationId).toBe('cid-meal-2');
+
+    const ambiguous = JSON.parse(
+      await tool.execute({ group: '搭伙', text: '不去' }, ctx('1', ADMIN_ID)),
+    );
+    expect(ambiguous.ok).toBe(false);
+    expect(ambiguous.candidates).toHaveLength(2);
+
+    const missing = JSON.parse(
+      await tool.execute(
+        { group: '不存在的群', text: '不去' },
+        ctx('1', ADMIN_ID),
+      ),
+    );
+    expect(missing.ok).toBe(false);
+    expect(h.groupText.sent).toHaveLength(before + 1);
+  });
+
+  it('admin_send_group_message 通道失败时如实返回失败', async () => {
+    const tool = (await h.provider.getTools(ctx('1', ADMIN_ID))).find(
+      (item) => item.name === 'admin_send_group_message',
+    )!;
+    h.groupText.failWith = 'HTTP 403 forbidden';
+    try {
+      const result = JSON.parse(
+        await tool.execute(
+          { group: '研发大群', text: '测试' },
+          ctx('1', ADMIN_ID),
+        ),
+      );
+      expect(result.ok).toBe(false);
+      expect(result.error).toContain('403');
+    } finally {
+      h.groupText.failWith = undefined;
+    }
+  });
+
+  it('admin_send_group_message 在群聊上下文执行被二次校验拦截', async () => {
+    const tool = (await h.provider.getTools(ctx('1', ADMIN_ID))).find(
+      (item) => item.name === 'admin_send_group_message',
+    )!;
+    await expect(
+      tool.execute({ group: '研发大群', text: '测试' }, ctx('2', ADMIN_ID)),
+    ).rejects.toThrow(/权限不足/);
   });
 
   it('admin_query_traces 返回今天调用最慢的查询', async () => {
