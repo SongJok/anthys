@@ -4,6 +4,7 @@ import type {
   TestcaseWorkspace,
 } from '../types/testcase-workspace.js';
 import {
+  buildTestcaseXlsxSheets,
   compileTestcaseWorkspace,
   toPlainTestcaseRows,
 } from './TestcaseCompiler.js';
@@ -291,5 +292,341 @@ describe('compileTestcaseWorkspace', () => {
     expect(result.markdown).toContain('## 已确认口径与决策');
     expect(result.markdown).toContain('密码最小长度：以线上 6 位为准');
     expect(result.markdown).toContain('自动化可行性：暂不可自动化');
+  });
+
+  it('输出风险覆盖与缺陷复现追溯，并对未覆盖项告警', () => {
+    const input = workspace();
+    input.state.risks = [
+      {
+        id: 'risk_login_lock',
+        module: '登录',
+        title: '密码错误锁定规则未定义',
+        detail: 'PRD 未给出错误次数上限',
+        severity: '高',
+        requirementIds: ['req_login'],
+        evidenceIds: [],
+        mitigation: '需求评审确认阈值',
+        status: 'open',
+      },
+      {
+        id: 'risk_login_gap',
+        module: '登录',
+        title: '第三方登录异常未设计',
+        detail: '回调失败分支缺失',
+        severity: '中',
+        requirementIds: [],
+        evidenceIds: [],
+        mitigation: '补充异常用例',
+        status: 'open',
+      },
+    ];
+    input.state.defects = [
+      {
+        id: 'defect_login_500',
+        module: '登录',
+        title: '空密码提交返回 500',
+        sourceRef: 'BUG-1024',
+        severity: '高',
+        symptom: '密码为空时接口 500',
+        status: 'fixed',
+      },
+    ];
+    input.state.cases = [draft({ riskIds: ['risk_login_lock'] })];
+
+    const result = compileTestcaseWorkspace(input, { now: 10 });
+
+    expect(result.riskRegister[0]).toMatchObject({
+      riskId: 'risk_login_lock',
+      covered: true,
+      caseNumbers: ['TC_登录_001'],
+    });
+    expect(result.defectTraceability[0]).toMatchObject({
+      defectId: 'defect_login_500',
+      covered: false,
+    });
+    expect(result.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'uncovered_risk',
+          riskId: 'risk_login_gap',
+        }),
+        expect.objectContaining({
+          code: 'uncovered_defect',
+          defectId: 'defect_login_500',
+        }),
+      ]),
+    );
+    expect(result.issues.some((item) => item.riskId === 'risk_login_lock')).toBe(false);
+    expect(result.markdown).toContain('## 需求评审风险');
+    expect(result.markdown).toContain('## 缺陷复现追溯');
+    expect(result.markdown).toContain('缺少复现或回归用例');
+  });
+
+  it('已接受风险不报未覆盖，已验证缺陷不报缺复现', () => {
+    const input = workspace();
+    input.state.risks = [
+      {
+        id: 'risk_accepted',
+        module: '登录',
+        title: '已接受风险',
+        detail: '',
+        severity: '低',
+        requirementIds: [],
+        evidenceIds: [],
+        mitigation: '',
+        status: 'accepted',
+      },
+      {
+        id: 'risk_mitigated',
+        module: '登录',
+        title: '已缓解风险',
+        detail: '',
+        severity: '中',
+        requirementIds: [],
+        evidenceIds: [],
+        mitigation: '已加限流',
+        status: 'mitigated',
+      },
+    ];
+    input.state.defects = [
+      {
+        id: 'defect_verified',
+        module: '登录',
+        title: '已验证缺陷',
+        sourceRef: 'BUG-1',
+        severity: '低',
+        symptom: '',
+        status: 'verified',
+      },
+      {
+        id: 'defect_rejected',
+        module: '登录',
+        title: '已拒绝缺陷',
+        sourceRef: 'BUG-2',
+        severity: '低',
+        symptom: '',
+        status: 'rejected',
+      },
+    ];
+
+    const result = compileTestcaseWorkspace(input, { now: 10 });
+
+    expect(result.issues.filter((item) => item.code === 'uncovered_risk')).toHaveLength(0);
+    expect(result.issues.filter((item) => item.code === 'uncovered_defect')).toHaveLength(0);
+  });
+
+  it('用例引用不存在的风险或缺陷时分别告警', () => {
+    const input = workspace();
+    input.state.cases = [
+      draft({ riskIds: ['risk_missing'], defectIds: ['defect_missing'] }),
+    ];
+
+    const result = compileTestcaseWorkspace(input, { now: 10 });
+
+    expect(result.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 'missing_risk', riskId: 'risk_missing' }),
+        expect.objectContaining({
+          code: 'missing_defect',
+          defectId: 'defect_missing',
+        }),
+      ]),
+    );
+  });
+
+  it('汇总执行结果、通过率与失败阻塞说明', () => {
+    const input = workspace();
+    input.state.cases = [
+      draft({ id: 'case_pass', execution: { status: 'passed', executor: '测试甲' } }),
+      draft({
+        id: 'case_fail',
+        title: '密码错误提示',
+        execution: { status: 'failed', note: '提示文案与需求不一致' },
+      }),
+      draft({
+        id: 'case_block',
+        title: '短信验证码登录',
+        execution: { status: 'blocked', note: '短信通道未开通' },
+      }),
+      draft({ id: 'case_untested', title: '记住登录状态' }),
+    ];
+
+    const result = compileTestcaseWorkspace(input, { now: 10 });
+
+    expect(result.execution).toMatchObject({
+      total: 4,
+      passed: 1,
+      failed: 1,
+      blocked: 1,
+      untested: 1,
+      passRate: 33.3,
+    });
+    expect(result.markdown).toContain('## 执行结果与测试报告');
+    expect(result.markdown).toContain('已执行用例通过率：33.3%');
+    expect(result.markdown).toContain('提示文案与需求不一致');
+    expect(result.markdown).toContain('短信通道未开通');
+    const sheets = buildTestcaseXlsxSheets(result, input);
+    expect(sheets.map((sheet) => sheet.name)).toContain('执行结果');
+  });
+
+  it('按失败、阻塞、未关闭风险、待验证缺陷与高优先级推荐回归范围', () => {
+    const input = workspace();
+    input.state.risks = [
+      {
+        id: 'risk_open',
+        module: '登录',
+        title: '锁定阈值待确认',
+        detail: '',
+        severity: '中',
+        requirementIds: [],
+        evidenceIds: [],
+        mitigation: '',
+        status: 'open',
+      },
+    ];
+    input.state.defects = [
+      {
+        id: 'defect_fixed',
+        module: '登录',
+        title: '空密码 500',
+        sourceRef: 'BUG-1',
+        severity: '中',
+        symptom: '',
+        status: 'fixed',
+      },
+    ];
+    input.state.cases = [
+      draft({ id: 'case_high', execution: { status: 'failed' } }),
+      draft({
+        id: 'case_risk',
+        title: '锁定阈值验证',
+        priority: '低',
+        riskIds: ['risk_open'],
+      }),
+      draft({
+        id: 'case_defect',
+        title: '空密码复现',
+        priority: '低',
+        defectIds: ['defect_fixed'],
+      }),
+      draft({ id: 'case_low', title: '页面文案展示', priority: '低' }),
+    ];
+
+    const result = compileTestcaseWorkspace(input, { now: 10 });
+    const numberOf = (id: string) =>
+      result.cases.find((item) => item.id === id)?.caseNumber;
+
+    expect(result.regression.caseNumbers).toHaveLength(3);
+    expect(result.regression.caseNumbers).toContain(numberOf('case_high'));
+    expect(result.regression.caseNumbers).toContain(numberOf('case_risk'));
+    expect(result.regression.caseNumbers).toContain(numberOf('case_defect'));
+    expect(result.regression.caseNumbers).not.toContain(numberOf('case_low'));
+    expect(result.regression.reasons).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          caseNumber: numberOf('case_high'),
+          reason: expect.stringContaining('上轮执行失败'),
+        }),
+        expect.objectContaining({
+          caseNumber: numberOf('case_risk'),
+          reason: expect.stringContaining('关联未关闭风险 risk_open'),
+        }),
+      ]),
+    );
+    expect(result.markdown).toContain('## 回归范围建议');
+    expect(buildTestcaseXlsxSheets(result, input).map((sheet) => sheet.name)).toEqual(
+      expect.arrayContaining(['需求评审风险', '缺陷复现追溯', '回归范围建议']),
+    );
+  });
+
+  it('selection 只合稿命中用例，且不把范围外需求报成未覆盖', () => {
+    const input = workspace();
+    input.state.requirements.push({
+      id: 'req_logout',
+      title: '退出登录',
+      description: '点击退出清空会话',
+      module: '会话',
+      sourceRef: 'PRD 3.9',
+      rules: [],
+      constraints: [],
+      status: 'active',
+    });
+    input.state.cases = [
+      draft(),
+      draft({
+        id: 'case_logout',
+        module: '会话',
+        title: '退出登录清空会话',
+        requirementIds: ['req_logout'],
+      }),
+    ];
+
+    const result = compileTestcaseWorkspace(input, {
+      now: 10,
+      selection: { modules: ['登录'] },
+    });
+
+    expect(result.cases.map((item) => item.id)).toEqual(['case_login_valid']);
+    expect(result.traceability.map((item) => item.requirementId)).toEqual(['req_login']);
+    expect(result.issues.filter((item) => item.code === 'uncovered_requirement')).toHaveLength(0);
+    expect(result.selection).toEqual({ modules: ['登录'] });
+    expect(result.markdown).toContain('合稿范围：模块 登录');
+  });
+
+  it('selection 支持按执行状态与优先级筛选回归子集', () => {
+    const input = workspace();
+    input.state.cases = [
+      draft({ id: 'case_failed', execution: { status: 'failed' } }),
+      draft({
+        id: 'case_passed',
+        title: '已通过用例',
+        execution: { status: 'passed' },
+      }),
+      draft({ id: 'case_low', title: '低优先级未执行', priority: '低' }),
+    ];
+
+    const result = compileTestcaseWorkspace(input, {
+      now: 10,
+      selection: { executionStatuses: ['failed'], priorities: ['高'] },
+    });
+
+    expect(result.cases.map((item) => item.id)).toEqual(['case_failed']);
+    expect(result.execution.failed).toBe(1);
+  });
+
+  it('selection 按草稿 ID 与需求 ID 取交集，并保留范围内追溯', () => {
+    const input = workspace();
+    input.state.requirements.push({
+      id: 'req_logout',
+      title: '退出登录',
+      description: '点击退出清空会话',
+      module: '登录',
+      sourceRef: 'PRD 3.9',
+      rules: [],
+      constraints: [],
+      status: 'active',
+    });
+    input.state.cases = [
+      draft(),
+      draft({
+        id: 'case_logout',
+        title: '退出登录清空会话',
+        requirementIds: ['req_logout'],
+      }),
+    ];
+
+    const byCase = compileTestcaseWorkspace(input, {
+      now: 10,
+      selection: { caseIds: ['case_logout'], requirementIds: ['req_logout'] },
+    });
+    expect(byCase.cases.map((item) => item.id)).toEqual(['case_logout']);
+    expect(byCase.traceability.map((item) => item.requirementId)).toEqual(['req_logout']);
+
+    const empty = compileTestcaseWorkspace(input, {
+      now: 10,
+      selection: { caseIds: ['case_logout'], requirementIds: ['req_login'] },
+    });
+    expect(empty.cases).toHaveLength(0);
+    expect(empty.statistics.total).toBe(0);
   });
 });

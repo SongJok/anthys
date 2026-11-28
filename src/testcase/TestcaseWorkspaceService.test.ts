@@ -169,4 +169,111 @@ describe('TestcaseWorkspaceService', () => {
     expect((await service.latest(actor, created.id))?.state.archived).toBe(true);
     expect(await service.delete(actor, created.id)).toBe(true);
   });
+
+  it('增量保存评审风险、缺陷与执行结果，并进入摘要与合稿', async () => {
+    const store = new InMemoryTestcaseWorkspaceStore(() => 100, () => 'ws_1');
+    const service = new TestcaseWorkspaceService(store, () => 100, () => 'ws_1');
+    const created = await service.create(actor, { title: '结算回归' });
+    const updated = await service.update(actor, created.id, 1, {
+      risks: {
+        upsert: [
+          {
+            id: 'risk_fee_rounding',
+            module: '结算',
+            title: '服务费舍入规则未确认',
+          } as never,
+        ],
+      },
+      defects: {
+        upsert: [
+          {
+            id: 'defect_fee_500',
+            module: '结算',
+            title: '空金额提交 500',
+            sourceRef: 'BUG-2048',
+            status: 'fixed',
+          } as never,
+        ],
+      },
+      cases: {
+        upsert: [
+          {
+            id: 'draft_fee_replay',
+            module: '结算',
+            title: '空金额提交复现',
+            steps: ['提交空金额'],
+            expectedResults: ['提示金额必填'],
+            requirementIds: [],
+            riskIds: ['risk_fee_rounding'],
+            defectIds: ['defect_fee_500'],
+            execution: { status: 'failed', note: '仍返回 500' },
+          } as never,
+        ],
+      },
+    });
+
+    expect(updated.state.risks[0]).toMatchObject({
+      severity: '中',
+      status: 'open',
+      detail: '',
+    });
+    expect(updated.state.defects[0]?.status).toBe('fixed');
+    expect(updated.state.cases[0]?.execution).toEqual({
+      status: 'failed',
+      note: '仍返回 500',
+    });
+    const summary = service.buildPromptSummary(updated);
+    expect(summary).toContain('待处理风险：1；待验证缺陷：1');
+    expect(summary).toContain('风险摘要：[中]risk_fee_rounding 服务费舍入规则未确认');
+    expect(summary).toContain('执行回填：已执行 1/1，失败 1');
+
+    const document = await service.compile(actor, {
+      workspaceId: created.id,
+      baseRevision: updated.revision,
+      now: 200,
+      selection: { executionStatuses: ['failed'] },
+    });
+    expect(document.cases).toHaveLength(1);
+    expect(document.execution.failed).toBe(1);
+    expect(document.regression.caseNumbers).toHaveLength(1);
+    expect(document.defectTraceability[0]?.covered).toBe(true);
+  });
+
+  it('拒绝非法执行状态与风险等级', async () => {
+    const store = new InMemoryTestcaseWorkspaceStore(() => 100, () => 'ws_1');
+    const service = new TestcaseWorkspaceService(store, () => 100, () => 'ws_1');
+    const created = await service.create(actor, { title: '非法值' });
+
+    await expect(
+      service.update(actor, created.id, 1, {
+        cases: {
+          upsert: [
+            {
+              id: 'draft_bad',
+              module: '结算',
+              title: '非法执行状态',
+              steps: ['点击'],
+              expectedResults: ['成功'],
+              execution: { status: 'green' },
+            } as never,
+          ],
+        },
+      }),
+    ).rejects.toThrow('case.execution.status 非法');
+
+    await expect(
+      service.update(actor, created.id, 1, {
+        risks: {
+          upsert: [
+            {
+              id: 'risk_bad',
+              module: '结算',
+              title: '非法等级',
+              severity: '致命',
+            } as never,
+          ],
+        },
+      }),
+    ).rejects.toThrow('risk.severity 非法');
+  });
 });

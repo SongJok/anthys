@@ -221,6 +221,8 @@ function emptyState(): TestcaseWorkspace['state'] {
     cases: [],
     decisions: [],
     openQuestions: [],
+    risks: [],
+    defects: [],
     outputPreferences: {
       screenshotMarkers: true,
       includeDataChecklist: true,
@@ -254,6 +256,11 @@ function toSummary(workspace: TestcaseWorkspace): TestcaseWorkspaceSummary {
     decisionCount: workspace.state.decisions.length,
     openQuestionCount: workspace.state.openQuestions.filter(
       (item) => item.status === 'open',
+    ).length,
+    riskCount: workspace.state.risks.filter((item) => item.status === 'open')
+      .length,
+    defectCount: workspace.state.defects.filter(
+      (item) => item.status === 'open' || item.status === 'fixed',
     ).length,
     archived: Boolean(workspace.state.archived),
     updatedAt: workspace.updatedAt,

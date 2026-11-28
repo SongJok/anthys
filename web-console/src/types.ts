@@ -1235,6 +1235,41 @@ export interface TestcaseDraft {
   evidenceIds: string[];
   assumptions: string[];
   status: 'draft' | 'ready' | 'superseded';
+  riskIds?: string[];
+  defectIds?: string[];
+  execution?: TestcaseExecution;
+}
+
+export type TestcaseSeverity = '高' | '中' | '低';
+export type TestcaseExecutionStatus = 'untested' | 'passed' | 'failed' | 'blocked';
+
+export interface TestcaseExecution {
+  status: TestcaseExecutionStatus;
+  executedAt?: number;
+  executor?: string;
+  note?: string;
+}
+
+export interface TestcaseRisk {
+  id: string;
+  module: string;
+  title: string;
+  detail: string;
+  severity: TestcaseSeverity;
+  requirementIds: string[];
+  evidenceIds: string[];
+  mitigation: string;
+  status: 'open' | 'mitigated' | 'accepted';
+}
+
+export interface TestcaseDefect {
+  id: string;
+  module: string;
+  title: string;
+  sourceRef: string;
+  severity: TestcaseSeverity;
+  symptom: string;
+  status: 'open' | 'fixed' | 'verified' | 'rejected';
 }
 
 export interface TestcaseDecision {
@@ -1266,6 +1301,8 @@ export interface TestcaseWorkspaceState {
   cases: TestcaseDraft[];
   decisions: TestcaseDecision[];
   openQuestions: TestcaseOpenQuestion[];
+  risks: TestcaseRisk[];
+  defects: TestcaseDefect[];
   outputPreferences: TestcaseOutputPreferences;
   archived?: boolean;
 }
@@ -1296,6 +1333,8 @@ export interface TestcaseWorkspaceSummary {
   evidenceCount?: number;
   decisionCount?: number;
   openQuestionCount: number;
+  riskCount?: number;
+  defectCount?: number;
   archived?: boolean;
   updatedAt: number;
 }
@@ -1313,11 +1352,51 @@ export interface TestcaseCompileIssue {
     | 'duplicate_candidate'
     | 'empty_case'
     | 'unsupported_method'
-    | 'unresolved_question';
+    | 'unresolved_question'
+    | 'missing_risk'
+    | 'uncovered_risk'
+    | 'missing_defect'
+    | 'uncovered_defect';
   message: string;
   requirementId?: string;
   evidenceId?: string;
   caseId?: string;
+  riskId?: string;
+  defectId?: string;
+}
+
+export interface TestcaseRiskCoverage {
+  riskId: string;
+  title: string;
+  severity: TestcaseSeverity;
+  status: TestcaseRisk['status'];
+  caseNumbers: string[];
+  covered: boolean;
+}
+
+export interface TestcaseDefectCoverage {
+  defectId: string;
+  title: string;
+  severity: TestcaseSeverity;
+  status: TestcaseDefect['status'];
+  caseNumbers: string[];
+  covered: boolean;
+}
+
+export interface TestcaseExecutionSummary {
+  total: number;
+  passed: number;
+  failed: number;
+  blocked: number;
+  untested: number;
+  passRate: number;
+  failedCaseNumbers: string[];
+  blockedCaseNumbers: string[];
+}
+
+export interface TestcaseRegressionScope {
+  caseNumbers: string[];
+  reasons: Array<{ caseNumber: string; reason: string }>;
 }
 
 export interface CompiledTestcaseDocument {
@@ -1344,6 +1423,18 @@ export interface CompiledTestcaseDocument {
     caseNumbers: string[];
     covered: boolean;
   }>;
+  // 历史合稿版本落盘时还没有这些集合，渲染时需要兜底
+  riskRegister?: TestcaseRiskCoverage[];
+  defectTraceability?: TestcaseDefectCoverage[];
+  execution?: TestcaseExecutionSummary;
+  regression?: TestcaseRegressionScope;
+  selection?: {
+    modules?: string[];
+    requirementIds?: string[];
+    caseIds?: string[];
+    priorities?: Array<'高' | '中' | '低'>;
+    executionStatuses?: TestcaseExecutionStatus[];
+  };
   openQuestions: TestcaseOpenQuestion[];
   issues: TestcaseCompileIssue[];
   markdown: string;

@@ -19,7 +19,9 @@ import {
   type TestcaseWorkspaceStore,
 } from '../testcase/TestcaseWorkspaceStore.js';
 
-function toWorkspace(row: typeof testcaseWorkspaces.$inferSelect): TestcaseWorkspace {
+export function toTestcaseWorkspace(
+  row: typeof testcaseWorkspaces.$inferSelect,
+): TestcaseWorkspace {
   return {
     id: row.id,
     title: row.title,
@@ -28,13 +30,20 @@ function toWorkspace(row: typeof testcaseWorkspaces.$inferSelect): TestcaseWorks
     ownerStaffId: row.ownerStaffId,
     ...(row.projectId ? { projectId: row.projectId } : {}),
     revision: row.revision,
-    state: row.stateJson,
+    // 早期工作区的 jsonb 里没有风险与缺陷集合，读取时补齐，无需迁移
+    state: {
+      ...row.stateJson,
+      risks: row.stateJson.risks ?? [],
+      defects: row.stateJson.defects ?? [],
+    },
     createdAt: row.createdAt.getTime(),
     updatedAt: row.updatedAt.getTime(),
   };
 }
 
-function toSummary(row: typeof testcaseWorkspaces.$inferSelect): TestcaseWorkspaceSummary {
+export function toTestcaseWorkspaceSummary(
+  row: typeof testcaseWorkspaces.$inferSelect,
+): TestcaseWorkspaceSummary {
   return {
     id: row.id,
     title: row.title,
@@ -52,6 +61,12 @@ function toSummary(row: typeof testcaseWorkspaces.$inferSelect): TestcaseWorkspa
     decisionCount: row.stateJson.decisions.length,
     openQuestionCount: row.stateJson.openQuestions.filter(
       (item) => item.status === 'open',
+    ).length,
+    riskCount: (row.stateJson.risks ?? []).filter(
+      (item) => item.status === 'open',
+    ).length,
+    defectCount: (row.stateJson.defects ?? []).filter(
+      (item) => item.status === 'open' || item.status === 'fixed',
     ).length,
     archived: Boolean(row.stateJson.archived),
     updatedAt: row.updatedAt.getTime(),
@@ -92,7 +107,7 @@ export class DrizzleTestcaseWorkspaceStore implements TestcaseWorkspaceStore {
       .returning();
     const row = rows[0];
     if (!row) throw new Error('failed to create testcase workspace');
-    return toWorkspace(row);
+    return toTestcaseWorkspace(row);
   }
 
   public async get(workspaceId: string): Promise<TestcaseWorkspace | null> {
@@ -101,7 +116,7 @@ export class DrizzleTestcaseWorkspaceStore implements TestcaseWorkspaceStore {
       .from(testcaseWorkspaces)
       .where(eq(testcaseWorkspaces.id, workspaceId))
       .limit(1);
-    return rows[0] ? toWorkspace(rows[0]) : null;
+    return rows[0] ? toTestcaseWorkspace(rows[0]) : null;
   }
 
   public async list(
@@ -140,7 +155,7 @@ export class DrizzleTestcaseWorkspaceStore implements TestcaseWorkspaceStore {
       .where(conditions.length > 0 ? and(...conditions) : undefined)
       .orderBy(desc(testcaseWorkspaces.updatedAt))
       .limit(Math.max(1, Math.min(input.limit ?? 20, 100)));
-    return rows.map(toSummary);
+    return rows.map(toTestcaseWorkspaceSummary);
   }
 
   public async delete(workspaceId: string): Promise<boolean> {
@@ -172,12 +187,14 @@ export class DrizzleTestcaseWorkspaceStore implements TestcaseWorkspaceStore {
           current.revision,
         );
       }
-      const patch = mutate(toWorkspace(current));
+      const currentWorkspace = toTestcaseWorkspace(current);
+      const patch = mutate(currentWorkspace);
       const changed =
         patch.title !== current.title ||
         (patch.projectId ?? undefined) !== (current.projectId ?? undefined) ||
-        JSON.stringify(patch.state) !== JSON.stringify(current.stateJson);
-      if (!changed) return toWorkspace(current);
+        // 与补齐后的状态比较，旧工作区不会因为补齐风险缺陷集合而空转一次 revision
+        JSON.stringify(patch.state) !== JSON.stringify(currentWorkspace.state);
+      if (!changed) return currentWorkspace;
       const updated = await tx
         .update(testcaseWorkspaces)
         .set({
@@ -202,7 +219,7 @@ export class DrizzleTestcaseWorkspaceStore implements TestcaseWorkspaceStore {
           current.revision + 1,
         );
       }
-      return toWorkspace(row);
+      return toTestcaseWorkspace(row);
     });
   }
 

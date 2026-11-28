@@ -2,9 +2,14 @@ import type {
   CompiledTestcaseCase,
   CompiledTestcaseDocument,
   TestcaseCompileIssue,
+  TestcaseCompileSelection,
   TestcaseDataItem,
+  TestcaseDefectCoverage,
   TestcaseDraft,
+  TestcaseExecutionSummary,
   TestcaseMethod,
+  TestcaseRegressionScope,
+  TestcaseRiskCoverage,
   TestcaseWorkspace,
 } from '../types/testcase-workspace.js';
 
@@ -20,6 +25,23 @@ const TEST_METHODS = new Set<TestcaseMethod>(CANONICAL_TESTCASE_METHODS);
 
 const PRIORITY_ORDER = { 高: 0, 中: 1, 低: 2 } as const;
 const SCENARIO_ORDER = { normal: 0, exception: 1, boundary: 2, other: 3 } as const;
+const RISK_STATUS_LABELS = {
+  open: '待处理',
+  mitigated: '已缓解',
+  accepted: '已接受',
+} as const;
+const DEFECT_STATUS_LABELS = {
+  open: '待修复',
+  fixed: '已修复待验证',
+  verified: '已验证',
+  rejected: '已拒绝',
+} as const;
+const EXECUTION_STATUS_LABELS = {
+  untested: '未执行',
+  passed: '通过',
+  failed: '失败',
+  blocked: '阻塞',
+} as const;
 const HEADERS = [
   '用例编号',
   '用例标题',
@@ -133,6 +155,105 @@ export function buildTestcaseXlsxSheets(
       }),
     });
   }
+  if ((prefs?.includeTraceability ?? true) && document.riskRegister.length > 0) {
+    const riskById = new Map(
+      (workspace?.state.risks ?? []).map((risk) => [risk.id, risk]),
+    );
+    sheets.push({
+      name: '需求评审风险',
+      headers: [
+        '风险 ID',
+        '模块',
+        '风险标题',
+        '等级',
+        '状态',
+        '已覆盖',
+        '覆盖用例编号',
+        '风险说明',
+        '应对说明',
+      ],
+      rows: document.riskRegister.map((item) => {
+        const risk = riskById.get(item.riskId);
+        return [
+          item.riskId,
+          risk?.module ?? '',
+          item.title,
+          item.severity,
+          RISK_STATUS_LABELS[item.status],
+          item.covered ? '是' : '否',
+          item.caseNumbers.join('、'),
+          risk?.detail ?? '',
+          risk?.mitigation ?? '',
+        ];
+      }),
+    });
+  }
+  if (
+    (prefs?.includeTraceability ?? true) &&
+    document.defectTraceability.length > 0
+  ) {
+    const defectById = new Map(
+      (workspace?.state.defects ?? []).map((defect) => [defect.id, defect]),
+    );
+    sheets.push({
+      name: '缺陷复现追溯',
+      headers: [
+        '缺陷 ID',
+        '模块',
+        '缺陷标题',
+        '等级',
+        '状态',
+        '来源',
+        '已覆盖',
+        '覆盖用例编号',
+        '现象',
+      ],
+      rows: document.defectTraceability.map((item) => {
+        const defect = defectById.get(item.defectId);
+        return [
+          item.defectId,
+          defect?.module ?? '',
+          item.title,
+          item.severity,
+          DEFECT_STATUS_LABELS[item.status],
+          defect?.sourceRef ?? '',
+          item.covered ? '是' : '否',
+          item.caseNumbers.join('、'),
+          defect?.symptom ?? '',
+        ];
+      }),
+    });
+  }
+  const executedCount =
+    document.execution.passed +
+    document.execution.failed +
+    document.execution.blocked;
+  if (executedCount > 0) {
+    sheets.push({
+      name: '执行结果',
+      headers: ['用例编号', '用例标题', '执行状态', '执行人', '执行时间', '备注'],
+      rows: document.cases.map((item) => [
+        item.caseNumber,
+        item.title,
+        EXECUTION_STATUS_LABELS[item.execution?.status ?? 'untested'],
+        item.execution?.executor ?? '',
+        item.execution?.executedAt
+          ? new Date(item.execution.executedAt).toISOString()
+          : '',
+        item.execution?.note ?? '',
+      ]),
+    });
+  }
+  if (document.regression.reasons.length > 0) {
+    sheets.push({
+      name: '回归范围建议',
+      headers: ['用例编号', '纳入原因'],
+      rows: document.regression.reasons.map((item) => [
+        item.caseNumber,
+        item.reason,
+      ]),
+    });
+  }
   const summaryRows: Array<[string, string]> = [
     ['工作区标题', document.title],
     ['工作区 ID', document.workspaceId],
@@ -154,7 +275,29 @@ export function buildTestcaseXlsxSheets(
         .map(([k, v]) => `${k}: ${v}`)
         .join('；') || '无',
     ],
+    [
+      '未关闭风险',
+      String(document.riskRegister.filter((item) => item.status === 'open').length),
+    ],
+    [
+      '待验证缺陷',
+      String(
+        document.defectTraceability.filter(
+          (item) => item.status === 'open' || item.status === 'fixed',
+        ).length,
+      ),
+    ],
+    ['回归范围建议', document.regression.caseNumbers.join('、') || '无'],
   ];
+  if (document.selection) {
+    summaryRows.push(['合稿范围', describeTestcaseSelection(document.selection)]);
+  }
+  if (executedCount > 0) {
+    summaryRows.push([
+      '执行统计',
+      `已执行 ${executedCount}/${document.execution.total}，通过 ${document.execution.passed}、失败 ${document.execution.failed}、阻塞 ${document.execution.blocked}，通过率 ${document.execution.passRate}%`,
+    ]);
+  }
   for (const decision of workspace?.state.decisions ?? []) {
     summaryRows.push([`已确认口径：${decision.topic}`, decision.value]);
   }
@@ -216,17 +359,201 @@ function mergeDuplicate(
   target: TestcaseDraft,
   source: TestcaseDraft,
 ): TestcaseDraft {
+  const riskIds = unique([...(target.riskIds ?? []), ...(source.riskIds ?? [])]);
+  const defectIds = unique([
+    ...(target.defectIds ?? []),
+    ...(source.defectIds ?? []),
+  ]);
+  const execution = target.execution ?? source.execution;
   return {
     ...target,
     requirementIds: unique([...target.requirementIds, ...source.requirementIds]),
     evidenceIds: unique([...target.evidenceIds, ...source.evidenceIds]),
     assumptions: unique([...target.assumptions, ...source.assumptions]),
+    ...(riskIds.length > 0 ? { riskIds } : {}),
+    ...(defectIds.length > 0 ? { defectIds } : {}),
+    ...(execution ? { execution } : {}),
   };
 }
 
 export interface CompileTestcaseOptions {
   version?: number;
   now?: number;
+  /** 只合稿命中筛选条件的用例，用于回归子集或单模块导出 */
+  selection?: TestcaseCompileSelection;
+}
+
+function matchesSelection(
+  item: TestcaseDraft,
+  selection: TestcaseCompileSelection,
+): boolean {
+  if (selection.modules?.length && !selection.modules.includes(item.module)) {
+    return false;
+  }
+  if (selection.caseIds?.length && !selection.caseIds.includes(item.id)) {
+    return false;
+  }
+  if (
+    selection.priorities?.length &&
+    !selection.priorities.includes(item.priority)
+  ) {
+    return false;
+  }
+  if (
+    selection.requirementIds?.length &&
+    !item.requirementIds.some((id) => selection.requirementIds?.includes(id))
+  ) {
+    return false;
+  }
+  if (
+    selection.executionStatuses?.length &&
+    !selection.executionStatuses.includes(item.execution?.status ?? 'untested')
+  ) {
+    return false;
+  }
+  return true;
+}
+
+export function describeTestcaseSelection(
+  selection: TestcaseCompileSelection,
+): string {
+  const parts: string[] = [];
+  if (selection.modules?.length) parts.push(`模块 ${selection.modules.join('、')}`);
+  if (selection.requirementIds?.length) {
+    parts.push(`需求 ${selection.requirementIds.join('、')}`);
+  }
+  if (selection.caseIds?.length) parts.push(`草稿 ${selection.caseIds.join('、')}`);
+  if (selection.priorities?.length) {
+    parts.push(`优先级 ${selection.priorities.join('、')}`);
+  }
+  if (selection.executionStatuses?.length) {
+    parts.push(`执行状态 ${selection.executionStatuses.join('、')}`);
+  }
+  return parts.join('；') || '全部用例';
+}
+
+function buildRiskRegister(
+  workspace: TestcaseWorkspace,
+  cases: CompiledTestcaseCase[],
+  issues: TestcaseCompileIssue[],
+): TestcaseRiskCoverage[] {
+  const register = workspace.state.risks.map((risk) => {
+    const matched = cases.filter((item) => item.riskIds?.includes(risk.id));
+    return {
+      riskId: risk.id,
+      title: risk.title,
+      severity: risk.severity,
+      status: risk.status,
+      caseNumbers: matched.map((item) => item.caseNumber),
+      covered: matched.length > 0,
+    };
+  });
+  for (const item of register) {
+    if (item.status === 'open' && !item.covered) {
+      issues.push({
+        code: 'uncovered_risk',
+        message: `风险 ${item.riskId} ${item.title} 仍待处理且没有用例覆盖`,
+        riskId: item.riskId,
+      });
+    }
+  }
+  return register;
+}
+
+function buildDefectTraceability(
+  workspace: TestcaseWorkspace,
+  cases: CompiledTestcaseCase[],
+  issues: TestcaseCompileIssue[],
+): TestcaseDefectCoverage[] {
+  const traceability = workspace.state.defects.map((defect) => {
+    const matched = cases.filter((item) => item.defectIds?.includes(defect.id));
+    return {
+      defectId: defect.id,
+      title: defect.title,
+      severity: defect.severity,
+      status: defect.status,
+      caseNumbers: matched.map((item) => item.caseNumber),
+      covered: matched.length > 0,
+    };
+  });
+  for (const item of traceability) {
+    if (
+      (item.status === 'open' || item.status === 'fixed') &&
+      !item.covered
+    ) {
+      issues.push({
+        code: 'uncovered_defect',
+        message: `缺陷 ${item.defectId} ${item.title} 缺少复现或回归验证用例`,
+        defectId: item.defectId,
+      });
+    }
+  }
+  return traceability;
+}
+
+function buildExecutionSummary(
+  cases: CompiledTestcaseCase[],
+): TestcaseExecutionSummary {
+  const summary: TestcaseExecutionSummary = {
+    total: cases.length,
+    passed: 0,
+    failed: 0,
+    blocked: 0,
+    untested: 0,
+    passRate: 0,
+    failedCaseNumbers: [],
+    blockedCaseNumbers: [],
+  };
+  for (const item of cases) {
+    const status = item.execution?.status ?? 'untested';
+    if (status === 'passed') summary.passed += 1;
+    else if (status === 'failed') {
+      summary.failed += 1;
+      summary.failedCaseNumbers.push(item.caseNumber);
+    } else if (status === 'blocked') {
+      summary.blocked += 1;
+      summary.blockedCaseNumbers.push(item.caseNumber);
+    } else summary.untested += 1;
+  }
+  const executed = summary.passed + summary.failed + summary.blocked;
+  summary.passRate =
+    executed > 0 ? Math.round((summary.passed / executed) * 1000) / 10 : 0;
+  return summary;
+}
+
+function buildRegressionScope(
+  workspace: TestcaseWorkspace,
+  cases: CompiledTestcaseCase[],
+): TestcaseRegressionScope {
+  const openRiskIds = new Set(
+    workspace.state.risks
+      .filter((item) => item.status === 'open')
+      .map((item) => item.id),
+  );
+  const pendingDefectIds = new Set(
+    workspace.state.defects
+      .filter((item) => item.status === 'open' || item.status === 'fixed')
+      .map((item) => item.id),
+  );
+  const reasons: TestcaseRegressionScope['reasons'] = [];
+  for (const item of cases) {
+    const why: string[] = [];
+    if (item.execution?.status === 'failed') why.push('上轮执行失败');
+    if (item.execution?.status === 'blocked') why.push('上轮执行阻塞');
+    const riskHits = (item.riskIds ?? []).filter((id) => openRiskIds.has(id));
+    if (riskHits.length > 0) why.push(`关联未关闭风险 ${riskHits.join('、')}`);
+    const defectHits = (item.defectIds ?? []).filter((id) =>
+      pendingDefectIds.has(id),
+    );
+    if (defectHits.length > 0) {
+      why.push(`关联待验证缺陷 ${defectHits.join('、')}`);
+    }
+    if (item.priority === '高') why.push('高优先级核心用例');
+    if (why.length > 0) {
+      reasons.push({ caseNumber: item.caseNumber, reason: why.join('；') });
+    }
+  }
+  return { caseNumbers: reasons.map((item) => item.caseNumber), reasons };
 }
 
 export function compileTestcaseWorkspace(
@@ -239,8 +566,13 @@ export function compileTestcaseWorkspace(
   );
   const requirementIds = new Set(activeRequirements.map((item) => item.id));
   const evidenceIds = new Set(workspace.state.evidence.map((item) => item.id));
+  const riskIds = new Set(workspace.state.risks.map((item) => item.id));
+  const defectIds = new Set(workspace.state.defects.map((item) => item.id));
+  const selection = options.selection;
   const candidates = workspace.state.cases.filter(
-    (item) => item.status !== 'superseded',
+    (item) =>
+      item.status !== 'superseded' &&
+      (!selection || matchesSelection(item, selection)),
   );
   const deduped: TestcaseDraft[] = [];
   const bySemanticKey = new Map<string, TestcaseDraft>();
@@ -327,6 +659,26 @@ export function compileTestcaseWorkspace(
           message: `用例 ${item.id} 引用了不存在的证据 ${evidenceId}`,
           caseId: item.id,
           evidenceId,
+        });
+      }
+    }
+    for (const riskId of item.riskIds ?? []) {
+      if (!riskIds.has(riskId)) {
+        issues.push({
+          code: 'missing_risk',
+          message: `用例 ${item.id} 引用了不存在的风险 ${riskId}`,
+          caseId: item.id,
+          riskId,
+        });
+      }
+    }
+    for (const defectId of item.defectIds ?? []) {
+      if (!defectIds.has(defectId)) {
+        issues.push({
+          code: 'missing_defect',
+          message: `用例 ${item.id} 引用了不存在的缺陷 ${defectId}`,
+          caseId: item.id,
+          defectId,
         });
       }
     }
@@ -422,7 +774,15 @@ export function compileTestcaseWorkspace(
   }
   statistics.byModule = Object.fromEntries(moduleCounts);
 
-  const traceability = activeRequirements.map((requirement) => {
+  // 筛选合稿时只追溯范围内的需求，避免把范围外需求报成未覆盖
+  const tracedRequirements = selection
+    ? activeRequirements.filter(
+        (requirement) =>
+          selection.requirementIds?.includes(requirement.id) ||
+          cases.some((item) => item.requirementIds.includes(requirement.id)),
+      )
+    : activeRequirements;
+  const traceability = tracedRequirements.map((requirement) => {
     const matched = cases.filter((item) =>
       item.requirementIds.includes(requirement.id),
     );
@@ -471,6 +831,11 @@ export function compileTestcaseWorkspace(
     });
   }
 
+  const riskRegister = buildRiskRegister(workspace, cases, issues);
+  const defectTraceability = buildDefectTraceability(workspace, cases, issues);
+  const execution = buildExecutionSummary(cases);
+  const regression = buildRegressionScope(workspace, cases);
+
   const rows = cases.map((item) => {
     const steps = item.steps.map(stepWithScreenshot(item, workspace));
     return [
@@ -490,6 +855,11 @@ export function compileTestcaseWorkspace(
     dataItems,
     statistics,
     traceability,
+    riskRegister,
+    defectTraceability,
+    execution,
+    regression,
+    ...(selection ? { selection } : {}),
     openQuestions,
     issues,
   });
@@ -504,6 +874,11 @@ export function compileTestcaseWorkspace(
     dataItems,
     statistics,
     traceability,
+    riskRegister,
+    defectTraceability,
+    execution,
+    regression,
+    ...(selection ? { selection } : {}),
     openQuestions,
     issues,
     markdown,
@@ -517,6 +892,11 @@ function renderMarkdown(input: {
   dataItems: TestcaseDataItem[];
   statistics: CompiledTestcaseDocument['statistics'];
   traceability: CompiledTestcaseDocument['traceability'];
+  riskRegister: TestcaseRiskCoverage[];
+  defectTraceability: TestcaseDefectCoverage[];
+  execution: TestcaseExecutionSummary;
+  regression: TestcaseRegressionScope;
+  selection?: TestcaseCompileSelection;
   openQuestions: CompiledTestcaseDocument['openQuestions'];
   issues: TestcaseCompileIssue[];
 }): string {
@@ -528,10 +908,11 @@ function renderMarkdown(input: {
     `- 来源版本：r${workspace.revision}`,
     `- 用例总数：${statistics.total}`,
     `- 优先级：高 ${statistics.byPriority.高} / 中 ${statistics.byPriority.中} / 低 ${statistics.byPriority.低}`,
-    '',
-    '## 需求缺失、假设与待确认',
-    '',
   ];
+  if (input.selection) {
+    lines.push(`- 合稿范围：${describeTestcaseSelection(input.selection)}`);
+  }
+  lines.push('', '## 需求缺失、假设与待确认', '');
 
   const assumptions = unique(cases.flatMap((item) => item.assumptions));
   if (assumptions.length === 0 && input.openQuestions.length === 0) {
@@ -635,6 +1016,61 @@ function renderMarkdown(input: {
       lines.push(
         `- ${item.requirementId} ${item.title}：${item.covered ? item.caseNumbers.join('、') : '未覆盖，需补充用例或说明原因'}`,
       );
+    }
+  }
+
+  if (input.riskRegister.length > 0) {
+    lines.push('', '## 需求评审风险', '');
+    for (const item of input.riskRegister) {
+      lines.push(
+        `- [${item.severity}] ${item.riskId} ${item.title}（${RISK_STATUS_LABELS[item.status]}）：${item.covered ? item.caseNumbers.join('、') : '无用例覆盖'}`,
+      );
+    }
+  }
+
+  if (input.defectTraceability.length > 0) {
+    lines.push('', '## 缺陷复现追溯', '');
+    for (const item of input.defectTraceability) {
+      lines.push(
+        `- [${item.severity}] ${item.defectId} ${item.title}（${DEFECT_STATUS_LABELS[item.status]}）：${item.covered ? item.caseNumbers.join('、') : '缺少复现或回归用例'}`,
+      );
+    }
+  }
+
+  const execution = input.execution;
+  const executed = execution.passed + execution.failed + execution.blocked;
+  if (executed > 0) {
+    const byNumber = new Map(cases.map((item) => [item.caseNumber, item]));
+    lines.push(
+      '',
+      '## 执行结果与测试报告',
+      '',
+      `- 已执行 ${executed} / ${execution.total}：通过 ${execution.passed}、失败 ${execution.failed}、阻塞 ${execution.blocked}；未执行 ${execution.untested}`,
+      `- 已执行用例通过率：${execution.passRate}%`,
+    );
+    for (const caseNumber of execution.failedCaseNumbers) {
+      const item = byNumber.get(caseNumber);
+      lines.push(
+        `- 失败 ${caseNumber} ${item?.title ?? ''}：${item?.execution?.note || '未填写失败说明'}`,
+      );
+    }
+    for (const caseNumber of execution.blockedCaseNumbers) {
+      const item = byNumber.get(caseNumber);
+      lines.push(
+        `- 阻塞 ${caseNumber} ${item?.title ?? ''}：${item?.execution?.note || '未填写阻塞原因'}`,
+      );
+    }
+  }
+
+  if (input.regression.caseNumbers.length > 0) {
+    lines.push(
+      '',
+      '## 回归范围建议',
+      '',
+      `共 ${input.regression.caseNumbers.length} 条，按失败、阻塞、未关闭风险、待验证缺陷与高优先级筛出：`,
+    );
+    for (const item of input.regression.reasons) {
+      lines.push(`- ${item.caseNumber}：${item.reason}`);
     }
   }
 

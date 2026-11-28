@@ -47,6 +47,50 @@ export interface TestcaseDraft {
   evidenceIds: string[];
   assumptions: string[];
   status: 'draft' | 'ready' | 'superseded';
+  /** 需求评审识别出的风险点，用例作为风险的验证手段 */
+  riskIds?: string[];
+  /** 缺陷复现或回归验证的目标缺陷 */
+  defectIds?: string[];
+  execution?: TestcaseExecution;
+}
+
+export type TestcaseSeverity = '高' | '中' | '低';
+
+export type TestcaseExecutionStatus =
+  | 'untested'
+  | 'passed'
+  | 'failed'
+  | 'blocked';
+
+export interface TestcaseExecution {
+  status: TestcaseExecutionStatus;
+  executedAt?: number;
+  executor?: string;
+  note?: string;
+}
+
+/** 需求评审阶段识别的风险点，需要用例覆盖或显式接受 */
+export interface TestcaseRisk {
+  id: string;
+  module: string;
+  title: string;
+  detail: string;
+  severity: TestcaseSeverity;
+  requirementIds: string[];
+  evidenceIds: string[];
+  mitigation: string;
+  status: 'open' | 'mitigated' | 'accepted';
+}
+
+/** 缺陷记录，用于生成复现用例与回归验证 */
+export interface TestcaseDefect {
+  id: string;
+  module: string;
+  title: string;
+  sourceRef: string;
+  severity: TestcaseSeverity;
+  symptom: string;
+  status: 'open' | 'fixed' | 'verified' | 'rejected';
 }
 
 export interface TestcaseDecision {
@@ -78,6 +122,8 @@ export interface TestcaseWorkspaceState {
   cases: TestcaseDraft[];
   decisions: TestcaseDecision[];
   openQuestions: TestcaseOpenQuestion[];
+  risks: TestcaseRisk[];
+  defects: TestcaseDefect[];
   outputPreferences: TestcaseOutputPreferences;
   archived?: boolean;
 }
@@ -125,6 +171,14 @@ export interface TestcaseWorkspacePatch {
     upsert?: TestcaseOpenQuestion[];
     removeIds?: string[];
   };
+  risks?: {
+    upsert?: TestcaseRisk[];
+    removeIds?: string[];
+  };
+  defects?: {
+    upsert?: TestcaseDefect[];
+    removeIds?: string[];
+  };
   outputPreferences?: Partial<TestcaseOutputPreferences>;
 }
 
@@ -141,6 +195,8 @@ export interface TestcaseWorkspaceSummary {
   evidenceCount?: number;
   decisionCount?: number;
   openQuestionCount: number;
+  riskCount?: number;
+  defectCount?: number;
   archived?: boolean;
   updatedAt: number;
 }
@@ -164,11 +220,61 @@ export interface TestcaseCompileIssue {
     | 'duplicate_candidate'
     | 'empty_case'
     | 'unsupported_method'
-    | 'unresolved_question';
+    | 'unresolved_question'
+    | 'missing_risk'
+    | 'uncovered_risk'
+    | 'missing_defect'
+    | 'uncovered_defect';
   message: string;
   requirementId?: string;
   evidenceId?: string;
   caseId?: string;
+  riskId?: string;
+  defectId?: string;
+}
+
+/** 合稿范围筛选：用于只导出回归子集或某个模块的用例 */
+export interface TestcaseCompileSelection {
+  modules?: string[];
+  requirementIds?: string[];
+  caseIds?: string[];
+  priorities?: Array<'高' | '中' | '低'>;
+  executionStatuses?: TestcaseExecutionStatus[];
+}
+
+export interface TestcaseRiskCoverage {
+  riskId: string;
+  title: string;
+  severity: TestcaseSeverity;
+  status: TestcaseRisk['status'];
+  caseNumbers: string[];
+  covered: boolean;
+}
+
+export interface TestcaseDefectCoverage {
+  defectId: string;
+  title: string;
+  severity: TestcaseSeverity;
+  status: TestcaseDefect['status'];
+  caseNumbers: string[];
+  covered: boolean;
+}
+
+export interface TestcaseExecutionSummary {
+  total: number;
+  passed: number;
+  failed: number;
+  blocked: number;
+  untested: number;
+  /** 已执行用例的通过率；无执行记录时为 0 */
+  passRate: number;
+  failedCaseNumbers: string[];
+  blockedCaseNumbers: string[];
+}
+
+export interface TestcaseRegressionScope {
+  caseNumbers: string[];
+  reasons: Array<{ caseNumber: string; reason: string }>;
 }
 
 export interface CompiledTestcaseDocument {
@@ -191,6 +297,12 @@ export interface CompiledTestcaseDocument {
     caseNumbers: string[];
     covered: boolean;
   }>;
+  riskRegister: TestcaseRiskCoverage[];
+  defectTraceability: TestcaseDefectCoverage[];
+  execution: TestcaseExecutionSummary;
+  regression: TestcaseRegressionScope;
+  /** 本次合稿使用的范围筛选；未筛选时缺省 */
+  selection?: TestcaseCompileSelection;
   openQuestions: TestcaseOpenQuestion[];
   issues: TestcaseCompileIssue[];
   markdown: string;

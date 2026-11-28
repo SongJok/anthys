@@ -131,6 +131,97 @@ describe('TestcaseWorkspaceToolProvider', () => {
     expect(markdown).toContain('使用有效商品创建订单');
   });
 
+  it('增量写入风险缺陷与执行结果，并按清洗后的 selection 合稿回归子集', async () => {
+    const { provider } = setup();
+    const binding = { current: null as { workspaceId: string; baseRevision: number } | null };
+    const ctx = context({ testcaseWorkspaceBinding: binding });
+    await tool(provider, ctx, 'testcase_workspace_create', { title: '支付回归' });
+
+    await tool(provider, ctx, 'testcase_workspace_update', {
+      workspaceId: 'ws-1',
+      baseRevision: 1,
+      patch: {
+        risks: {
+          upsert: [{ id: 'risk-fee', module: '支付', title: '手续费舍入口径未确认' }],
+        },
+        defects: {
+          upsert: [
+            { id: 'defect-500', module: '支付', title: '零金额提交 500', sourceRef: 'BUG-77', status: 'fixed' },
+          ],
+        },
+        cases: {
+          upsert: [
+            {
+              id: 'draft-fail',
+              module: '支付',
+              title: '零金额提交复现',
+              steps: ['提交零金额'],
+              expectedResults: ['提示金额必填'],
+              priority: '高',
+              riskIds: ['risk-fee'],
+              defectIds: ['defect-500'],
+              execution: { status: 'failed', note: '仍返回 500' },
+            },
+            {
+              id: 'draft-pass',
+              module: '支付',
+              title: '正常金额支付',
+              steps: ['提交有效金额'],
+              expectedResults: ['支付成功'],
+              priority: '低',
+              execution: { status: 'passed' },
+            },
+          ],
+        },
+      },
+    });
+    expect(binding.current).toEqual({ workspaceId: 'ws-1', baseRevision: 2 });
+
+    const risks = JSON.parse(
+      await tool(provider, ctx, 'testcase_workspace_get', {
+        workspaceId: 'ws-1',
+        section: 'risks',
+      }),
+    );
+    expect(risks.items[0]).toMatchObject({ severity: '中', status: 'open' });
+    const defects = JSON.parse(
+      await tool(provider, ctx, 'testcase_workspace_get', {
+        workspaceId: 'ws-1',
+        section: 'defects',
+      }),
+    );
+    expect(defects.items[0]).toMatchObject({ status: 'fixed' });
+
+    const subset = JSON.parse(
+      await tool(provider, ctx, 'testcase_compile', {
+        workspaceId: 'ws-1',
+        baseRevision: 2,
+        format: 'json',
+        selection: {
+          executionStatuses: ['failed', 'green', ' failed '],
+          priorities: ['高', '紧急'],
+          modules: [' ', 3],
+        },
+      }),
+    );
+    expect(subset.selection).toEqual({ executionStatuses: ['failed'], priorities: ['高'] });
+    expect(subset.cases).toHaveLength(1);
+    expect(subset.execution).toMatchObject({ total: 1, failed: 1, passRate: 0 });
+    expect(subset.regression.caseNumbers).toHaveLength(1);
+    expect(subset.defectTraceability[0]).toMatchObject({ covered: true });
+
+    const markdown = await tool(provider, ctx, 'testcase_compile', {
+      workspaceId: 'ws-1',
+      baseRevision: 2,
+      selection: {},
+    });
+    expect(markdown).toContain('## 需求评审风险');
+    expect(markdown).toContain('## 缺陷复现追溯');
+    expect(markdown).toContain('## 执行结果与测试报告');
+    expect(markdown).toContain('## 回归范围建议');
+    expect(markdown).not.toContain('合稿范围：');
+  });
+
   it('enforces workspace ownership and the active run binding', async () => {
     const { provider, service } = setup();
     await service.create(context(), { title: '私有用例' });

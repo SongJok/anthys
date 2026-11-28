@@ -29,7 +29,10 @@ import { api, downloadTestcaseExport } from '../api';
 import { formatShanghaiDateTime } from '../time';
 import type {
   CompiledTestcaseCase,
+  TestcaseDefect,
+  TestcaseExecutionStatus,
   TestcaseExportFormat,
+  TestcaseRisk,
   TestcaseWorkspaceDetail,
   TestcaseWorkspaceSummary,
 } from '../types';
@@ -46,6 +49,33 @@ const PRIORITY_COLOR: Record<'高' | '中' | '低', string> = {
   高: 'red',
   中: 'orange',
   低: 'blue',
+};
+
+const EXECUTION_LABEL: Record<TestcaseExecutionStatus, string> = {
+  untested: '未执行',
+  passed: '通过',
+  failed: '失败',
+  blocked: '阻塞',
+};
+
+const EXECUTION_COLOR: Record<TestcaseExecutionStatus, string> = {
+  untested: 'default',
+  passed: 'green',
+  failed: 'red',
+  blocked: 'orange',
+};
+
+const RISK_STATUS_LABEL: Record<TestcaseRisk['status'], string> = {
+  open: '待处理',
+  mitigated: '已缓解',
+  accepted: '已接受',
+};
+
+const DEFECT_STATUS_LABEL: Record<TestcaseDefect['status'], string> = {
+  open: '待修复',
+  fixed: '已修复待验证',
+  verified: '已验证',
+  rejected: '已拒绝',
 };
 
 function renderLines(items: string[]) {
@@ -216,6 +246,38 @@ export default function TestcaseWorkspacesPage() {
     });
   }, [detail, moduleFilter, priorityFilter]);
 
+  const riskRows = useMemo(() => {
+    if (!detail) return [];
+    const coverage = new Map(
+      (detail.preview.riskRegister ?? []).map((item) => [item.riskId, item]),
+    );
+    return detail.workspace.state.risks.map((risk) => ({
+      ...risk,
+      caseNumbers: coverage.get(risk.id)?.caseNumbers ?? [],
+      covered: coverage.get(risk.id)?.covered ?? false,
+    }));
+  }, [detail]);
+
+  const defectRows = useMemo(() => {
+    if (!detail) return [];
+    const coverage = new Map(
+      (detail.preview.defectTraceability ?? []).map((item) => [
+        item.defectId,
+        item,
+      ]),
+    );
+    return detail.workspace.state.defects.map((defect) => ({
+      ...defect,
+      caseNumbers: coverage.get(defect.id)?.caseNumbers ?? [],
+      covered: coverage.get(defect.id)?.covered ?? false,
+    }));
+  }, [detail]);
+
+  const execution = detail?.preview.execution;
+  const executedCount = execution
+    ? execution.passed + execution.failed + execution.blocked
+    : 0;
+
   return (
     <Space direction="vertical" size={16} style={{ width: '100%' }}>
       <Card size="small">
@@ -306,6 +368,12 @@ export default function TestcaseWorkspacesPage() {
                   <Tag color="green">用例 {record.caseCount}</Tag>
                   {record.openQuestionCount > 0 && (
                     <Tag color="orange">待确认 {record.openQuestionCount}</Tag>
+                  )}
+                  {(record.riskCount ?? 0) > 0 && (
+                    <Tag color="volcano">风险 {record.riskCount}</Tag>
+                  )}
+                  {(record.defectCount ?? 0) > 0 && (
+                    <Tag color="magenta">缺陷 {record.defectCount}</Tag>
                   )}
                 </Space>
               ),
@@ -538,6 +606,19 @@ export default function TestcaseWorkspacesPage() {
                             ),
                           },
                           { title: '测试方法', dataIndex: 'testMethod', width: 140 },
+                          {
+                            title: '执行状态',
+                            dataIndex: 'execution',
+                            width: 90,
+                            render: (execution: CompiledTestcaseCase['execution']) => {
+                              const status = execution?.status ?? 'untested';
+                              return (
+                                <Tag color={EXECUTION_COLOR[status]}>
+                                  {EXECUTION_LABEL[status]}
+                                </Tag>
+                              );
+                            },
+                          },
                         ]}
                       />
                     </Space>
@@ -573,6 +654,144 @@ export default function TestcaseWorkspacesPage() {
                         },
                       ]}
                     />
+                  ),
+                },
+                {
+                  key: 'risks',
+                  label: `风险与缺陷（${riskRows.length} / ${defectRows.length}）`,
+                  children: (
+                    <Space direction="vertical" size={12} style={{ width: '100%' }}>
+                      <Card size="small" title="需求评审风险">
+                        <Table<TestcaseRisk & { caseNumbers: string[]; covered: boolean }>
+                          rowKey="id"
+                          size="small"
+                          pagination={false}
+                          dataSource={riskRows}
+                          scroll={{ x: 1100 }}
+                          columns={[
+                            { title: '风险 ID', dataIndex: 'id', width: 150 },
+                            { title: '模块', dataIndex: 'module', width: 120 },
+                            { title: '风险标题', dataIndex: 'title', width: 200 },
+                            {
+                              title: '等级',
+                              dataIndex: 'severity',
+                              width: 70,
+                              render: (severity: '高' | '中' | '低') => (
+                                <Tag color={PRIORITY_COLOR[severity]}>{severity}</Tag>
+                              ),
+                            },
+                            {
+                              title: '状态',
+                              dataIndex: 'status',
+                              width: 90,
+                              render: (status: TestcaseRisk['status']) =>
+                                RISK_STATUS_LABEL[status],
+                            },
+                            { title: '风险说明', dataIndex: 'detail' },
+                            { title: '应对说明', dataIndex: 'mitigation' },
+                            {
+                              title: '覆盖用例',
+                              dataIndex: 'caseNumbers',
+                              width: 170,
+                              render: (nums: string[], row) =>
+                                nums.length > 0 ? (
+                                  nums.join('、')
+                                ) : (
+                                  <Tag color={row.status === 'open' ? 'red' : 'default'}>
+                                    {row.status === 'open' ? '未覆盖' : '无需覆盖'}
+                                  </Tag>
+                                ),
+                            },
+                          ]}
+                        />
+                      </Card>
+                      <Card size="small" title="缺陷复现追溯">
+                        <Table<TestcaseDefect & { caseNumbers: string[]; covered: boolean }>
+                          rowKey="id"
+                          size="small"
+                          pagination={false}
+                          dataSource={defectRows}
+                          scroll={{ x: 1100 }}
+                          columns={[
+                            { title: '缺陷 ID', dataIndex: 'id', width: 150 },
+                            { title: '模块', dataIndex: 'module', width: 120 },
+                            { title: '缺陷标题', dataIndex: 'title', width: 200 },
+                            {
+                              title: '等级',
+                              dataIndex: 'severity',
+                              width: 70,
+                              render: (severity: '高' | '中' | '低') => (
+                                <Tag color={PRIORITY_COLOR[severity]}>{severity}</Tag>
+                              ),
+                            },
+                            {
+                              title: '状态',
+                              dataIndex: 'status',
+                              width: 120,
+                              render: (status: TestcaseDefect['status']) =>
+                                DEFECT_STATUS_LABEL[status],
+                            },
+                            { title: '来源', dataIndex: 'sourceRef', width: 160 },
+                            { title: '现象', dataIndex: 'symptom' },
+                            {
+                              title: '复现用例',
+                              dataIndex: 'caseNumbers',
+                              width: 170,
+                              render: (nums: string[], row) =>
+                                nums.length > 0 ? (
+                                  nums.join('、')
+                                ) : (
+                                  <Tag
+                                    color={
+                                      row.status === 'open' || row.status === 'fixed'
+                                        ? 'red'
+                                        : 'default'
+                                    }
+                                  >
+                                    缺少复现用例
+                                  </Tag>
+                                ),
+                            },
+                          ]}
+                        />
+                      </Card>
+                    </Space>
+                  ),
+                },
+                {
+                  key: 'execution',
+                  label: `执行与回归（${detail.preview.regression?.caseNumbers.length ?? 0}）`,
+                  children: (
+                    <Space direction="vertical" size={12} style={{ width: '100%' }}>
+                      <Card size="small" title="执行结果汇总">
+                        {execution ? (
+                          <Space wrap size={12}>
+                            <span>
+                              已执行 {executedCount}/{execution.total}
+                            </span>
+                            <Tag color="green">通过 {execution.passed}</Tag>
+                            <Tag color="red">失败 {execution.failed}</Tag>
+                            <Tag color="orange">阻塞 {execution.blocked}</Tag>
+                            <Tag>未执行 {execution.untested}</Tag>
+                            <span>已执行通过率 {execution.passRate}%</span>
+                          </Space>
+                        ) : (
+                          <Empty description="该合稿版本未记录执行统计" />
+                        )}
+                      </Card>
+                      <Card size="small" title="回归范围建议">
+                        <Table
+                          rowKey="caseNumber"
+                          size="small"
+                          pagination={{ pageSize: 12 }}
+                          dataSource={detail.preview.regression?.reasons ?? []}
+                          columns={[
+                            { title: '用例编号', dataIndex: 'caseNumber', width: 150 },
+                            { title: '纳入原因', dataIndex: 'reason' },
+                          ]}
+                        />
+                      </Card>
+                    </Space>
                   ),
                 },
                 {

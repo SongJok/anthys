@@ -8,6 +8,8 @@ import type {
 } from '../../types/core.js';
 import type {
   CompiledTestcaseDocument,
+  TestcaseCompileSelection,
+  TestcaseExecutionStatus,
   TestcaseWorkspace,
   TestcaseWorkspacePatch,
 } from '../../types/testcase-workspace.js';
@@ -81,6 +83,21 @@ const EVIDENCE_ITEM_SCHEMA = {
   },
 };
 
+const EXECUTION_SCHEMA = {
+  type: 'object',
+  description: '人工或外部测试平台回填的执行结果；机器人不执行用例',
+  additionalProperties: false,
+  properties: {
+    status: {
+      type: 'string',
+      enum: ['untested', 'passed', 'failed', 'blocked'],
+    },
+    executedAt: { type: 'number' },
+    executor: { type: 'string' },
+    note: { type: 'string', description: '失败现象或阻塞原因' },
+  },
+};
+
 const CASE_ITEM_SCHEMA = {
   type: 'object',
   required: ['id', 'module', 'title', 'steps', 'expectedResults'],
@@ -106,6 +123,43 @@ const CASE_ITEM_SCHEMA = {
     evidenceIds: stringListSchema(),
     assumptions: stringListSchema(),
     status: { type: 'string', enum: ['draft', 'ready', 'superseded'] },
+    riskIds: stringListSchema('本用例验证的需求评审风险 ID'),
+    defectIds: stringListSchema('本用例复现或回归验证的缺陷 ID'),
+    execution: EXECUTION_SCHEMA,
+  },
+};
+
+const RISK_ITEM_SCHEMA = {
+  type: 'object',
+  description: '需求评审识别出的风险点',
+  required: ['id', 'module', 'title'],
+  additionalProperties: false,
+  properties: {
+    id: { type: 'string' },
+    module: { type: 'string' },
+    title: { type: 'string' },
+    detail: { type: 'string', description: '风险成因与影响' },
+    severity: { type: 'string', enum: ['高', '中', '低'] },
+    requirementIds: stringListSchema(),
+    evidenceIds: stringListSchema(),
+    mitigation: { type: 'string', description: '应对或规避方式' },
+    status: { type: 'string', enum: ['open', 'mitigated', 'accepted'] },
+  },
+};
+
+const DEFECT_ITEM_SCHEMA = {
+  type: 'object',
+  description: '缺陷记录，用于生成复现用例与回归验证',
+  required: ['id', 'module', 'title', 'sourceRef'],
+  additionalProperties: false,
+  properties: {
+    id: { type: 'string' },
+    module: { type: 'string' },
+    title: { type: 'string' },
+    sourceRef: { type: 'string', description: '缺陷单号或来源链接' },
+    severity: { type: 'string', enum: ['高', '中', '低'] },
+    symptom: { type: 'string', description: '可复现的现象与触发条件' },
+    status: { type: 'string', enum: ['open', 'fixed', 'verified', 'rejected'] },
   },
 };
 
@@ -166,6 +220,8 @@ const PATCH_SCHEMA = {
     cases: deltaCollectionSchema(CASE_ITEM_SCHEMA),
     decisions: deltaCollectionSchema(DECISION_ITEM_SCHEMA),
     openQuestions: deltaCollectionSchema(QUESTION_ITEM_SCHEMA),
+    risks: deltaCollectionSchema(RISK_ITEM_SCHEMA),
+    defects: deltaCollectionSchema(DEFECT_ITEM_SCHEMA),
     outputPreferences: {
       type: 'object',
       additionalProperties: false,
@@ -270,6 +326,8 @@ export class TestcaseWorkspaceToolProvider implements IToolProvider {
               'evidence',
               'decisions',
               'questions',
+              'risks',
+              'defects',
               'versions',
               'full',
             ],
@@ -345,7 +403,11 @@ export class TestcaseWorkspaceToolProvider implements IToolProvider {
                 ? (workspace.state.evidence as unknown as Array<Record<string, unknown>>)
                 : section === 'decisions'
                   ? (workspace.state.decisions as unknown as Array<Record<string, unknown>>)
-                  : (workspace.state.openQuestions as unknown as Array<Record<string, unknown>>);
+                  : section === 'risks'
+                    ? (workspace.state.risks as unknown as Array<Record<string, unknown>>)
+                    : section === 'defects'
+                      ? (workspace.state.defects as unknown as Array<Record<string, unknown>>)
+                      : (workspace.state.openQuestions as unknown as Array<Record<string, unknown>>);
 
         const filtered = rawSource.filter((item) => {
           if (!includeSuperseded && item.status === 'superseded') return false;
@@ -444,7 +506,7 @@ export class TestcaseWorkspaceToolProvider implements IToolProvider {
     return {
       name: 'testcase_workspace_update',
       description:
-        '增量更新需求、证据、草稿、决策或输出偏好。只传本次变化；同一轮请合并为单次调用；baseRevision 必须来自最近一次读取。内部草稿保存无外部副作用。',
+        '增量更新需求、证据、草稿、决策、评审风险、缺陷、执行结果或输出偏好。只传本次变化；同一轮请合并为单次调用；baseRevision 必须来自最近一次读取。内部草稿保存无外部副作用。',
       parametersJsonSchema: {
         type: 'object',
         properties: {
@@ -491,13 +553,35 @@ export class TestcaseWorkspaceToolProvider implements IToolProvider {
     return {
       name: 'testcase_compile',
       description:
-        '对当前工作区执行确定性去重、排序、编号、统计、追溯检查并生成版本。可只返回内容，也可生成 md/json/csv/xlsx/docx 文件；deliver=true 时才投递到当前会话。',
+        '对当前工作区执行确定性去重、排序、编号、统计、追溯检查并生成版本，同时输出风险覆盖、缺陷复现追溯、执行统计与回归范围建议。可用 selection 只合稿回归子集；可生成 md/json/csv/xlsx/docx 文件，deliver=true 时才投递到当前会话。',
       parametersJsonSchema: {
         type: 'object',
         properties: {
           workspaceId: { type: 'string' },
           baseRevision: { type: 'integer', minimum: 1 },
           label: { type: 'string' },
+          selection: {
+            type: 'object',
+            description:
+              '可选：只合稿命中条件的用例（回归子集或单模块导出）；填写的多个条件同时生效',
+            additionalProperties: false,
+            properties: {
+              modules: stringListSchema(),
+              requirementIds: stringListSchema(),
+              caseIds: stringListSchema('草稿稳定 ID，不是最终用例编号'),
+              priorities: {
+                type: 'array',
+                items: { type: 'string', enum: ['高', '中', '低'] },
+              },
+              executionStatuses: {
+                type: 'array',
+                items: {
+                  type: 'string',
+                  enum: ['untested', 'passed', 'failed', 'blocked'],
+                },
+              },
+            },
+          },
           format: {
             type: 'string',
             enum: ['md', 'json', 'csv', 'xlsx', 'docx'],
@@ -519,10 +603,12 @@ export class TestcaseWorkspaceToolProvider implements IToolProvider {
         let document: CompiledTestcaseDocument;
         try {
           workspace = await this.options.service.get(actor, workspaceId);
+          const selection = parseSelection(args.selection);
           document = await this.options.service.compile(actor, {
             workspaceId,
             baseRevision: Number(args.baseRevision),
             ...(typeof args.label === 'string' ? { label: args.label } : {}),
+            ...(selection ? { selection } : {}),
           });
         } catch (error) {
           if (error instanceof TestcaseRevisionConflictError) {
@@ -597,6 +683,8 @@ export class TestcaseWorkspaceToolProvider implements IToolProvider {
               format: generated.format,
               delivered: false,
               statistics: document.statistics,
+              execution: document.execution,
+              regressionCaseNumbers: document.regression.caseNumbers,
               issues: document.issues,
             },
             `已编译并生成 ${generated.fileName}`,
@@ -612,6 +700,8 @@ export class TestcaseWorkspaceToolProvider implements IToolProvider {
               format: generated.format,
               delivered: false,
               statistics: document.statistics,
+              execution: document.execution,
+              regressionCaseNumbers: document.regression.caseNumbers,
               issues: document.issues,
               message:
                 '已在工作区生成产物并保存编译版本；当前为管理控制台会话，请前往「测试用例库」页面预览或直接下载文件。',
@@ -703,6 +793,42 @@ function assertActiveWorkspace(ctx: ExecutionContext, workspaceId: unknown): voi
 
 function jsonOutput(value: unknown, summary: string): ToolExecutionOutput {
   return { text: JSON.stringify(value), summary };
+}
+
+function parseSelection(value: unknown): TestcaseCompileSelection | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const raw = value as Record<string, unknown>;
+  const strings = (key: string): string[] | undefined => {
+    const list = raw[key];
+    if (!Array.isArray(list)) return undefined;
+    const cleaned = [
+      ...new Set(
+        list
+          .filter((item): item is string => typeof item === 'string')
+          .map((item) => item.trim())
+          .filter(Boolean),
+      ),
+    ];
+    return cleaned.length > 0 ? cleaned : undefined;
+  };
+  const modules = strings('modules');
+  const requirementIds = strings('requirementIds');
+  const caseIds = strings('caseIds');
+  const priorities = strings('priorities')?.filter(
+    (item): item is '高' | '中' | '低' => ['高', '中', '低'].includes(item),
+  );
+  const executionStatuses = strings('executionStatuses')?.filter(
+    (item): item is TestcaseExecutionStatus =>
+      ['untested', 'passed', 'failed', 'blocked'].includes(item),
+  );
+  const selection: TestcaseCompileSelection = {
+    ...(modules ? { modules } : {}),
+    ...(requirementIds ? { requirementIds } : {}),
+    ...(caseIds ? { caseIds } : {}),
+    ...(priorities?.length ? { priorities } : {}),
+    ...(executionStatuses?.length ? { executionStatuses } : {}),
+  };
+  return Object.keys(selection).length > 0 ? selection : undefined;
 }
 
 function toCsv(document: CompiledTestcaseDocument): string {

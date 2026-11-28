@@ -1,10 +1,14 @@
 import type {
   CompiledTestcaseDocument,
+  TestcaseCompileSelection,
+  TestcaseDefect,
   TestcaseDraft,
   TestcaseEvidence,
+  TestcaseExecution,
   TestcaseOpenQuestion,
   TestcaseOutputPreferences,
   TestcaseRequirement,
+  TestcaseRisk,
   TestcaseWorkspace,
   TestcaseWorkspacePatch,
   TestcaseWorkspaceSummary,
@@ -44,6 +48,7 @@ export interface CompileTestcaseInput {
   baseRevision: number;
   label?: string;
   now?: number;
+  selection?: TestcaseCompileSelection;
 }
 
 export class TestcaseWorkspaceAccessError extends Error {
@@ -217,6 +222,7 @@ export class TestcaseWorkspaceService {
     }
     const document = compileTestcaseWorkspace(workspace, {
       now: input.now ?? this.now(),
+      ...(input.selection ? { selection: input.selection } : {}),
     });
     const saved = await this.store.saveVersion({
       workspaceId: workspace.id,
@@ -270,6 +276,26 @@ export class TestcaseWorkspaceService {
       .slice(0, 5)
       .map((item) => `[${item.blocking ? '阻塞' : '非阻塞'}]${item.question}`)
       .join('；');
+    const openRisks = workspace.state.risks.filter(
+      (item) => item.status === 'open',
+    );
+    const pendingDefects = workspace.state.defects.filter(
+      (item) => item.status === 'open' || item.status === 'fixed',
+    );
+    const riskSummary = openRisks
+      .slice(0, 6)
+      .map((item) => `[${item.severity}]${item.id} ${item.title}`)
+      .join('；');
+    const defectSummary = pendingDefects
+      .slice(0, 6)
+      .map((item) => `[${item.severity}]${item.id} ${item.title}`)
+      .join('；');
+    const executedCases = activeCases.filter(
+      (item) => item.execution && item.execution.status !== 'untested',
+    );
+    const failedCases = activeCases.filter(
+      (item) => item.execution?.status === 'failed',
+    );
     return [
       '## 当前测试用例工作区',
       `- workspaceId：${workspace.id}`,
@@ -280,6 +306,14 @@ export class TestcaseWorkspaceService {
       cases ? `- 草稿摘要：${cases}` : '',
       uncoveredSummary
         ? `- 未覆盖需求（${uncoveredRequirements.length}）：${uncoveredSummary}`
+        : '',
+      openRisks.length > 0 || pendingDefects.length > 0
+        ? `- 待处理风险：${openRisks.length}；待验证缺陷：${pendingDefects.length}`
+        : '',
+      riskSummary ? `- 风险摘要：${riskSummary}` : '',
+      defectSummary ? `- 缺陷摘要：${defectSummary}` : '',
+      executedCases.length > 0
+        ? `- 执行回填：已执行 ${executedCases.length}/${activeCases.length}，失败 ${failedCases.length}`
         : '',
       decisions ? `- 已确认口径：${decisions}` : '',
       questions ? `- 待确认：${questions}` : '',
@@ -342,6 +376,20 @@ function applyPatch(
       patch.openQuestions.removeIds ?? [],
     );
   }
+  if (patch.risks) {
+    state.risks = upsertItems(
+      state.risks,
+      patch.risks.upsert ?? [],
+      patch.risks.removeIds ?? [],
+    );
+  }
+  if (patch.defects) {
+    state.defects = upsertItems(
+      state.defects,
+      patch.defects.upsert ?? [],
+      patch.defects.removeIds ?? [],
+    );
+  }
   if (patch.outputPreferences) {
     state.outputPreferences = {
       ...state.outputPreferences,
@@ -379,6 +427,8 @@ function sanitizeState(state: TestcaseWorkspaceState): TestcaseWorkspaceState {
     cases: sanitizeArray(state.cases, sanitizeCase, 'cases'),
     decisions: sanitizeArray(state.decisions, sanitizeDecision, 'decisions'),
     openQuestions: sanitizeArray(state.openQuestions, sanitizeQuestion, 'openQuestions'),
+    risks: sanitizeArray(state.risks ?? [], sanitizeRisk, 'risks'),
+    defects: sanitizeArray(state.defects ?? [], sanitizeDefect, 'defects'),
     outputPreferences: sanitizePreferences(state.outputPreferences),
     ...(state.archived ? { archived: true } : {}),
   };
@@ -499,6 +549,38 @@ function sanitizePatch(
           },
         }
       : {}),
+    ...(patch.risks
+      ? {
+          risks: {
+            ...(patch.risks.upsert
+              ? {
+                  upsert: sanitizeArray(patch.risks.upsert, sanitizeRisk, 'risks.upsert'),
+                }
+              : {}),
+            ...(patch.risks.removeIds
+              ? { removeIds: sanitizeIds(patch.risks.removeIds, 'risks.removeIds') }
+              : {}),
+          },
+        }
+      : {}),
+    ...(patch.defects
+      ? {
+          defects: {
+            ...(patch.defects.upsert
+              ? {
+                  upsert: sanitizeArray(
+                    patch.defects.upsert,
+                    sanitizeDefect,
+                    'defects.upsert',
+                  ),
+                }
+              : {}),
+            ...(patch.defects.removeIds
+              ? { removeIds: sanitizeIds(patch.defects.removeIds, 'defects.removeIds') }
+              : {}),
+          },
+        }
+      : {}),
     ...(patch.outputPreferences
       ? { outputPreferences: sanitizePreferences(patch.outputPreferences, true) }
       : {}),
@@ -567,6 +649,70 @@ function sanitizeCase(item: TestcaseDraft): TestcaseDraft {
       item.status ?? 'ready',
       ['draft', 'ready', 'superseded'] as const,
       'case.status',
+    ),
+    ...(item.riskIds?.length
+      ? { riskIds: sanitizeIds(item.riskIds, 'case.riskIds') }
+      : {}),
+    ...(item.defectIds?.length
+      ? { defectIds: sanitizeIds(item.defectIds, 'case.defectIds') }
+      : {}),
+    ...(item.execution ? { execution: sanitizeExecution(item.execution) } : {}),
+  };
+}
+
+function sanitizeExecution(item: TestcaseExecution): TestcaseExecution {
+  return {
+    status: oneOf(
+      item.status ?? 'untested',
+      ['untested', 'passed', 'failed', 'blocked'] as const,
+      'case.execution.status',
+    ),
+    ...(item.executedAt !== undefined
+      ? { executedAt: finiteNumber(item.executedAt, 'case.execution.executedAt') }
+      : {}),
+    ...(item.executor
+      ? { executor: cleanText(item.executor, 'case.execution.executor', 200) }
+      : {}),
+    ...(item.note
+      ? { note: cleanText(item.note, 'case.execution.note', 4000) }
+      : {}),
+  };
+}
+
+function sanitizeRisk(item: TestcaseRisk): TestcaseRisk {
+  return {
+    id: cleanId(item.id, 'risk.id'),
+    module: requiredText(item.module, 'risk.module', 200),
+    title: requiredText(item.title, 'risk.title', 500),
+    detail: cleanText(item.detail ?? '', 'risk.detail', 8000),
+    severity: oneOf(item.severity ?? '中', ['高', '中', '低'] as const, 'risk.severity'),
+    requirementIds: sanitizeIds(item.requirementIds ?? [], 'risk.requirementIds'),
+    evidenceIds: sanitizeIds(item.evidenceIds ?? [], 'risk.evidenceIds'),
+    mitigation: cleanText(item.mitigation ?? '', 'risk.mitigation', 4000),
+    status: oneOf(
+      item.status ?? 'open',
+      ['open', 'mitigated', 'accepted'] as const,
+      'risk.status',
+    ),
+  };
+}
+
+function sanitizeDefect(item: TestcaseDefect): TestcaseDefect {
+  return {
+    id: cleanId(item.id, 'defect.id'),
+    module: requiredText(item.module, 'defect.module', 200),
+    title: requiredText(item.title, 'defect.title', 500),
+    sourceRef: requiredText(item.sourceRef, 'defect.sourceRef', 2000),
+    severity: oneOf(
+      item.severity ?? '中',
+      ['高', '中', '低'] as const,
+      'defect.severity',
+    ),
+    symptom: cleanText(item.symptom ?? '', 'defect.symptom', 8000),
+    status: oneOf(
+      item.status ?? 'open',
+      ['open', 'fixed', 'verified', 'rejected'] as const,
+      'defect.status',
     ),
   };
 }
