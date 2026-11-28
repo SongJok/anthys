@@ -18,6 +18,7 @@ import type {
   AgentEngine,
   AgentStreamEvent,
   ConversationRecord,
+  DynamicLoopPolicy,
   InboundMessage,
   StoredMessage,
 } from '../types/core.js';
@@ -141,6 +142,9 @@ function createHarness(
     resolveTestcaseWorkspace?: ConstructorParameters<
       typeof AgentHarness
     >[0]['resolveTestcaseWorkspace'];
+    resolveRunPolicy?: ConstructorParameters<
+      typeof AgentHarness
+    >[0]['resolveRunPolicy'];
   },
 ) {
   const { repository, conversations, rows } = createRepository();
@@ -159,6 +163,9 @@ function createHarness(
     ...(extras?.extensions ? { extensions: extras.extensions } : {}),
     ...(extras?.resolveTestcaseWorkspace
       ? { resolveTestcaseWorkspace: extras.resolveTestcaseWorkspace }
+      : {}),
+    ...(extras?.resolveRunPolicy
+      ? { resolveRunPolicy: extras.resolveRunPolicy }
       : {}),
     repository,
     assembler: new ContextAssembler({ windowMessages: 20, now: () => 0 }),
@@ -607,6 +614,101 @@ describe('AgentHarness', () => {
       testcaseWorkspace: testcaseSnapshot(),
     });
     expect(contexts).toEqual([{ workspaceId: 'ws-1' }]);
+  });
+
+  it('测试用例编写把放宽后的预算与更长时限交给引擎，普通聊天仍用主策略', async () => {
+    const runs: Array<{
+      policyOverride?: DynamicLoopPolicy;
+      deadlineAt: number;
+    }> = [];
+    const engine: AgentEngine = {
+      async run(input) {
+        runs.push({
+          ...(input.policyOverride
+            ? { policyOverride: input.policyOverride }
+            : {}),
+          deadlineAt: input.context.deadlineAt,
+        });
+        input.emit({
+          type: 'completed',
+          usage: { totalTokens: 1, steps: 0, durationMs: 1 },
+        });
+        return {
+          answer: 'ok',
+          reasoning: '',
+          usage: { totalTokens: 1, steps: 0, durationMs: 1 },
+        };
+      },
+    };
+    const extended: DynamicLoopPolicy = {
+      maxWallTimeMs: 3_600_000,
+      maxTotalTokens: 2_000_000,
+      maxConsecutiveSameTool: 2,
+      convergenceCheck: true,
+      maxIterations: 200,
+    };
+    const { harness } = createHarness(
+      engine,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        resolveRunPolicy: ({ text, explicitWorkspace }) =>
+          explicitWorkspace || text.includes('测试用例') ? extended : undefined,
+      },
+    );
+
+    await harness.handleMessage(
+      inbound({ text: '帮我写一份登录模块的测试用例' }),
+      { emit: () => undefined },
+    );
+    expect(runs[0]?.policyOverride).toEqual(extended);
+    expect(runs[0]?.deadlineAt).toBe(1_000 + 3_600_000);
+
+    await harness.handleMessage(inbound({ messageId: 'msg-2' }), {
+      emit: () => undefined,
+    });
+    expect(runs[1]?.policyOverride).toBeUndefined();
+    expect(runs[1]?.deadlineAt).toBe(1_000 + 5_000);
+  });
+
+  it('放宽预算的测试用例需求不再被长任务时长启发式拒接', async () => {
+    const calls: { messages: unknown[] }[] = [];
+    const { harness } = createHarness(
+      scriptedEngine(calls),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        resolveRunPolicy: ({ text }) =>
+          text.includes('测试用例')
+            ? {
+                maxWallTimeMs: 3_600_000,
+                maxTotalTokens: 2_000_000,
+                maxConsecutiveSameTool: 2,
+                convergenceCheck: true,
+              }
+            : undefined,
+      },
+    );
+
+    const refused = await harness.handleMessage(
+      inbound({ text: '这个需求需要全量扫描所有历史订单' }),
+      { emit: () => undefined },
+    );
+    expect(refused?.answer).toContain('机器人不认可这个需求');
+
+    const accepted = await harness.handleMessage(
+      inbound({
+        messageId: 'msg-2',
+        text: '这个需求需要全量扫描所有历史订单，请补齐测试用例',
+      }),
+      { emit: () => undefined },
+    );
+    expect(accepted?.answer).toBe('现在是十点。');
+    expect(calls).toHaveLength(1);
   });
 
   it('后台任务只恢复 metadata 指定的工作区快照', async () => {

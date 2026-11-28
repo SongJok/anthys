@@ -109,6 +109,14 @@ export interface AgentHarnessOptions {
     message: InboundMessage;
     requestedWorkspace?: { workspaceId: string; baseRevision: number };
   }) => Promise<TestcaseWorkspaceSnapshot | null>;
+  /** 按场景解析本次运行的预算覆盖（如测试用例编写）；缺省沿用主策略 */
+  resolveRunPolicy?: (input: {
+    message: InboundMessage;
+    text: string;
+    testcaseWorkspace?: TestcaseWorkspaceSnapshot | null;
+    /** 工作区由前台显式选择或后台任务 metadata 指定，而非会话历史自动快照 */
+    explicitWorkspace: boolean;
+  }) => DynamicLoopPolicy | undefined;
   /** 个人表达偏好与跨群记忆授权；缺省时按既有默认行为处理 */
   personSettings?: {
     buildPrompt(
@@ -281,7 +289,29 @@ export class AgentHarness {
     }
     const text = message.text.trim();
     if (!text) return null;
-    const quota = await this.enforceQuota(message, handle.emit, false);
+    const { repository, assembler, engine, policy } = this.options;
+    const testcaseWorkspace = await this.loadTestcaseWorkspace(
+      message,
+      undefined,
+      handle.testcaseWorkspace,
+    );
+    const runPolicy =
+      this.options.resolveRunPolicy?.({
+        message,
+        text,
+        testcaseWorkspace,
+        explicitWorkspace: Boolean(
+          handle.testcaseWorkspaceBinding?.current &&
+            !handle.testcaseWorkspaceBinding.autoSnapshotted,
+        ),
+      }) ?? policy;
+    const extendedBudget = runPolicy !== policy;
+    const quota = await this.enforceQuota(
+      message,
+      handle.emit,
+      false,
+      runPolicy.maxTotalTokens,
+    );
     if (quota.answer) return quota.answer;
     const admissionAnswer = this.enforceAdmission(
       message.senderStaffId,
@@ -289,13 +319,14 @@ export class AgentHarness {
       text,
       handle.emit,
       handle.proactive ?? false,
+      runPolicy,
+      extendedBudget,
     );
     if (admissionAnswer) {
       await this.options.usageGuard?.release?.(quota.reservation);
       return admissionAnswer;
     }
 
-    const { repository, assembler, engine, policy } = this.options;
     const { persona, personKey } = await this.resolveTurnContext(message);
     const conversation = await repository.ensureConversation({
       conversationKey: conversationKeyFor(message),
@@ -328,11 +359,6 @@ export class AgentHarness {
       audience: message.conversationType === '2' ? 'group' : 'single',
       excludeMessageId: message.messageId,
     });
-    const testcaseWorkspace = await this.loadTestcaseWorkspace(
-      message,
-      undefined,
-      handle.testcaseWorkspace,
-    );
     const baseExtraPrompt = await this.buildExtraSystemPrompt(
       message,
       text,
@@ -395,7 +421,7 @@ export class AgentHarness {
           senderNick: message.senderNick,
           conversationType: message.conversationType,
           personKey,
-          deadlineAt: startedAt + policy.maxWallTimeMs,
+          deadlineAt: startedAt + runPolicy.maxWallTimeMs,
           now: this.now,
           proactive: handle.proactive ?? false,
           ...(testcaseWorkspaceBinding.current
@@ -406,6 +432,7 @@ export class AgentHarness {
         },
         emit: handle.emit,
         signal: handle.signal,
+        ...(extendedBudget ? { policyOverride: runPolicy } : {}),
       });
     } catch (error) {
       this.options.logger?.warn?.(
@@ -834,18 +861,27 @@ export class AgentHarness {
       throw new Error('后台任务无法恢复指定的测试用例工作区快照');
     }
 
+    const basePolicy = workerProfile?.policy ?? this.options.policy;
+    const runPolicy =
+      this.options.resolveRunPolicy?.({
+        message,
+        text,
+        testcaseWorkspace,
+        explicitWorkspace: Boolean(requestedWorkspace),
+      }) ?? basePolicy;
+    const extendedBudget = runPolicy !== basePolicy;
     const quota = await this.enforceQuota(
       message,
       handle.emit,
       false,
-      workerProfile?.policy.maxTotalTokens,
+      runPolicy.maxTotalTokens,
     );
     if (quota.answer) return quota.answer;
 
     const { repository, assembler } = this.options;
     const { persona, personKey } = await this.resolveTurnContext(message);
     const engine = workerRuntime?.engine ?? this.options.engine;
-    const policy = workerProfile?.policy ?? this.options.policy;
+    const policy = runPolicy;
     const conversation = await repository.ensureConversation({
       conversationKey: conversationKeyFor(message),
       conversationType: message.conversationType,
@@ -955,6 +991,7 @@ export class AgentHarness {
         emit: handle.emit,
         signal: handle.signal,
         ...(handle.checkpoint ? { checkpoint: handle.checkpoint } : {}),
+        ...(extendedBudget ? { policyOverride: runPolicy } : {}),
       });
     } finally {
       const updatedBinding = testcaseWorkspaceBinding.current;
@@ -1391,6 +1428,7 @@ export class AgentHarness {
   /**
    * 明文里已经写明是 20 分钟以上的任务时，不调用模型、不写记忆，
    * 直接告知提问者机器人不认可该需求。
+   * 已放宽预算的长任务（测试用例编写）不受该时长启发式拦截，仍受自身硬上限约束。
    */
   private enforceAdmission(
     senderStaffId: string,
@@ -1398,10 +1436,14 @@ export class AgentHarness {
     text: string,
     emit: (event: AgentStreamEvent) => void,
     proactive: boolean,
+    policy: DynamicLoopPolicy = this.options.policy,
+    extendedBudget = false,
   ): RunResult | null {
-    const decision = assessRequestAdmission(text);
+    const decision = extendedBudget
+      ? { accepted: true }
+      : assessRequestAdmission(text);
     if (decision.accepted) return null;
-    const answer = formatAdmissionRefusal(decision, this.options.policy);
+    const answer = formatAdmissionRefusal(decision, policy);
     this.options.logger?.info(
       {
         conversationId,

@@ -416,6 +416,86 @@ describe('ReActRunner', () => {
     expect(events.at(-1)?.type).toBe('completed');
   });
 
+  it('policyOverride 放宽 Token 上限后继续多轮编写', async () => {
+    const model = new ScriptedModel([
+      toolTurn([{ index: 0, id: 'c1', name: 'current_time', args: {} }], 10),
+      toolTurn([{ index: 0, id: 'c2', name: 'current_time', args: {} }], 10),
+      [
+        { contentDelta: '已完成 2 条用例，剩余边界场景待补充。' },
+        { finishReason: 'stop', usage: { totalTokens: 5 } },
+      ],
+    ]);
+    const runner = new ReActRunner({
+      model,
+      toolProviders: [new BuiltinToolProvider()],
+      policy: { ...policy, maxTotalTokens: 10 },
+    });
+
+    const result = await runner.run({
+      messages: userMessages,
+      context: makeContext(),
+      emit: () => undefined,
+      policyOverride: { ...policy, maxTotalTokens: 40 },
+    });
+
+    expect(model.requests).toHaveLength(3);
+    expect(result.answer).toContain('已完成 2 条用例');
+    expect(result.answer).not.toContain('机器人不认可这个需求');
+  });
+
+  it('放宽预算命中上限时收尾交付已完成部分，而不是拒接', async () => {
+    const model = new ScriptedModel([
+      toolTurn([{ index: 0, id: 'c1', name: 'current_time', args: {} }], 30),
+      [
+        { contentDelta: '已交付已完成部分，剩余模块下次继续。' },
+        { finishReason: 'stop', usage: { totalTokens: 2 } },
+      ],
+    ]);
+    const runner = new ReActRunner({
+      model,
+      toolProviders: [new BuiltinToolProvider()],
+      policy: { ...policy, maxTotalTokens: 10 },
+    });
+
+    const result = await runner.run({
+      messages: userMessages,
+      context: makeContext(),
+      emit: () => undefined,
+      policyOverride: { ...policy, maxTotalTokens: 25 },
+    });
+
+    expect(model.requests).toHaveLength(2);
+    expect(model.requests[1]?.toolChoice).toBe('none');
+    expect(result.answer).toContain('已交付已完成部分');
+    expect(result.answer).not.toContain('机器人不认可这个需求');
+  });
+
+  it('policyOverride 的轮次上限生效', async () => {
+    const model = new ScriptedModel([
+      toolTurn([{ index: 0, id: 'c1', name: 'current_time', args: {} }], 1),
+      toolTurn([{ index: 0, id: 'c2', name: 'current_time', args: {} }], 1),
+      [
+        { contentDelta: '两轮查证完成。' },
+        { finishReason: 'stop', usage: { totalTokens: 1 } },
+      ],
+    ]);
+    const runner = new ReActRunner({
+      model,
+      toolProviders: [new BuiltinToolProvider()],
+      policy: { ...policy, maxIterations: 1 },
+    });
+
+    const result = await runner.run({
+      messages: userMessages,
+      context: makeContext(),
+      emit: () => undefined,
+      policyOverride: { ...policy, maxIterations: 3 },
+    });
+
+    expect(model.requests).toHaveLength(3);
+    expect(result.answer).toContain('两轮查证完成');
+  });
+
   it('时间预算耗尽时拒接并中止循环', async () => {
     let now = 0;
     const basePolicy = { ...policy, maxWallTimeMs: 1_000 };

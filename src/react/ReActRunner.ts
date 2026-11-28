@@ -352,12 +352,14 @@ export class ReActRunner implements AgentEngine {
     emit: (event: AgentStreamEvent) => void;
     signal?: AbortSignal;
     checkpoint?: ReActCheckpointHooks;
+    policyOverride?: DynamicLoopPolicy;
   }): Promise<RunResult> {
     const { emit, signal, checkpoint } = input;
     const initialCheckpoint = checkpoint?.initial;
     const stepOffset = initialCheckpoint?.stepIndex ?? 0;
     const startedAt = this.now();
-    const policy = this.options.policy;
+    const policy = input.policyOverride ?? this.options.policy;
+    const extendedBudget = Boolean(input.policyOverride);
     const deadlineAt = Number.isFinite(input.context.deadlineAt)
       ? Math.min(input.context.deadlineAt, startedAt + policy.maxWallTimeMs)
       : startedAt + policy.maxWallTimeMs;
@@ -377,6 +379,10 @@ export class ReActRunner implements AgentEngine {
             },
             ...(watchdogOption.policy
               ? { policy: watchdogOption.policy }
+              : {}),
+            // 放宽预算的长任务用满硬上限再收尾，看门狗仍保留空转/重复/连续失败保护
+            ...(extendedBudget
+              ? { policy: { ...watchdogOption.policy, hardRatio: 1 } }
               : {}),
           })
         : null;
@@ -414,6 +420,16 @@ export class ReActRunner implements AgentEngine {
     const successfulOutputs = new Map<string, string>();
     /** 本次运行已注入的技能 ID，避免重复占用上下文 */
     const injectedInstructionIds = new Set<string>();
+
+    // 放宽预算的长任务（测试用例编写）命中上限时交付已完成部分，而不是拒接整个需求
+    const haltForBudget = (cause: string, buildRefusal: () => string): void => {
+      if (extendedBudget) {
+        halted = `${cause}已完成的内容仍然保留，请交付已完成部分并说明剩余工作与继续方式。`;
+      } else {
+        refusal = buildRefusal();
+        skipFinalTurn = true;
+      }
+    };
 
     try {
       const loadedTools = await this.loadTools(context);
@@ -540,6 +556,10 @@ export class ReActRunner implements AgentEngine {
       };
       const stopForWatchdog = (): void => {
         const notice = watchdogOutcome?.notice ?? '';
+        if (extendedBudget) {
+          halted = `${notice || '本次执行已被执行保护终止。'}已完成的内容仍然保留，请交付已完成部分并说明剩余工作与继续方式。`;
+          return;
+        }
         if (notice) {
           answer += notice;
           emit({ type: 'answer_delta', content: notice, final: true });
@@ -590,18 +610,24 @@ export class ReActRunner implements AgentEngine {
           break;
         }
         if (this.now() >= deadlineAt) {
-          refusal = formatRuntimeRefusal({
-            reason: 'wall-time',
-            elapsedMs: this.now() - startedAt,
-            tokens: totalTokens,
-            policy,
-          });
-          skipFinalTurn = true;
+          haltForBudget(
+            `本次已执行 ${Math.round((this.now() - startedAt) / 60_000)} 分钟，达到时间上限。`,
+            () =>
+              formatRuntimeRefusal({
+                reason: 'wall-time',
+                elapsedMs: this.now() - startedAt,
+                tokens: totalTokens,
+                policy,
+              }),
+          );
           break;
         }
         if (steps >= maxIterations) {
-          refusal = `机器人已达到单次运行的最大推理轮数（${maxIterations}），已停止执行。请缩小问题范围或拆成更小的任务后重试。`;
-          skipFinalTurn = true;
+          haltForBudget(
+            `本次已达到最大推理轮数（${maxIterations}）。`,
+            () =>
+              `机器人已达到单次运行的最大推理轮数（${maxIterations}），已停止执行。请缩小问题范围或拆成更小的任务后重试。`,
+          );
           break;
         }
         // 在发起下一轮模型调用前检查预算，保留已完成的最终回答；
@@ -821,13 +847,18 @@ export class ReActRunner implements AgentEngine {
 
         if (!decision.allowContinue) {
           if (decision.haltCode) {
-            refusal = formatRuntimeRefusal({
-              reason: decision.haltCode,
-              elapsedMs: this.now() - startedAt,
-              tokens: totalTokens,
-              policy,
-            });
-            skipFinalTurn = true;
+            haltForBudget(
+              decision.haltCode === 'tokens'
+                ? `本次已消耗 ${totalTokens.toLocaleString('en-US')} tokens，达到 Token 上限。`
+                : `本次已达到时间上限。`,
+              () =>
+                formatRuntimeRefusal({
+                  reason: decision.haltCode ?? 'tokens',
+                  elapsedMs: this.now() - startedAt,
+                  tokens: totalTokens,
+                  policy,
+                }),
+            );
           } else {
             halted = decision.haltReason;
           }

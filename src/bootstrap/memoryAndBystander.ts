@@ -54,6 +54,11 @@ import { GroupQaModeToolProvider } from '../tools/groups/GroupQaModeToolProvider
 import { PersonalMemoryToolProvider } from '../tools/personal/PersonalMemoryToolProvider.js';
 import { PersonSettingsToolProvider } from '../tools/personal/PersonSettingsToolProvider.js';
 import type { TestcaseWorkspaceService } from '../testcase/TestcaseWorkspaceService.js';
+import {
+  isTestcaseWritingIntent,
+  resolveTestcaseRunBudget,
+  testcaseRunPolicy,
+} from '../testcase/TestcaseRunBudget.js';
 import { groupMemberSubjectKey } from '../types/bystander-and-memory.js';
 import type { IToolProvider } from '../types/core.js';
 import type { GlossaryService } from '../glossary/GlossaryService.js';
@@ -382,6 +387,7 @@ export async function setupMemoryAndBystander(
   );
 
   const repository = new DrizzleConversationRepository(db);
+  const testcaseBudget = resolveTestcaseRunBudget(process.env);
   const harness = new AgentHarness({
     engine: runtimes.groupModelRouting,
     investigationEngine: runtimes.investigationEngine,
@@ -413,6 +419,11 @@ export async function setupMemoryAndBystander(
             requestedWorkspace.baseRevision,
           )
         : testcaseWorkspaces.snapshot(actor);
+    },
+    resolveRunPolicy: ({ text, explicitWorkspace }) => {
+      if (!testcaseBudget.enabled) return undefined;
+      if (!explicitWorkspace && !isTestcaseWritingIntent(text)) return undefined;
+      return testcaseRunPolicy(configCenter.getLoopPolicy(), testcaseBudget);
     },
     personSettings: {
       buildPrompt: (personKey, conversationType) =>

@@ -487,5 +487,7 @@ export interface AgentEngine {
     emit: (event: AgentStreamEvent) => void;
     signal?: AbortSignal;
     checkpoint?: ReActCheckpointHooks;
+    /** 本次运行的预算覆盖（如测试用例编写）；缺省沿用引擎自身策略 */
+    policyOverride?: DynamicLoopPolicy;
   }): Promise<RunResult>;
 }
