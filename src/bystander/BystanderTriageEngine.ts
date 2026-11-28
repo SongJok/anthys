@@ -59,8 +59,9 @@ const QUESTION_PATTERN =
 /** 答疑模式下的宽松疑问识别：一般生活/业务问题也交给 L2 自主判断 */
 const QA_QUESTION_PATTERN =
   /([?？]|怎么|为什么|为啥|如何|是不是|有没有|吗|呢|什么|哪|几点|多少|谁|请问|能否|是否|帮忙|求助|看一下|查一下)/u;
-/** 答疑模式冷却上限：连续答疑时不被默认 180s 冷却卡住 */
-const QA_MODE_COOLDOWN_SECONDS = 45;
+/** 答疑模式取消回复冷却：成员授权逐条答疑，紧随的提问不应被静默丢弃；
+ * 防刷屏仍由忙窗抑制、防抢答窗口、L1 疑问识别与 L2 置信门把关。 */
+const QA_MODE_COOLDOWN_SECONDS = 0;
 const FACT_PATTERN =
   /((数据|报表|金额|统计|对账|数字|指标).*(不对|不一致|对不上|偏差|少了|多了|异常))|((不对|不一致|对不上|偏差|少了|多了).*(数据|报表|金额|统计|对账|数字|指标))/u;
 
@@ -450,7 +451,7 @@ export class BystanderTriageEngine {
     const now = this.now();
     const qaModeActive = isQaModeActive(policy, now);
     const cooldownSeconds = qaModeActive
-      ? Math.min(policy.cooldownSeconds, QA_MODE_COOLDOWN_SECONDS)
+      ? QA_MODE_COOLDOWN_SECONDS
       : policy.cooldownSeconds;
     const busySince = now - this.busyWindowSeconds * 1000;
     const recentCount = this.buffer

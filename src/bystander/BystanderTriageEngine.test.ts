@@ -445,7 +445,7 @@ describe('BystanderTriageEngine 答疑模式', () => {
     expect(ctx.classifierCalls).toHaveLength(0);
   });
 
-  it('答疑模式冷却缩短到 45s，连续答疑不被默认 180s 卡住', async () => {
+  it('答疑模式取消回复冷却，紧随的提问也逐条作答', async () => {
     const ctx = setup({ policy: qaPolicy });
     const first = await ctx.engine.evaluate(
       inbound({ text: '团建几点集合？' }),
@@ -453,11 +453,32 @@ describe('BystanderTriageEngine 答疑模式', () => {
     );
     expect(first.action).toBe('PROACTIVE_REPLY');
 
-    ctx.clock.now += 50_000;
+    // 防抢答窗口仅推进 8s，远小于普通 180s 冷却；答疑模式不应因此静默
     const second = await ctx.engine.evaluate(
-      inbound({ text: '团建去哪里？' }),
+      inbound({ text: '团建去哪里？' }, BASE_TIME + 8_000),
       ctx.policy,
     );
     expect(second.action).toBe('PROACTIVE_REPLY');
+    expect(ctx.classifierCalls).toHaveLength(2);
+  });
+
+  it('答疑模式仍受忙窗抑制，群内过于活跃时不插话', async () => {
+    const ctx = setup({
+      policy: qaPolicy,
+      sleep: async () => {},
+    });
+    for (let i = 0; i < 12; i += 1) {
+      ctx.buffer.append(
+        transcript(`busy-${i}`, `闲聊 ${i}`, BASE_TIME, {
+          senderStaffId: `staff-${i}`,
+        }),
+      );
+    }
+    const result = await ctx.engine.evaluate(
+      inbound({ text: '团建几点集合？' }, BASE_TIME),
+      ctx.policy,
+    );
+    expect(result.action).toBe('SILENT');
+    expect(result.rationale).toContain('过于活跃');
   });
 });

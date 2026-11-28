@@ -259,6 +259,7 @@ export async function setupToolsAndGovernance(
           request.toolName === 'personal_report_manage')) ||
         (context.conversationType === '2' &&
           (request.toolName === 'group_schedule_manage' ||
+            request.toolName === 'group_qa_mode' ||
             request.toolName === 'group_memory_save' ||
             request.toolName === 'group_member_memory_save' ||
             request.toolName === 'group_member_memory_forget')))
