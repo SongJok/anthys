@@ -277,7 +277,12 @@ export class AgentHarness {
     handle: HandleMessageOptions,
   ): Promise<RunResult | null> {
     if (message.conversationType === '2') {
-      this.options.bystander?.buffer.append(toTranscriptEntry(message));
+      // 仅 @ 回合的正文是系统补齐的作答指引或合并上文，不是成员原话，不写入旁听记录
+      this.options.bystander?.buffer.append(
+        toTranscriptEntry(
+          message.mentionOnlySource ? { ...message, text: '' } : message,
+        ),
+      );
     }
     // 非 @ 群消息走旁听漏斗；系统发起的主动播报（定时任务）不是成员消息，直接放行
     if (

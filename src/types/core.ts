@@ -41,6 +41,8 @@ export interface InboundMessage {
   text: string;
   /** 正文只有 @ 前缀、没有任何内容；交由调用方合并上文或兜底回应 */
   mentionOnly?: boolean;
+  /** 仅 @ 消息经入站层补齐后的作答依据；补齐正文是系统生成的指引，不是用户原话 */
+  mentionOnlySource?: 'quoted' | 'merged' | 'transcript' | 'history';
   /**
    * 卡片投递使用的 staffId；缺省回退 senderStaffId。
    * DWS 群消息只有 openDingTalkId，不能投递卡片，置空后走群维度投递。

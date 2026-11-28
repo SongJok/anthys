@@ -33,8 +33,8 @@ import {
   OpenApiRobotEmotionApi,
 } from '../dingtalk/EmotionReplier.js';
 import {
-  findMentionOnlyContext,
   MENTION_ONLY_FALLBACK_REPLY,
+  resolveMentionOnlyMessage,
 } from '../dingtalk/MentionOnlyMessage.js';
 import { replyMention } from '../dingtalk/Mentions.js';
 import { StreamGateway, type StreamGatewayLogger } from '../dingtalk/StreamGateway.js';
@@ -1596,15 +1596,18 @@ export async function setupDingTalkIngress(
       }
     }
     if (message.mentionOnly) {
-      const context = findMentionOnlyContext(message, memory.transcriptBuffer);
-      if (!context) {
+      const resolved = resolveMentionOnlyMessage(
+        message,
+        memory.transcriptBuffer,
+      );
+      if (!resolved) {
         logger.info(
           {
             messageId: message.messageId,
             conversationId: message.conversationId,
             senderStaffId: message.senderStaffId,
           },
-          'mention-only message without recent context, replying fallback',
+          'mention-only message without any context, replying fallback',
         );
         await replyTo(message, MENTION_ONLY_FALLBACK_REPLY);
         return;
@@ -1613,20 +1616,15 @@ export async function setupDingTalkIngress(
         {
           messageId: message.messageId,
           conversationId: message.conversationId,
-          mergedFromMessageId: context.messageId,
+          senderStaffId: message.senderStaffId,
+          source: resolved.source,
+          ...(resolved.mergedFromMessageId
+            ? { mergedFromMessageId: resolved.mergedFromMessageId }
+            : {}),
         },
-        'mention-only message merged with recent context',
+        'mention-only message resolved with context',
       );
-      message = {
-        ...message,
-        text: context.text,
-        mentionOnly: false,
-        rawPayload: {
-          ...message.rawPayload,
-          mentionOnly: true,
-          mergedFromMessageId: context.messageId,
-        },
-      };
+      message = resolved.message;
     }
     if (await commandRouter.tryHandle(message)) return;
 

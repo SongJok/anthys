@@ -5,6 +5,9 @@ import {
   type ExtensionPromptProvider,
 } from './AgentHarness.js';
 import { ContextAssembler, HISTORY_TRIM_SLACK } from '../memory/ContextAssembler.js';
+import { GroupTranscriptBuffer } from '../bystander/GroupTranscriptBuffer.js';
+import type { BystanderTriageEngine } from '../bystander/BystanderTriageEngine.js';
+import type { GroupBystanderPolicy } from '../types/bystander-and-memory.js';
 import { PersonaResolver } from '../persona/PersonaResolver.js';
 import type { HierarchicalMemoryManager } from '../memory/HierarchicalMemoryManager.js';
 import type { PersonaProfileStore } from '../types/persona-and-identity.js';
@@ -260,6 +263,56 @@ describe('AgentHarness', () => {
     expect(result).toBeNull();
     expect(calls).toHaveLength(0);
     expect(rows).toHaveLength(0);
+  });
+
+  it('仅 @ 回合的系统补齐正文不写入群聊旁听记录', async () => {
+    const buffer = new GroupTranscriptBuffer();
+    const calls: { messages: unknown[] }[] = [];
+    const { repository } = createRepository();
+    const harness = new AgentHarness({
+      engine: scriptedEngine(calls),
+      repository,
+      assembler: new ContextAssembler({ windowMessages: 20, now: () => 0 }),
+      persona,
+      policy: {
+        maxWallTimeMs: 5_000,
+        maxTotalTokens: 1_000,
+        maxConsecutiveSameTool: 2,
+        convergenceCheck: true,
+      },
+      windowMessages: 20,
+      now: () => 1_000,
+      bystander: {
+        buffer,
+        triage: {} as BystanderTriageEngine,
+        policyProvider: () => ({}) as GroupBystanderPolicy,
+      },
+    });
+
+    await harness.handleMessage(
+      inbound({
+        messageId: 'msg-normal',
+        conversationType: '2',
+        text: '支付回调又超时了',
+      }),
+      { emit: () => undefined },
+    );
+    await harness.handleMessage(
+      inbound({
+        messageId: 'msg-mention',
+        conversationType: '2',
+        text: '（用户只 @ 了你，没有输入文字。请结合最近的对话上下文判断…）',
+        mentionOnlySource: 'transcript',
+      }),
+      { emit: () => undefined },
+    );
+
+    expect(
+      buffer.recent('cid-1').map((entry) => [entry.messageId, entry.text]),
+    ).toEqual([
+      ['msg-normal', '支付回调又超时了'],
+      ['msg-mention', ''],
+    ]);
   });
 
   it('群聊定时任务未 @ 机器人时仍执行引擎并写库（proactive 系统发起）', async () => {
