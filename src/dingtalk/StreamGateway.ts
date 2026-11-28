@@ -1,6 +1,6 @@
 import { TOPIC_CARD, TOPIC_ROBOT } from 'dingtalk-stream';
 import { parseCardAction, type CardActionEvent } from './CardActions.js';
-import { parseStreamMessage } from './MessageParser.js';
+import { parseStreamMessage, summarizeRobotPayload } from './MessageParser.js';
 import { toTranscriptEntry } from '../bystander/GroupTranscriptBuffer.js';
 import type { GroupTranscriptBuffer } from '../bystander/GroupTranscriptBuffer.js';
 import type { InboundMessage } from '../types/core.js';
@@ -209,7 +209,7 @@ export class StreamGateway {
     const message = parseStreamMessage(payload, this.now);
     if (!message) {
       this.options.logger?.info(
-        { messageId },
+        { messageId, payload: summarizeRobotPayload(payload) },
         'stream message ignored, unsupported type or empty payload',
       );
       return;

@@ -357,6 +357,11 @@ export function parseStreamMessage(
   let mentionOnly = false;
   let supported = true;
   const attachments: InboundAttachment[] = [];
+  // 只 @ 不输入时钉钉可能把 text.content 发成空串，且未知类型也可能只是 @：
+  // 先判定 @ 与引用，正文为空时据此降级为 mentionOnly 而不是整条丢弃
+  const atBot = detectAtBot(payload, conversationType);
+  const quotedMessage = parseQuotedMessage(payload);
+  const canFallbackToMention = atBot || quotedMessage !== undefined;
   const rawRecord = raw as Record<string, unknown>;
   const cardLike =
     /card|forward|mixed/i.test(asNonEmptyString(payload.msgtype) ?? '') ||
@@ -378,7 +383,11 @@ export function parseStreamMessage(
         (textBlock as { content?: unknown }).content,
       );
       if (!content) {
-        supported = false;
+        if (canFallbackToMention) {
+          mentionOnly = true;
+        } else {
+          supported = false;
+        }
       } else {
         text = stripLeadingMentions(content);
         if (!text) {
@@ -414,10 +423,10 @@ export function parseStreamMessage(
         const rawText = textParts.join('');
         text = stripLeadingMentions(rawText);
         if (!text && attachments.length === 0) {
-          if (!hasLeadingMention(rawText)) {
-            supported = false;
-          } else {
+          if (hasLeadingMention(rawText) || canFallbackToMention) {
             mentionOnly = true;
+          } else {
+            supported = false;
           }
         }
       }
@@ -445,13 +454,17 @@ export function parseStreamMessage(
   }
 
   if (!supported) {
-    if (documentReferences.length === 0 && !cardTitle) return null;
-    text = documentReferences.length > 0 ? '[钉钉文档]' : `[卡片] ${cardTitle}`;
-    mentionOnly = false;
+    if (documentReferences.length === 0 && !cardTitle) {
+      // 引用了消息时即便类型不认识也值得交给模型围绕引用作答
+      if (!quotedMessage) return null;
+      mentionOnly = true;
+    } else {
+      text = documentReferences.length > 0 ? '[钉钉文档]' : `[卡片] ${cardTitle}`;
+      mentionOnly = false;
+    }
   }
 
   const createdAt = Number(payload.createAt);
-  const quotedMessage = parseQuotedMessage(payload);
 
   if (!text && attachments.length > 0) {
     const first = attachments[0]!;
@@ -467,7 +480,7 @@ export function parseStreamMessage(
     conversationType,
     senderStaffId,
     senderNick: asNonEmptyString(payload.senderNick) ?? senderStaffId,
-    isAtBot: detectAtBot(payload, conversationType),
+    isAtBot: atBot,
     text,
     ...(mentionOnly ? { mentionOnly: true } : {}),
     ...(attachments.length > 0 ? { attachments } : {}),
@@ -478,5 +491,46 @@ export function parseStreamMessage(
       : {}),
     rawPayload: raw as Record<string, unknown>,
     timestamp: Number.isFinite(createdAt) && createdAt > 0 ? createdAt : now(),
+  };
+}
+
+/**
+ * 丢弃机器人消息时记录的结构摘要：只保留字段形态、长度与短预览，
+ * 用于定位钉钉真实 payload 与解析器假设不符的情况。
+ */
+export function summarizeRobotPayload(raw: unknown): Record<string, unknown> {
+  const payload = asRecord(raw);
+  if (!payload) return { payloadType: raw === null ? 'null' : typeof raw };
+  const textBlock = asRecord(payload.text);
+  const contentBlock = asRecord(payload.content);
+  const textContent = textBlock?.content;
+  return {
+    msgtype: payload.msgtype,
+    conversationType: payload.conversationType,
+    isInAtList: payload.isInAtList,
+    atUserCount: Array.isArray(payload.atUsers) ? payload.atUsers.length : 0,
+    hasMsgId: typeof payload.msgId === 'string',
+    hasConversationId: typeof payload.conversationId === 'string',
+    hasSenderStaffId: typeof payload.senderStaffId === 'string',
+    hasSenderId: typeof payload.senderId === 'string',
+    hasTextBlock: textBlock !== null,
+    textContentLength:
+      typeof textContent === 'string' ? textContent.length : null,
+    textContentPreview:
+      typeof textContent === 'string' ? textContent.slice(0, 40) : null,
+    hasContentBlock: contentBlock !== null,
+    richTextLength: Array.isArray(contentBlock?.richText)
+      ? contentBlock.richText.length
+      : null,
+    hasRepliedMsg: Boolean(
+      textBlock?.repliedMsg ??
+        contentBlock?.repliedMsg ??
+        payload.repliedMsg,
+    ),
+    hasOriginalMsgId: [
+      textBlock?.originalMsgId,
+      contentBlock?.originalMsgId,
+      payload.originalMsgId,
+    ].some((value) => typeof value === 'string'),
   };
 }

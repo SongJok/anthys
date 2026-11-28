@@ -3,6 +3,7 @@ import {
   extractDocumentReferences,
   parseStreamMessage,
   stripLeadingMentions,
+  summarizeRobotPayload,
 } from './MessageParser.js';
 
 function payload(overrides: Record<string, unknown> = {}): Record<string, unknown> {
@@ -201,6 +202,60 @@ describe('parseStreamMessage', () => {
         }),
       ),
     ).toBeNull();
+  });
+
+  it('群聊正文为空但 @ 了机器人时按 mentionOnly 接收', () => {
+    const message = parseStreamMessage(
+      payload({ isInAtList: true, text: { content: '' } }),
+    );
+    expect(message).toMatchObject({
+      text: '',
+      isAtBot: true,
+      mentionOnly: true,
+    });
+  });
+
+  it('正文为空时通过 atUsers 命中机器人同样按 mentionOnly 接收', () => {
+    const message = parseStreamMessage(
+      payload({
+        text: { content: '  ' },
+        atUsers: [{ staffId: 'bot-1' }],
+      }),
+    );
+    expect(message).toMatchObject({ text: '', mentionOnly: true, isAtBot: true });
+  });
+
+  it('单聊正文为空时按 mentionOnly 接收', () => {
+    const message = parseStreamMessage(
+      payload({ conversationType: '1', text: { content: '' } }),
+    );
+    expect(message).toMatchObject({ text: '', mentionOnly: true, isAtBot: true });
+  });
+
+  it('富文本没有文本块但 @ 了机器人时按 mentionOnly 接收', () => {
+    const message = parseStreamMessage(
+      payload({
+        msgtype: 'richText',
+        isInAtList: true,
+        content: { richText: [] },
+      }),
+    );
+    expect(message).toMatchObject({ text: '', mentionOnly: true });
+  });
+
+  it('未知类型但带引用时按 mentionOnly 接收，保留引用上下文', () => {
+    const message = parseStreamMessage(
+      payload({
+        msgtype: 'unknownType',
+        text: undefined,
+        repliedMsg: { msgId: 'orig-1', content: { text: '被引用的原文' } },
+      }),
+    );
+    expect(message).toMatchObject({
+      text: '',
+      mentionOnly: true,
+      quotedMessage: { messageId: 'orig-1', text: '被引用的原文' },
+    });
   });
 
   it('普通消息不携带 mentionOnly 标记', () => {
@@ -423,5 +478,31 @@ describe('extractDocumentReferences', () => {
     };
     record.self = record;
     expect(extractDocumentReferences(record)).toHaveLength(5);
+  });
+});
+
+describe('summarizeRobotPayload', () => {
+  it('丢弃消息时输出字段形态与正文长度，不携带完整正文', () => {
+    const summary = summarizeRobotPayload(
+      payload({
+        isInAtList: true,
+        atUsers: [{ staffId: 'bot-1' }],
+        text: { content: '' },
+      }),
+    );
+    expect(summary).toMatchObject({
+      msgtype: 'text',
+      conversationType: '2',
+      isInAtList: true,
+      atUserCount: 1,
+      hasTextBlock: true,
+      textContentLength: 0,
+      hasRepliedMsg: false,
+    });
+  });
+
+  it('非对象 payload 只记录类型', () => {
+    expect(summarizeRobotPayload(null)).toEqual({ payloadType: 'null' });
+    expect(summarizeRobotPayload('bad')).toEqual({ payloadType: 'string' });
   });
 });
