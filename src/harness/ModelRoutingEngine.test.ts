@@ -60,6 +60,31 @@ describe('ModelRoutingEngine', () => {
     expect(await answerFor(engine, context())).toBe('admin');
   });
 
+  it('答疑模式主动回复对齐正常路由，不走 proactive 角色', async () => {
+    const engine = new ModelRoutingEngine({
+      fallback: engineNamed('fallback'),
+      engineForRole: (role) => engineNamed(role),
+      isAdmin: (staffId) => staffId === 'admin-1',
+    });
+    // 答疑态普通成员走默认模型，管理员走 admin，均与正常@回复一致
+    expect(
+      await answerFor(
+        engine,
+        context({ proactive: true, qaMode: true, senderStaffId: 'staff-9' }),
+      ),
+    ).toBe('fallback');
+    expect(
+      await answerFor(
+        engine,
+        context({ proactive: true, qaMode: true, senderStaffId: 'admin-1' }),
+      ),
+    ).toBe('admin');
+    // 非答疑主动回复仍走便宜旁听模型
+    expect(
+      await answerFor(engine, context({ proactive: true, qaMode: false })),
+    ).toBe('proactive');
+  });
+
   it('管理员单聊切到 admin 角色，普通员工不切', async () => {
     const engine = new ModelRoutingEngine({
       fallback: engineNamed('fallback'),

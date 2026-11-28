@@ -25,7 +25,8 @@ export class ModelRoutingEngine implements AgentEngine {
 
   public selectRole(context: ExecutionContext): ModelRole | undefined {
     if (this.options.roleFor) return this.options.roleFor(context);
-    if (context.proactive) return 'proactive';
+    // 答疑模式对齐正常@回复：跳过便宜旁听模型，按管理员/默认路由
+    if (context.proactive && !context.qaMode) return 'proactive';
     if (this.options.isAdmin?.(context.senderStaffId)) return 'admin';
     return undefined;
   }

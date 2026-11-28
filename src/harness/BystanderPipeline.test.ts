@@ -372,6 +372,79 @@ describe('群聊旁听与非 @ 自主回复主链路', () => {
     ]);
   });
 
+  it('答疑模式主动回复对齐正常@框定：成员原话+昵称前缀，不用插话指令', async () => {
+    const buffer = new GroupTranscriptBuffer({ defaultWindowSize: 20 });
+    const calls: Array<{ messages: unknown[] }> = [];
+    const { repository } = createRepository();
+    const { summaryStore, semanticStore } = createMemoryStores();
+    const harness = new AgentHarness({
+      engine: scriptedEngine(calls),
+      repository,
+      assembler: new ContextAssembler({
+        windowMessages: 20,
+        now: () => BASE_TIME,
+      }),
+      persona,
+      policy: {
+        maxWallTimeMs: 5_000,
+        maxTotalTokens: 1_000,
+        maxConsecutiveSameTool: 2,
+        convergenceCheck: true,
+      },
+      windowMessages: 20,
+      now: () => BASE_TIME,
+      memory: new HierarchicalMemoryManager({ summaryStore, semanticStore }),
+      bystander: {
+        buffer,
+        triage: new BystanderTriageEngine({
+          buffer,
+          classifier: new HeuristicBystanderClassifier(),
+          debounceMs: 0,
+          now: () => BASE_TIME,
+        }),
+        policyProvider: (conversationId) =>
+          createDefaultBystanderPolicy(conversationId, {
+            qaModeEnabled: true,
+            qaModeExpiresAt: BASE_TIME + 7_200_000,
+          }),
+      },
+    });
+    const message: InboundMessage = {
+      messageId: 'm-qa',
+      conversationId: 'cid-group',
+      conversationType: '2',
+      senderStaffId: 'staff-wang',
+      senderNick: '王五',
+      isAtBot: false,
+      text: '现在几点了？',
+      rawPayload: {},
+      timestamp: BASE_TIME,
+    };
+
+    await harness.handleBystanderMessage(message, {
+      decision: {
+        action: 'PROACTIVE_REPLY',
+        triggerReason: 'UNANSWERED_QUESTION',
+        confidence: 0.9,
+        extractedQuery: '查询当前时间',
+        rationale: 'qa',
+      },
+      emit: () => undefined,
+    });
+
+    expect(calls).toHaveLength(1);
+    const messages = calls[0]?.messages as Array<{
+      role: string;
+      content: string;
+    }>;
+    const last = messages.at(-1);
+    expect(last?.role).toBe('user');
+    // 用成员原话而非判官改写，且带昵称前缀，与正常@回复一致
+    expect(last?.content).toContain('王五：');
+    expect(last?.content).toContain('现在几点了？');
+    expect(last?.content).not.toContain('主动提供帮助');
+  });
+
   it('未 @ 的日常闲聊保持静默，不调用 ReAct 也不写库', async () => {
     const pipeline = createPipeline();
 

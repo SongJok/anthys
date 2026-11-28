@@ -528,43 +528,62 @@ export class AgentHarness {
       personaSystemPrompt: buildSystemPrompt(persona),
       audience: 'group',
     });
-    const glossaryPrompt = await this.buildGlossaryPrompt(message, text);
     const testcaseWorkspace = await this.loadTestcaseWorkspace(message);
     const qaModeActive =
       policyConfig !== undefined &&
       isQaModeActive(policyConfig, this.now());
-    const proactiveInstruction = [
-      '你正在钉钉群里主动提供帮助（并非被 @）。',
-      '请结合群聊旁听记录核实问题，直接给出结论、关键依据与下一步建议。',
-      '不要说明你在旁听，不要复述整段群聊，保持简洁，避免刷屏。',
-      ...(qaModeActive
-        ? [
-            '本群处于答疑模式：成员提问无需 @，请直接回答问题本身，给出可执行的结论或步骤；',
-            '不确定或超出能力范围时如实说明，不要编造；涉及他人隐私或敏感信息时拒绝回答。',
-          ]
-        : []),
-      `需要查证的问题：${text}`,
-    ].join('\n');
-    const extensionPrompt = await this.buildExtensionPrompt(
-      message,
-      text,
-      true,
-      testcaseWorkspace,
-    );
-    const extraSystemPrompt = [extensionPrompt, glossaryPrompt]
-      .filter((section): section is string => Boolean(section))
-      .join('\n\n');
-    const messages = assembler.build({
-      persona,
-      history,
-      windowMessages: this.historyWindow(message.conversationType),
-      userText: proactiveInstruction,
-      now: this.now,
-      memoryContext,
-      ...(extraSystemPrompt ? { extraSystemPrompt } : {}),
-      groupChat: true,
-      // 主动回复的 user 消息是系统指令，不使用成员昵称加前缀
-    });
+
+    let messages: ReturnType<typeof assembler.build>;
+    if (qaModeActive) {
+      // 答疑模式对齐正常@回复：成员原话 + 昵称前缀 + 正常附加提示，模型走 default/admin
+      const qaExtraPrompt = await this.buildExtraSystemPrompt(
+        message,
+        message.text.trim(),
+        false,
+        personKey,
+        testcaseWorkspace,
+      );
+      messages = assembler.build({
+        persona,
+        history,
+        windowMessages: this.historyWindow(message.conversationType),
+        conversationKey: conversation.id,
+        userText: message.text.trim(),
+        now: this.now,
+        memoryContext,
+        ...(qaExtraPrompt ? { extraSystemPrompt: qaExtraPrompt } : {}),
+        groupChat: true,
+        userSpeaker: message.senderNick,
+      });
+    } else {
+      const glossaryPrompt = await this.buildGlossaryPrompt(message, text);
+      const proactiveInstruction = [
+        '你正在钉钉群里主动提供帮助（并非被 @）。',
+        '请结合群聊旁听记录核实问题，直接给出结论、关键依据与下一步建议。',
+        '不要说明你在旁听，不要复述整段群聊，保持简洁，避免刷屏。',
+        `需要查证的问题：${text}`,
+      ].join('\n');
+      const extensionPrompt = await this.buildExtensionPrompt(
+        message,
+        text,
+        true,
+        testcaseWorkspace,
+      );
+      const extraSystemPrompt = [extensionPrompt, glossaryPrompt]
+        .filter((section): section is string => Boolean(section))
+        .join('\n\n');
+      messages = assembler.build({
+        persona,
+        history,
+        windowMessages: this.historyWindow(message.conversationType),
+        userText: proactiveInstruction,
+        now: this.now,
+        memoryContext,
+        ...(extraSystemPrompt ? { extraSystemPrompt } : {}),
+        groupChat: true,
+        // 主动回复的 user 消息是系统指令，不使用成员昵称加前缀
+      });
+    }
 
     await repository.appendMessage({
       conversationId: conversation.id,
@@ -602,6 +621,7 @@ export class AgentHarness {
         deadlineAt: startedAt + policy.maxWallTimeMs,
         now: this.now,
         proactive: true,
+        ...(qaModeActive ? { qaMode: true } : {}),
         ...(testcaseWorkspaceBinding.current
           ? { workspaceId: testcaseWorkspaceBinding.current.workspaceId }
           : {}),

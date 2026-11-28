@@ -241,6 +241,8 @@ export interface ExecutionContext {
   signal?: AbortSignal;
   /** 是否为群聊主动回复，供模型路由与用量归因使用 */
   proactive?: boolean;
+  /** 群聊限时答疑模式生效：主动回复对齐正常@回复（default/admin 模型），不走便宜旁听模型 */
+  qaMode?: boolean;
   /** 后台任务执行上下文；普通消息不设置 */
   jobId?: string;
   jobKind?: string;
