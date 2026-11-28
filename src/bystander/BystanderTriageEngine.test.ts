@@ -389,3 +389,75 @@ describe('LlmBystanderClassifier', () => {
     });
   });
 });
+
+describe('BystanderTriageEngine 答疑模式', () => {
+  const qaPolicy = {
+    qaModeEnabled: true,
+    qaModeExpiresAt: BASE_TIME + 7_200_000,
+  };
+
+  it('答疑模式生效时一般生活问题也升级为 PROACTIVE_REPLY', async () => {
+    const ctx = setup({ policy: qaPolicy });
+    const result = await ctx.engine.evaluate(
+      inbound({ text: '今天下午茶吃什么？' }),
+      ctx.policy,
+    );
+    expect(result.action).toBe('PROACTIVE_REPLY');
+    expect(result.triggerReason).toBe('UNANSWERED_QUESTION');
+    expect(result.confidence).toBeGreaterThanOrEqual(
+      ctx.policy.confidenceThreshold,
+    );
+    expect(ctx.classifierCalls).toHaveLength(1);
+    expect(ctx.classifierCalls[0]?.qaModeActive).toBe(true);
+  });
+
+  it('答疑模式到期后回落普通口径，一般问题重新静默', async () => {
+    const ctx = setup({
+      policy: { qaModeEnabled: true, qaModeExpiresAt: BASE_TIME - 1 },
+    });
+    const result = await ctx.engine.evaluate(
+      inbound({ text: '今天下午茶吃什么？' }),
+      ctx.policy,
+    );
+    expect(result.action).toBe('SILENT');
+    expect(ctx.classifierCalls).toHaveLength(0);
+  });
+
+  it('答疑模式不豁免确认短语与闲聊静默', async () => {
+    const ctx = setup({ policy: qaPolicy });
+    const result = await ctx.engine.evaluate(
+      inbound({ text: '收到' }),
+      ctx.policy,
+    );
+    expect(result.action).toBe('SILENT');
+    expect(ctx.classifierCalls).toHaveLength(0);
+  });
+
+  it('旁听被管理员暂停时答疑模式不生效', async () => {
+    const ctx = setup({
+      policy: { ...qaPolicy, bystanderEnabled: false },
+    });
+    const result = await ctx.engine.evaluate(
+      inbound({ text: '今天下午茶吃什么？' }),
+      ctx.policy,
+    );
+    expect(result.action).toBe('SILENT');
+    expect(ctx.classifierCalls).toHaveLength(0);
+  });
+
+  it('答疑模式冷却缩短到 45s，连续答疑不被默认 180s 卡住', async () => {
+    const ctx = setup({ policy: qaPolicy });
+    const first = await ctx.engine.evaluate(
+      inbound({ text: '团建几点集合？' }),
+      ctx.policy,
+    );
+    expect(first.action).toBe('PROACTIVE_REPLY');
+
+    ctx.clock.now += 50_000;
+    const second = await ctx.engine.evaluate(
+      inbound({ text: '团建去哪里？' }),
+      ctx.policy,
+    );
+    expect(second.action).toBe('PROACTIVE_REPLY');
+  });
+});

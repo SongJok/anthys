@@ -100,6 +100,10 @@ export interface GroupPolicy {
   cooldownSeconds: number;
   confidenceThreshold: number;
   triggerTopics: string[];
+  /** 限时答疑模式：成员授权后对非 @ 一般提问也自主回答 */
+  qaModeEnabled?: boolean;
+  /** 答疑模式到期时间（epoch ms）；0 表示不限时 */
+  qaModeExpiresAt?: number;
 }
 
 export type DefaultGroupPolicy = Omit<GroupPolicy, 'conversationId'>;

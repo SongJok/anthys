@@ -12,6 +12,7 @@ import {
   sql,
 } from 'drizzle-orm';
 import {
+  bigint,
   boolean,
   index,
   integer,
@@ -131,6 +132,10 @@ export const bystanderPolicies = pgTable('bystander_policies', {
   cooldownSeconds: integer('cooldown_seconds').notNull().default(180),
   confidenceThreshold: real('confidence_threshold').notNull().default(0.82),
   triggerTopics: jsonb('trigger_topics').$type<string[]>().notNull().default([]),
+  qaModeEnabled: boolean('qa_mode_enabled').notNull().default(false),
+  qaModeExpiresAt: bigint('qa_mode_expires_at', { mode: 'number' })
+    .notNull()
+    .default(0),
   updatedAt: timestamp('updated_at', { withTimezone: true })
     .notNull()
     .defaultNow(),
@@ -663,6 +668,8 @@ export class DrizzleMemoryStore
       cooldownSeconds: row.cooldownSeconds,
       confidenceThreshold: row.confidenceThreshold,
       triggerTopics: row.triggerTopics,
+      qaModeEnabled: row.qaModeEnabled,
+      qaModeExpiresAt: row.qaModeExpiresAt,
     };
   }
 
@@ -678,6 +685,8 @@ export class DrizzleMemoryStore
         cooldownSeconds: policy.cooldownSeconds,
         confidenceThreshold: policy.confidenceThreshold,
         triggerTopics: policy.triggerTopics,
+        qaModeEnabled: policy.qaModeEnabled ?? false,
+        qaModeExpiresAt: policy.qaModeExpiresAt ?? 0,
       })
       .onConflictDoUpdate({
         target: bystanderPolicies.conversationId,
@@ -689,6 +698,8 @@ export class DrizzleMemoryStore
           cooldownSeconds: policy.cooldownSeconds,
           confidenceThreshold: policy.confidenceThreshold,
           triggerTopics: policy.triggerTopics,
+          qaModeEnabled: policy.qaModeEnabled ?? false,
+          qaModeExpiresAt: policy.qaModeExpiresAt ?? 0,
           updatedAt: new Date(),
         },
       });

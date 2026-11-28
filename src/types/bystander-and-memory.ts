@@ -13,6 +13,23 @@ export interface GroupBystanderPolicy {
   cooldownSeconds: number;
   confidenceThreshold: number;
   triggerTopics: string[];
+  /** 答疑模式：群成员授权后，对非 @ 的一般提问也自主判断并回答 */
+  qaModeEnabled?: boolean;
+  /** 答疑模式到期时间（epoch ms）；0 或缺省表示不限时 */
+  qaModeExpiresAt?: number;
+}
+
+/** 答疑模式默认时长：2 小时 */
+export const DEFAULT_QA_MODE_TTL_SECONDS = 7_200;
+
+/** 答疑模式是否生效：开关开启且未到期（旁听/主动回复总开关仍需另行满足） */
+export function isQaModeActive(
+  policy: Pick<GroupBystanderPolicy, 'qaModeEnabled' | 'qaModeExpiresAt'>,
+  now: number,
+): boolean {
+  if (policy.qaModeEnabled !== true) return false;
+  const expiresAt = policy.qaModeExpiresAt ?? 0;
+  return expiresAt <= 0 || now < expiresAt;
 }
 
 /** 2. 旁听意图评估输出契约 */

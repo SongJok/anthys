@@ -379,6 +379,32 @@ export default function GroupsPage() {
                 ),
             },
             {
+              title: '答疑模式',
+              key: 'qaMode',
+              render: (_, row) => {
+                if (row.policy?.qaModeEnabled !== true) return <Tag>关闭</Tag>;
+                const expiresAt = row.policy?.qaModeExpiresAt ?? 0;
+                if (expiresAt > 0 && expiresAt <= Date.now()) {
+                  return (
+                    <Tooltip title={`已于 ${formatShanghaiDateTime(expiresAt)} 到期，如需继续请在群里重新开启`}>
+                      <Tag color="orange">已到期</Tag>
+                    </Tooltip>
+                  );
+                }
+                return (
+                  <Tooltip
+                    title={
+                      expiresAt > 0
+                        ? `限时答疑生效中，${formatShanghaiDateTime(expiresAt)} 到期；期间非 @ 提问也会自主判断回答`
+                        : '长期答疑生效中；期间非 @ 提问也会自主判断回答'
+                    }
+                  >
+                    <Tag color="green">答疑中</Tag>
+                  </Tooltip>
+                );
+              },
+            },
+            {
               title: '冷却时间',
               key: 'cooldown',
               render: (_, row) =>

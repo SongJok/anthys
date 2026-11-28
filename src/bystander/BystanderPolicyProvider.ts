@@ -55,6 +55,8 @@ export class BystanderPolicyProvider {
       cooldownSeconds: defaults.cooldownSeconds,
       confidenceThreshold: defaults.confidenceThreshold,
       triggerTopics: [...defaults.triggerTopics],
+      qaModeEnabled: false,
+      qaModeExpiresAt: 0,
     };
   }
 }

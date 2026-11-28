@@ -623,6 +623,12 @@ export class DynamicConfigCenter
               .filter(Boolean),
           }
         : {}),
+      ...(input.qaModeEnabled !== undefined
+        ? { qaModeEnabled: input.qaModeEnabled }
+        : {}),
+      ...(input.qaModeExpiresAt !== undefined
+        ? { qaModeExpiresAt: Math.max(0, Math.floor(input.qaModeExpiresAt)) }
+        : {}),
     };
     await this.persist('defaultBystanderPolicy', next);
     this.state = { ...this.state, defaultBystanderPolicy: next };
@@ -743,6 +749,12 @@ export class DynamicConfigCenter
               .filter(Boolean),
           }
         : {}),
+      ...(input.qaModeEnabled !== undefined
+        ? { qaModeEnabled: input.qaModeEnabled }
+        : {}),
+      ...(input.qaModeExpiresAt !== undefined
+        ? { qaModeExpiresAt: Math.max(0, Math.floor(input.qaModeExpiresAt)) }
+        : {}),
     };
     if (!this.groupPolicies) {
       throw new Error('未配置群策略存储，无法持久化群级策略');
@@ -835,6 +847,8 @@ export class DynamicConfigCenter
         ),
         confidenceThreshold: clamp(bystander.confidenceThreshold, 0, 1),
         triggerTopics: [...bystander.triggerTopics],
+        qaModeEnabled: false,
+        qaModeExpiresAt: 0,
       },
       mcpAccessPolicies: [],
       extensions:

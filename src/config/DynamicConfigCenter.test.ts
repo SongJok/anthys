@@ -473,6 +473,32 @@ describe('DynamicConfigCenter', () => {
     ).toBe(false);
   });
 
+  it('群级答疑模式开关与到期时间可持久化并广播变更', async () => {
+    const { center, groups } = createCenter();
+    await center.init();
+    const changes: string[] = [];
+    center.on('groupPolicy:changed', () => changes.push('groupPolicy'));
+
+    const expiresAt = Date.now() + 7_200_000;
+    const updated = await center.updateGroupPolicy(
+      'cid-qa',
+      { qaModeEnabled: true, qaModeExpiresAt: expiresAt },
+      'staff-1',
+    );
+    expect(updated.qaModeEnabled).toBe(true);
+    expect(updated.qaModeExpiresAt).toBe(expiresAt);
+    expect(await groups.getPolicy('cid-qa')).toEqual(updated);
+    expect(changes).toEqual(['groupPolicy']);
+
+    const disabled = await center.updateGroupPolicy(
+      'cid-qa',
+      { qaModeEnabled: false, qaModeExpiresAt: 0 },
+      'staff-1',
+    );
+    expect(disabled.qaModeEnabled).toBe(false);
+    expect(disabled.qaModeExpiresAt).toBe(0);
+  });
+
   it('records admin audit entries', async () => {
     const { center, audit } = createCenter();
     await center.init();

@@ -389,5 +389,7 @@ export function policySnapshot(
     proactiveReplyEnabled: policy.proactiveReplyEnabled,
     cooldownSeconds: policy.cooldownSeconds,
     confidenceThreshold: policy.confidenceThreshold,
+    qaModeEnabled: policy.qaModeEnabled ?? false,
+    qaModeExpiresAt: policy.qaModeExpiresAt ?? 0,
   };
 }

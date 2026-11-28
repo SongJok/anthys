@@ -200,6 +200,7 @@ export async function setupDingTalkIngress(
   let gateway: StreamGateway | undefined;
   let bystanderListener: DwsGroupMessageListener | undefined;
   let bystanderListenTimer: ReturnType<typeof setInterval> | undefined;
+  let bystanderPolicySubscribed = false;
   let streamConnected = false;
 
   const asyncReactEnabled = envEnabled(process.env.ASYNC_REACT_ENABLED, false);
@@ -2118,6 +2119,14 @@ export async function setupDingTalkIngress(
         envSeconds(process.env.BYSTANDER_LISTEN_REFRESH_SECONDS, 60) * 1_000,
       );
       bystanderListenTimer.unref?.();
+    }
+    if (!bystanderPolicySubscribed) {
+      bystanderPolicySubscribed = true;
+      const onPolicyChanged = (): void => {
+        void refreshBystanderListenGroups();
+      };
+      configCenter.on('groupPolicy:changed', onPolicyChanged);
+      configCenter.on('defaultBystanderPolicy:changed', onPolicyChanged);
     }
   };
 

@@ -50,6 +50,7 @@ import { PersonalMemoryService } from '../personal/PersonalMemoryService.js';
 import { PersonSettingsService } from '../personal/PersonSettingsService.js';
 import { PersonaResolver } from '../persona/PersonaResolver.js';
 import { GroupWorkspaceToolProvider } from '../tools/groups/GroupWorkspaceToolProvider.js';
+import { GroupQaModeToolProvider } from '../tools/groups/GroupQaModeToolProvider.js';
 import { PersonalMemoryToolProvider } from '../tools/personal/PersonalMemoryToolProvider.js';
 import { PersonSettingsToolProvider } from '../tools/personal/PersonSettingsToolProvider.js';
 import type { TestcaseWorkspaceService } from '../testcase/TestcaseWorkspaceService.js';
@@ -375,6 +376,7 @@ export async function setupMemoryAndBystander(
       reports: groupReport,
       notifyAll: groupNotifyAll,
     }),
+    new GroupQaModeToolProvider({ policies: configCenter }),
     new PersonSettingsToolProvider({ service: personSettings }),
     new PersonalMemoryToolProvider({ service: personalMemory }),
   );

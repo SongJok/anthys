@@ -538,6 +538,12 @@ export function createConfigRoutes(deps: ConfigRouteDeps): Hono {
         ...(readStringArray(body, 'triggerTopics') !== undefined
           ? { triggerTopics: readStringArray(body, 'triggerTopics')! }
           : {}),
+        ...(readBoolean(body, 'qaModeEnabled') !== undefined
+          ? { qaModeEnabled: readBoolean(body, 'qaModeEnabled')! }
+          : {}),
+        ...(readNumber(body, 'qaModeExpiresAt') !== undefined
+          ? { qaModeExpiresAt: readNumber(body, 'qaModeExpiresAt')! }
+          : {}),
       },
       actor(c),
     );

@@ -57,6 +57,13 @@
       "when": 1795573634762,
       "tag": "0007_moaning_the_hunter",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1795837142021,
+      "tag": "0008_solid_sauron",
+      "breakpoints": true
     }
   ]
 }

@@ -5,6 +5,7 @@ import type {
   GroupBystanderPolicy,
   TranscriptEntry,
 } from '../types/bystander-and-memory.js';
+import { isQaModeActive } from '../types/bystander-and-memory.js';
 import type { ChatMessage, ChatModel, InboundMessage } from '../types/core.js';
 import {
   collectContentStream,
@@ -55,6 +56,11 @@ const TECHNICAL_PATTERN =
   /(接口|服务|日志|数据库|sql|缓存|网关|部署|发布|上线|配置|环境|代码|版本|监控|链路|qps|并发|队列|集群|容器|k8s|redis|mysql|mq|回滚|扩容|限流|熔断|线程|内存|磁盘|cpu)/iu;
 const QUESTION_PATTERN =
   /([?？]|怎么|为什么|为啥|如何|是不是|有没有|谁(在|能|来|看)|帮忙|求助|请问|能否|可以帮|看一下|查一下)/u;
+/** 答疑模式下的宽松疑问识别：一般生活/业务问题也交给 L2 自主判断 */
+const QA_QUESTION_PATTERN =
+  /([?？]|怎么|为什么|为啥|如何|是不是|有没有|吗|呢|什么|哪|几点|多少|谁|请问|能否|是否|帮忙|求助|看一下|查一下)/u;
+/** 答疑模式冷却上限：连续答疑时不被默认 180s 冷却卡住 */
+const QA_MODE_COOLDOWN_SECONDS = 45;
 const FACT_PATTERN =
   /((数据|报表|金额|统计|对账|数字|指标).*(不对|不一致|对不上|偏差|少了|多了|异常))|((不对|不一致|对不上|偏差|少了|多了).*(数据|报表|金额|统计|对账|数字|指标))/u;
 
@@ -64,6 +70,8 @@ export interface BystanderClassifierInput {
   /** 最近 15 条旁听消息（含当前消息） */
   window: TranscriptEntry[];
   policy: GroupBystanderPolicy;
+  /** 答疑模式生效中：一般提问也可判定为值得回答；缺省视为 false */
+  qaModeActive?: boolean;
 }
 
 export interface BystanderClassifier {
@@ -212,6 +220,20 @@ export class HeuristicBystanderClassifier implements BystanderClassifier {
       };
     }
 
+    if (input.qaModeActive && QA_QUESTION_PATTERN.test(text)) {
+      return {
+        action: 'PROACTIVE_REPLY',
+        confidence: 0.86,
+        triggerReason: 'UNANSWERED_QUESTION',
+        extractedQuery: buildExtractedQuery(
+          text,
+          input.window,
+          'UNANSWERED_QUESTION',
+        ),
+        rationale: 'heuristic: 答疑模式生效，群成员提出一般问题',
+      };
+    }
+
     return {
       action: 'SILENT',
       confidence: 0.1,
@@ -232,6 +254,13 @@ const LLM_SYSTEM_PROMPT = [
   '输出字段：action(SILENT|PROACTIVE_REPLY), confidence(0~1),',
   'triggerReason(PROD_INCIDENT|UNANSWERED_QUESTION|FACT_CHECK|NONE),',
   'extractedQuery(交给查证引擎的核心问题), rationale(内部审计依据)。',
+].join('\n');
+
+const QA_MODE_PROMPT_SECTION = [
+  '本群已开启限时答疑模式：群成员授权机器人对后续提问自主答疑。',
+  '除上述三类外，成员提出的任何真实问题（含非技术类的生活/业务问题），',
+  '只要群内尚无人给出有效回应、且问题有明确可答的内容，也应返回 PROACTIVE_REPLY（triggerReason=UNANSWERED_QUESTION）。',
+  '闲聊、表情、确认短语、已有人回答的问题、无明确诉求的感叹仍必须 SILENT。',
 ].join('\n');
 
 function extractJsonObject(raw: string): Record<string, unknown> {
@@ -272,7 +301,12 @@ export class LlmBystanderClassifier implements BystanderClassifier {
       .join('\n');
 
     const messages: ChatMessage[] = [
-      { role: 'system', content: LLM_SYSTEM_PROMPT },
+      {
+        role: 'system',
+        content: input.qaModeActive
+          ? `${LLM_SYSTEM_PROMPT}\n${QA_MODE_PROMPT_SECTION}`
+          : LLM_SYSTEM_PROMPT,
+      },
       {
         role: 'user',
         content: [
@@ -414,6 +448,10 @@ export class BystanderTriageEngine {
     }
 
     const now = this.now();
+    const qaModeActive = isQaModeActive(policy, now);
+    const cooldownSeconds = qaModeActive
+      ? Math.min(policy.cooldownSeconds, QA_MODE_COOLDOWN_SECONDS)
+      : policy.cooldownSeconds;
     const busySince = now - this.busyWindowSeconds * 1000;
     const recentCount = this.buffer
       .entriesSince(message.conversationId, busySince)
@@ -422,10 +460,10 @@ export class BystanderTriageEngine {
       return silent(`L1: 群内近 ${this.busyWindowSeconds}s 过于活跃，暂不插话`);
     }
 
-    if (this.cooldown.isCoolingDown(message.conversationId, policy.cooldownSeconds)) {
+    if (this.cooldown.isCoolingDown(message.conversationId, cooldownSeconds)) {
       const remaining = this.cooldown.remainingSeconds(
         message.conversationId,
-        policy.cooldownSeconds,
+        cooldownSeconds,
       );
       return silent(`L1: 主动回复冷却中，剩余 ${remaining}s`);
     }
@@ -435,7 +473,10 @@ export class BystanderTriageEngine {
       .filter((entry) => entry.messageId !== message.messageId)
       .map((entry) => `${entry.senderNick}: ${entry.text}`)
       .join('\n');
-    if (!looksActionable(message.text, contextText, policy)) {
+    if (
+      !looksActionable(message.text, contextText, policy) &&
+      !(qaModeActive && QA_QUESTION_PATTERN.test(message.text))
+    ) {
       return silent('L1: 未命中技术信号或关注主题');
     }
 
@@ -458,10 +499,10 @@ export class BystanderTriageEngine {
       );
     }
 
-    if (this.cooldown.isCoolingDown(message.conversationId, policy.cooldownSeconds)) {
+    if (this.cooldown.isCoolingDown(message.conversationId, cooldownSeconds)) {
       const remaining = this.cooldown.remainingSeconds(
         message.conversationId,
-        policy.cooldownSeconds,
+        cooldownSeconds,
       );
       return silent(`L1: 等待期间进入主动回复冷却，剩余 ${remaining}s`);
     }
@@ -481,6 +522,7 @@ export class BystanderTriageEngine {
         current,
         window,
         policy,
+        qaModeActive,
       });
     } catch (error) {
       this.logger?.warn(
@@ -507,6 +549,7 @@ export class BystanderTriageEngine {
         triggerReason: decision.triggerReason,
         confidence: decision.confidence,
         threshold: policy.confidenceThreshold,
+        qaModeActive,
         rationale: decision.rationale,
       },
       'bystander triage decision',

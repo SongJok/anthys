@@ -354,6 +354,8 @@ function toGroupPolicy(
     cooldownSeconds: row.cooldownSeconds,
     confidenceThreshold: row.confidenceThreshold,
     triggerTopics: row.triggerTopics,
+    qaModeEnabled: row.qaModeEnabled,
+    qaModeExpiresAt: row.qaModeExpiresAt,
   };
 }
 
@@ -383,6 +385,8 @@ export class DrizzleGroupPolicyStore implements GroupPolicyStore {
         cooldownSeconds: policy.cooldownSeconds,
         confidenceThreshold: policy.confidenceThreshold,
         triggerTopics: policy.triggerTopics,
+        qaModeEnabled: policy.qaModeEnabled ?? false,
+        qaModeExpiresAt: policy.qaModeExpiresAt ?? 0,
       })
       .onConflictDoUpdate({
         target: bystanderPolicies.conversationId,
@@ -394,6 +398,8 @@ export class DrizzleGroupPolicyStore implements GroupPolicyStore {
           cooldownSeconds: policy.cooldownSeconds,
           confidenceThreshold: policy.confidenceThreshold,
           triggerTopics: policy.triggerTopics,
+          qaModeEnabled: policy.qaModeEnabled ?? false,
+          qaModeExpiresAt: policy.qaModeExpiresAt ?? 0,
           updatedAt: new Date(),
         },
       });

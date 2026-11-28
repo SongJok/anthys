@@ -1,0 +1,2 @@
+ALTER TABLE "bystander_policies" ADD COLUMN "qa_mode_enabled" boolean DEFAULT false NOT NULL;--> statement-breakpoint
+ALTER TABLE "bystander_policies" ADD COLUMN "qa_mode_expires_at" bigint DEFAULT 0 NOT NULL;
