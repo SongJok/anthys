@@ -12,7 +12,7 @@
 | 上游 source_url | 未随包提供 |
 | license | 未随包提供 |
 | security_audit | 包内无审计报告；正文为方法论，三个 references 为纯文档。 |
-| importedAt | 2026-11-10 |
+| importedAt | 2026-11-28 |
 | 可用度分级 | B |
 | 目标模块 | testing |
 | 风险等级 | read |
@@ -20,14 +20,13 @@
 
 ## 转换改动
 
-- description：本地重写为 55 字符（上限 160）
-- when_to_use：本地重写为 44 字符（上限 200）
-- version：市场来源 1.0.0；本地升级为 2.0.0
-- allowed_tools：按本项目真实工具名映射，共 13 个（含 activate_tools、artifact_generate、dws_doc）
+- description：本地重写为 78 字符（上限 160）
+- when_to_use：本地重写为 80 字符（上限 200）
+- version：市场来源 1.0.0；本地升级为 2.2.0
+- allowed_tools：按本项目真实工具名映射，共 14 个
 - risk=read，visibility=public，max_instruction_chars=8000
-- 本地升级：按自主编写目标重组正文，移除固定流程与强制参考阅读，MCP/DWS/Web 改为按需取证，接入测试用例工作区与确定性编译工具；并补强组合测试方法、防双重编号、按需套件激活与归档指引
-- 保留三个 references 资源，正文 3029 字符，未超过 8000 上限
-- 保留资源：references/test-methods.md、references/testcase-splitting-rules.md、references/output-example.md
+- 保留本地升级正文（skills/market/testing/auto-gen-testcase-from-req/SKILL.md），防止重跑导入脚本被上游包覆盖
+- 保留资源：references/test-methods.md、references/testcase-splitting-rules.md、references/output-example.md、references/business-evidence.md
 - 未导入：agents/openai.yaml
 
 ## 阻塞点

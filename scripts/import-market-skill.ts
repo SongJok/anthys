@@ -505,10 +505,10 @@ const CURATION: SkillSpec[] = [
     name: 'auto-gen-testcase-from-req',
     module: 'testing',
     description:
-      '自主生成和修订可追溯的功能测试用例：按需取证、增量保存、确定性合稿，输出七列用例、数据占位符、统计与需求追溯。',
+      '自主生成和修订可追溯的功能测试用例：按需取证、增量保存、确定性合稿，输出七列用例、数据占位符、统计与需求追溯，并承载评审风险、缺陷复现、执行回填与回归范围。',
     whenToUse:
-      '用户要求生成、设计、修改、汇总或导出功能测试用例，或持续补充需求、证据与用例草稿时使用。',
-    version: '2.0.0',
+      '用户要求生成、设计、修改、汇总或导出功能测试用例，做需求评审风险识别、缺陷复现用例、执行结果回填、回归范围推荐或测试报告，或持续补充需求、证据与用例草稿时使用。',
+    version: '2.2.0',
     risk: 'read',
     visibility: 'public',
     maxInstructionChars: 8000,
@@ -526,6 +526,7 @@ const CURATION: SkillSpec[] = [
       'artifact_generate',
       'deliver_artifact',
       'dws_doc',
+      'mcp__enterprise__chat',
     ],
     tags: ['origin:qoder-market', 'test-case', 'prd', 'qa'],
     localBodyFile: 'skills/market/testing/auto-gen-testcase-from-req/SKILL.md',
@@ -537,6 +538,8 @@ const CURATION: SkillSpec[] = [
       '本项目没有自动执行器：输出是功能测试用例文档，执行由人或外部测试平台完成，不要承诺"可直接执行"。',
       '`📷` 只是截图节点标记，本项目不会真的截图；需要文件时使用 testcase_compile 或 deliver_artifact 交付。',
       '技能只约束质量与领域规范，不设置固定流程；MCP/DWS/Web 取证按需使用，跨批次草稿通过 testcase_workspace_* 增量保存。',
+      '公司业务事实按需走点宝（`mcp__enterprise__chat`，企业 AI 中台只读问答）：思维链缺业务口径且文档未覆盖时才调用，结论必须落 `type=mcp` 证据；节点不可用时记缺口并标假设，不编造业务规则。',
+      '同一工作区支持测试全流程：`risks` 评审风险、`defects` 缺陷复现追溯、草稿 `execution` 执行回填，合稿输出测试报告与回归范围建议；回归子集用 `testcase_compile` 的 `selection` 筛选，不删改用例。',
     ].join('\n'),
     market: {
       title: '需求自动生成测试用例',
@@ -559,6 +562,10 @@ const CURATION: SkillSpec[] = [
         to: 'references/testcase-splitting-rules.md',
       },
       { from: 'references/output-example.md', to: 'references/output-example.md' },
+      {
+        from: 'references/business-evidence.md',
+        to: 'references/business-evidence.md',
+      },
     ],
     replacements: [
       [
@@ -1229,6 +1236,9 @@ async function convert(spec: SkillSpec, importedAt: string): Promise<Converted> 
       spec.keptResources.length > 0
         ? `保留资源：${spec.keptResources.map((item) => item.to).join('、')}`
         : '未保留资源',
+      spec.droppedFiles.length > 0
+        ? `未导入：${spec.droppedFiles.join('、')}`
+        : '无丢弃文件',
     ];
     return {
       spec,
